@@ -41,6 +41,43 @@ app = Flask(__name__)
 app.secret_key = 'typeset-studio-local'
 
 
+# ----------------------------------------------------------------- print spec
+# Pages-per-inch factors for spine width calculation (source: KDP / IngramSpark docs)
+_PAPER = {
+    'white': {'label': 'White (60 lb)',  'ppi': 0.002252},
+    'cream': {'label': 'Cream (60 lb)',  'ppi': 0.0025},
+    'color': {'label': 'Color',          'ppi': 0.002347},
+}
+
+# (min_pages, max_pages, min_inside_inches)
+_KDP_MARGINS    = [(24,150,.375),(151,300,.5),(301,500,.625),(501,700,.75),(701,828,.875)]
+_INGRAM_MARGINS = [(1,100,.375),(101,200,.5),(201,300,.625),(301,400,.75),(401,600,.875),(601,9999,1.0)]
+
+
+def _min_inside(pages, table):
+    for lo, hi, m in table:
+        if lo <= pages <= hi:
+            return m
+    return None
+
+
+def print_spec(page_count, preset):
+    """Return a dict of spine widths and minimum inside-margin info for the result page."""
+    inside    = preset['margins']['inside']
+    kdp_min   = _min_inside(page_count, _KDP_MARGINS)
+    ingram_min = _min_inside(page_count, _INGRAM_MARGINS)
+    return {
+        'page_count': page_count,
+        'inside':     round(inside, 3),
+        'spines':     {k: round(page_count * v['ppi'], 3) for k, v in _PAPER.items()},
+        'paper':      {k: v['label'] for k, v in _PAPER.items()},
+        'kdp_min':    kdp_min,
+        'ingram_min': ingram_min,
+        'kdp_ok':     (inside >= kdp_min)    if kdp_min    else None,
+        'ingram_ok':  (inside >= ingram_min) if ingram_min else None,
+    }
+
+
 # ----------------------------------------------------------------- presets
 DEFAULTS = {
     'name': 'Untitled style', 'description': '',
@@ -311,10 +348,11 @@ def generate():
     out_name  = ''
     epub_name = ''
 
+    page_count = 0
     if fmt in ('pdf', 'both'):
         out_name = f'{base}-{stamp}.pdf'
         try:
-            engine.build_pdf(ms, preset, os.path.join(OUT_DIR, out_name), meta)
+            page_count = engine.build_pdf(ms, preset, os.path.join(OUT_DIR, out_name), meta)
         except Exception as exc:
             logging.error('PDF build failed: %s', traceback.format_exc())
             flash(f'PDF build failed: {exc}')
@@ -329,11 +367,13 @@ def generate():
             flash(f'EPUB build failed: {exc}')
             epub_name = ''
 
+    spec = print_spec(page_count, preset) if page_count else None
     chapters = len(ms['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
                            meta=meta, preset=preset, preset_id=pid,
                            chapters=chapters, ms_path=ms_path, ms_type=ms_type,
-                           cover_path=cover_path, from_project=None, fmt=fmt)
+                           cover_path=cover_path, from_project=None, fmt=fmt,
+                           spec=spec)
 
 
 # ----------------------------------------------------------------- project routes
@@ -506,13 +546,14 @@ def project_generate(pid):
     base  = slugify(meta['title'] or proj.get('name', 'book'))
     fmt   = proj.get('format', 'pdf')
 
-    out_name  = ''
-    epub_name = ''
+    out_name   = ''
+    epub_name  = ''
+    page_count = 0
 
     if fmt in ('pdf', 'both'):
         out_name = f'{base}-{stamp}.pdf'
         try:
-            engine.build_pdf(ms_parsed, preset, os.path.join(OUT_DIR, out_name), meta)
+            page_count = engine.build_pdf(ms_parsed, preset, os.path.join(OUT_DIR, out_name), meta)
         except Exception as exc:
             logging.error('PDF build failed: %s', traceback.format_exc())
             flash(f'PDF build failed: {exc}')
@@ -532,11 +573,13 @@ def project_generate(pid):
     proj['updated']   = datetime.now().isoformat(timespec='seconds')
     save_project_file(pid, proj)
 
+    spec = print_spec(page_count, preset) if page_count else None
     chapters = len(ms_parsed['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
                            meta=meta, preset=preset, preset_id=proj['preset'],
                            chapters=chapters, ms_path='', ms_type=ms_type,
-                           cover_path=cover_path, from_project=pid, fmt=fmt)
+                           cover_path=cover_path, from_project=pid, fmt=fmt,
+                           spec=spec)
 
 
 @app.route('/project/<pid>/delete', methods=['POST'])

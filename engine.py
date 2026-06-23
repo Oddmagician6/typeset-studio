@@ -480,9 +480,10 @@ def build_pdf(manuscript, preset, out_path, meta):
     doc = BookDoc(out_path, preset, meta, head_font, cover=cover,
                   title=meta.get('title', ''), author=meta.get('author', ''))
     doc.build(story)
+    page_count = doc.page
     if cover_path:
         try:
             os.remove(cover_path)
         except OSError:
             pass
-    return out_path
+    return page_count
