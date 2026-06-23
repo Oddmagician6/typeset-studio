@@ -65,6 +65,14 @@ p.scene-break {
 .copyright { margin: 0 5%; font-size: 0.8em; line-height: 1.5; margin-top: 40%; }
 .cover-page { text-align: center; margin: 0; padding: 0; }
 .cover-page img { max-width: 100%; max-height: 100vh; }
+.doc-block {
+  margin: 1.2em 8%;
+  border-top: 1px solid #aaa;
+  border-bottom: 1px solid #aaa;
+  padding: 0.7em 0;
+  font-size: 0.95em;
+}
+.doc-block p { text-indent: 0; margin: 0.4em 0; }
 """
 
 
@@ -157,6 +165,13 @@ def _chapter_xhtml(idx, chapter, preset):
             no_indent_next = True
         elif kind == 'subhead':
             lines.append(f'  <h2>{_markup_to_html(val)}</h2>')
+            no_indent_next = True
+        elif kind == 'doc_block':
+            lines.append('  <div class="doc-block">')
+            for bi, (_, btext) in enumerate(val):
+                cls = ' class="no-indent"' if bi == 0 else ''
+                lines.append(f'    <p{cls}>{_markup_to_html(btext)}</p>')
+            lines.append('  </div>')
             no_indent_next = True
         else:
             html_val = _markup_to_html(val)

@@ -25,9 +25,10 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import (
     BaseDocTemplate, PageTemplate, Frame, Paragraph, Spacer,
-    PageBreak, Flowable, NextPageTemplate,
+    PageBreak, Flowable, NextPageTemplate, Table, TableStyle,
 )
 from reportlab.platypus.paragraph import Paragraph as _P
+from reportlab.lib import colors as _colors
 
 try:
     from PIL import Image as PILImage, ImageOps
@@ -116,6 +117,25 @@ class OpenerMarker(Flowable):
     width = height = 0
     def wrap(self, w, h): return (0, 0)
     def draw(self): self.canv._is_opener = True
+
+
+class HRule(Flowable):
+    """Thin horizontal rule for framing document blocks."""
+    def __init__(self, color=(0.55, 0.55, 0.55), thickness=0.5):
+        super().__init__()
+        self.color, self.thickness = color, thickness
+
+    def wrap(self, w, h):
+        self.width = w
+        self.height = self.thickness + 4
+        return (w, self.height)
+
+    def draw(self):
+        c = self.canv
+        c.setStrokeColorRGB(*self.color)
+        c.setLineWidth(self.thickness)
+        y = self.thickness / 2 + 1
+        c.line(0, y, self.width, y)
 
 
 class DropCap(Flowable):
@@ -366,7 +386,58 @@ def _default_copyright(meta):
     return '\n'.join(lines)
 
 
-def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False):
+def _render_doc_block(block_paras, preset, fonts, st, avail_w):
+    """Return flowables for one ~~~ … ~~~ document block."""
+    db     = preset.get('document_block', {})
+    frame  = db.get('frame', 'ruled')
+    indent = db.get('indent', 0.25) * inch
+    size   = db.get('font_size', 0) or st['body'].fontSize
+    lead   = size * 1.45
+    fi     = db.get('first_indent', 0.0) * inch
+    space  = db.get('space_around', 12.0)
+
+    db_style = ParagraphStyle(
+        'dbpara', parent=st['body'],
+        fontName=fonts['regular'],
+        fontSize=size, leading=lead,
+        firstLineIndent=fi,
+        leftIndent=indent, rightIndent=indent,
+        spaceBefore=0, spaceAfter=2,
+    )
+    # first paragraph of the block never has first-line indent (no indent on opening line of a letter)
+    db_first = ParagraphStyle('dbfirst', parent=db_style, firstLineIndent=0)
+
+    out = [Spacer(1, space)]
+
+    if frame in ('ruled', 'box'):
+        out += [HRule(), Spacer(1, 5)]
+
+    if frame == 'box':
+        col_w = avail_w - 2 * indent
+        rows  = [[Paragraph(text, db_first if i == 0 else db_style)]
+                 for i, (_, text) in enumerate(block_paras)]
+        t = Table(rows, colWidths=[col_w])
+        t.setStyle(TableStyle([
+            ('BOX',          (0, 0), (-1, -1), 0.5,  _colors.Color(.55, .55, .55)),
+            ('BACKGROUND',   (0, 0), (-1, -1),       _colors.Color(.97, .96, .94)),
+            ('LEFTPADDING',  (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING',   (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING',(0, 0), (-1, -1), 3),
+        ]))
+        out.append(t)
+    else:
+        for i, (_, text) in enumerate(block_paras):
+            out.append(Paragraph(text, db_first if i == 0 else db_style))
+
+    if frame in ('ruled', 'box'):
+        out += [Spacer(1, 5), HRule()]
+
+    out.append(Spacer(1, space))
+    return out
+
+
+def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False, avail_w=0):
     glyph = preset['scene_break']['glyph']
     story = []
 
@@ -443,6 +514,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False
             elif kind == 'subhead':
                 story.append(Paragraph(val, st['subhead']))
                 flush_next = True
+            elif kind == 'doc_block':
+                if not opened:
+                    opened = True  # a doc block counts as the chapter opener
+                story.extend(_render_doc_block(val, preset, fonts, st, avail_w))
+                flush_next = True
             else:
                 if not opened:
                     story.extend(_opening_para(val, st, preset, fonts))
@@ -488,8 +564,10 @@ def build_pdf(manuscript, preset, out_path, meta):
                  'color': meta.get('cover_color', 'light'),
                  'title_font': fonts.get('bold', fonts['regular'])}
 
-    story = _build_story(manuscript, preset, meta, fonts, st, head_font,
-                         has_cover=bool(cover))
+    m      = preset['margins']
+    avail_w = (preset['trim']['w'] - m['inside'] - m['outside']) * inch
+    story  = _build_story(manuscript, preset, meta, fonts, st, head_font,
+                          has_cover=bool(cover), avail_w=avail_w)
     doc = BookDoc(out_path, preset, meta, head_font, cover=cover,
                   title=meta.get('title', ''), author=meta.get('author', ''))
     doc.build(story)

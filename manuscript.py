@@ -20,8 +20,9 @@ import html
 
 
 SCENE_BREAK_RE = re.compile(r'^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$')
-CHAPTER_RE = re.compile(r'^#\s+(.*)$')
-SUBHEAD_RE = re.compile(r'^##\s+(.*)$')
+CHAPTER_RE     = re.compile(r'^#\s+(.*)$')
+SUBHEAD_RE     = re.compile(r'^##\s+(.*)$')
+DOCBLOCK_RE    = re.compile(r'^\s*~~~')
 
 
 def _inline(text):
@@ -36,12 +37,19 @@ def _inline(text):
 def parse_markdown(raw):
     """Return {'chapters': [{'title': str|None, 'blocks': [...] }]}.
 
-    Each block is ('para', text) | ('subhead', text) | ('scene', None).
+    Each block is:
+      ('para', text) | ('subhead', text) | ('scene', None)
+      | ('doc_block', [('para', text), ...])
     """
     lines = raw.replace('\r\n', '\n').replace('\r', '\n').split('\n')
-    chapters = []
-    cur = None
-    para_buf = []
+    chapters  = []
+    cur       = None
+    para_buf  = []
+
+    # doc-block state
+    in_block      = False
+    block_buf     = []   # accumulated ('para', text) entries for current block
+    block_para_buf = []  # line accumulator inside the block
 
     def flush_para():
         nonlocal para_buf
@@ -51,6 +59,14 @@ def parse_markdown(raw):
                 cur['blocks'].append(('para', _inline(joined)))
             para_buf = []
 
+    def flush_block_para():
+        nonlocal block_para_buf
+        if block_para_buf:
+            joined = ' '.join(s.strip() for s in block_para_buf).strip()
+            if joined:
+                block_buf.append(('para', _inline(joined)))
+            block_para_buf = []
+
     def new_chapter(title):
         nonlocal cur
         flush_para() if cur else None
@@ -58,13 +74,36 @@ def parse_markdown(raw):
         chapters.append(cur)
 
     for line in lines:
-        m_ch = CHAPTER_RE.match(line)
+        # ~~~ fence — toggle doc-block mode (optional label after ~~~ is ignored)
+        if DOCBLOCK_RE.match(line):
+            if in_block:
+                flush_block_para()
+                if block_buf:
+                    cur['blocks'].append(('doc_block', list(block_buf)))
+                block_buf[:] = []
+                in_block = False
+            else:
+                flush_para()
+                if cur is None:
+                    new_chapter(None)
+                in_block = True
+            continue
+
+        # Inside a doc block: only paragraph text
+        if in_block:
+            if line.strip() == '':
+                flush_block_para()
+            else:
+                block_para_buf.append(line)
+            continue
+
+        m_ch  = CHAPTER_RE.match(line)
         m_sub = SUBHEAD_RE.match(line)
         if m_ch:
             new_chapter(m_ch.group(1).strip() or None)
             continue
         if cur is None:
-            new_chapter(None)  # untitled opening chapter
+            new_chapter(None)
         if SCENE_BREAK_RE.match(line):
             flush_para()
             cur['blocks'].append(('scene', None))
@@ -77,9 +116,14 @@ def parse_markdown(raw):
             flush_para()
         else:
             para_buf.append(line)
+
+    # close any unclosed block
+    if in_block:
+        flush_block_para()
+        if block_buf:
+            cur['blocks'].append(('doc_block', list(block_buf)))
     flush_para()
 
-    # Drop fully-empty chapters that can appear from leading headings
     chapters = [c for c in chapters if c['blocks'] or c['title']]
     return {'chapters': chapters}
 

@@ -173,6 +173,32 @@
       </fieldset>
 
       <fieldset>
+        <legend>Document blocks</legend>
+        <div class="fs-body">
+          {% set db = p.get('document_block', {}) %}
+          <div class="row">
+            <div class="field"><label>Frame style</label><span class="hint">~~~ … ~~~ blocks</span>
+              <select name="db_frame">
+                {% set dbf = db.get('frame','ruled') %}
+                <option value="none"  {{ 'selected' if dbf=='none'  }}>None — indent only</option>
+                <option value="ruled" {{ 'selected' if dbf=='ruled' }}>Ruled — lines above &amp; below</option>
+                <option value="box"   {{ 'selected' if dbf=='box'   }}>Box — border + tint</option>
+              </select></div>
+            <div class="field num"><label>Indent</label><span class="hint">inches each side</span>
+              <input type="number" step="0.05" name="db_indent" value="{{ db.get('indent', 0.25) }}"></div>
+          </div>
+          <div class="row">
+            <div class="field num"><label>Font size</label><span class="hint">points · 0 = body size</span>
+              <input type="number" step="0.25" name="db_font_size" value="{{ db.get('font_size', 0) }}"></div>
+            <div class="field num"><label>First-line indent</label><span class="hint">inches · 0 for letters</span>
+              <input type="number" step="0.05" name="db_first_indent" value="{{ db.get('first_indent', 0.0) }}"></div>
+            <div class="field num"><label>Space around</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="db_space_around" value="{{ db.get('space_around', 12.0) }}"></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
         <legend>Running heads &amp; page numbers</legend>
         <div class="fs-body">
           <div class="row">
