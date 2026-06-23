@@ -17,6 +17,12 @@ Imposition produced:
 import os
 import re
 import tempfile
+
+try:
+    import pyphen as _pyphen
+    _HAVE_PYPHEN = True
+except ImportError:
+    _HAVE_PYPHEN = False
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER
 from reportlab.lib.styles import ParagraphStyle
@@ -353,25 +359,48 @@ def _plain(text):
     return _TAG_RE.sub('', text)
 
 
-def _opening_para(text, st, preset, fonts):
+_SHY = '­'  # soft hyphen recognised by ReportLab as a valid line-break point
+
+def _hyphenate_markup(text, dic):
+    """Insert soft hyphens into text nodes of ReportLab XML markup.
+
+    Tags are left untouched; only runs of 5+ letter words in text nodes
+    are hyphenated (short words and numbers aren't worth breaking).
+    """
+    parts  = re.split(r'(<[^>]+>)', text)
+    result = []
+    for part in parts:
+        if part.startswith('<'):
+            result.append(part)
+        else:
+            result.append(re.sub(
+                r'\b[A-Za-z]{5,}\b',
+                lambda m: dic.inserted(m.group(), hyphen=_SHY),
+                part,
+            ))
+    return ''.join(result)
+
+
+def _opening_para(text, st, preset, fonts, hyph=None):
     style = preset['chapter']['open_style']
-    # Special treatments operate at the character/word level, so they need
-    # plain text — inline markup (bold/italic) from Word would split across
-    # tag boundaries and produce malformed XML fed to ReportLab.
     plain = _plain(text)
     if style == 'dropcap':
-        return [DropCap(plain, st['first'], fonts.get('bold', fonts['regular']),
+        plain_h = _hyphenate_markup(plain, hyph) if hyph else plain
+        return [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
                         lines=preset['chapter'].get('dropcap_lines', 3))]
     if style == 'raised_initial':
-        big = int(st['first'].fontSize * 1.9)
-        return [Paragraph(f'<font size="{big}">{plain[:1]}</font>{plain[1:]}', st['first'])]
+        big  = int(st['first'].fontSize * 1.9)
+        rest = _hyphenate_markup(plain[1:], hyph) if hyph else plain[1:]
+        return [Paragraph(f'<font size="{big}">{plain[:1]}</font>{rest}', st['first'])]
     if style == 'smallcaps_leadin':
         words = plain.split(' ')
-        n = preset['chapter'].get('leadin_words', 4)
+        n     = preset['chapter'].get('leadin_words', 4)
         lead, rest = ' '.join(words[:n]), ' '.join(words[n:])
-        big = int(st['first'].fontSize * 1.05)
+        big   = int(st['first'].fontSize * 1.05)
+        rest  = _hyphenate_markup(rest, hyph) if hyph else rest
         return [Paragraph(f'<font size="{big}">{lead.upper()}</font> {rest}', st['first'])]
-    return [Paragraph(text, st['first'])]
+    text_h = _hyphenate_markup(text, hyph) if hyph else text
+    return [Paragraph(text_h, st['first'])]
 
 
 def _default_copyright(meta):
@@ -386,7 +415,7 @@ def _default_copyright(meta):
     return '\n'.join(lines)
 
 
-def _render_doc_block(block_paras, preset, fonts, st, avail_w):
+def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None):
     """Return flowables for one ~~~ … ~~~ document block."""
     db     = preset.get('document_block', {})
     frame  = db.get('frame', 'ruled')
@@ -414,7 +443,8 @@ def _render_doc_block(block_paras, preset, fonts, st, avail_w):
 
     if frame == 'box':
         col_w = avail_w - 2 * indent
-        rows  = [[Paragraph(text, db_first if i == 0 else db_style)]
+        rows  = [[Paragraph(_hyphenate_markup(text, hyph) if hyph else text,
+                             db_first if i == 0 else db_style)]
                  for i, (_, text) in enumerate(block_paras)]
         t = Table(rows, colWidths=[col_w])
         t.setStyle(TableStyle([
@@ -428,7 +458,8 @@ def _render_doc_block(block_paras, preset, fonts, st, avail_w):
         out.append(t)
     else:
         for i, (_, text) in enumerate(block_paras):
-            out.append(Paragraph(text, db_first if i == 0 else db_style))
+            t = _hyphenate_markup(text, hyph) if hyph else text
+            out.append(Paragraph(t, db_first if i == 0 else db_style))
 
     if frame in ('ruled', 'box'):
         out += [Spacer(1, 5), HRule()]
@@ -437,7 +468,7 @@ def _render_doc_block(block_paras, preset, fonts, st, avail_w):
     return out
 
 
-def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False, avail_w=0):
+def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False, avail_w=0, hyph=None):
     glyph = preset['scene_break']['glyph']
     story = []
 
@@ -516,17 +547,19 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False
                 flush_next = True
             elif kind == 'doc_block':
                 if not opened:
-                    opened = True  # a doc block counts as the chapter opener
-                story.extend(_render_doc_block(val, preset, fonts, st, avail_w))
+                    opened = True
+                story.extend(_render_doc_block(val, preset, fonts, st, avail_w, hyph=hyph))
                 flush_next = True
             else:
                 if not opened:
-                    story.extend(_opening_para(val, st, preset, fonts))
+                    story.extend(_opening_para(val, st, preset, fonts, hyph=hyph))
                     opened = True
                 elif flush_next:
-                    story.append(Paragraph(val, st['first']))
+                    val_h = _hyphenate_markup(val, hyph) if hyph else val
+                    story.append(Paragraph(val_h, st['first']))
                 else:
-                    story.append(Paragraph(val, st['body']))
+                    val_h = _hyphenate_markup(val, hyph) if hyph else val
+                    story.append(Paragraph(val_h, st['body']))
                 flush_next = False
     return story
 
@@ -564,10 +597,11 @@ def build_pdf(manuscript, preset, out_path, meta):
                  'color': meta.get('cover_color', 'light'),
                  'title_font': fonts.get('bold', fonts['regular'])}
 
-    m      = preset['margins']
+    m       = preset['margins']
     avail_w = (preset['trim']['w'] - m['inside'] - m['outside']) * inch
-    story  = _build_story(manuscript, preset, meta, fonts, st, head_font,
-                          has_cover=bool(cover), avail_w=avail_w)
+    hyph    = _pyphen.Pyphen(lang='en_US') if (preset['body'].get('hyphenate') and _HAVE_PYPHEN) else None
+    story   = _build_story(manuscript, preset, meta, fonts, st, head_font,
+                           has_cover=bool(cover), avail_w=avail_w, hyph=hyph)
     doc = BookDoc(out_path, preset, meta, head_font, cover=cover,
                   title=meta.get('title', ''), author=meta.get('author', ''))
     doc.build(story)
