@@ -23,6 +23,18 @@
   .spec-card td{padding:2px 0}
   .spec-card td:last-child{text-align:right;font-weight:600}
   .ok{color:#2a7a2a}.warn{color:var(--red)}
+  .preflight{margin-top:18px;background:var(--surface);border:1px solid var(--rule);border-radius:3px;box-shadow:var(--shadow);overflow:hidden}
+  .preflight .head{padding:12px 24px;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:10px}
+  .preflight .head-label{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--red)}
+  .preflight .badge{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:2px;font-weight:600}
+  .preflight .badge-ok{background:#e6f4e6;color:#2a7a2a}
+  .preflight .badge-warn{background:#fce9e7;color:var(--red)}
+  .preflight ul{list-style:none;margin:0;padding:10px 24px 14px}
+  .preflight li{display:flex;align-items:baseline;gap:8px;padding:4px 0;font-size:13.5px;border-bottom:1px solid var(--rule)}
+  .preflight li:last-child{border-bottom:none}
+  .preflight .icon{font-size:11px;flex-shrink:0;width:14px;text-align:center}
+  .preflight .chk-label{font-weight:600;min-width:160px}
+  .preflight .chk-detail{color:var(--muted);font-size:12.5px}
   @media(max-width:600px){.spec-card .body{grid-template-columns:1fr}}
   .save-project{margin-top:28px;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:18px 22px}
   .save-project p{margin:0 0 12px;font-size:13.5px;color:var(--muted)}
@@ -103,6 +115,29 @@
           </table>
         </div>
       </div>
+    </div>
+    {% endif %}
+
+    {% if preflight %}
+    {% set issues = preflight | selectattr('ok', 'equalto', false) | list %}
+    <div class="preflight">
+      <div class="head">
+        <span class="head-label">Preflight</span>
+        {% if issues %}
+          <span class="badge badge-warn">{{ issues | length }} issue{{ 's' if issues | length != 1 }}</span>
+        {% else %}
+          <span class="badge badge-ok">All clear</span>
+        {% endif %}
+      </div>
+      <ul>
+        {% for c in preflight %}
+        <li>
+          <span class="icon {{ 'ok' if c.ok else 'warn' }}">{{ '✓' if c.ok else '✗' }}</span>
+          <span class="chk-label {{ 'ok' if c.ok else 'warn' }}">{{ c.label }}</span>
+          <span class="chk-detail">{{ c.detail }}</span>
+        </li>
+        {% endfor %}
+      </ul>
     </div>
     {% endif %}
 

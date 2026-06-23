@@ -61,6 +61,37 @@ def _min_inside(pages, table):
     return None
 
 
+def _preflight(build_result, preset, page_count):
+    """Return a list of preflight check dicts: {label, ok, detail}."""
+    checks = []
+    requested = preset.get('font_family', 'Book')
+
+    if build_result.get('font_fallback'):
+        checks.append({'label': f'Fonts ({requested})', 'ok': False,
+                       'detail': 'Font files not found — fell back to Times Roman (not embedded)'})
+    else:
+        checks.append({'label': f'Fonts ({build_result["font_family"]})', 'ok': True,
+                       'detail': 'Custom fonts loaded'})
+        for role, info in build_result.get('font_details', {}).items():
+            if not info['ok']:
+                checks.append({'label': f'  {role.capitalize()} weight', 'ok': False,
+                               'detail': f'{info["file"]} — {info["error"]}'})
+
+    checks.append({'label': 'Fonts embedded', 'ok': build_result.get('fonts_embedded', True),
+                   'detail': ('Embedded & subsetted — upload-ready'
+                              if build_result.get('fonts_embedded')
+                              else 'Standard PDF fonts not embedded — platforms may reject')})
+
+    if page_count:
+        kdp_ok = 24 <= page_count <= 828
+        checks.append({'label': 'Page count', 'ok': kdp_ok,
+                       'detail': (f'{page_count} pages — within KDP range (24–828)'
+                                  if kdp_ok else
+                                  f'{page_count} pages — outside KDP range (24–828)')})
+
+    return checks
+
+
 def print_spec(page_count, preset):
     """Return a dict of spine widths and minimum inside-margin info for the result page."""
     inside    = preset['margins']['inside']
@@ -348,11 +379,13 @@ def generate():
     out_name  = ''
     epub_name = ''
 
-    page_count = 0
+    build_result = None
+    page_count   = 0
     if fmt in ('pdf', 'both'):
         out_name = f'{base}-{stamp}.pdf'
         try:
-            page_count = engine.build_pdf(ms, preset, os.path.join(OUT_DIR, out_name), meta)
+            build_result = engine.build_pdf(ms, preset, os.path.join(OUT_DIR, out_name), meta)
+            page_count   = build_result['page_count']
         except Exception as exc:
             logging.error('PDF build failed: %s', traceback.format_exc())
             flash(f'PDF build failed: {exc}')
@@ -367,13 +400,14 @@ def generate():
             flash(f'EPUB build failed: {exc}')
             epub_name = ''
 
-    spec = print_spec(page_count, preset) if page_count else None
-    chapters = len(ms['chapters'])
+    spec      = print_spec(page_count, preset) if page_count else None
+    preflight = _preflight(build_result, preset, page_count) if build_result else None
+    chapters  = len(ms['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
                            meta=meta, preset=preset, preset_id=pid,
                            chapters=chapters, ms_path=ms_path, ms_type=ms_type,
                            cover_path=cover_path, from_project=None, fmt=fmt,
-                           spec=spec)
+                           spec=spec, preflight=preflight)
 
 
 # ----------------------------------------------------------------- project routes
@@ -546,14 +580,16 @@ def project_generate(pid):
     base  = slugify(meta['title'] or proj.get('name', 'book'))
     fmt   = proj.get('format', 'pdf')
 
-    out_name   = ''
-    epub_name  = ''
-    page_count = 0
+    out_name     = ''
+    epub_name    = ''
+    build_result = None
+    page_count   = 0
 
     if fmt in ('pdf', 'both'):
         out_name = f'{base}-{stamp}.pdf'
         try:
-            page_count = engine.build_pdf(ms_parsed, preset, os.path.join(OUT_DIR, out_name), meta)
+            build_result = engine.build_pdf(ms_parsed, preset, os.path.join(OUT_DIR, out_name), meta)
+            page_count   = build_result['page_count']
         except Exception as exc:
             logging.error('PDF build failed: %s', traceback.format_exc())
             flash(f'PDF build failed: {exc}')
@@ -573,13 +609,14 @@ def project_generate(pid):
     proj['updated']   = datetime.now().isoformat(timespec='seconds')
     save_project_file(pid, proj)
 
-    spec = print_spec(page_count, preset) if page_count else None
-    chapters = len(ms_parsed['chapters'])
+    spec      = print_spec(page_count, preset) if page_count else None
+    preflight = _preflight(build_result, preset, page_count) if build_result else None
+    chapters  = len(ms_parsed['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
                            meta=meta, preset=preset, preset_id=proj['preset'],
                            chapters=chapters, ms_path='', ms_type=ms_type,
                            cover_path=cover_path, from_project=pid, fmt=fmt,
-                           spec=spec)
+                           spec=spec, preflight=preflight)
 
 
 @app.route('/project/<pid>/delete', methods=['POST'])

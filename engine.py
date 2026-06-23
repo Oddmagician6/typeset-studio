@@ -40,25 +40,30 @@ FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
 
 # ---------------------------------------------------------------- fonts
 def register_fonts(preset):
-    fam = preset.get('font_family', 'Book')
+    fam   = preset.get('font_family', 'Book')
     files = preset.get('font_files', {
         'regular': 'Book-Regular.ttf',
         'bold': 'Book-Bold.ttf',
         'italic': 'Book-Italic.ttf',
     })
-    roles, ok = {}, True
+    roles   = {}
+    details = {}  # role -> {'file': str, 'ok': bool, 'error': str|None}
+
     for role, fname in files.items():
         path = fname if os.path.isabs(fname) else os.path.join(FONT_DIR, fname)
         name = f'{fam}-{role}'
         if os.path.exists(path):
             try:
                 pdfmetrics.registerFont(TTFont(name, path))
-                roles[role] = name
-            except Exception:
-                ok = False
+                roles[role]   = name
+                details[role] = {'file': fname, 'ok': True, 'error': None}
+            except Exception as e:
+                details[role] = {'file': fname, 'ok': False, 'error': str(e)}
         else:
-            ok = False
-    if not ok or 'regular' not in roles:
+            details[role] = {'file': fname, 'ok': False, 'error': 'file not found'}
+
+    fallback = 'regular' not in roles
+    if fallback:
         roles = {'regular': 'Times-Roman', 'bold': 'Times-Bold',
                  'italic': 'Times-Italic'}
         fam = 'Times'
@@ -68,7 +73,15 @@ def register_fonts(preset):
             bold=roles.get('bold', roles['regular']),
             italic=roles.get('italic', roles['regular']),
             boldItalic=roles.get('bold', roles['regular']))
-    return {'family': fam, **roles}
+
+    return {
+        'family':   fam,
+        'regular':  roles['regular'],
+        'bold':     roles.get('bold',   roles['regular']),
+        'italic':   roles.get('italic', roles['regular']),
+        'fallback': fallback,
+        'details':  details,
+    }
 
 
 # ---------------------------------------------------------------- flowables
@@ -486,4 +499,10 @@ def build_pdf(manuscript, preset, out_path, meta):
             os.remove(cover_path)
         except OSError:
             pass
-    return page_count
+    return {
+        'page_count':     page_count,
+        'font_family':    fonts['family'],
+        'font_fallback':  fonts['fallback'],
+        'font_details':   fonts['details'],
+        'fonts_embedded': not fonts['fallback'],
+    }
