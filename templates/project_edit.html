@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% set active = 'projects' %}
+{% block title %}Edit project · Typeset Studio{% endblock %}
+
+{% block style %}
+  form.editor{display:flex;flex-direction:column;gap:22px;max-width:760px}
+  fieldset{border:1px solid var(--rule);border-radius:3px;background:var(--surface);padding:0;margin:0}
+  legend{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--red);padding:0 8px;margin-left:12px}
+  .fs-body{padding:6px 20px 20px}
+  .row{display:flex;flex-wrap:wrap;gap:18px}
+  .field{display:flex;flex-direction:column;gap:4px;margin-top:14px;flex:1 1 200px}
+  .field.wide{flex-basis:100%}
+  .field label{font-size:13px;font-weight:600}
+  .field .hint{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .field input[type=text],.field input[type=number],.field select,.field input[type=file]{
+    font-family:var(--sans);font-size:14px;background:var(--surface-2);
+    border:1px solid var(--rule-strong);border-radius:2px;padding:8px 10px;width:100%;
+  }
+  .field input:focus,.field select:focus{border-color:var(--red);background:#fff}
+  .check{display:flex;align-items:center;gap:8px;margin-top:16px}
+  .check input{width:16px;height:16px;accent-color:var(--red)}
+  .current-file{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:6px}
+  .formbar{display:flex;gap:10px;align-items:center;padding:4px 0 0}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">Projects</div>
+    <h1>{{ proj.name or proj.title or 'Edit project' }}</h1>
+    <p>Change the settings or replace the manuscript, then save. Use <b>Regenerate</b>
+       on the projects page to rebuild the PDF.</p>
+  </div>
+
+  <form class="editor" method="post"
+        action="{{ url_for('project_edit', pid=pid) }}"
+        enctype="multipart/form-data">
+
+    <fieldset>
+      <legend>Project</legend>
+      <div class="fs-body">
+        <div class="row">
+          <div class="field wide"><label>Project name</label>
+            <input type="text" name="name" value="{{ proj.name }}"></div>
+        </div>
+        <div class="row">
+          <div class="field wide"><label>Style</label>
+            <select name="preset">
+              {% for item in presets %}
+                <option value="{{ item.id }}" {{ 'selected' if item.id == proj.preset }}>{{ item.data.name }}</option>
+              {% endfor %}
+            </select></div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Manuscript</legend>
+      <div class="fs-body">
+        {% if proj.manuscript_file %}
+          <p class="current-file">Current file: {{ proj.manuscript_file }}</p>
+        {% elif proj.manuscript_type == 'sample' %}
+          <p class="current-file">Current: bundled sample</p>
+        {% endif %}
+        <div class="row">
+          <div class="field wide"><label>Replace manuscript</label>
+            <span class="hint">leave blank to keep the current file · .docx, .md or .txt</span>
+            <input type="file" name="manuscript" accept=".docx,.md,.txt,.markdown"></div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Cover art</legend>
+      <div class="fs-body">
+        {% if proj.cover_file %}
+          <p class="current-file">Current file: {{ proj.cover_file }}</p>
+        {% endif %}
+        <div class="row">
+          <div class="field wide"><label>Replace cover image</label>
+            <span class="hint">leave blank to keep the current cover · .jpg or .png</span>
+            <input type="file" name="cover" accept=".jpg,.jpeg,.png"></div>
+        </div>
+        <div class="check"><input type="checkbox" id="cov-ov" name="cover_overlay" {{ 'checked' if proj.cover_overlay }}>
+          <label for="cov-ov">Print the title and author over the art</label></div>
+        <div class="row" style="margin-top:14px">
+          <div class="field"><label>Overlay text colour</label>
+            <select name="cover_color">
+              <option value="light" {{ 'selected' if proj.cover_color == 'light' }}>Light text (for dark art)</option>
+              <option value="dark"  {{ 'selected' if proj.cover_color == 'dark' }}>Dark text (for light art)</option>
+            </select></div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Title page</legend>
+      <div class="fs-body">
+        <div class="row">
+          <div class="field"><label>Title</label>
+            <input type="text" name="title" value="{{ proj.title }}"></div>
+          <div class="field"><label>Subtitle</label><span class="hint">optional</span>
+            <input type="text" name="subtitle" value="{{ proj.subtitle }}"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Author</label>
+            <input type="text" name="author" value="{{ proj.author }}"></div>
+          <div class="field"><label>Year</label>
+            <input type="text" name="year" value="{{ proj.year }}"></div>
+          <div class="field"><label>Publisher</label>
+            <input type="text" name="publisher" value="{{ proj.publisher }}"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Front matter</label>
+            <select name="front_matter">
+              <option value="full"      {{ 'selected' if proj.front_matter == 'full' }}>Half-title, title page, copyright</option>
+              <option value="title"     {{ 'selected' if proj.front_matter == 'title' }}>Title page + copyright</option>
+              <option value="copyright" {{ 'selected' if proj.front_matter == 'copyright' }}>Copyright page only</option>
+              <option value="none"      {{ 'selected' if proj.front_matter == 'none' }}>None — start on the story</option>
+            </select></div>
+        </div>
+        <div class="check"><input type="checkbox" id="rhs" name="right_hand_starts" {{ 'checked' if proj.right_hand_starts }}>
+          <label for="rhs">Add blank pages so the story and each chapter start on a right-hand page</label></div>
+      </div>
+    </fieldset>
+
+    <div class="formbar">
+      <button class="btn btn-primary" type="submit">Save changes</button>
+      <a class="btn" href="{{ url_for('projects') }}">Cancel</a>
+    </div>
+  </form>
+{% endblock %}

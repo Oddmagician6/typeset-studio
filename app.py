@@ -9,6 +9,7 @@ plain JSON files in ./presets so you can clone one per customer and tweak it.
 import os
 import re
 import json
+import shutil
 import logging
 import threading
 import traceback
@@ -26,11 +27,13 @@ import engine
 import manuscript
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PRESET_DIR = os.path.join(HERE, 'presets')
-OUT_DIR = os.path.join(HERE, 'out')
-UPLOAD_DIR = os.path.join(HERE, 'uploads')
+PRESET_DIR    = os.path.join(HERE, 'presets')
+OUT_DIR       = os.path.join(HERE, 'out')
+UPLOAD_DIR    = os.path.join(HERE, 'uploads')
+PROJECT_DIR   = os.path.join(HERE, 'projects')
+PROJECT_MS_DIR = os.path.join(PROJECT_DIR, 'manuscripts')
 SAMPLE = os.path.join(HERE, 'sample', 'sample.md')
-for d in (PRESET_DIR, OUT_DIR, UPLOAD_DIR):
+for d in (PRESET_DIR, OUT_DIR, UPLOAD_DIR, PROJECT_DIR, PROJECT_MS_DIR):
     os.makedirs(d, exist_ok=True)
 
 app = Flask(__name__)
@@ -94,6 +97,43 @@ def save_preset(pid, data):
 def unique_id(base):
     pid, n = base, 2
     existing = {i['id'] for i in list_presets()}
+    while pid in existing:
+        pid = f'{base}-{n}'
+        n += 1
+    return pid
+
+
+# ----------------------------------------------------------------- projects
+def list_projects():
+    items = []
+    for fn in sorted(os.listdir(PROJECT_DIR)):
+        if fn.endswith('.json'):
+            try:
+                with open(os.path.join(PROJECT_DIR, fn), encoding='utf-8') as f:
+                    data = json.load(f)
+                items.append({'id': fn[:-5], 'data': data})
+            except Exception:
+                pass
+    return sorted(items, key=lambda x: x['data'].get('updated', ''), reverse=True)
+
+
+def load_project(pid):
+    path = os.path.join(PROJECT_DIR, secure_filename(pid) + '.json')
+    if not os.path.exists(path):
+        abort(404)
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def save_project_file(pid, data):
+    path = os.path.join(PROJECT_DIR, secure_filename(pid) + '.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def unique_project_id(base):
+    pid, n = base, 2
+    existing = {i['id'] for i in list_projects()}
     while pid in existing:
         pid = f'{base}-{n}'
         n += 1
@@ -206,11 +246,15 @@ def generate():
 
     # manuscript source: uploaded file, pasted text, or the bundled sample
     raw = None
+    ms_path = ''   # stable file path — stored with project on save
+    ms_type = 'file'
+
     up = request.files.get('manuscript')
     if up and up.filename:
         fn = secure_filename(up.filename)
         dest = os.path.join(UPLOAD_DIR, fn)
         up.save(dest)
+        ms_path, ms_type = dest, 'file'
         if fn.lower().endswith('.docx'):
             try:
                 raw = manuscript.import_docx(dest)
@@ -225,8 +269,14 @@ def generate():
             raw = open(dest, encoding='utf-8', errors='replace').read()
     elif form.get('pasted', '').strip():
         raw = form['pasted']
+        stamp_p = datetime.now().strftime('%Y%m%d-%H%M%S')
+        ms_path = os.path.join(UPLOAD_DIR, f'pasted-{stamp_p}.txt')
+        with open(ms_path, 'w', encoding='utf-8') as pf:
+            pf.write(raw)
+        ms_type = 'pasted'
     elif form.get('use_sample'):
         raw = open(SAMPLE, encoding='utf-8').read()
+        ms_type = 'sample'
 
     if not raw:
         flash('Add a manuscript: upload a file, paste text, or use the sample.')
@@ -265,7 +315,212 @@ def generate():
 
     chapters = len(ms['chapters'])
     return render_template('result.html', out_name=out_name, meta=meta,
-                           preset=preset, chapters=chapters)
+                           preset=preset, preset_id=pid, chapters=chapters,
+                           ms_path=ms_path, ms_type=ms_type,
+                           cover_path=cover_path, from_project=None)
+
+
+# ----------------------------------------------------------------- project routes
+@app.route('/projects')
+def projects():
+    preset_map = {p['id']: p['data'] for p in list_presets()}
+    return render_template('projects.html', projects=list_projects(),
+                           preset_map=preset_map)
+
+
+@app.route('/project/create', methods=['POST'])
+def project_create():
+    form = request.form
+    name = form.get('project_name', '').strip() or form.get('title', '').strip() or 'Untitled'
+    proj_id = unique_project_id(slugify(name) or 'project')
+
+    ms_src  = form.get('ms_path', '')
+    ms_type = form.get('ms_type', 'file')
+    ms_file = ''
+    if ms_type != 'sample' and ms_src and os.path.exists(ms_src):
+        ext = os.path.splitext(ms_src)[1]
+        ms_file = proj_id + ext
+        shutil.copy2(ms_src, os.path.join(PROJECT_MS_DIR, ms_file))
+
+    cover_src  = form.get('cover_path', '')
+    cover_file = ''
+    if cover_src and os.path.exists(cover_src):
+        ext = os.path.splitext(cover_src)[1]
+        cover_file = proj_id + '-cover' + ext
+        shutil.copy2(cover_src, os.path.join(PROJECT_MS_DIR, cover_file))
+
+    now = datetime.now().isoformat(timespec='seconds')
+    data = {
+        'name': name,
+        'preset': form.get('preset_id', ''),
+        'title': form.get('title', '').strip(),
+        'subtitle': form.get('subtitle', '').strip(),
+        'author': form.get('author', '').strip(),
+        'year': form.get('year', '').strip(),
+        'publisher': form.get('publisher', '').strip(),
+        'front_matter': form.get('front_matter', 'full'),
+        'right_hand_starts': form.get('right_hand_starts') == '1',
+        'cover_overlay': form.get('cover_overlay') == '1',
+        'cover_color': form.get('cover_color', 'light'),
+        'manuscript_file': ms_file,
+        'manuscript_type': ms_type,
+        'cover_file': cover_file,
+        'last_pdf': form.get('last_pdf', ''),
+        'created': now,
+        'updated': now,
+    }
+    save_project_file(proj_id, data)
+    flash(f'“{name}” saved as a project.')
+    return redirect(url_for('projects'))
+
+
+@app.route('/project/<pid>/edit', methods=['GET', 'POST'])
+def project_edit(pid):
+    proj = load_project(pid)
+    presets = list_presets()
+
+    if request.method == 'POST':
+        form = request.form
+
+        # Optional manuscript replacement
+        up = request.files.get('manuscript')
+        if up and up.filename:
+            fn  = secure_filename(up.filename)
+            ext = os.path.splitext(fn)[1]
+            dest = os.path.join(PROJECT_MS_DIR, pid + ext)
+            up.save(dest)
+            # Remove old file if extension changed
+            old = proj.get('manuscript_file', '')
+            if old and old != pid + ext:
+                old_path = os.path.join(PROJECT_MS_DIR, old)
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+            proj['manuscript_file'] = pid + ext
+            proj['manuscript_type'] = 'file'
+
+        # Optional cover replacement
+        cov = request.files.get('cover')
+        if cov and cov.filename:
+            cfn = secure_filename(cov.filename)
+            ext = os.path.splitext(cfn)[1]
+            dest = os.path.join(PROJECT_MS_DIR, pid + '-cover' + ext)
+            cov.save(dest)
+            old = proj.get('cover_file', '')
+            if old and old != pid + '-cover' + ext:
+                old_path = os.path.join(PROJECT_MS_DIR, old)
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+            proj['cover_file'] = pid + '-cover' + ext
+
+        proj.update({
+            'name':             form.get('name', '').strip() or proj['name'],
+            'preset':           form.get('preset', proj['preset']),
+            'title':            form.get('title', '').strip(),
+            'subtitle':         form.get('subtitle', '').strip(),
+            'author':           form.get('author', '').strip(),
+            'year':             form.get('year', '').strip(),
+            'publisher':        form.get('publisher', '').strip(),
+            'front_matter':     form.get('front_matter', 'full'),
+            'right_hand_starts': 'right_hand_starts' in form,
+            'cover_overlay':    'cover_overlay' in form,
+            'cover_color':      form.get('cover_color', 'light'),
+            'updated':          datetime.now().isoformat(timespec='seconds'),
+        })
+        save_project_file(pid, proj)
+        flash('Project updated.')
+        return redirect(url_for('projects'))
+
+    return render_template('project_edit.html', pid=pid, proj=proj, presets=presets)
+
+
+@app.route('/project/<pid>/generate', methods=['POST'])
+def project_generate(pid):
+    proj   = load_project(pid)
+    preset = load_preset(proj['preset'])
+
+    ms_type = proj.get('manuscript_type', 'file')
+    ms_file = proj.get('manuscript_file', '')
+    raw = None
+
+    if ms_type == 'sample':
+        raw = open(SAMPLE, encoding='utf-8').read()
+    elif ms_file:
+        ms_path = os.path.join(PROJECT_MS_DIR, ms_file)
+        if not os.path.exists(ms_path):
+            flash('Manuscript file not found — please replace it via Edit.')
+            return redirect(url_for('projects'))
+        if ms_file.lower().endswith('.docx'):
+            try:
+                raw = manuscript.import_docx(ms_path)
+            except Exception as exc:
+                logging.error('docx import failed: %s', traceback.format_exc())
+                flash(f'Could not read the Word file: {exc}')
+                return redirect(url_for('projects'))
+        else:
+            raw = open(ms_path, encoding='utf-8', errors='replace').read()
+
+    if not raw:
+        flash('No manuscript found for this project.')
+        return redirect(url_for('projects'))
+
+    cover_path = ''
+    cover_file = proj.get('cover_file', '')
+    if cover_file:
+        cp = os.path.join(PROJECT_MS_DIR, cover_file)
+        if os.path.exists(cp):
+            cover_path = cp
+
+    ms_parsed = manuscript.parse_markdown(raw)
+    meta = {
+        'title':            proj.get('title', ''),
+        'subtitle':         proj.get('subtitle', ''),
+        'author':           proj.get('author', ''),
+        'year':             proj.get('year', '') or str(datetime.now().year),
+        'publisher':        proj.get('publisher', ''),
+        'front_matter':     proj.get('front_matter', 'full'),
+        'right_hand_starts': proj.get('right_hand_starts', True),
+        'cover_image':      cover_path,
+        'cover_overlay':    proj.get('cover_overlay', False),
+        'cover_color':      proj.get('cover_color', 'light'),
+    }
+    stamp    = datetime.now().strftime('%Y%m%d-%H%M%S')
+    out_name = f'{slugify(meta["title"] or proj.get("name", "book"))}-{stamp}.pdf'
+
+    try:
+        engine.build_pdf(ms_parsed, preset, os.path.join(OUT_DIR, out_name), meta)
+    except Exception as exc:
+        logging.error('PDF build failed: %s', traceback.format_exc())
+        flash(f'PDF build failed: {exc}')
+        return redirect(url_for('projects'))
+
+    proj['last_pdf'] = out_name
+    proj['updated']  = datetime.now().isoformat(timespec='seconds')
+    save_project_file(pid, proj)
+
+    chapters = len(ms_parsed['chapters'])
+    return render_template('result.html', out_name=out_name, meta=meta,
+                           preset=preset, preset_id=proj['preset'],
+                           chapters=chapters, ms_path='', ms_type=ms_type,
+                           cover_path=cover_path, from_project=pid)
+
+
+@app.route('/project/<pid>/delete', methods=['POST'])
+def project_delete(pid):
+    try:
+        proj = load_project(pid)
+        for field in ('manuscript_file', 'cover_file'):
+            fn = proj.get(field, '')
+            if fn:
+                fp = os.path.join(PROJECT_MS_DIR, fn)
+                if os.path.exists(fp):
+                    os.remove(fp)
+    except Exception:
+        pass
+    path = os.path.join(PROJECT_DIR, secure_filename(pid) + '.json')
+    if os.path.exists(path):
+        os.remove(path)
+    flash('Project deleted.')
+    return redirect(url_for('projects'))
 
 
 @app.route('/out/<path:fn>')

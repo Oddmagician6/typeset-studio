@@ -15,6 +15,14 @@
   .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:0 24px 22px}
   .more{margin-top:20px}
   .more a{font-size:14px}
+  .save-project{margin-top:28px;background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:18px 22px}
+  .save-project p{margin:0 0 12px;font-size:13.5px;color:var(--muted)}
+  .save-project .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .save-project input[type=text]{
+    font-family:var(--sans);font-size:14px;background:var(--surface-2);
+    border:1px solid var(--rule-strong);border-radius:2px;padding:8px 10px;flex:1 1 200px;
+  }
+  .save-project input:focus{border-color:var(--red);background:#fff}
 {% endblock %}
 
 {% block body %}
@@ -44,7 +52,35 @@
         <a class="btn" href="{{ url_for('out_file', fn=out_name) }}" target="_blank" rel="noopener">Open in browser</a>
       </div>
     </div>
-    <p class="more"><a href="{{ url_for('generate') }}">Set another book</a> &nbsp;·&nbsp;
-       <a href="{{ url_for('index') }}">Back to styles</a></p>
+    {% if from_project %}
+      <p class="more"><a href="{{ url_for('projects') }}">Back to projects</a> &nbsp;·&nbsp;
+         <a href="{{ url_for('generate') }}">Set a new book</a></p>
+    {% else %}
+      <p class="more"><a href="{{ url_for('generate') }}">Set another book</a> &nbsp;·&nbsp;
+         <a href="{{ url_for('index') }}">Back to styles</a></p>
+      <div class="save-project">
+        <p>Save these settings as a project so you can regenerate this book any time.</p>
+        <form method="post" action="{{ url_for('project_create') }}">
+          <input type="hidden" name="preset_id"         value="{{ preset_id }}">
+          <input type="hidden" name="ms_path"           value="{{ ms_path }}">
+          <input type="hidden" name="ms_type"           value="{{ ms_type }}">
+          <input type="hidden" name="cover_path"        value="{{ cover_path }}">
+          <input type="hidden" name="last_pdf"          value="{{ out_name }}">
+          <input type="hidden" name="title"             value="{{ meta.title }}">
+          <input type="hidden" name="subtitle"          value="{{ meta.subtitle }}">
+          <input type="hidden" name="author"            value="{{ meta.author }}">
+          <input type="hidden" name="year"              value="{{ meta.year }}">
+          <input type="hidden" name="publisher"         value="{{ meta.publisher }}">
+          <input type="hidden" name="front_matter"      value="{{ meta.front_matter }}">
+          <input type="hidden" name="right_hand_starts" value="{{ '1' if meta.right_hand_starts else '' }}">
+          <input type="hidden" name="cover_overlay"     value="{{ '1' if meta.cover_overlay else '' }}">
+          <input type="hidden" name="cover_color"       value="{{ meta.cover_color }}">
+          <div class="row">
+            <input type="text" name="project_name" value="{{ meta.title }}" placeholder="Project name">
+            <button class="btn btn-primary" type="submit">Save as project</button>
+          </div>
+        </form>
+      </div>
+    {% endif %}
   </div>
 {% endblock %}

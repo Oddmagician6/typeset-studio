@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% set active = 'projects' %}
+{% block title %}Projects · Typeset Studio{% endblock %}
+
+{% block style %}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px}
+  .card{
+    background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+    box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden;
+  }
+  .card .top{
+    padding:20px 22px 14px;border-bottom:1px solid var(--rule);
+    background:repeating-linear-gradient(transparent,transparent 27px,rgba(27,26,24,.04) 27px,rgba(27,26,24,.04) 28px);
+  }
+  .card .top .name{font-family:var(--serif);font-size:20px;font-weight:600;margin:0;line-height:1.2}
+  .card .top .byline{color:var(--muted);font-size:13px;margin:3px 0 0}
+  .card .body{padding:12px 22px 16px;display:flex;flex-direction:column;gap:12px;flex:1}
+  .card .spec{font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.8}
+  .card .spec b{color:var(--ink)}
+  .card .actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:auto}
+  .card .actions .sep{flex:1}
+  .empty{color:var(--muted);font-size:15px;margin-top:8px}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">Books in progress</div>
+    <h1>Projects</h1>
+    <p>Each project stores a book's manuscript, style, and title-page settings so you can
+       regenerate the PDF any time without re-entering everything.</p>
+  </div>
+
+  <div class="grid">
+    {% for item in projects %}
+      {% set p = item.data %}
+      {% set style_name = preset_map.get(p.preset, {}).get('name', p.preset) %}
+      <article class="card">
+        <div class="top">
+          <p class="name">{{ p.name or p.title or 'Untitled' }}</p>
+          <p class="byline">
+            {% if p.title and p.name != p.title %}<em>{{ p.title }}</em>{% endif %}
+            {% if p.author %} · {{ p.author }}{% endif %}
+          </p>
+        </div>
+        <div class="body">
+          <div class="spec">
+            <b>Style</b> {{ style_name }}<br>
+            {% if p.last_pdf %}<b>Last built</b> {{ p.updated[:10] }}{% endif %}
+            {% if p.manuscript_type == 'sample' %}<br><b>Manuscript</b> bundled sample{% elif p.manuscript_file %}<br><b>Manuscript</b> {{ p.manuscript_file }}{% endif %}
+          </div>
+          <div class="actions">
+            <form class="inline-form" method="post" action="{{ url_for('project_generate', pid=item.id) }}">
+              <button class="btn btn-primary btn-sm" type="submit">Regenerate</button>
+            </form>
+            <a class="btn btn-sm" href="{{ url_for('project_edit', pid=item.id) }}">Edit</a>
+            {% if p.last_pdf %}
+              <a class="btn btn-sm" href="{{ url_for('download', fn=p.last_pdf) }}">Last PDF</a>
+            {% endif %}
+            <span class="sep"></span>
+            <form class="inline-form" method="post" action="{{ url_for('project_delete', pid=item.id) }}"
+                  onsubmit="return confirm('Delete the project “{{ p.name }}”? This cannot be undone.');">
+              <button class="btn btn-ghost btn-sm" type="submit">Delete</button>
+            </form>
+          </div>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+
+  {% if not projects %}
+    <p class="empty">No projects yet. After composing a book, use <b>Save as project</b> on the result page.</p>
+  {% endif %}
+{% endblock %}
