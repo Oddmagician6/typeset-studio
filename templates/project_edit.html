@@ -123,6 +123,20 @@
       </div>
     </fieldset>
 
+    <fieldset>
+      <legend>Output format</legend>
+      <div class="fs-body">
+        <div class="row">
+          <div class="field"><label>Format</label>
+            <select name="format">
+              <option value="pdf"  {{ 'selected' if proj.get('format','pdf')=='pdf'  }}>PDF only</option>
+              <option value="epub" {{ 'selected' if proj.get('format','pdf')=='epub' }}>EPUB only</option>
+              <option value="both" {{ 'selected' if proj.get('format','pdf')=='both' }}>PDF + EPUB</option>
+            </select></div>
+        </div>
+      </div>
+    </fieldset>
+
     <div class="formbar">
       <button class="btn btn-primary" type="submit">Save changes</button>
       <a class="btn" href="{{ url_for('projects') }}">Cancel</a>

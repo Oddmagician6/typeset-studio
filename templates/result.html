@@ -42,14 +42,20 @@
       </div>
       <div class="recap">
         <span class="k">Style</span><span><b>{{ preset.name }}</b></span>
-        <span class="k">Trim</span><span>{{ '%g'|format(preset.trim.w) }}&times;{{ '%g'|format(preset.trim.h) }}"</span>
+        {% if fmt != 'epub' %}<span class="k">Trim</span><span>{{ '%g'|format(preset.trim.w) }}&times;{{ '%g'|format(preset.trim.h) }}"</span>{% endif %}
         <span class="k">Body</span><span>{{ '%g'|format(preset.body.size) }}/{{ '%g'|format(preset.body.leading) }} {{ preset.font_family }}</span>
         <span class="k">Chapters</span><span>{{ chapters }}</span>
-        <span class="k">File</span><span>{{ out_name }}</span>
+        {% if out_name %}<span class="k">PDF</span><span>{{ out_name }}</span>{% endif %}
+        {% if epub_name %}<span class="k">EPUB</span><span>{{ epub_name }}</span>{% endif %}
       </div>
       <div class="actions">
-        <a class="btn btn-primary" href="{{ url_for('download', fn=out_name) }}">Download PDF</a>
-        <a class="btn" href="{{ url_for('out_file', fn=out_name) }}" target="_blank" rel="noopener">Open in browser</a>
+        {% if out_name %}
+          <a class="btn btn-primary" href="{{ url_for('download', fn=out_name) }}">Download PDF</a>
+          <a class="btn" href="{{ url_for('out_file', fn=out_name) }}" target="_blank" rel="noopener">Open PDF</a>
+        {% endif %}
+        {% if epub_name %}
+          <a class="btn {{ 'btn-primary' if not out_name }}" href="{{ url_for('download', fn=epub_name) }}">Download EPUB</a>
+        {% endif %}
       </div>
     </div>
     {% if from_project %}
@@ -75,6 +81,8 @@
           <input type="hidden" name="right_hand_starts" value="{{ '1' if meta.right_hand_starts else '' }}">
           <input type="hidden" name="cover_overlay"     value="{{ '1' if meta.cover_overlay else '' }}">
           <input type="hidden" name="cover_color"       value="{{ meta.cover_color }}">
+          <input type="hidden" name="fmt"               value="{{ fmt }}">
+          <input type="hidden" name="last_epub"         value="{{ epub_name }}">
           <div class="row">
             <input type="text" name="project_name" value="{{ meta.title }}" placeholder="Project name">
             <button class="btn btn-primary" type="submit">Save as project</button>

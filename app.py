@@ -24,6 +24,7 @@ from flask import (Flask, request, redirect, url_for, render_template,
 from werkzeug.utils import secure_filename
 
 import engine
+import epub
 import manuscript
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -243,6 +244,7 @@ def generate():
         flash('Pick a style first.')
         return render_template('generate.html', presets=presets, form=form)
     preset = load_preset(pid)
+    fmt = form.get('format', 'pdf')
 
     # manuscript source: uploaded file, pasted text, or the bundled sample
     raw = None
@@ -304,20 +306,34 @@ def generate():
         'cover_color': form.get('cover_color', 'light'),
     }
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-    base = slugify(meta['title'] or 'book')
-    out_name = f'{base}-{stamp}.pdf'
-    try:
-        engine.build_pdf(ms, preset, os.path.join(OUT_DIR, out_name), meta)
-    except Exception as exc:
-        logging.error('PDF build failed: %s', traceback.format_exc())
-        flash(f'PDF build failed: {exc}')
-        return render_template('generate.html', presets=presets, form=form)
+    base  = slugify(meta['title'] or 'book')
+
+    out_name  = ''
+    epub_name = ''
+
+    if fmt in ('pdf', 'both'):
+        out_name = f'{base}-{stamp}.pdf'
+        try:
+            engine.build_pdf(ms, preset, os.path.join(OUT_DIR, out_name), meta)
+        except Exception as exc:
+            logging.error('PDF build failed: %s', traceback.format_exc())
+            flash(f'PDF build failed: {exc}')
+            return render_template('generate.html', presets=presets, form=form)
+
+    if fmt in ('epub', 'both'):
+        epub_name = f'{base}-{stamp}.epub'
+        try:
+            epub.build_epub(ms, preset, os.path.join(OUT_DIR, epub_name), meta)
+        except Exception as exc:
+            logging.error('EPUB build failed: %s', traceback.format_exc())
+            flash(f'EPUB build failed: {exc}')
+            epub_name = ''
 
     chapters = len(ms['chapters'])
-    return render_template('result.html', out_name=out_name, meta=meta,
-                           preset=preset, preset_id=pid, chapters=chapters,
-                           ms_path=ms_path, ms_type=ms_type,
-                           cover_path=cover_path, from_project=None)
+    return render_template('result.html', out_name=out_name, epub_name=epub_name,
+                           meta=meta, preset=preset, preset_id=pid,
+                           chapters=chapters, ms_path=ms_path, ms_type=ms_type,
+                           cover_path=cover_path, from_project=None, fmt=fmt)
 
 
 # ----------------------------------------------------------------- project routes
@@ -362,10 +378,12 @@ def project_create():
         'right_hand_starts': form.get('right_hand_starts') == '1',
         'cover_overlay': form.get('cover_overlay') == '1',
         'cover_color': form.get('cover_color', 'light'),
+        'format': form.get('fmt', 'pdf'),
         'manuscript_file': ms_file,
         'manuscript_type': ms_type,
         'cover_file': cover_file,
         'last_pdf': form.get('last_pdf', ''),
+        'last_epub': form.get('last_epub', ''),
         'created': now,
         'updated': now,
     }
@@ -415,6 +433,7 @@ def project_edit(pid):
         proj.update({
             'name':             form.get('name', '').strip() or proj['name'],
             'preset':           form.get('preset', proj['preset']),
+            'format':           form.get('format', proj.get('format', 'pdf')),
             'title':            form.get('title', '').strip(),
             'subtitle':         form.get('subtitle', '').strip(),
             'author':           form.get('author', '').strip(),
@@ -483,25 +502,41 @@ def project_generate(pid):
         'cover_overlay':    proj.get('cover_overlay', False),
         'cover_color':      proj.get('cover_color', 'light'),
     }
-    stamp    = datetime.now().strftime('%Y%m%d-%H%M%S')
-    out_name = f'{slugify(meta["title"] or proj.get("name", "book"))}-{stamp}.pdf'
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    base  = slugify(meta['title'] or proj.get('name', 'book'))
+    fmt   = proj.get('format', 'pdf')
 
-    try:
-        engine.build_pdf(ms_parsed, preset, os.path.join(OUT_DIR, out_name), meta)
-    except Exception as exc:
-        logging.error('PDF build failed: %s', traceback.format_exc())
-        flash(f'PDF build failed: {exc}')
-        return redirect(url_for('projects'))
+    out_name  = ''
+    epub_name = ''
 
-    proj['last_pdf'] = out_name
-    proj['updated']  = datetime.now().isoformat(timespec='seconds')
+    if fmt in ('pdf', 'both'):
+        out_name = f'{base}-{stamp}.pdf'
+        try:
+            engine.build_pdf(ms_parsed, preset, os.path.join(OUT_DIR, out_name), meta)
+        except Exception as exc:
+            logging.error('PDF build failed: %s', traceback.format_exc())
+            flash(f'PDF build failed: {exc}')
+            return redirect(url_for('projects'))
+
+    if fmt in ('epub', 'both'):
+        epub_name = f'{base}-{stamp}.epub'
+        try:
+            epub.build_epub(ms_parsed, preset, os.path.join(OUT_DIR, epub_name), meta)
+        except Exception as exc:
+            logging.error('EPUB build failed: %s', traceback.format_exc())
+            flash(f'EPUB build failed: {exc}')
+            epub_name = ''
+
+    proj['last_pdf']  = out_name
+    proj['last_epub'] = epub_name
+    proj['updated']   = datetime.now().isoformat(timespec='seconds')
     save_project_file(pid, proj)
 
     chapters = len(ms_parsed['chapters'])
-    return render_template('result.html', out_name=out_name, meta=meta,
-                           preset=preset, preset_id=proj['preset'],
+    return render_template('result.html', out_name=out_name, epub_name=epub_name,
+                           meta=meta, preset=preset, preset_id=proj['preset'],
                            chapters=chapters, ms_path='', ms_type=ms_type,
-                           cover_path=cover_path, from_project=pid)
+                           cover_path=cover_path, from_project=pid, fmt=fmt)
 
 
 @app.route('/project/<pid>/delete', methods=['POST'])

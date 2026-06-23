@@ -1,0 +1,324 @@
+"""EPUB 3 builder: manuscript + preset -> .epub file.
+
+Stdlib-only (zipfile, uuid, datetime) — no extra dependencies.
+Reuses the same parsed manuscript structure as engine.py.
+"""
+
+import os
+import uuid
+import zipfile
+from datetime import datetime, timezone
+
+
+# ---------------------------------------------------------------- markup
+def _markup_to_html(text):
+    """Convert ReportLab XML tags to HTML equivalents."""
+    text = text.replace('<b>', '<strong>').replace('</b>', '</strong>')
+    text = text.replace('<i>', '<em>').replace('</i>', '</em>')
+    return text
+
+
+# ---------------------------------------------------------------- CSS
+def _style_css():
+    return """\
+body {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 100%;
+  line-height: 1.6;
+  margin: 0;
+  padding: 0;
+}
+.chapter { margin: 0 5%; }
+h1.chapter-num {
+  font-size: 0.85em;
+  font-weight: normal;
+  text-align: center;
+  color: #666;
+  margin: 3em 0 0.4em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+h1.chapter-title {
+  font-size: 1.4em;
+  font-weight: bold;
+  text-align: center;
+  margin: 0.3em 0 1.5em;
+}
+p { margin: 0; text-indent: 1.5em; }
+p.no-indent { text-indent: 0; }
+h2 {
+  font-size: 1em;
+  font-weight: bold;
+  text-align: center;
+  margin: 1.5em 0 0.8em;
+}
+p.scene-break {
+  text-align: center;
+  text-indent: 0;
+  margin: 1.2em 0;
+  color: #666;
+}
+.front { margin: 0 5%; text-align: center; }
+.front h1.main { font-size: 1.8em; margin: 3em 0 0.4em; }
+.front p.subtitle { font-size: 1.1em; font-style: italic; margin: 0.3em 0; }
+.front p.author { font-size: 1.1em; margin: 0.8em 0 2em; }
+.copyright { margin: 0 5%; font-size: 0.8em; line-height: 1.5; margin-top: 40%; }
+.cover-page { text-align: center; margin: 0; padding: 0; }
+.cover-page img { max-width: 100%; max-height: 100vh; }
+"""
+
+
+# ---------------------------------------------------------------- XHTML helpers
+def _xhtml(title, body_content, css_href='style.css'):
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE html>\n'
+        '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">\n'
+        '<head>\n'
+        '  <meta charset="UTF-8"/>\n'
+        f'  <title>{title}</title>\n'
+        f'  <link rel="stylesheet" type="text/css" href="{css_href}"/>\n'
+        '</head>\n'
+        '<body>\n'
+        + body_content +
+        '</body>\n</html>\n'
+    )
+
+
+def _default_copyright(meta):
+    lines = [
+        f"Copyright © {meta.get('year', '')} {meta.get('author', '')}".strip(),
+        '', 'All rights reserved.', '',
+        'This is a work of fiction. Names, characters, places, and incidents are '
+        'the products of the author’s imagination or used fictitiously.',
+    ]
+    if meta.get('publisher'):
+        lines += ['', meta['publisher']]
+    return '\n'.join(lines)
+
+
+def _cover_xhtml(img_filename):
+    body = (
+        '<div class="cover-page">\n'
+        f'  <img src="{img_filename}" alt="Cover"/>\n'
+        '</div>\n'
+    )
+    return _xhtml('Cover', body)
+
+
+def _front_xhtml(meta):
+    level    = meta.get('front_matter', 'full')
+    title    = meta.get('title', '')
+    subtitle = meta.get('subtitle', '')
+    author   = meta.get('author', '')
+    cp_text  = meta.get('copyright') or _default_copyright(meta)
+    cp_html  = cp_text.replace('\n', '<br/>')
+
+    body = '<div class="front">\n'
+
+    if level == 'full':
+        body += f'  <h1 class="main">{title}</h1>\n'
+        body += '  <hr style="margin: 2em auto; width: 30%"/>\n'
+
+    if level in ('full', 'title'):
+        body += f'  <h1 class="main">{title}</h1>\n'
+        if subtitle:
+            body += f'  <p class="subtitle">{subtitle}</p>\n'
+        body += f'  <p class="author">{author}</p>\n'
+
+    body += '</div>\n'
+
+    if level in ('full', 'title', 'copyright'):
+        body += f'<div class="copyright"><p>{cp_html}</p></div>\n'
+
+    return _xhtml(title or 'Front Matter', body)
+
+
+def _chapter_xhtml(idx, chapter, preset):
+    c          = preset.get('chapter', {})
+    show_num   = c.get('show_number', True)
+    num_fmt    = c.get('number_format', 'Chapter {n}')
+    scene_glyph = preset.get('scene_break', {}).get('glyph', '* * *')
+
+    lines = ['<div class="chapter">']
+
+    if show_num:
+        lines.append(f'  <h1 class="chapter-num">{num_fmt.format(n=idx)}</h1>')
+
+    if chapter.get('title'):
+        lines.append(f'  <h1 class="chapter-title">{_markup_to_html(chapter["title"])}</h1>')
+
+    opened         = False
+    no_indent_next = False
+
+    for kind, val in chapter.get('blocks', []):
+        if kind == 'scene':
+            lines.append(f'  <p class="scene-break">{scene_glyph}</p>')
+            no_indent_next = True
+        elif kind == 'subhead':
+            lines.append(f'  <h2>{_markup_to_html(val)}</h2>')
+            no_indent_next = True
+        else:
+            html_val = _markup_to_html(val)
+            cls = 'no-indent' if (not opened or no_indent_next) else None
+            attr = f' class="{cls}"' if cls else ''
+            lines.append(f'  <p{attr}>{html_val}</p>')
+            opened = True
+            no_indent_next = False
+
+    lines.append('</div>\n')
+    ch_title = chapter.get('title') or (num_fmt.format(n=idx) if show_num else f'Chapter {idx}')
+    return _xhtml(ch_title, '\n'.join(lines))
+
+
+# ---------------------------------------------------------------- OPF / NAV
+def _container_xml():
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<container version="1.0" xmlns="urn:oasis:schemas:container">\n'
+        '  <rootfiles>\n'
+        '    <rootfile full-path="OEBPS/content.opf"'
+        ' media-type="application/oebps-package+xml"/>\n'
+        '  </rootfiles>\n'
+        '</container>\n'
+    )
+
+
+def _content_opf(uid, meta, manifest_items, spine_items, modified):
+    title  = meta.get('title', 'Untitled')
+    author = meta.get('author', '')
+    year   = meta.get('year', '')
+
+    def _item(i):
+        props = f' properties="{i["props"]}"' if i.get('props') else ''
+        return (f'    <item id="{i["id"]}" href="{i["href"]}"'
+                f' media-type="{i["type"]}"{props}/>')
+    manifest_xml = '\n'.join(_item(i) for i in manifest_items)
+    spine_xml = '\n'.join(f'    <itemref idref="{s}"/>' for s in spine_items)
+
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"'
+        ' unique-identifier="uid" xml:lang="en">\n'
+        '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
+        f'    <dc:identifier id="uid">{uid}</dc:identifier>\n'
+        f'    <dc:title>{title}</dc:title>\n'
+        f'    <dc:creator>{author}</dc:creator>\n'
+        '    <dc:language>en</dc:language>\n'
+        f'    <dc:date>{year}</dc:date>\n'
+        f'    <meta property="dcterms:modified">{modified}</meta>\n'
+        '  </metadata>\n'
+        '  <manifest>\n'
+        + manifest_xml + '\n'
+        '  </manifest>\n'
+        '  <spine>\n'
+        + spine_xml + '\n'
+        '  </spine>\n'
+        '</package>\n'
+    )
+
+
+def _nav_xhtml(chapters, has_cover, has_front, preset):
+    c        = preset.get('chapter', {})
+    show_num = c.get('show_number', True)
+    num_fmt  = c.get('number_format', 'Chapter {n}')
+
+    toc = []
+    if has_cover:
+        toc.append(('cover.xhtml', 'Cover'))
+    if has_front:
+        toc.append(('front.xhtml', 'Front Matter'))
+    for idx, ch in enumerate(chapters, start=1):
+        label = ch.get('title') or (num_fmt.format(n=idx) if show_num else f'Chapter {idx}')
+        toc.append((f'chapter{idx:03d}.xhtml', label))
+
+    items = '\n'.join(
+        f'      <li><a href="{href}">{label}</a></li>' for href, label in toc
+    )
+    body = (
+        '<nav epub:type="toc" id="toc">\n'
+        '  <h1>Contents</h1>\n'
+        '  <ol>\n'
+        + items + '\n'
+        '  </ol>\n'
+        '</nav>\n'
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE html>\n'
+        '<html xmlns="http://www.w3.org/1999/xhtml"'
+        ' xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en">\n'
+        '<head>\n'
+        '  <meta charset="UTF-8"/>\n'
+        '  <title>Contents</title>\n'
+        '  <link rel="stylesheet" type="text/css" href="style.css"/>\n'
+        '</head>\n'
+        '<body>\n'
+        + body +
+        '</body>\n</html>\n'
+    )
+
+
+# ---------------------------------------------------------------- public API
+def build_epub(manuscript, preset, out_path, meta):
+    """Write an EPUB 3 file to out_path. Returns out_path."""
+    uid      = 'urn:uuid:' + str(uuid.uuid4())
+    modified = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    chapters = manuscript['chapters']
+
+    level = meta.get('front_matter', 'full')
+    if level is True:  level = 'full'
+    if level is False: level = 'none'
+
+    cover_src   = meta.get('cover_image', '')
+    has_cover   = bool(cover_src and os.path.exists(cover_src))
+    cover_ext   = os.path.splitext(cover_src)[1].lower() if has_cover else ''
+    cover_mime  = 'image/jpeg' if cover_ext in ('.jpg', '.jpeg') else 'image/png'
+    cover_img_fn = 'cover' + cover_ext if has_cover else ''
+    has_front   = level != 'none'
+
+    manifest_items = [
+        {'id': 'nav',   'href': 'nav.xhtml',  'type': 'application/xhtml+xml', 'props': 'nav'},
+        {'id': 'style', 'href': 'style.css',   'type': 'text/css'},
+    ]
+    spine_items = []
+
+    if has_cover:
+        manifest_items.append({'id': 'cover-img',  'href': cover_img_fn,
+                                'type': cover_mime, 'props': 'cover-image'})
+        manifest_items.append({'id': 'cover-page', 'href': 'cover.xhtml',
+                                'type': 'application/xhtml+xml'})
+        spine_items.append('cover-page')
+
+    if has_front:
+        manifest_items.append({'id': 'front', 'href': 'front.xhtml',
+                                'type': 'application/xhtml+xml'})
+        spine_items.append('front')
+
+    for idx in range(1, len(chapters) + 1):
+        manifest_items.append({'id': f'ch{idx:03d}', 'href': f'chapter{idx:03d}.xhtml',
+                                'type': 'application/xhtml+xml'})
+        spine_items.append(f'ch{idx:03d}')
+
+    with zipfile.ZipFile(out_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        # mimetype must be first and stored uncompressed
+        zf.writestr(zipfile.ZipInfo('mimetype'), 'application/epub+zip',
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr('META-INF/container.xml', _container_xml())
+        zf.writestr('OEBPS/content.opf',
+                    _content_opf(uid, meta, manifest_items, spine_items, modified))
+        zf.writestr('OEBPS/nav.xhtml',
+                    _nav_xhtml(chapters, has_cover, has_front, preset))
+        zf.writestr('OEBPS/style.css', _style_css())
+
+        if has_cover:
+            zf.write(cover_src, f'OEBPS/{cover_img_fn}')
+            zf.writestr('OEBPS/cover.xhtml', _cover_xhtml(cover_img_fn))
+
+        if has_front:
+            zf.writestr('OEBPS/front.xhtml', _front_xhtml(meta))
+
+        for idx, ch in enumerate(chapters, start=1):
+            zf.writestr(f'OEBPS/chapter{idx:03d}.xhtml', _chapter_xhtml(idx, ch, preset))
+
+    return out_path

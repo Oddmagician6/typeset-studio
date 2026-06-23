@@ -139,6 +139,21 @@
       </div>
     </fieldset>
 
+    <fieldset>
+      <legend>Output format</legend>
+      <div class="fs-body">
+        <div class="row">
+          <div class="field"><label>Format</label>
+            {% set fmt = form.get('format','pdf') %}
+            <select name="format">
+              <option value="pdf"  {{ 'selected' if fmt=='pdf'  }}>PDF only</option>
+              <option value="epub" {{ 'selected' if fmt=='epub' }}>EPUB only</option>
+              <option value="both" {{ 'selected' if fmt=='both' }}>PDF + EPUB</option>
+            </select></div>
+        </div>
+      </div>
+    </fieldset>
+
     <div class="formbar">
       <button class="btn btn-primary" type="submit">Compose the book</button>
       <a class="btn" href="{{ url_for('index') }}">Back to styles</a>
