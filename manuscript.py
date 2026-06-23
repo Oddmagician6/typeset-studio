@@ -23,6 +23,7 @@ SCENE_BREAK_RE = re.compile(r'^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$')
 CHAPTER_RE     = re.compile(r'^#\s+(.*)$')
 SUBHEAD_RE     = re.compile(r'^##\s+(.*)$')
 DOCBLOCK_RE    = re.compile(r'^\s*~~~')
+PART_RE        = re.compile(r'^\s*===\s*(.*)')
 
 
 def _smarten(text):
@@ -60,21 +61,27 @@ def _inline(text, smartquotes=True):
 
 
 def parse_markdown(raw, smartquotes=True):
-    """Return {'chapters': [{'title': str|None, 'blocks': [...] }]}.
+    """Return {'chapters': [{'title': str|None, 'part': dict|None, 'blocks': [...] }]}.
 
     Each block is:
       ('para', text) | ('subhead', text) | ('scene', None)
       | ('doc_block', [('para', text), ...])
+
+    'part' on each chapter is {'title': str|None, 'number': int} or None.
     """
     lines = raw.replace('\r\n', '\n').replace('\r', '\n').split('\n')
     chapters  = []
     cur       = None
     para_buf  = []
 
+    # part tracking
+    current_part = None
+    part_number  = 0
+
     # doc-block state
-    in_block      = False
-    block_buf     = []   # accumulated ('para', text) entries for current block
-    block_para_buf = []  # line accumulator inside the block
+    in_block       = False
+    block_buf      = []
+    block_para_buf = []
 
     def flush_para():
         nonlocal para_buf
@@ -95,10 +102,20 @@ def parse_markdown(raw, smartquotes=True):
     def new_chapter(title):
         nonlocal cur
         flush_para() if cur else None
-        cur = {'title': title, 'blocks': []}
+        cur = {'title': title, 'part': current_part, 'blocks': []}
         chapters.append(cur)
 
     for line in lines:
+        # === Part marker (only outside doc blocks)
+        if not in_block:
+            m_part = PART_RE.match(line)
+            if m_part:
+                flush_para()
+                part_number += 1
+                part_title = m_part.group(1).strip() or None
+                current_part = {'title': part_title, 'number': part_number}
+                continue
+
         # ~~~ fence — toggle doc-block mode (optional label after ~~~ is ignored)
         if DOCBLOCK_RE.match(line):
             if in_block:

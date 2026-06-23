@@ -347,8 +347,17 @@ def _styles(preset, fonts):
     subhead = ParagraphStyle('sub', parent=body, fontName=fonts.get('bold', fonts['regular']),
                              firstLineIndent=0, alignment=TA_CENTER,
                              spaceBefore=b['leading'], spaceAfter=b['leading'] * 0.5)
-    return dict(body=body, first=first, chap_title=chap_title,
-                chap_num=chap_num, subhead=subhead)
+    pd = preset.get('part_divider', {})
+    part_num_style = ParagraphStyle('partnum', fontName=fonts['regular'],
+                                    fontSize=pd.get('number_size', 13.0),
+                                    leading=pd.get('number_size', 13.0) * 1.2,
+                                    alignment=TA_CENTER, textColor=(0.35, 0.35, 0.35))
+    part_title_style = ParagraphStyle('parttitle', fontName=fonts.get('bold', fonts['regular']),
+                                      fontSize=pd.get('title_size', 26.0),
+                                      leading=pd.get('title_size', 26.0) * 1.15,
+                                      alignment=TA_CENTER)
+    return dict(body=body, first=first, chap_title=chap_title, chap_num=chap_num,
+                subhead=subhead, part_num=part_num_style, part_title=part_title_style)
 
 
 _TAG_RE = re.compile(r'<[^>]+>')
@@ -519,12 +528,43 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False
             story += copyright_page()
 
     # ---- body ----
-    c = preset['chapter']
+    c  = preset['chapter']
+    pd = preset.get('part_divider', {})
+    m  = preset['margins']
+    text_h = (preset['trim']['h'] - m['top'] - m['bottom']) * inch
+
+    need_break      = False   # True after the first body element is placed
+    current_part_num = None
+
     for idx, ch in enumerate(manuscript['chapters'], start=1):
+        ch_part     = ch.get('part')
+        ch_part_num = ch_part['number'] if ch_part else None
+
+        # --- part divider when a new part starts ---
+        if ch_part_num is not None and ch_part_num != current_part_num:
+            if c['start'] == 'recto' and rhs:
+                story.append(RectoBreak())
+            elif need_break:
+                story.append(PageBreak())
+            story.append(BlankMarker())   # suppress folio/running-head on divider
+            sink_pts = pd.get('sink', 0.38) * text_h
+            story.append(Spacer(1, sink_pts))
+            if pd.get('show_number', True):
+                label = pd.get('number_format', 'Part {n}').format(n=ch_part_num)
+                story.append(Paragraph(label, st['part_num']))
+                story.append(Spacer(1, 0.15 * inch))
+            if ch_part.get('title'):
+                story.append(Paragraph(ch_part['title'], st['part_title']))
+            current_part_num = ch_part_num
+            need_break = True
+
+        # --- chapter break ---
         if c['start'] == 'recto' and rhs:
             story.append(RectoBreak())
-        elif idx > 1:
+        elif need_break:
             story.append(PageBreak())
+        need_break = True
+
         story.append(OpenerMarker())
         story.append(Spacer(1, c['sink'] * inch))
         if c.get('show_number', True):

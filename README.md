@@ -77,14 +77,16 @@ still want the cover uploaded as its own file with bleed — keep doing that sep
 
 The tool reads a light, plain-text convention:
 
-| You write        | You get              |
-|------------------|----------------------|
-| `# Chapter title`| starts a new chapter |
-| `## Subhead`     | a section subhead    |
-| `* * *` (own line)| a scene break       |
-| `*italic*`       | *italic*             |
-| `**bold**`       | **bold**             |
-| blank line       | new paragraph        |
+| You write          | You get                       |
+|--------------------|-------------------------------|
+| `=== Part title`   | a part divider page           |
+| `# Chapter title`  | starts a new chapter          |
+| `## Subhead`       | a section subhead             |
+| `* * *` (own line) | a scene break                 |
+| `~~~` … `~~~`      | an epistolary / document block|
+| `*italic*`         | *italic*                      |
+| `**bold**`         | **bold**                      |
+| blank line         | new paragraph                 |
 
 For Word files, a **Heading 1** paragraph becomes a chapter; everything else flows
 as body text.

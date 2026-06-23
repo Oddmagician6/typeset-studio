@@ -124,6 +124,8 @@ DEFAULTS = {
                 'title_size': 18.0, 'after_title': 0.45,
                 'open_style': 'smallcaps_leadin', 'leadin_words': 4,
                 'dropcap_lines': 3},
+    'part_divider': {'show_number': True, 'number_format': 'Part {n}',
+                     'number_size': 13.0, 'title_size': 26.0, 'sink': 0.38},
     'document_block': {'frame': 'ruled', 'indent': 0.25, 'font_size': 0,
                        'first_indent': 0.0, 'space_around': 12.0},
     'scene_break': {'glyph': '* * *', 'size': 11.0, 'gap': 9.0},
@@ -245,6 +247,13 @@ def parse_preset_form(form):
             'open_style': form.get('c_open_style', 'smallcaps_leadin'),
             'leadin_words': int(_f(form, 'c_leadin_words', 4)),
             'dropcap_lines': int(_f(form, 'c_dropcap_lines', 3)),
+        },
+        'part_divider': {
+            'show_number':   'pd_show_number' in form,
+            'number_format':  form.get('pd_number_format', 'Part {n}') or 'Part {n}',
+            'number_size':   _f(form, 'pd_number_size', 13.0),
+            'title_size':    _f(form, 'pd_title_size', 26.0),
+            'sink':          _f(form, 'pd_sink', 0.38),
         },
         'document_block': {
             'frame':        form.get('db_frame', 'ruled'),

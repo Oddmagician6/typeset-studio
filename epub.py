@@ -73,6 +73,9 @@ p.scene-break {
   font-size: 0.95em;
 }
 .doc-block p { text-indent: 0; margin: 0.4em 0; }
+.part-page { margin: 0 5%; text-align: center; padding-top: 30%; }
+.part-page .part-num { font-size: 0.9em; color: #666; margin: 0 0 0.5em; letter-spacing: 0.06em; }
+.part-page .part-title { font-size: 1.6em; font-weight: bold; margin: 0; }
 """
 
 
@@ -103,6 +106,19 @@ def _default_copyright(meta):
     if meta.get('publisher'):
         lines += ['', meta['publisher']]
     return '\n'.join(lines)
+
+
+def _part_xhtml(part_num, title, preset):
+    pd       = preset.get('part_divider', {})
+    show_num = pd.get('show_number', True)
+    num_fmt  = pd.get('number_format', 'Part {n}')
+    body = '<div class="part-page">\n'
+    if show_num:
+        body += f'  <p class="part-num">{num_fmt.format(n=part_num)}</p>\n'
+    if title:
+        body += f'  <h1 class="part-title">{title}</h1>\n'
+    body += '</div>\n'
+    return _xhtml(title or f'Part {part_num}', body)
 
 
 def _cover_xhtml(img_filename):
@@ -237,13 +253,22 @@ def _nav_xhtml(chapters, has_cover, has_front, preset):
     c        = preset.get('chapter', {})
     show_num = c.get('show_number', True)
     num_fmt  = c.get('number_format', 'Chapter {n}')
+    pd       = preset.get('part_divider', {})
+    pd_fmt   = pd.get('number_format', 'Part {n}')
 
     toc = []
     if has_cover:
         toc.append(('cover.xhtml', 'Cover'))
     if has_front:
         toc.append(('front.xhtml', 'Front Matter'))
+    current_part_num = None
     for idx, ch in enumerate(chapters, start=1):
+        ch_part     = ch.get('part')
+        ch_part_num = ch_part['number'] if ch_part else None
+        if ch_part_num is not None and ch_part_num != current_part_num:
+            part_label = ch_part.get('title') or pd_fmt.format(n=ch_part_num)
+            toc.append((f'part{ch_part_num:03d}.xhtml', part_label))
+            current_part_num = ch_part_num
         label = ch.get('title') or (num_fmt.format(n=idx) if show_num else f'Chapter {idx}')
         toc.append((f'chapter{idx:03d}.xhtml', label))
 
@@ -310,7 +335,16 @@ def build_epub(manuscript, preset, out_path, meta):
                                 'type': 'application/xhtml+xml'})
         spine_items.append('front')
 
-    for idx in range(1, len(chapters) + 1):
+    current_part_num = None
+    for idx, ch in enumerate(chapters, start=1):
+        ch_part     = ch.get('part')
+        ch_part_num = ch_part['number'] if ch_part else None
+        if ch_part_num is not None and ch_part_num != current_part_num:
+            pid = f'pt{ch_part_num:03d}'
+            manifest_items.append({'id': pid, 'href': f'part{ch_part_num:03d}.xhtml',
+                                    'type': 'application/xhtml+xml'})
+            spine_items.append(pid)
+            current_part_num = ch_part_num
         manifest_items.append({'id': f'ch{idx:03d}', 'href': f'chapter{idx:03d}.xhtml',
                                 'type': 'application/xhtml+xml'})
         spine_items.append(f'ch{idx:03d}')
@@ -333,7 +367,14 @@ def build_epub(manuscript, preset, out_path, meta):
         if has_front:
             zf.writestr('OEBPS/front.xhtml', _front_xhtml(meta))
 
+        current_part_num = None
         for idx, ch in enumerate(chapters, start=1):
+            ch_part     = ch.get('part')
+            ch_part_num = ch_part['number'] if ch_part else None
+            if ch_part_num is not None and ch_part_num != current_part_num:
+                zf.writestr(f'OEBPS/part{ch_part_num:03d}.xhtml',
+                            _part_xhtml(ch_part_num, ch_part.get('title') or '', preset))
+                current_part_num = ch_part_num
             zf.writestr(f'OEBPS/chapter{idx:03d}.xhtml', _chapter_xhtml(idx, ch, preset))
 
     return out_path

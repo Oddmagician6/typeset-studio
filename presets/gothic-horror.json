@@ -28,6 +28,7 @@
     "leadin_words": 4,
     "dropcap_lines": 3
   },
+  "part_divider": { "show_number": true, "number_format": "Part {n}", "number_size": 12.0, "title_size": 24.0, "sink": 0.4 },
   "document_block": { "frame": "ruled", "indent": 0.3, "font_size": 10.0, "first_indent": 0.0, "space_around": 11.0 },
   "scene_break": { "glyph": "\u2014  \u2014  \u2014", "size": 10.5, "gap": 9.0 },
   "running_head": { "show": true, "caps": true, "size": 8.0, "gap": 0.26 },
