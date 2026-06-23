@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% set active = 'styles' %}
+{% block title %}Styles · Typeset Studio{% endblock %}
+
+{% block style %}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px}
+  .card{
+    background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+    box-shadow:var(--shadow);padding:0;display:flex;flex-direction:column;overflow:hidden;
+  }
+  .card .specimen{
+    padding:22px 22px 16px;border-bottom:1px solid var(--rule);
+    background:
+      repeating-linear-gradient(transparent,transparent 27px,rgba(27,26,24,.04) 27px,rgba(27,26,24,.04) 28px);
+  }
+  .card .specimen .name{font-family:var(--serif);font-size:22px;font-weight:600;line-height:1.15;margin:0}
+  .card .specimen .desc{color:var(--muted);font-size:13.5px;margin:4px 0 0;min-height:1.2em}
+  .card .body{padding:14px 22px 18px;display:flex;flex-direction:column;gap:14px;flex:1}
+  .card .spec{display:grid;grid-template-columns:auto 1fr;gap:2px 14px}
+  .card .spec .k{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em}
+  .card .actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:auto}
+  .card .actions .sep{flex:1}
+  .newcard{
+    border:1px dashed var(--rule-strong);background:transparent;box-shadow:none;
+    align-items:center;justify-content:center;min-height:200px;text-decoration:none;color:var(--muted);
+    display:flex;flex-direction:column;gap:8px;border-radius:3px;
+  }
+  .newcard:hover{border-color:var(--red);color:var(--red-deep);background:rgba(177,42,29,.03)}
+  .newcard .plus{font-family:var(--serif);font-size:34px;line-height:1}
+  .empty{color:var(--muted);font-size:15px}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">Composing styles</div>
+    <h1>Styles</h1>
+    <p>Each style is a complete recipe for a book's interior. Duplicate one to make a customer's
+       own version, then tweak only what you need.</p>
+  </div>
+
+  {% macro openlabel(s) -%}
+    {%- if s=='dropcap' -%}drop cap
+    {%- elif s=='raised_initial' -%}raised initial
+    {%- elif s=='smallcaps_leadin' -%}small-caps lead-in
+    {%- else -%}plain{%- endif -%}
+  {%- endmacro %}
+
+  <div class="grid">
+    {% for item in presets %}
+      {% set p = item.data %}
+      <article class="card">
+        <div class="specimen">
+          <p class="name">{{ p.name or 'Untitled style' }}</p>
+          <p class="desc">{{ p.description or '—' }}</p>
+        </div>
+        <div class="body">
+          <div class="spec">
+            <span class="k">Trim</span><span><b>{{ '%g'|format(p.trim.w) }}&times;{{ '%g'|format(p.trim.h) }}"</b></span>
+            <span class="k">Body</span><span><b>{{ '%g'|format(p.body.size) }}/{{ '%g'|format(p.body.leading) }}</b> {{ p.font_family }}{% if p.body.justify %}, justified{% endif %}</span>
+            <span class="k">Opener</span><span>{{ openlabel(p.chapter.open_style) }}{% if p.chapter.start=='recto' %}, recto{% endif %}</span>
+            <span class="k">Break</span><span>{{ p.scene_break.glyph }}</span>
+            <span class="k">Folio</span><span>{% if p.folio.show %}{{ p.folio.position }}{% else %}none{% endif %}</span>
+          </div>
+          <div class="actions">
+            <a class="btn btn-primary btn-sm" href="{{ url_for('generate') }}?preset={{ item.id }}">Set a book</a>
+            <a class="btn btn-sm" href="{{ url_for('editor', pid=item.id) }}">Edit</a>
+            <form class="inline-form" method="post" action="{{ url_for('clone', pid=item.id) }}">
+              <button class="btn btn-sm" type="submit">Duplicate</button>
+            </form>
+            <span class="sep"></span>
+            <form class="inline-form" method="post" action="{{ url_for('delete', pid=item.id) }}"
+                  onsubmit="return confirm('Delete the “{{ p.name }}” style? This cannot be undone.');">
+              <button class="btn btn-ghost btn-sm" type="submit">Delete</button>
+            </form>
+          </div>
+        </div>
+      </article>
+    {% endfor %}
+
+    <a class="newcard" href="{{ url_for('editor_new') }}">
+      <span class="plus">+</span>
+      <span>New style</span>
+    </a>
+  </div>
+
+  {% if not presets %}
+    <p class="empty">No styles yet. Start one with <b>New style</b>.</p>
+  {% endif %}
+{% endblock %}

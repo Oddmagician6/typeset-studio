@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% set active = 'generate' %}
+{% block title %}Composed · Typeset Studio{% endblock %}
+
+{% block style %}
+  .galley{max-width:620px}
+  .ticket{background:var(--surface);border:1px solid var(--rule);border-radius:3px;box-shadow:var(--shadow);overflow:hidden}
+  .ticket .top{padding:22px 24px 18px;border-bottom:1px solid var(--rule)}
+  .ticket .top .stamp{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.2em;color:var(--red)}
+  .ticket .top h2{font-family:var(--serif);font-size:25px;font-weight:600;margin:6px 0 2px;line-height:1.15}
+  .ticket .top .by{color:var(--muted);font-size:14px}
+  .ticket .recap{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;padding:18px 24px;font-family:var(--mono);font-size:12px}
+  .ticket .recap .k{color:var(--faint);text-transform:uppercase;letter-spacing:.1em}
+  .ticket .recap b{color:var(--ink);font-weight:600}
+  .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:0 24px 22px}
+  .more{margin-top:20px}
+  .more a{font-size:14px}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">Composed</div>
+    <h1>Off the press</h1>
+    <p>The interior is set and the fonts are embedded. Open it to proof every page, or download
+       the file to hand off to KDP or IngramSpark.</p>
+  </div>
+
+  <div class="galley">
+    <div class="ticket">
+      <div class="top">
+        <div class="stamp">Galley proof</div>
+        <h2>{{ meta.title or 'Untitled' }}</h2>
+        <div class="by">{% if meta.author %}{{ meta.author }}{% endif %}{% if meta.publisher %} · {{ meta.publisher }}{% endif %}</div>
+      </div>
+      <div class="recap">
+        <span class="k">Style</span><span><b>{{ preset.name }}</b></span>
+        <span class="k">Trim</span><span>{{ '%g'|format(preset.trim.w) }}&times;{{ '%g'|format(preset.trim.h) }}"</span>
+        <span class="k">Body</span><span>{{ '%g'|format(preset.body.size) }}/{{ '%g'|format(preset.body.leading) }} {{ preset.font_family }}</span>
+        <span class="k">Chapters</span><span>{{ chapters }}</span>
+        <span class="k">File</span><span>{{ out_name }}</span>
+      </div>
+      <div class="actions">
+        <a class="btn btn-primary" href="{{ url_for('download', fn=out_name) }}">Download PDF</a>
+        <a class="btn" href="{{ url_for('out_file', fn=out_name) }}" target="_blank" rel="noopener">Open in browser</a>
+      </div>
+    </div>
+    <p class="more"><a href="{{ url_for('generate') }}">Set another book</a> &nbsp;·&nbsp;
+       <a href="{{ url_for('index') }}">Back to styles</a></p>
+  </div>
+{% endblock %}

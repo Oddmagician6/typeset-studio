@@ -1,0 +1,34 @@
+{
+  "name": "Gothic / Horror (5.5\u00d78.5)",
+  "description": "Tighter trim, denser page, sunken drop-cap openings. Suits horror, gothic, and literary-dark fiction.",
+  "trim": { "w": 5.5, "h": 8.5 },
+  "margins": { "top": 0.7, "bottom": 0.75, "inside": 0.8, "outside": 0.55 },
+  "font_family": "Book",
+  "font_files": {
+    "regular": "Book-Regular.ttf",
+    "bold": "Book-Bold.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "body": {
+    "size": 10.5,
+    "leading": 14.5,
+    "indent": 0.28,
+    "justify": true,
+    "hyphenate": false
+  },
+  "chapter": {
+    "start": "recto",
+    "sink": 1.0,
+    "show_number": true,
+    "number_format": "{n}",
+    "number_size": 13.0,
+    "title_size": 16.0,
+    "after_title": 0.4,
+    "open_style": "dropcap",
+    "leadin_words": 4,
+    "dropcap_lines": 3
+  },
+  "scene_break": { "glyph": "\u2014  \u2014  \u2014", "size": 10.5, "gap": 9.0 },
+  "running_head": { "show": true, "caps": true, "size": 8.0, "gap": 0.26 },
+  "folio": { "show": true, "position": "outer", "size": 9.0, "gap": 0.4, "hide_on_opener": true }
+}

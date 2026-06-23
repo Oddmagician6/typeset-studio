@@ -1,0 +1,17 @@
+# virtual environment
+.venv/
+
+# generated PDFs
+out/
+
+# uploaded manuscripts (may contain client content)
+uploads/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# OS noise
+.DS_Store
+Thumbs.db

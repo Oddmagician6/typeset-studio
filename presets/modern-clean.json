@@ -1,0 +1,34 @@
+{
+  "name": "Modern Clean (6\u00d79)",
+  "description": "Airy and contemporary. Bigger chapter numerals, no running heads, centered page numbers. Good for upmarket and book-club fiction.",
+  "trim": { "w": 6.0, "h": 9.0 },
+  "margins": { "top": 0.85, "bottom": 0.9, "inside": 0.9, "outside": 0.7 },
+  "font_family": "Book",
+  "font_files": {
+    "regular": "Book-Regular.ttf",
+    "bold": "Book-Bold.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "body": {
+    "size": 11.5,
+    "leading": 17.0,
+    "indent": 0.28,
+    "justify": true,
+    "hyphenate": false
+  },
+  "chapter": {
+    "start": "recto",
+    "sink": 1.4,
+    "show_number": true,
+    "number_format": "{n}",
+    "number_size": 40.0,
+    "title_size": 15.0,
+    "after_title": 0.5,
+    "open_style": "none",
+    "leadin_words": 3,
+    "dropcap_lines": 3
+  },
+  "scene_break": { "glyph": "\u00b7  \u00b7  \u00b7", "size": 12.0, "gap": 10.0 },
+  "running_head": { "show": false, "caps": true, "size": 8.5, "gap": 0.28 },
+  "folio": { "show": true, "position": "center", "size": 10.0, "gap": 0.45, "hide_on_opener": false }
+}

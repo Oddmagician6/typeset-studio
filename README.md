@@ -1,0 +1,158 @@
+# Typeset Studio
+
+A small, private tool for setting print-ready book interiors. It runs on your own
+computer, opens in your browser, and turns a manuscript into a typeset 6×9 (or any
+trim) PDF with the fonts embedded — ready for KDP or IngramSpark.
+
+It is built around **styles**: a style is the complete typographic recipe for a
+book's interior (trim, margins, body type, chapter openings, scene breaks, running
+heads, page numbers, fonts). You build a style once, then **duplicate it per customer**
+and tweak only what that book needs.
+
+---
+
+## Running it (Windows)
+
+1. Make sure **Python 3.10+** is installed. If not, get it from
+   <https://www.python.org/downloads/> and tick **"Add Python to PATH"** during setup.
+2. Double-click **`run.bat`**.
+   - The first run sets up a private workspace and installs what it needs (about a minute).
+   - Every run after that starts immediately.
+3. A browser tab opens at <http://127.0.0.1:5050>. Keep the little black window open
+   while you work; close it to stop the tool.
+
+Running it any other way (Mac / manual):
+
+```
+python -m venv .venv
+.venv\Scripts\activate        (Windows)   or   source .venv/bin/activate   (Mac/Linux)
+pip install -r requirements.txt
+python app.py
+```
+
+---
+
+## Using it
+
+**Styles** (the home page) lists every style as a spec card. From a card you can
+**Set a book** in that style, **Edit** it, **Duplicate** it, or **Delete** it.
+Use **New style** to start one from scratch.
+
+**Set a book**:
+1. Pick a style.
+2. Add the manuscript — upload a `.docx`, `.md`, or `.txt` file, paste the text, or
+   tick *Use the bundled sample* to try a style.
+3. (Optional) Add **cover art** — see below.
+4. Fill in the title page and choose how much **front matter** you want.
+5. **Compose the book.** You'll get a page to open the PDF or download it.
+
+Composed files are saved in the `out/` folder as well, named by title and timestamp.
+
+### Blank pages and front matter
+
+On the *Set a book* page you control the pages before your story:
+
+- **Front matter** — choose *Half-title, title page, copyright* (the traditional set),
+  *Title page + copyright*, *Copyright page only*, or *None* to open straight on the story.
+- **Add blank pages so each part starts on a right-hand page** — on by default, because
+  that's how printed books are laid out (it's why a title page often has a blank facing
+  it). **Uncheck it for no blank pages at all** — handy for short works or screen reading.
+
+The story always begins numbering at page 1, however much front matter you include.
+
+### Cover art
+
+Optionally drop in a **cover image** (`.jpg`/`.png`). It becomes a full-bleed first page,
+cropped to your trim. Two ways to use it:
+
+- **Art already has the title on it** — leave *Print the title and author over the art*
+  unchecked, and the image prints exactly as supplied.
+- **Plain art** — check the overlay box and the tool prints the title and author over the
+  image, in the book's own type. Pick *light* text for dark art, *dark* for light art.
+
+This cover is meant for proofing or an all-in-one PDF. Print platforms (KDP, IngramSpark)
+still want the cover uploaded as its own file with bleed — keep doing that separately.
+
+### Manuscript markup
+
+The tool reads a light, plain-text convention:
+
+| You write        | You get              |
+|------------------|----------------------|
+| `# Chapter title`| starts a new chapter |
+| `## Subhead`     | a section subhead    |
+| `* * *` (own line)| a scene break       |
+| `*italic*`       | *italic*             |
+| `**bold**`       | **bold**             |
+| blank line       | new paragraph        |
+
+For Word files, a **Heading 1** paragraph becomes a chapter; everything else flows
+as body text.
+
+---
+
+## Building a style per customer
+
+The fastest workflow:
+
+1. Start from the closest existing style and click **Duplicate**.
+2. Rename it for the customer (e.g. *"Aldren series — J. Marsh"*) and add a one-line
+   description so future-you remembers when to use it.
+3. Change only what that book needs and **Save changes**.
+
+Styles are just plain text files in the **`presets/`** folder (one `.json` per style).
+You can back them up, copy them between machines, or hand a customer's style to a
+colleague by sending the single file. Drop a `.json` into `presets/` and it appears in
+the tool automatically.
+
+The three starting styles:
+
+- **Classic Literary (6×9)** — warm, traditional novel interior; a good default.
+- **Gothic / Horror (5.5×8.5)** — tighter trim, denser page, sunken drop-cap openings.
+- **Modern Clean (6×9)** — airy and contemporary, centered folios, no running heads.
+
+---
+
+## Fonts
+
+The tool ships with an embeddable book serif registered as **"Book"**
+(`fonts/Book-Regular.ttf`, `-Bold`, `-Italic`).
+
+In a style's **Fonts** section you can point to your own typefaces two ways:
+
+- A **filename** (e.g. `Book-Regular.ttf`) is looked up in the `fonts/` folder — drop
+  new `.ttf` files there.
+- A **full path** (e.g. `C:\Windows\Fonts\Georgia.ttf`) is used directly.
+
+Use fonts you are licensed to embed. If a file can't be found, the tool falls back to a
+standard serif so a build never fails outright — but check the **Fonts** fields if type
+looks wrong.
+
+---
+
+## Handing off to print
+
+The interior PDF embeds and subsets its fonts, which is what KDP and IngramSpark
+require. Before uploading, still confirm per platform:
+
+- **Trim size** matches the book you set up on the platform.
+- **Inside (spine) margin** is generous enough for the page count (longer books need more).
+- Cover is a **separate** file (this tool sets interiors only).
+
+---
+
+## Folder map
+
+```
+typeset_studio/
+  run.bat            double-click to start (Windows)
+  app.py             the web app
+  engine.py          the typesetting engine
+  manuscript.py      reads .md / .docx into chapters
+  requirements.txt   what to install
+  presets/           one .json per style  <- your per-customer styles live here
+  fonts/             .ttf files used by styles
+  sample/            a sample manuscript for trying styles
+  out/               composed PDFs land here
+  uploads/           manuscripts you upload (created on first use)
+```

@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% set active = 'styles' %}
+{% block title %}{{ 'New style' if is_new else 'Edit style' }} · Typeset Studio{% endblock %}
+
+{% block style %}
+  .work{display:grid;grid-template-columns:1fr 300px;gap:34px;align-items:start}
+  form.editor{display:flex;flex-direction:column;gap:22px}
+  fieldset{border:1px solid var(--rule);border-radius:3px;background:var(--surface);padding:0;margin:0}
+  legend{
+    font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--red);
+    padding:0 8px;margin-left:12px;
+  }
+  .fs-body{padding:6px 20px 20px}
+  .row{display:flex;flex-wrap:wrap;gap:18px}
+  .field{display:flex;flex-direction:column;gap:4px;margin-top:14px;flex:1 1 150px}
+  .field.wide{flex-basis:100%}
+  .field label{font-size:13px;color:var(--ink);font-weight:600}
+  .field .hint{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .field input[type=text],.field input[type=number],.field select,.field textarea{
+    font-family:var(--sans);font-size:14px;color:var(--ink);background:var(--surface-2);
+    border:1px solid var(--rule-strong);border-radius:2px;padding:8px 10px;width:100%;
+  }
+  .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--red);background:#fff}
+  .field textarea{resize:vertical;min-height:54px}
+  .check{display:flex;align-items:center;gap:8px;margin-top:16px;flex:1 1 150px}
+  .check input{width:16px;height:16px;accent-color:var(--red)}
+  .check label{font-size:13.5px}
+  .num{max-width:130px}
+
+  .formbar{display:flex;gap:10px;align-items:center;padding:4px 0 0}
+
+  /* live spec card (signature) */
+  .preview{position:sticky;top:22px}
+  .preview .card{
+    background:var(--surface);border:1px solid var(--rule);border-radius:3px;box-shadow:var(--shadow);
+    overflow:hidden;
+  }
+  .preview .specimen{
+    padding:20px 20px 16px;border-bottom:1px solid var(--rule);
+    background:repeating-linear-gradient(transparent,transparent 27px,rgba(27,26,24,.04) 27px,rgba(27,26,24,.04) 28px);
+  }
+  .preview .specimen .name{font-family:var(--serif);font-size:21px;font-weight:600;margin:0;line-height:1.15}
+  .preview .specimen .desc{color:var(--muted);font-size:13px;margin:4px 0 0}
+  .preview .spec{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;padding:16px 20px 18px}
+  .preview .spec .k{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em}
+  .preview .label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.2em;color:var(--faint);margin:0 0 8px}
+  @media (max-width:820px){.work{grid-template-columns:1fr}.preview{position:static}}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">{{ 'New style' if is_new else 'Editing' }}</div>
+    <h1>{{ 'Compose a new style' if is_new else p.name }}</h1>
+    <p>Set the typographic recipe once. Everything here is plain book-design language —
+       hover the grey notes for units.</p>
+  </div>
+
+  <div class="work">
+    <form class="editor" method="post"
+          action="{{ url_for('save') if is_new else url_for('save', pid=pid) }}"
+          oninput="updatePreview()">
+
+      <fieldset>
+        <legend>Identity</legend>
+        <div class="fs-body">
+          <div class="row">
+            <div class="field"><label>Style name</label>
+              <input type="text" id="f-name" name="name" value="{{ p.name }}" placeholder="e.g. Edenfall Literary"></div>
+          </div>
+          <div class="row">
+            <div class="field wide"><label>Description</label>
+              <input type="text" id="f-desc" name="description" value="{{ p.description }}"
+                     placeholder="A short note to your future self about when to use this"></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Trim &amp; margins</legend>
+        <div class="fs-body">
+          <div class="row">
+            <div class="field num"><label>Page width</label><span class="hint">inches</span>
+              <input type="number" step="0.05" id="f-tw" name="trim_w" value="{{ p.trim.w }}"></div>
+            <div class="field num"><label>Page height</label><span class="hint">inches</span>
+              <input type="number" step="0.05" name="trim_h" value="{{ p.trim.h }}"></div>
+          </div>
+          <div class="row">
+            <div class="field num"><label>Top</label><span class="hint">inches</span>
+              <input type="number" step="0.05" name="m_top" value="{{ p.margins.top }}"></div>
+            <div class="field num"><label>Bottom</label><span class="hint">inches</span>
+              <input type="number" step="0.05" name="m_bottom" value="{{ p.margins.bottom }}"></div>
+            <div class="field num"><label>Inside (spine)</label><span class="hint">inches · gutter</span>
+              <input type="number" step="0.05" name="m_inside" value="{{ p.margins.inside }}"></div>
+            <div class="field num"><label>Outside</label><span class="hint">inches</span>
+              <input type="number" step="0.05" name="m_outside" value="{{ p.margins.outside }}"></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Body text</legend>
+        <div class="fs-body">
+          <div class="row">
+            <div class="field num"><label>Type size</label><span class="hint">points</span>
+              <input type="number" step="0.25" id="f-bsize" name="b_size" value="{{ p.body.size }}"></div>
+            <div class="field num"><label>Leading</label><span class="hint">points · line height</span>
+              <input type="number" step="0.25" id="f-blead" name="b_leading" value="{{ p.body.leading }}"></div>
+            <div class="field num"><label>First-line indent</label><span class="hint">inches</span>
+              <input type="number" step="0.05" name="b_indent" value="{{ p.body.indent }}"></div>
+          </div>
+          <div class="row">
+            <div class="check"><input type="checkbox" id="f-just" name="b_justify" {{ 'checked' if p.body.justify }}>
+              <label for="f-just">Justify text (flush both edges)</label></div>
+            <div class="check"><input type="checkbox" name="b_hyphenate" {{ 'checked' if p.body.hyphenate }}>
+              <label>Allow hyphenation</label></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Chapter openings</legend>
+        <div class="fs-body">
+          <div class="row">
+            <div class="field"><label>Start each chapter on</label><span class="hint">page placement</span>
+              <select name="c_start" id="f-start">
+                <option value="recto" {{ 'selected' if p.chapter.start=='recto' }}>A right-hand page (recto)</option>
+                <option value="any" {{ 'selected' if p.chapter.start!='recto' }}>The next available page</option>
+              </select></div>
+            <div class="field"><label>Opening letters</label><span class="hint">first-paragraph treatment</span>
+              <select name="c_open_style" id="f-open">
+                {% set os = p.chapter.open_style %}
+                <option value="none" {{ 'selected' if os=='none' }}>Plain</option>
+                <option value="raised_initial" {{ 'selected' if os=='raised_initial' }}>Raised initial</option>
+                <option value="smallcaps_leadin" {{ 'selected' if os=='smallcaps_leadin' }}>Small-caps lead-in</option>
+                <option value="dropcap" {{ 'selected' if os=='dropcap' }}>Drop cap</option>
+              </select></div>
+            <div class="field num"><label>Sink</label><span class="hint">inches from top</span>
+              <input type="number" step="0.05" name="c_sink" value="{{ p.chapter.sink }}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Number format</label><span class="hint">use {n} for the number</span>
+              <input type="text" name="c_number_format" value="{{ p.chapter.number_format }}"></div>
+            <div class="field num"><label>Number size</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="c_number_size" value="{{ p.chapter.number_size }}"></div>
+            <div class="field num"><label>Title size</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="c_title_size" value="{{ p.chapter.title_size }}"></div>
+            <div class="field num"><label>Space after title</label><span class="hint">inches</span>
+              <input type="number" step="0.05" name="c_after_title" value="{{ p.chapter.after_title }}"></div>
+          </div>
+          <div class="row">
+            <div class="check"><input type="checkbox" name="c_show_number" {{ 'checked' if p.chapter.show_number }}>
+              <label>Show the chapter number line</label></div>
+            <div class="field num"><label>Lead-in words</label><span class="hint">for small-caps</span>
+              <input type="number" step="1" name="c_leadin_words" value="{{ p.chapter.leadin_words }}"></div>
+            <div class="field num"><label>Drop-cap lines</label><span class="hint">letter depth</span>
+              <input type="number" step="1" name="c_dropcap_lines" value="{{ p.chapter.dropcap_lines }}"></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Scene breaks</legend>
+        <div class="fs-body">
+          <div class="row">
+            <div class="field"><label>Mark</label><span class="hint">what prints between scenes</span>
+              <input type="text" id="f-glyph" name="s_glyph" value="{{ p.scene_break.glyph }}"></div>
+            <div class="field num"><label>Mark size</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="s_size" value="{{ p.scene_break.size }}"></div>
+            <div class="field num"><label>Space around</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="s_gap" value="{{ p.scene_break.gap }}"></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Running heads &amp; page numbers</legend>
+        <div class="fs-body">
+          <div class="row">
+            <div class="check"><input type="checkbox" id="f-rh" name="rh_show" {{ 'checked' if p.running_head.show }}>
+              <label for="f-rh">Print running heads (author / title at top)</label></div>
+            <div class="check"><input type="checkbox" name="rh_caps" {{ 'checked' if p.running_head.caps }}>
+              <label>Set them in capitals</label></div>
+            <div class="field num"><label>Head size</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="rh_size" value="{{ p.running_head.size }}"></div>
+            <div class="field num"><label>Head gap</label><span class="hint">inches</span>
+              <input type="number" step="0.02" name="rh_gap" value="{{ p.running_head.gap }}"></div>
+          </div>
+          <div class="row">
+            <div class="check"><input type="checkbox" id="f-fo" name="fo_show" {{ 'checked' if p.folio.show }}>
+              <label for="f-fo">Print page numbers (folios)</label></div>
+            <div class="field"><label>Folio position</label><span class="hint">on the page</span>
+              <select name="fo_position" id="f-fopos">
+                <option value="outer" {{ 'selected' if p.folio.position=='outer' }}>Outer corner</option>
+                <option value="center" {{ 'selected' if p.folio.position=='center' }}>Centered</option>
+              </select></div>
+            <div class="field num"><label>Folio size</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="fo_size" value="{{ p.folio.size }}"></div>
+            <div class="field num"><label>Folio gap</label><span class="hint">inches</span>
+              <input type="number" step="0.02" name="fo_gap" value="{{ p.folio.gap }}"></div>
+          </div>
+          <div class="row">
+            <div class="check"><input type="checkbox" name="fo_hide_on_opener" {{ 'checked' if p.folio.hide_on_opener }}>
+              <label>Hide the folio on chapter-opening pages</label></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Fonts</legend>
+        <div class="fs-body">
+          <div class="row">
+            <div class="field"><label>Family name</label><span class="hint">registered name</span>
+              <input type="text" id="f-fam" name="font_family" value="{{ p.font_family }}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Regular</label><span class="hint">.ttf in /fonts or full path</span>
+              <input type="text" name="font_regular" value="{{ p.font_files.regular }}"></div>
+            <div class="field"><label>Bold</label><span class="hint">.ttf</span>
+              <input type="text" name="font_bold" value="{{ p.font_files.bold }}"></div>
+            <div class="field"><label>Italic</label><span class="hint">.ttf</span>
+              <input type="text" name="font_italic" value="{{ p.font_files.italic }}"></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <div class="formbar">
+        <button class="btn btn-primary" type="submit">{{ 'Create style' if is_new else 'Save changes' }}</button>
+        <a class="btn" href="{{ url_for('index') }}">Cancel</a>
+      </div>
+    </form>
+
+    <aside class="preview">
+      <p class="label">Spec card</p>
+      <div class="card">
+        <div class="specimen">
+          <p class="name" id="pv-name">{{ p.name or 'Untitled style' }}</p>
+          <p class="desc" id="pv-desc">{{ p.description or '—' }}</p>
+        </div>
+        <div class="spec">
+          <span class="k">Trim</span><span id="pv-trim"></span>
+          <span class="k">Body</span><span id="pv-body"></span>
+          <span class="k">Opener</span><span id="pv-open"></span>
+          <span class="k">Break</span><span id="pv-break"></span>
+          <span class="k">Folio</span><span id="pv-folio"></span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    function val(id){var e=document.getElementById(id);return e?e.value:'';}
+    function num(id){var v=parseFloat(val(id));return isNaN(v)?'?':(''+ (Math.round(v*100)/100));}
+    function openLabel(v){return {none:'plain',raised_initial:'raised initial',
+      smallcaps_leadin:'small-caps lead-in',dropcap:'drop cap'}[v]||v;}
+    function updatePreview(){
+      document.getElementById('pv-name').textContent = val('f-name') || 'Untitled style';
+      document.getElementById('pv-desc').textContent = val('f-desc') || '—';
+      document.getElementById('pv-trim').innerHTML = '<b>'+num('f-tw')+'\u00d7'+
+        (document.querySelector('[name=trim_h]').value||'?')+'"</b>';
+      var just = document.getElementById('f-just').checked ? ', justified' : '';
+      document.getElementById('pv-body').innerHTML = '<b>'+num('f-bsize')+'/'+num('f-blead')+
+        '</b> '+ (val('f-fam')||'—') + just;
+      var start = document.getElementById('f-start').value=='recto' ? ', recto' : '';
+      document.getElementById('pv-open').textContent = openLabel(document.getElementById('f-open').value)+start;
+      document.getElementById('pv-break').textContent = val('f-glyph') || '—';
+      var fo = document.getElementById('f-fo').checked
+        ? document.getElementById('f-fopos').value : 'none';
+      document.getElementById('pv-folio').textContent = fo;
+    }
+    updatePreview();
+  </script>
+{% endblock %}

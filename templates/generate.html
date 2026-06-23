@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% set active = 'generate' %}
+{% block title %}Set a book · Typeset Studio{% endblock %}
+
+{% block style %}
+  form.compose{display:flex;flex-direction:column;gap:22px;max-width:760px}
+  fieldset{border:1px solid var(--rule);border-radius:3px;background:var(--surface);padding:0;margin:0}
+  legend{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--red);padding:0 8px;margin-left:12px}
+  .fs-body{padding:6px 20px 20px}
+  .row{display:flex;flex-wrap:wrap;gap:18px}
+  .field{display:flex;flex-direction:column;gap:4px;margin-top:14px;flex:1 1 200px}
+  .field.wide{flex-basis:100%}
+  .field label{font-size:13px;font-weight:600}
+  .field .hint{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .field input[type=text],.field input[type=number],.field select,.field textarea,.field input[type=file]{
+    font-family:var(--sans);font-size:14px;background:var(--surface-2);
+    border:1px solid var(--rule-strong);border-radius:2px;padding:8px 10px;width:100%;
+  }
+  .field textarea{resize:vertical;min-height:120px;font-family:var(--mono);font-size:13px;line-height:1.5}
+  .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--red);background:#fff}
+  .check{display:flex;align-items:center;gap:8px;margin-top:16px}
+  .check input{width:16px;height:16px;accent-color:var(--red)}
+  .or{font-family:var(--mono);font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.2em;margin:14px 0 0}
+  .conv{background:var(--surface-2);border:1px solid var(--rule);border-radius:2px;padding:12px 14px;margin-top:14px}
+  .conv p{margin:0 0 4px;font-size:12.5px;color:var(--muted)}
+  .conv code{font-family:var(--mono);font-size:12px;color:var(--ink);background:rgba(27,26,24,.05);padding:1px 5px;border-radius:2px}
+  .compose .formbar{display:flex;gap:10px;align-items:center}
+  .nostyles{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--red);padding:14px 16px;border-radius:2px}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">Compose</div>
+    <h1>Set a book</h1>
+    <p>Choose a style, add the manuscript, and fill in the title page. The result is a
+       print-ready interior PDF with the fonts embedded.</p>
+  </div>
+
+  {% if not presets %}
+    <div class="nostyles">You need a style first. <a href="{{ url_for('editor_new') }}">Create one</a>.</div>
+  {% else %}
+  {% set chosen = form.get('preset') or request.args.get('preset') %}
+  <form class="compose" method="post" action="{{ url_for('generate') }}" enctype="multipart/form-data">
+
+    <fieldset>
+      <legend>Style</legend>
+      <div class="fs-body">
+        <div class="row">
+          <div class="field wide"><label>Compose in this style</label>
+            <select name="preset">
+              {% for item in presets %}
+                <option value="{{ item.id }}" {{ 'selected' if item.id==chosen }}>{{ item.data.name }}</option>
+              {% endfor %}
+            </select></div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Manuscript</legend>
+      <div class="fs-body">
+        <div class="row">
+          <div class="field wide"><label>Upload a file</label><span class="hint">.docx, .md or .txt</span>
+            <input type="file" name="manuscript" accept=".docx,.md,.txt,.markdown"></div>
+        </div>
+        <p class="or">— or paste it —</p>
+        <div class="row">
+          <div class="field wide"><label>Paste manuscript text</label>
+            <textarea name="pasted" placeholder="# Chapter One&#10;&#10;Text of the first paragraph...">{{ form.get('pasted','') }}</textarea></div>
+        </div>
+        <div class="check"><input type="checkbox" id="us" name="use_sample" {{ 'checked' if form.get('use_sample') }}>
+          <label for="us">Use the bundled sample instead (for trying a style)</label></div>
+
+        <div class="conv">
+          <p>Markup it understands:</p>
+          <p><code># Chapter title</code> starts a chapter &nbsp;·&nbsp; <code>## Subhead</code> a section head</p>
+          <p><code>* * *</code> a scene break &nbsp;·&nbsp; <code>*italic*</code> and <code>**bold**</code> inline</p>
+          <p>A blank line separates paragraphs. Word files: Heading 1 becomes a chapter.</p>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Cover art</legend>
+      <div class="fs-body">
+        <p class="or" style="margin-top:0">optional</p>
+        <div class="row">
+          <div class="field wide"><label>Cover image</label>
+            <span class="hint">.jpg or .png · becomes a full-bleed first page, cropped to the trim</span>
+            <input type="file" name="cover" accept=".jpg,.jpeg,.png"></div>
+        </div>
+        <div class="check"><input type="checkbox" id="cov-ov" name="cover_overlay">
+          <label for="cov-ov">Print the title and author over the art</label></div>
+        <div class="row">
+          <div class="field"><label>Overlay text colour</label>
+            <span class="hint">if the art is dark, choose light</span>
+            <select name="cover_color">
+              <option value="light">Light text (for dark art)</option>
+              <option value="dark">Dark text (for light art)</option>
+            </select></div>
+        </div>
+        <div class="conv"><p>If your art already has the title on it, leave the overlay
+          unchecked and the image prints as-is. The cover is for proofing or an all-in-one
+          PDF — print platforms still take the cover as a separate file.</p></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Title page</legend>
+      <div class="fs-body">
+        <div class="row">
+          <div class="field"><label>Title</label>
+            <input type="text" name="title" value="{{ form.get('title','') }}"></div>
+          <div class="field"><label>Subtitle</label><span class="hint">optional</span>
+            <input type="text" name="subtitle" value="{{ form.get('subtitle','') }}"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Author</label>
+            <input type="text" name="author" value="{{ form.get('author','') }}"></div>
+          <div class="field"><label>Year</label><span class="hint">defaults to this year</span>
+            <input type="text" name="year" value="{{ form.get('year','') }}"></div>
+          <div class="field"><label>Publisher</label><span class="hint">e.g. Edenfall Fiction</span>
+            <input type="text" name="publisher" value="{{ form.get('publisher','') }}"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Front matter</label><span class="hint">pages before the story</span>
+            <select name="front_matter">
+              {% set fm = form.get('front_matter','full') %}
+              <option value="full" {{ 'selected' if fm=='full' }}>Half-title, title page, copyright</option>
+              <option value="title" {{ 'selected' if fm=='title' }}>Title page + copyright</option>
+              <option value="copyright" {{ 'selected' if fm=='copyright' }}>Copyright page only</option>
+              <option value="none" {{ 'selected' if fm=='none' }}>None — start on the story</option>
+            </select></div>
+        </div>
+        <div class="check"><input type="checkbox" id="rhs" name="right_hand_starts"
+              {{ 'checked' if form.get('right_hand_starts') or not form }}>
+          <label for="rhs">Add blank pages so the story and each chapter start on a
+            right-hand page (standard for print books — uncheck for no blank pages)</label></div>
+      </div>
+    </fieldset>
+
+    <div class="formbar">
+      <button class="btn btn-primary" type="submit">Compose the book</button>
+      <a class="btn" href="{{ url_for('index') }}">Back to styles</a>
+    </div>
+  </form>
+  {% endif %}
+{% endblock %}
