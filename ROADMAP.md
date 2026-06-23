@@ -112,6 +112,11 @@ Inline emphasis is converted to ReportLab markup (`<b>`, `<i>`). Markup conventi
   type may silently change. Surface this in any preflight feature.
 - **Paragraph-after-scene/subhead** is set flush (no indent) via the `flush_next` flag in
   `_build_story`; the chapter's first paragraph gets the `open_style` once via `opened`.
+- **Opening-paragraph markup slicing:** `_inline()` converts Word bold/italic runs to
+  ReportLab XML (`<b>`, `<i>`). The `_opening_para()` function strips this via `_plain()`
+  before any character/word-level operations (drop cap, raised initial, small-caps lead-in)
+  — these styles are incompatible with inline markup on the first paragraph anyway. Never
+  pass raw `text` with embedded tags to code that slices by index or splits on spaces.
 
 ---
 
