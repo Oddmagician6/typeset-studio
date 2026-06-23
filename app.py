@@ -369,7 +369,6 @@ def generate():
         cover_path = os.path.join(UPLOAD_DIR, cfn)
         cov.save(cover_path)
 
-    ms = manuscript.parse_markdown(raw)
     meta = {
         'title': form.get('title', '').strip(),
         'subtitle': form.get('subtitle', '').strip(),
@@ -381,9 +380,12 @@ def generate():
         'cover_image': cover_path,
         'cover_overlay': 'cover_overlay' in form,
         'cover_color': form.get('cover_color', 'light'),
+        'smartquotes': 'smartquotes' in form,
     }
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     base  = slugify(meta['title'] or 'book')
+
+    ms = manuscript.parse_markdown(raw, smartquotes=meta['smartquotes'])
 
     out_name  = ''
     epub_name = ''
@@ -461,7 +463,8 @@ def project_create():
         'right_hand_starts': form.get('right_hand_starts') == '1',
         'cover_overlay': form.get('cover_overlay') == '1',
         'cover_color': form.get('cover_color', 'light'),
-        'format': form.get('fmt', 'pdf'),
+        'format':      form.get('fmt', 'pdf'),
+        'smartquotes': form.get('smartquotes') == '1',
         'manuscript_file': ms_file,
         'manuscript_type': ms_type,
         'cover_file': cover_file,
@@ -516,7 +519,8 @@ def project_edit(pid):
         proj.update({
             'name':             form.get('name', '').strip() or proj['name'],
             'preset':           form.get('preset', proj['preset']),
-            'format':           form.get('format', proj.get('format', 'pdf')),
+            'format':      form.get('format', proj.get('format', 'pdf')),
+            'smartquotes': 'smartquotes' in form,
             'title':            form.get('title', '').strip(),
             'subtitle':         form.get('subtitle', '').strip(),
             'author':           form.get('author', '').strip(),
@@ -572,7 +576,7 @@ def project_generate(pid):
         if os.path.exists(cp):
             cover_path = cp
 
-    ms_parsed = manuscript.parse_markdown(raw)
+    ms_parsed = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
     meta = {
         'title':            proj.get('title', ''),
         'subtitle':         proj.get('subtitle', ''),
@@ -581,9 +585,10 @@ def project_generate(pid):
         'publisher':        proj.get('publisher', ''),
         'front_matter':     proj.get('front_matter', 'full'),
         'right_hand_starts': proj.get('right_hand_starts', True),
-        'cover_image':      cover_path,
-        'cover_overlay':    proj.get('cover_overlay', False),
-        'cover_color':      proj.get('cover_color', 'light'),
+        'cover_image':   cover_path,
+        'cover_overlay': proj.get('cover_overlay', False),
+        'cover_color':   proj.get('cover_color', 'light'),
+        'smartquotes':   proj.get('smartquotes', True),
     }
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     base  = slugify(meta['title'] or proj.get('name', 'book'))

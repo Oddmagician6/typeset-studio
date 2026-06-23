@@ -25,8 +25,33 @@ SUBHEAD_RE     = re.compile(r'^##\s+(.*)$')
 DOCBLOCK_RE    = re.compile(r'^\s*~~~')
 
 
-def _inline(text):
+def _smarten(text):
+    """Convert ASCII punctuation to typographic equivalents.
+
+    Applied before html.escape so we work on plain characters only.
+    """
+    # em dashes — must do --- before -- to avoid double-converting
+    text = text.replace('---', '—')
+    text = text.replace('--',  '—')
+    # ellipsis
+    text = re.sub(r'\.{3,}', '…', text)
+    # double quotes
+    # opening: preceded by start-of-string, whitespace, open bracket, or em dash
+    text = re.sub(r'(^|[\s(\[{—])"', r'\1“', text, flags=re.MULTILINE)
+    text = text.replace('"', '”')                         # remaining → closing
+    # single quotes / apostrophes
+    text = re.sub(r"(\w)'(\w)", r'\1’\2', text)          # contractions first
+    text = re.sub(r"(^|[\s(\[{—])'", r'\1‘', text, flags=re.MULTILINE)
+    text = text.replace("'", '’')                         # remaining → closing/apostrophe
+    # collapse multiple spaces
+    text = re.sub(r'  +', ' ', text)
+    return text
+
+
+def _inline(text, smartquotes=True):
     """Escape XML, then re-introduce ReportLab markup for *italic* / **bold**."""
+    if smartquotes:
+        text = _smarten(text)
     text = html.escape(text, quote=False)
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<i>\1</i>', text)
@@ -34,7 +59,7 @@ def _inline(text):
     return text
 
 
-def parse_markdown(raw):
+def parse_markdown(raw, smartquotes=True):
     """Return {'chapters': [{'title': str|None, 'blocks': [...] }]}.
 
     Each block is:
@@ -56,7 +81,7 @@ def parse_markdown(raw):
         if para_buf:
             joined = ' '.join(s.strip() for s in para_buf).strip()
             if joined:
-                cur['blocks'].append(('para', _inline(joined)))
+                cur['blocks'].append(('para', _inline(joined, smartquotes)))
             para_buf = []
 
     def flush_block_para():
@@ -64,7 +89,7 @@ def parse_markdown(raw):
         if block_para_buf:
             joined = ' '.join(s.strip() for s in block_para_buf).strip()
             if joined:
-                block_buf.append(('para', _inline(joined)))
+                block_buf.append(('para', _inline(joined, smartquotes)))
             block_para_buf = []
 
     def new_chapter(title):
@@ -110,7 +135,7 @@ def parse_markdown(raw):
             continue
         if m_sub:
             flush_para()
-            cur['blocks'].append(('subhead', _inline(m_sub.group(1).strip())))
+            cur['blocks'].append(('subhead', _inline(m_sub.group(1).strip(), smartquotes)))
             continue
         if line.strip() == '':
             flush_para()

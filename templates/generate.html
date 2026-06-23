@@ -70,6 +70,8 @@
         </div>
         <div class="check"><input type="checkbox" id="us" name="use_sample" {{ 'checked' if form.get('use_sample') }}>
           <label for="us">Use the bundled sample instead (for trying a style)</label></div>
+        <div class="check" style="margin-top:10px"><input type="checkbox" id="sq" name="smartquotes" {{ 'checked' if not form or form.get('smartquotes') != '0' }}>
+          <label for="sq">Apply smart punctuation — curly quotes, em dashes, ellipsis</label></div>
 
         <div class="conv">
           <p>Markup it understands:</p>

@@ -127,7 +127,9 @@
       <legend>Output format</legend>
       <div class="fs-body">
         <div class="row">
-          <div class="field"><label>Format</label>
+          <div class="check" style="margin-top:6px"><input type="checkbox" id="sq" name="smartquotes" {{ 'checked' if proj.get('smartquotes', True) }}>
+          <label for="sq">Apply smart punctuation — curly quotes, em dashes, ellipsis</label></div>
+        <div class="field"><label>Format</label>
             <select name="format">
               <option value="pdf"  {{ 'selected' if proj.get('format','pdf')=='pdf'  }}>PDF only</option>
               <option value="epub" {{ 'selected' if proj.get('format','pdf')=='epub' }}>EPUB only</option>
