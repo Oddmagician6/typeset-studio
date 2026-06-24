@@ -10,30 +10,36 @@ sections before changing the engine.
 ## What this app is
 
 A local, single-user Flask web app that turns a manuscript + a reusable **style**
-(preset) into a print-ready interior PDF with embedded fonts. Runs on the author's
-own machine; not a public service. Styles are JSON files meant to be cloned and
-tweaked per customer.
+(preset) into a print-ready interior PDF with embedded fonts, and optionally an EPUB.
+Runs on the author's own machine; not a public service. Styles are JSON files meant
+to be cloned and tweaked per customer. Books (manuscript + meta + preset) can be saved
+as **projects** for one-click regeneration.
 
 ---
 
 ## Architecture snapshot
 
 ```
-app.py            Flask routes + preset CRUD + form parsing. Entry point (port 5050).
-engine.py         The typesetting engine (ReportLab). Builds the PDF.
-manuscript.py     Parses Markdown / imports .docx -> a chapters/blocks structure.
-templates/        Jinja2 UI: base, index (styles), editor (preset form), generate, result.
+app.py            Flask routes + preset/project CRUD + form parsing. Entry point (port 5050).
+engine.py         The typesetting engine (ReportLab). Builds the PDF. Two-pass when TOC enabled.
+manuscript.py     Parses Markdown / imports .docx → a chapters/blocks structure.
+epub.py           EPUB 3 builder — consumes the same parsed structure as engine.py.
+templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
+                  generate, result, projects, project_edit.
 presets/*.json    One file per style. Cloneable per customer.
-fonts/*.ttf       Embeddable static TrueType faces (family "Book").
+fonts/*.ttf       Embeddable TrueType faces (family "Book"). Also stores scene-break ornament images.
 sample/sample.md  Demo manuscript.
-out/              Composed PDFs land here (also served for download).
+out/              Composed PDFs / EPUBs land here (also served for download).
 uploads/          User-uploaded manuscripts / cover art (created at runtime).
+projects/         One .json per saved project.
+projects/manuscripts/   Stored manuscript + cover copies (one per project).
 ```
 
 Data flow for a compose:
 `generate.html` (POST) → `app.generate()` builds a **meta** dict + loads the chosen
 **preset** + parses the manuscript via `manuscript.parse_markdown()` →
-`engine.build_pdf(manuscript, preset, out_path, meta)` → PDF in `out/` → `result.html`.
+`engine.build_pdf(manuscript, preset, out_path, meta)` (two-pass if TOC enabled) →
+PDF in `out/` → `result.html`. If format includes EPUB, `epub.build_epub()` runs too.
 
 ---
 
@@ -42,19 +48,24 @@ Data flow for a compose:
 ### Preset (presets/*.json) — the per-book typographic recipe
 ```
 name, description
-trim:        {w, h}                      inches
-margins:     {top, bottom, inside, outside}   inches (inside = gutter/spine side)
-font_family: str                          registered family name
-font_files:  {regular, bold, italic}      .ttf filename (looked up in fonts/) OR abs path
-body:        {size, leading, indent, justify, hyphenate}   pts/pts/inches/bool/bool
-chapter:     {start, sink, show_number, number_format, number_size, title_size,
-              after_title, open_style, leadin_words, dropcap_lines}
-             start: "recto" | "any"
-             open_style: "none" | "raised_initial" | "smallcaps_leadin" | "dropcap"
-             number_format uses "{n}", e.g. "Chapter {n}"
-scene_break: {glyph, size, gap}           glyph is plain text; keep it font-safe
-running_head:{show, caps, size, gap}      gap in inches
-folio:       {show, position, size, gap, hide_on_opener}   position: "outer" | "center"
+trim:          {w, h}                       inches
+margins:       {top, bottom, inside, outside}   inches (inside = gutter/spine side)
+font_family:   str                           registered family name
+font_files:    {regular, bold, italic}       .ttf filename (looked up in fonts/) OR abs path
+body:          {size, leading, indent, justify, hyphenate}   pts/pts/inches/bool/bool
+chapter:       {start, sink, show_number, number_format, number_size, title_size,
+               after_title, open_style, leadin_words, dropcap_lines}
+               start: "recto" | "any"
+               open_style: "none" | "raised_initial" | "smallcaps_leadin" | "dropcap"
+               number_format uses "{n}", e.g. "Chapter {n}"
+part_divider:  {show_number, number_format, number_size, title_size, sink}
+               sink is a 0–1 fraction of the text-area height
+scene_break:   {type, glyph, size, gap, image}
+               type: "glyph" | "image"; image is a filename in fonts/ or absolute path
+document_block:{frame, indent, font_size, first_indent, space_around}
+               frame: "none" | "ruled" | "box"
+running_head:  {show, caps, size, gap}       gap in inches
+folio:         {show, position, size, gap, hide_on_opener}   position: "outer" | "center"
 ```
 `app.DEFAULTS` is the canonical default preset and `app.parse_preset_form()` maps the
 editor form fields to this schema. **If you add a preset field, update all three:**
@@ -69,16 +80,62 @@ right_hand_starts    bool — insert blank pages so sections open on a recto
 cover_image          path to uploaded art ('' if none)
 cover_overlay        bool — print title/author over the art
 cover_color          "light" | "dark"   (overlay text colour)
+include_toc          bool — generate a Contents page (triggers two-pass build)
+smartquotes          bool — apply curly quotes / em dashes / ellipsis (default True)
+format               "pdf" | "epub" | "both"
+dedication           plain text ('' = no page)
+epigraph             plain text; last line starting with — is styled as attribution
+acknowledgments      plain text ('' = no page)
+about_author         plain text ('' = no page)
+also_by              plain text, one title per line ('' = no page)
 ```
 
 ### Parsed manuscript (manuscript.parse_markdown)
 ```
-{ "chapters": [ { "title": str|None, "blocks": [ block, ... ] }, ... ] }
-block = ("para", html_text) | ("subhead", html_text) | ("scene", None)
+{
+  "chapters": [
+    {
+      "title":  str | None,
+      "part":   {"title": str | None, "number": int} | None,
+      "blocks": [ block, ... ]
+    },
+    ...
+  ]
+}
+block = ("para", html_text)
+      | ("subhead", html_text)
+      | ("scene", None)
+      | ("doc_block", [("para", html_text), ...])
 ```
-Inline emphasis is converted to ReportLab markup (`<b>`, `<i>`). Markup conventions:
-`# ` chapter, `## ` subhead, `* * *` / `***` / `---` scene break, blank line = para.
-`.docx` import (`manuscript.import_docx`) maps Heading 1 → chapter.
+
+Inline emphasis is converted to ReportLab markup (`<b>`, `<i>`), with optional smart
+punctuation applied first. Markup conventions:
+
+| You write          | You get                        |
+|--------------------|--------------------------------|
+| `=== Part title`   | a part divider page            |
+| `# Chapter title`  | starts a new chapter           |
+| `## Subhead`       | a centered section subhead     |
+| `* * *` (own line) | a scene break                  |
+| `~~~` … `~~~`      | an epistolary / document block |
+| `*italic*`         | *italic*                       |
+| `**bold**`         | **bold**                       |
+| blank line         | new paragraph                  |
+
+`.docx` import (`manuscript.import_docx`) maps Heading 1 → chapter, runs → bold/italic.
+
+### Project (projects/*.json) — a saved book
+```
+name, preset (preset id), title, subtitle, author, year, publisher
+front_matter, right_hand_starts, include_toc, smartquotes, format
+dedication, epigraph, acknowledgments, about_author, also_by
+cover_overlay, cover_color
+manuscript_file     filename inside projects/manuscripts/
+manuscript_type     "file" | "pasted" | "sample"
+cover_file          filename inside projects/manuscripts/ ('' if none)
+last_pdf, last_epub
+created, updated    ISO 8601 datetime strings
+```
 
 ---
 
@@ -89,148 +146,154 @@ Inline emphasis is converted to ReportLab markup (`<b>`, `<i>`). Markup conventi
   the first page where `canv._is_opener`). Anything before it gets no running head/folio.
   Do **not** reintroduce a hardcoded `fm_pages` count — variable front matter + cover
   would break it.
+
 - **Furniture is drawn at page END** (`onPageEnd=self._furniture`) so opener/blank status
-  is known without a pre-pass. Opener/blank state is flagged by zero-size marker flowables
-  `OpenerMarker` / `BlankMarker` whose `draw()` sets `canv._is_opener` / `canv._is_blank`.
+  is known without a pre-pass. Opener/blank state is flagged by zero-size marker flowables:
+  `TocMarker` sets `_is_opener` AND records the chapter page for TOC generation;
+  `BlankMarker.draw()` sets `canv._is_blank` (part dividers, blank versos, TOC pages).
+  `OpenerMarker` is kept for part dividers that don't need TOC recording.
+
 - **Recto forcing** is handled in `BookDoc.handle_flowable` via the `RectoBreak` flowable,
   branching on `self.frame._atTop` × current-page parity (`self.page`, which ReportLab has
   already incremented for the composing page — do not use `self.page+1`). It inserts a
   counted blank verso when needed.
+
 - **Mirrored margins / parity:** recto pages use the `recto` frame (left = inside margin),
   verso pages the `verso` frame. Body pages alternate correctly; front-matter pages render
   in the recto frame (fine, they're centered). Verify parity after engine changes by
   measuring text `x0` on odd vs even pages (recto≈inside, verso≈outside).
+
 - **Cover** is a full-bleed page-1 template (`id='cover'`, `onPage=_draw_cover`). When a
   cover exists it is inserted at template index 0 so page 1 paints the art; the story then
   switches to a normal template. Art is pre-cropped to trim @300dpi with Pillow
   (`_prepare_cover`) and the temp file is deleted after build.
+
 - **Scene-break glyphs must exist in the body font.** Libre Baskerville ("Book") lacks many
-  ornaments (e.g. U+2766 renders as tofu). Presets ship with font-safe marks (`* * *`,
-  em-dashes, middots). A custom-ornament feature should validate or fall back.
+  ornaments. Presets ship with font-safe marks (`* * *`, em-dashes, middots). Use the image
+  ornament type for custom artwork instead of exotic Unicode.
+
 - **Fonts:** `register_fonts` resolves bare filenames against `fonts/`, accepts absolute
   paths, and falls back to Times if a file is missing — so a build never hard-fails, but
-  type may silently change. Surface this in any preflight feature.
+  type may silently change. The preflight report surfaces this.
+
 - **Paragraph-after-scene/subhead** is set flush (no indent) via the `flush_next` flag in
   `_build_story`; the chapter's first paragraph gets the `open_style` once via `opened`.
+
 - **Opening-paragraph markup slicing:** `_inline()` converts Word bold/italic runs to
   ReportLab XML (`<b>`, `<i>`). The `_opening_para()` function strips this via `_plain()`
   before any character/word-level operations (drop cap, raised initial, small-caps lead-in)
   — these styles are incompatible with inline markup on the first paragraph anyway. Never
   pass raw `text` with embedded tags to code that slices by index or splits on spaces.
 
+- **TOC two-pass build:** when `meta['include_toc']` is True, `build_pdf` runs the story
+  through a first (temp-file) build to capture `doc._toc_entries` and `doc._body_start`,
+  estimates the TOC page count, adjusts folios by that count, then does a second build with
+  the TOC injected via `_build_story(..., toc_flowables=...)`. The TOC is inserted after
+  the copyright page and before dedications/epigraph.
+
+- **Front/back matter blank pages:** only the *first* item in each group (front extras:
+  dedication + epigraph; back matter: acknowledgments + about + also-by) is recto-forced
+  via `RectoBreak`. Subsequent items in the same group use plain `PageBreak` to avoid
+  inserting unnecessary blank versos between consecutive special pages.
+
+- **`_matter_page` and `_build_toc` import `_ms_inline` from `manuscript.py`** (no
+  circular dependency — manuscript.py does not import engine.py). Keep it that way.
+
+- **`doc_block` rendering:** the `box` frame style wraps all paragraphs in a single-column
+  `Table` so ReportLab can split it across pages with proper borders. The `ruled` and `none`
+  styles use plain `Paragraph` flowables. Never use `KeepTogether` for long blocks.
+
 ---
 
-## Feature backlog (prioritized)
+## Feature status
 
-Effort key: **S** ≈ hours, **M** ≈ half-day–day, **L** ≈ multi-day.
+All Tier 1–3 backlog items and the Tier 4 EPUB export are **shipped**. The list below
+shows what was built and where to find it.
 
-### Tier 1 — do first (client-readiness + biggest time savers)
+### ✓ Tier 1 — shipped
 
-**1. Projects: save & re-generate a book — M**
-Currently every compose is one-shot. Persist a "book" = manuscript ref + preset id +
-meta so it can be regenerated after edits without re-entering everything.
-- Touch: new `projects/*.json` store; `app.py` routes (`/projects`, `/project/<id>`,
-  save-from-generate); store uploaded manuscript alongside; new `projects.html` + link
-  from generate/result ("Save as project").
-- Acceptance: edit manuscript file, hit regenerate, get an updated PDF with same settings.
+**1. Projects: save & re-generate a book**
+`app.py` (`/projects`, `/project/<pid>/*` routes) · `templates/projects.html`,
+`templates/project_edit.html` · `projects/` + `projects/manuscripts/` on disk.
+After composing, the result page offers "Save as project". Projects remember manuscript,
+style, all meta, and output format. Regenerate any time from the Projects page.
 
-**2. Spine & margin calculator — S**
-After a build the page count is known. Report KDP/IngramSpark minimum inside margin for
-that page count and the cover spine width (page count × paper-thickness factor; expose a
-paper-type selector: white/cream/color). Pure information, high trust value.
-- Touch: compute in `app.generate()` post-build (read final page count from the PDF or
-  return it from `engine.build_pdf`); show on `result.html`. Add paper-type constants.
-- Acceptance: 300-page 6×9 shows correct min gutter + spine inches for chosen paper.
+**2. Spine & margin calculator**
+`app.py` (`print_spec()`, `_KDP_MARGINS`, `_INGRAM_MARGINS`, `_PAPER` constants) ·
+`templates/result.html` (Print spec card). Shows spine width for white/cream/color paper
+and flags inside-margin adequacy for KDP and IngramSpark after every PDF build.
 
-**3. Preflight report — S/M**
-Post-build checklist surfaced on result page: fonts embedded ✓, requested fonts actually
-used (not silently Times-fallback) ✓, trim matches preset ✓, inside margin adequate for
-page count ✓, flag any missing-glyph / overset characters. A confidence artifact to hand
-clients.
-- Touch: `engine.build_pdf` returns a report dict (font fallback already detectable in
-  `register_fonts`; check embedded fonts via pdf inspection); render on `result.html`.
-- Acceptance: a preset pointing at a missing font shows a clear "fell back to Times" warning.
+**3. Preflight report**
+`engine.py` (`register_fonts` returns `fallback` + `details`) · `app.py` (`_preflight()`)
+· `templates/result.html` (Preflight card). Checks: font loading, fonts embedded, page
+count within KDP range. Red ✗ with explanation on failure; green ✓ when clear.
 
-**4. Letter / document / field-log block style — M** *(the differentiator)*
-A dedicated block format for epistolary content (letters, journal entries, field logs):
-distinct indent/measure, optional alternate face or monospaced treatment, optional ruled
-or boxed framing. This is the "complex literary interior" niche the whole positioning
-rests on (cf. "Correspondence").
-- Touch: extend the manuscript convention with a block marker (e.g. fenced
-  `~~~letter … ~~~` or a `> ` document block); add block kind in `manuscript.py`; add a
-  `document_block` style group to the preset + editor + `_build_story` rendering.
-- Acceptance: a letter block renders visually distinct from body prose and survives page
-  breaks.
+**4. Epistolary / document block style**
+`manuscript.py` (`DOCBLOCK_RE`, `~~~ … ~~~` parsing → `('doc_block', [...])` blocks) ·
+`engine.py` (`HRule` flowable, `_render_doc_block()`) · `epub.py` (`.doc-block` CSS +
+`<div>` output) · `templates/editor.html` (Document blocks fieldset with frame/indent/size).
 
-### Tier 2 — craft & polish
+**12. EPUB export** *(moved up from Tier 4)*
+`epub.py` (stdlib-only EPUB 3 builder: manifest, spine, nav, CSS, chapter XHTML, cover,
+part pages, matter pages, TOC page) · `app.py` (format selector in generate + projects) ·
+`templates/generate.html` (Output format fieldset: PDF / EPUB / Both).
 
-**5. Typographic cleanup (smart punctuation) — S**
-Straight→curly quotes, `--`→em dash, `...`→ellipsis, collapse double spaces. On by default,
-toggle per book. Apply in `manuscript._inline` (careful: do it before/around the existing
-escape + emphasis regexes; don't curl quotes inside markup).
-- Acceptance: `"He said--wait..."` renders with curly quotes, em dash, ellipsis.
+### ✓ Tier 2 — shipped
 
-**6. Real hyphenation for justified text — M**
-Reduce rivers/loose lines in justified literary setting. Integrate a hyphenation dict
-(e.g. `pyphen`) and feed soft hyphens into paragraphs when `body.hyphenate` is on.
-- Touch: `engine._styles`/paragraph construction; new dep; respect the existing
-  `hyphenate` preset flag (currently parsed but unused).
-- Acceptance: justified text with hyphenation shows tighter spacing vs off.
+**5. Smart punctuation**
+`manuscript.py` (`_smarten()` called at the start of `_inline()` when `smartquotes=True`).
+Converts `--` → em dash, `...` → ellipsis, straight quotes → curly. Toggle per book on
+the compose page. Off for `.docx` files that already have curly quotes from Word.
 
-**7. Parts / section dividers — M**
-"Part One" divider pages above chapters. Add a manuscript marker (e.g. `# #` or a
-`=== Part: Title` line) and a `part` style group (divider page, sink, recto-forced).
-- Touch: `manuscript.py` (new top-level structure or a `part` block), `_build_story`.
-- Acceptance: a part divider gets its own recto page and doesn't carry a chapter folio.
+**6. Real hyphenation**
+`engine.py` (`_hyphenate_markup()`, `pyphen.Pyphen(lang='en_US')`). When `body.hyphenate`
+is on in the preset, soft hyphens (U+00AD) are inserted into 5+ letter words in all body
+paragraphs, chapter openers, and doc blocks. Tags in ReportLab XML markup are skipped.
 
-**8. Front/back matter blocks — M**
-Dedication, epigraph, also-by, about-the-author, acknowledgments. Either dedicated meta
-fields or recognized manuscript sections, rendered with appropriate (often centered,
-unnumbered) styling.
-- Touch: meta + `generate.html` (or manuscript markers); `_build_story` front/back sections.
+**7. Parts / section dividers**
+`manuscript.py` (`PART_RE`, `=== Part title` parsing → `ch['part']` on each chapter) ·
+`engine.py` (`part_num` + `part_title` styles, part divider logic before chapter loop) ·
+`epub.py` (`_part_xhtml()`, part pages in spine + nav) · `templates/editor.html`
+(Part dividers fieldset: number format, sizes, sink).
 
-**9. Custom scene-break ornament (image) — S**
-Allow a small image as the scene break instead of a text glyph, with size control. Keep
-the text-glyph path as default and font-safe.
-- Touch: `scene_break` preset (`type: glyph|image`, `image` path); `SceneBreak` flowable
-  to draw an image; editor field.
+**8. Front/back matter pages**
+`engine.py` (`_matter_page()` helper; front extras after copyright, back matter after last
+chapter) · `epub.py` (`_matter_xhtml()`, matter pages in spine/nav/zip) ·
+`templates/generate.html` + `templates/project_edit.html` (Front matter extras + Back matter
+fieldsets) · `app.py` (five new meta keys: dedication, epigraph, acknowledgments,
+about_author, also_by).
 
-### Tier 3 — usability
+**9. Custom scene-break ornament (image)**
+`engine.py` (`SceneBreak` flowable: `image_path` arg, draws proportional image via
+`ImageReader`, falls back to text glyph if file missing) · `app.py` (sb_type, sb_image
+form fields) · `templates/editor.html` (type selector + image path field).
 
-**10. Live page preview — M**
-Render a few representative pages (chapter opener, a facing-page spread, a scene break) to
-PNG thumbnails shown in the browser when editing a style — no full PDF download per tweak.
-- Touch: build a tiny sample doc with the in-progress preset; rasterize with
-  `pdftoppm`/PyMuPDF; new endpoint returning images; editor.html preview panel.
-- Note: needs a PDF→image rasterizer available at runtime (document the dependency).
+### ✓ Tier 3 — shipped
 
-**11. Auto table of contents — S/M**
-Generate a TOC page from chapter titles (+ part titles). Page numbers require knowing
-final folios — either a two-pass build or capture opener page numbers during build and
-emit the TOC in front matter on a second pass.
-- Touch: `engine` (capture chapter→folio map), front-matter assembly.
+**10. Live page preview**
+`app.py` (`POST /preview` route: parses current form, builds sample PDF, rasterizes via
+PyMuPDF, returns base64 PNG array as JSON) · `templates/editor.html` (Preview pages button
++ image panel in sidebar, fetch JS). Uses `PREVIEW_SAMPLE` constant — no manuscript upload
+required. Reflects unsaved form changes instantly.
 
-### Tier 4 — bigger bets
-
-**12. EPUB export — L**
-Many clients want ebook + print. Separate output path: generate semantic HTML/EPUB from
-the already-parsed manuscript structure (reuse `manuscript.parse_markdown` output; ignore
-print-only preset fields; map styles to CSS). Roughly doubles sellable output per book.
-- Touch: new `epub.py` builder consuming the chapters/blocks structure; output `.epub`;
-  generate-page format toggle (PDF / EPUB / both).
-- Acceptance: produces a valid EPUB (passes epubcheck) with chapters, scene breaks,
-  italics/bold, and front matter.
+**11. Auto table of contents**
+`engine.py` (`TocMarker` flowable records chapter page during build; `_build_toc()` with
+dot leaders and part headings; `_estimate_toc_pages()`; two-pass in `build_pdf()`) ·
+`epub.py` (`_toc_page_xhtml()` clickable chapter list) · `templates/generate.html` +
+`templates/project_edit.html` (Include table of contents checkbox, off by default).
 
 ---
 
 ## Conventions for contributions
 
 - Keep the engine **single-pass** unless a feature genuinely needs two (TOC, cross-refs);
-  if so, isolate the measuring pass.
+  if so, isolate the measuring pass in `build_pdf` and pass the result into `_build_story`.
 - New preset fields: update `DEFAULTS`, `parse_preset_form`, `editor.html` together, and
   keep defaults backward-compatible with existing `presets/*.json` (use `.get(...)`).
 - New per-book options go on the **generate** page + `meta`, not the preset, when they vary
-  per book (cover, front matter, TOC) rather than per style.
+  per book (cover, front matter, TOC, smart punctuation) rather than per style.
 - Preserve offline operation: no CDN assets in templates; system-font stacks only.
 - After any imposition change, re-verify: folio starts at 1 on the first story page; blanks
   appear only where intended; recto/verso text margins alternate correctly.
+- `_matter_page` and `_build_toc` call `_ms_inline` from `manuscript.py` — that import
+  direction (engine → manuscript) is intentional and safe; never reverse it.
