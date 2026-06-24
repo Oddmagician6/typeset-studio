@@ -599,13 +599,15 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False
     # ---- front matter extras (dedication, epigraph) ----
     sq = meta.get('smartquotes', True)
     _fm_need_break = len(story) > 0
+    _fm_first = True   # only the first extra page gets recto-forced
     for _key, _mstyle in [('dedication', 'dedication'), ('epigraph', 'epigraph')]:
         _txt = meta.get(_key, '').strip()
         if not _txt:
             continue
         if _fm_need_break:
-            story.append(RectoBreak() if rhs else PageBreak())
+            story.append((RectoBreak() if rhs else PageBreak()) if _fm_first else PageBreak())
         _fm_need_break = True
+        _fm_first = False
         story.extend(_matter_page(None, _txt, fonts, st, sq, _mstyle))
 
     # ---- body ----
@@ -694,11 +696,13 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False
         ('about_author',    'About the Author',                   'body'),
         ('also_by',         f'Also by {_author}'.strip() or 'Also By', 'also_by'),
     ]
+    _bm_first = True   # only the first back-matter page gets recto-forced
     for _key, _heading, _mstyle in _back:
         _txt = meta.get(_key, '').strip()
         if not _txt:
             continue
-        story.append(RectoBreak() if rhs else PageBreak())
+        story.append((RectoBreak() if rhs else PageBreak()) if _bm_first else PageBreak())
+        _bm_first = False
         story.extend(_matter_page(_heading, _txt, fonts, st, sq, _mstyle))
 
     return story
