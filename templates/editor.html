@@ -283,11 +283,17 @@
       <div class="formbar">
         <button class="btn btn-primary" type="submit">{{ 'Create style' if is_new else 'Save changes' }}</button>
         <a class="btn" href="{{ url_for('index') }}">Cancel</a>
+        <button type="button" id="preview-btn" class="btn">Preview pages</button>
+        <span id="preview-status" style="font-size:13px;color:var(--muted)"></span>
       </div>
     </form>
 
     <aside class="preview">
       <p class="label">Spec card</p>
+      <div id="preview-pages" style="margin-bottom:16px;display:none">
+        <p class="label">Page preview</p>
+        <div id="preview-imgs" style="display:flex;flex-direction:column;gap:6px"></div>
+      </div>
       <div class="card">
         <div class="specimen">
           <p class="name" id="pv-name">{{ p.name or 'Untitled style' }}</p>
@@ -325,5 +331,31 @@
       document.getElementById('pv-folio').textContent = fo;
     }
     updatePreview();
+
+    document.getElementById('preview-btn').addEventListener('click', async () => {
+      const btn    = document.getElementById('preview-btn');
+      const status = document.getElementById('preview-status');
+      btn.disabled = true;
+      status.textContent = 'Rendering…';
+      try {
+        const data = new FormData(document.querySelector('form.editor'));
+        const res  = await fetch('/preview', {method: 'POST', body: data});
+        const json = await res.json();
+        if (json.ok) {
+          const wrap = document.getElementById('preview-imgs');
+          wrap.innerHTML = json.images.map(src =>
+            '<img src="' + src + '" style="width:100%;border:1px solid var(--rule);border-radius:2px">'
+          ).join('');
+          document.getElementById('preview-pages').style.display = 'block';
+          status.textContent = json.images.length + ' page' + (json.images.length !== 1 ? 's' : '');
+        } else {
+          status.textContent = json.error;
+        }
+      } catch (e) {
+        status.textContent = 'Preview failed.';
+      } finally {
+        btn.disabled = false;
+      }
+    });
   </script>
 {% endblock %}

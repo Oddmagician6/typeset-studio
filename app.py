@@ -9,8 +9,10 @@ plain JSON files in ./presets so you can clone one per customer and tweak it.
 import os
 import re
 import json
+import base64
 import shutil
 import logging
+import tempfile
 import threading
 import traceback
 import webbrowser
@@ -20,7 +22,7 @@ logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s %(levelname)s %(message)s')
 
 from flask import (Flask, request, redirect, url_for, render_template,
-                   send_from_directory, abort, flash)
+                   send_from_directory, abort, flash, jsonify)
 from werkzeug.utils import secure_filename
 
 import engine
@@ -39,6 +41,32 @@ for d in (PRESET_DIR, OUT_DIR, UPLOAD_DIR, PROJECT_DIR, PROJECT_MS_DIR):
 
 app = Flask(__name__)
 app.secret_key = 'typeset-studio-local'
+
+PREVIEW_SAMPLE = """\
+# The First Chapter
+
+The opening paragraph of the first chapter, with enough words to fill more than
+one line of body text at normal settings and demonstrate the chapter-open style.
+
+A second paragraph shows line spacing and justification. The quick brown fox
+jumps over the lazy dog. Pack my box with five dozen liquor jugs.
+
+A third paragraph adds volume so the body pages look realistic and the reader
+can appreciate how leading and margins interact across a full column of prose.
+
+* * *
+
+After the scene break the story continues, showing the post-break paragraph
+set flush-left just as it would appear in a finished book.
+
+One more paragraph of body text, long enough to reach the second line so that
+justification and hyphenation behaviour are visible in the preview.
+
+# The Second Chapter
+
+The second chapter opener demonstrates the sink, number label, chapter title
+typography, and the opening-paragraph treatment all in one place.
+"""
 
 
 # ----------------------------------------------------------------- print spec
@@ -438,6 +466,49 @@ def generate():
                            chapters=chapters, ms_path=ms_path, ms_type=ms_type,
                            cover_path=cover_path, from_project=None, fmt=fmt,
                            spec=spec, preflight=preflight)
+
+
+# ----------------------------------------------------------------- preview
+@app.route('/preview', methods=['POST'])
+def preview():
+    try:
+        import fitz
+    except ImportError:
+        return jsonify({'ok': False,
+                        'error': 'pymupdf not installed — run: pip install pymupdf'})
+    try:
+        preset = parse_preset_form(request.form)
+        ms     = manuscript.parse_markdown(PREVIEW_SAMPLE, smartquotes=True)
+        meta   = {
+            'title': 'Preview', 'subtitle': '', 'author': 'Author Name',
+            'year': '2026', 'publisher': '',
+            'front_matter': 'none', 'right_hand_starts': False,
+            'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
+            'smartquotes': True,
+            'dedication': '', 'epigraph': '', 'acknowledgments': '',
+            'about_author': '', 'also_by': '',
+        }
+        fd, tmp_path = tempfile.mkstemp(suffix='.pdf')
+        os.close(fd)
+        try:
+            engine.build_pdf(ms, preset, tmp_path, meta)
+            doc    = fitz.open(tmp_path)
+            images = []
+            for page in doc:
+                mat = fitz.Matrix(1.5, 1.5)   # ~108 dpi
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                b64 = base64.b64encode(pix.tobytes('png')).decode()
+                images.append(f'data:image/png;base64,{b64}')
+            doc.close()
+            return jsonify({'ok': True, 'images': images})
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+    except Exception as exc:
+        logging.error('preview failed: %s', traceback.format_exc())
+        return jsonify({'ok': False, 'error': str(exc)})
 
 
 # ----------------------------------------------------------------- project routes
