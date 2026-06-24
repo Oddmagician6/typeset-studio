@@ -23,8 +23,10 @@ try:
     _HAVE_PYPHEN = True
 except ImportError:
     _HAVE_PYPHEN = False
+
+from manuscript import _inline as _ms_inline
 from reportlab.lib.units import inch
-from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER
+from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -477,6 +479,58 @@ def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None):
     return out
 
 
+def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
+    """Flowables for one front/back matter page. Caller handles page breaks."""
+    # Split on blank lines into raw paragraph strings
+    blocks = [' '.join(l.strip() for l in b.split('\n') if l.strip()).strip()
+              for b in text.replace('\r\n', '\n').split('\n\n')]
+    blocks = [b for b in blocks if b]
+
+    out = [BlankMarker()]
+
+    if style == 'dedication':
+        s = ParagraphStyle('ded', fontName=fonts['italic'],
+                           fontSize=st['body'].fontSize, leading=st['body'].leading,
+                           alignment=TA_CENTER, firstLineIndent=0)
+        out.append(Spacer(1, 2.2 * inch))
+        for b in blocks:
+            out.append(Paragraph(_ms_inline(b, smartquotes), s))
+
+    elif style == 'epigraph':
+        s_q = ParagraphStyle('epiq', fontName=fonts['regular'],
+                              fontSize=st['body'].fontSize - 0.5, leading=st['body'].leading,
+                              leftIndent=1.2*inch, rightIndent=0.5*inch, firstLineIndent=0)
+        s_a = ParagraphStyle('epia', parent=s_q, leftIndent=0.5*inch, alignment=TA_RIGHT,
+                              fontSize=st['body'].fontSize - 1.5, textColor=(0.4, 0.4, 0.4))
+        out.append(Spacer(1, 2.2 * inch))
+        _attr = ('—', '–', '--', '-')
+        for i, b in enumerate(blocks):
+            is_attr = i == len(blocks) - 1 and any(b.startswith(m) for m in _attr)
+            out.append(Paragraph(_ms_inline(b, smartquotes), s_a if is_attr else s_q))
+
+    elif style == 'also_by':
+        s = ParagraphStyle('aby', fontName=fonts['regular'],
+                           fontSize=st['body'].fontSize, leading=st['body'].leading + 4,
+                           alignment=TA_CENTER, firstLineIndent=0)
+        out.append(Spacer(1, 1.0 * inch))
+        if heading:
+            out.append(Paragraph(heading, st['chap_title']))
+            out.append(Spacer(1, 0.4 * inch))
+        for b in blocks:
+            out.append(Paragraph(_ms_inline(b, smartquotes), s))
+
+    else:  # body: acknowledgments, about_author
+        out.append(Spacer(1, 1.0 * inch))
+        if heading:
+            out.append(Paragraph(heading, st['chap_title']))
+            out.append(Spacer(1, 0.4 * inch))
+        s_first = ParagraphStyle('mb1', parent=st['body'], firstLineIndent=0)
+        for i, b in enumerate(blocks):
+            out.append(Paragraph(_ms_inline(b, smartquotes), s_first if i == 0 else st['body']))
+
+    return out
+
+
 def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False, avail_w=0, hyph=None):
     glyph = preset['scene_break']['glyph']
     story = []
@@ -526,6 +580,18 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False
             story += copyright_page()
         elif level == 'copyright':
             story += copyright_page()
+
+    # ---- front matter extras (dedication, epigraph) ----
+    sq = meta.get('smartquotes', True)
+    _fm_need_break = len(story) > 0
+    for _key, _mstyle in [('dedication', 'dedication'), ('epigraph', 'epigraph')]:
+        _txt = meta.get(_key, '').strip()
+        if not _txt:
+            continue
+        if _fm_need_break:
+            story.append(RectoBreak() if rhs else PageBreak())
+        _fm_need_break = True
+        story.extend(_matter_page(None, _txt, fonts, st, sq, _mstyle))
 
     # ---- body ----
     c  = preset['chapter']
@@ -601,6 +667,21 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False
                     val_h = _hyphenate_markup(val, hyph) if hyph else val
                     story.append(Paragraph(val_h, st['body']))
                 flush_next = False
+
+    # ---- back matter (acknowledgments, about author, also by) ----
+    _author = meta.get('author', '')
+    _back = [
+        ('acknowledgments', 'Acknowledgments',                    'body'),
+        ('about_author',    'About the Author',                   'body'),
+        ('also_by',         f'Also by {_author}'.strip() or 'Also By', 'also_by'),
+    ]
+    for _key, _heading, _mstyle in _back:
+        _txt = meta.get(_key, '').strip()
+        if not _txt:
+            continue
+        story.append(RectoBreak() if rhs else PageBreak())
+        story.extend(_matter_page(_heading, _txt, fonts, st, sq, _mstyle))
+
     return story
 
 

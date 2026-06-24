@@ -5,6 +5,7 @@ Reuses the same parsed manuscript structure as engine.py.
 """
 
 import os
+import re
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -76,6 +77,17 @@ p.scene-break {
 .part-page { margin: 0 5%; text-align: center; padding-top: 30%; }
 .part-page .part-num { font-size: 0.9em; color: #666; margin: 0 0 0.5em; letter-spacing: 0.06em; }
 .part-page .part-title { font-size: 1.6em; font-weight: bold; margin: 0; }
+.matter-body .matter-head { font-size: 1.4em; font-weight: bold; text-align: center; margin: 2em 0 1em; }
+.matter-body p { margin: 0; text-indent: 1.5em; }
+.matter-body p.no-indent { text-indent: 0; }
+.matter-dedication { text-align: center; padding-top: 25%; font-style: italic; }
+.matter-dedication p { text-indent: 0; margin: 0.4em 0; }
+.matter-epigraph { margin: 0 10%; padding-top: 25%; }
+.matter-epigraph p { text-indent: 0; margin: 0.3em 0; }
+.matter-epigraph .attr { text-align: right; color: #555; font-size: 0.9em; margin-top: 0.6em; }
+.matter-alsoby { text-align: center; }
+.matter-alsoby .matter-head { font-size: 1.2em; font-weight: bold; margin: 2em 0 1em; }
+.matter-alsoby p { text-indent: 0; margin: 0.3em 0; }
 """
 
 
@@ -156,6 +168,25 @@ def _front_xhtml(meta):
         body += f'<div class="copyright"><p>{cp_html}</p></div>\n'
 
     return _xhtml(title or 'Front Matter', body)
+
+
+def _matter_xhtml(heading, text, css_class):
+    """XHTML page for a front/back matter section."""
+    blocks = [b.strip() for b in text.replace('\r\n', '\n').split('\n\n') if b.strip()]
+    body   = f'<div class="{css_class}">\n'
+    if heading:
+        body += f'  <h1 class="matter-head">{heading}</h1>\n'
+    _attr_markers = ('—', '–', '--', '-')
+    for i, b in enumerate(blocks):
+        cls = ''
+        if css_class == 'matter-epigraph':
+            if i == len(blocks) - 1 and any(b.startswith(m) for m in _attr_markers):
+                cls = ' class="attr"'
+        elif css_class == 'matter-body' and i == 0:
+            cls = ' class="no-indent"'
+        body += f'  <p{cls}>{_markup_to_html(b)}</p>\n'
+    body += '</div>\n'
+    return _xhtml(heading or 'Front Matter', body)
 
 
 def _chapter_xhtml(idx, chapter, preset):
@@ -249,18 +280,23 @@ def _content_opf(uid, meta, manifest_items, spine_items, modified):
     )
 
 
-def _nav_xhtml(chapters, has_cover, has_front, preset):
+def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None):
     c        = preset.get('chapter', {})
     show_num = c.get('show_number', True)
     num_fmt  = c.get('number_format', 'Chapter {n}')
     pd       = preset.get('part_divider', {})
     pd_fmt   = pd.get('number_format', 'Part {n}')
 
+    meta = meta or {}
     toc = []
     if has_cover:
         toc.append(('cover.xhtml', 'Cover'))
     if has_front:
         toc.append(('front.xhtml', 'Front Matter'))
+    if meta.get('dedication', '').strip():
+        toc.append(('dedication.xhtml', 'Dedication'))
+    if meta.get('epigraph', '').strip():
+        toc.append(('epigraph.xhtml', 'Epigraph'))
     current_part_num = None
     for idx, ch in enumerate(chapters, start=1):
         ch_part     = ch.get('part')
@@ -271,6 +307,16 @@ def _nav_xhtml(chapters, has_cover, has_front, preset):
             current_part_num = ch_part_num
         label = ch.get('title') or (num_fmt.format(n=idx) if show_num else f'Chapter {idx}')
         toc.append((f'chapter{idx:03d}.xhtml', label))
+
+    author = meta.get('author', '')
+    _back_nav = [
+        ('acknowledgments', 'acknowledgments.xhtml', 'Acknowledgments'),
+        ('about_author',    'about.xhtml',           'About the Author'),
+        ('also_by',         'alsoby.xhtml',          f'Also by {author}'.strip() or 'Also By'),
+    ]
+    for _key, _href, _label in _back_nav:
+        if meta.get(_key, '').strip():
+            toc.append((_href, _label))
 
     items = '\n'.join(
         f'      <li><a href="{href}">{label}</a></li>' for href, label in toc
@@ -335,6 +381,13 @@ def build_epub(manuscript, preset, out_path, meta):
                                 'type': 'application/xhtml+xml'})
         spine_items.append('front')
 
+    _front_extras = [('dedication', 'ded'), ('epigraph', 'epi')]
+    for _fkey, _fid in _front_extras:
+        if meta.get(_fkey, '').strip():
+            manifest_items.append({'id': _fid, 'href': f'{_fkey}.xhtml',
+                                    'type': 'application/xhtml+xml'})
+            spine_items.append(_fid)
+
     current_part_num = None
     for idx, ch in enumerate(chapters, start=1):
         ch_part     = ch.get('part')
@@ -349,6 +402,18 @@ def build_epub(manuscript, preset, out_path, meta):
                                 'type': 'application/xhtml+xml'})
         spine_items.append(f'ch{idx:03d}')
 
+    _author = meta.get('author', '')
+    _back_items = [
+        ('acknowledgments', 'ack',   'acknowledgments.xhtml', 'Acknowledgments'),
+        ('about_author',    'about', 'about.xhtml',           'About the Author'),
+        ('also_by',         'aby',   'alsoby.xhtml',          f'Also by {_author}'.strip() or 'Also By'),
+    ]
+    for _bkey, _bid, _bhref, _bhead in _back_items:
+        if meta.get(_bkey, '').strip():
+            manifest_items.append({'id': _bid, 'href': _bhref,
+                                    'type': 'application/xhtml+xml'})
+            spine_items.append(_bid)
+
     with zipfile.ZipFile(out_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
         # mimetype must be first and stored uncompressed
         zf.writestr(zipfile.ZipInfo('mimetype'), 'application/epub+zip',
@@ -357,7 +422,7 @@ def build_epub(manuscript, preset, out_path, meta):
         zf.writestr('OEBPS/content.opf',
                     _content_opf(uid, meta, manifest_items, spine_items, modified))
         zf.writestr('OEBPS/nav.xhtml',
-                    _nav_xhtml(chapters, has_cover, has_front, preset))
+                    _nav_xhtml(chapters, has_cover, has_front, preset, meta=meta))
         zf.writestr('OEBPS/style.css', _style_css())
 
         if has_cover:
@@ -366,6 +431,13 @@ def build_epub(manuscript, preset, out_path, meta):
 
         if has_front:
             zf.writestr('OEBPS/front.xhtml', _front_xhtml(meta))
+
+        if meta.get('dedication', '').strip():
+            zf.writestr('OEBPS/dedication.xhtml',
+                        _matter_xhtml(None, meta['dedication'], 'matter-dedication'))
+        if meta.get('epigraph', '').strip():
+            zf.writestr('OEBPS/epigraph.xhtml',
+                        _matter_xhtml(None, meta['epigraph'], 'matter-epigraph'))
 
         current_part_num = None
         for idx, ch in enumerate(chapters, start=1):
@@ -376,5 +448,12 @@ def build_epub(manuscript, preset, out_path, meta):
                             _part_xhtml(ch_part_num, ch_part.get('title') or '', preset))
                 current_part_num = ch_part_num
             zf.writestr(f'OEBPS/chapter{idx:03d}.xhtml', _chapter_xhtml(idx, ch, preset))
+
+        for _bkey, _bid, _bhref, _bhead in _back_items:
+            _btxt = meta.get(_bkey, '').strip()
+            if not _btxt:
+                continue
+            _css = 'matter-alsoby' if _bkey == 'also_by' else 'matter-body'
+            zf.writestr(f'OEBPS/{_bhref}', _matter_xhtml(_bhead, _btxt, _css))
 
     return out_path

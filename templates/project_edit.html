@@ -124,6 +124,40 @@
     </fieldset>
 
     <fieldset>
+      <legend>Front matter extras</legend>
+      <div class="fs-body">
+        <div class="row">
+          <div class="field wide"><label>Dedication</label>
+            <textarea name="dedication" rows="3">{{ proj.get('dedication','') }}</textarea></div>
+        </div>
+        <div class="row">
+          <div class="field wide"><label>Epigraph</label>
+            <span class="hint">Attribution on last line, starting with —</span>
+            <textarea name="epigraph" rows="4">{{ proj.get('epigraph','') }}</textarea></div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Back matter</legend>
+      <div class="fs-body">
+        <div class="row">
+          <div class="field wide"><label>Acknowledgments</label>
+            <textarea name="acknowledgments" rows="4">{{ proj.get('acknowledgments','') }}</textarea></div>
+        </div>
+        <div class="row">
+          <div class="field wide"><label>About the Author</label>
+            <textarea name="about_author" rows="4">{{ proj.get('about_author','') }}</textarea></div>
+        </div>
+        <div class="row">
+          <div class="field wide"><label>Also By</label>
+            <span class="hint">One title per line</span>
+            <textarea name="also_by" rows="4">{{ proj.get('also_by','') }}</textarea></div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
       <legend>Output format</legend>
       <div class="fs-body">
         <div class="row">

@@ -389,7 +389,12 @@ def generate():
         'cover_image': cover_path,
         'cover_overlay': 'cover_overlay' in form,
         'cover_color': form.get('cover_color', 'light'),
-        'smartquotes': 'smartquotes' in form,
+        'smartquotes':    'smartquotes' in form,
+        'dedication':     form.get('dedication', '').strip(),
+        'epigraph':       form.get('epigraph', '').strip(),
+        'acknowledgments': form.get('acknowledgments', '').strip(),
+        'about_author':   form.get('about_author', '').strip(),
+        'also_by':        form.get('also_by', '').strip(),
     }
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     base  = slugify(meta['title'] or 'book')
@@ -474,6 +479,11 @@ def project_create():
         'cover_color': form.get('cover_color', 'light'),
         'format':      form.get('fmt', 'pdf'),
         'smartquotes': form.get('smartquotes') == '1',
+        'dedication':     form.get('dedication', '').strip(),
+        'epigraph':       form.get('epigraph', '').strip(),
+        'acknowledgments': form.get('acknowledgments', '').strip(),
+        'about_author':   form.get('about_author', '').strip(),
+        'also_by':        form.get('also_by', '').strip(),
         'manuscript_file': ms_file,
         'manuscript_type': ms_type,
         'cover_file': cover_file,
@@ -530,6 +540,11 @@ def project_edit(pid):
             'preset':           form.get('preset', proj['preset']),
             'format':      form.get('format', proj.get('format', 'pdf')),
             'smartquotes': 'smartquotes' in form,
+            'dedication':     form.get('dedication', '').strip(),
+            'epigraph':       form.get('epigraph', '').strip(),
+            'acknowledgments': form.get('acknowledgments', '').strip(),
+            'about_author':   form.get('about_author', '').strip(),
+            'also_by':        form.get('also_by', '').strip(),
             'title':            form.get('title', '').strip(),
             'subtitle':         form.get('subtitle', '').strip(),
             'author':           form.get('author', '').strip(),
@@ -598,6 +613,11 @@ def project_generate(pid):
         'cover_overlay': proj.get('cover_overlay', False),
         'cover_color':   proj.get('cover_color', 'light'),
         'smartquotes':   proj.get('smartquotes', True),
+        'dedication':     proj.get('dedication', ''),
+        'epigraph':       proj.get('epigraph', ''),
+        'acknowledgments': proj.get('acknowledgments', ''),
+        'about_author':   proj.get('about_author', ''),
+        'also_by':        proj.get('also_by', ''),
     }
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     base  = slugify(meta['title'] or proj.get('name', 'book'))

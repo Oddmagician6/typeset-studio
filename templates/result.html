@@ -166,6 +166,11 @@
           <input type="hidden" name="cover_color"       value="{{ meta.cover_color }}">
           <input type="hidden" name="fmt"               value="{{ fmt }}">
           <input type="hidden" name="smartquotes"      value="{{ '1' if meta.smartquotes else '' }}">
+          <input type="hidden" name="dedication"      value="{{ meta.get('dedication','') }}">
+          <input type="hidden" name="epigraph"        value="{{ meta.get('epigraph','') }}">
+          <input type="hidden" name="acknowledgments" value="{{ meta.get('acknowledgments','') }}">
+          <input type="hidden" name="about_author"    value="{{ meta.get('about_author','') }}">
+          <input type="hidden" name="also_by"         value="{{ meta.get('also_by','') }}">
           <input type="hidden" name="last_epub"         value="{{ epub_name }}">
           <div class="row">
             <input type="text" name="project_name" value="{{ meta.title }}" placeholder="Project name">

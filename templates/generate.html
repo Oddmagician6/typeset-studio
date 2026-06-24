@@ -142,6 +142,43 @@
     </fieldset>
 
     <fieldset>
+      <legend>Front matter extras</legend>
+      <div class="fs-body">
+        <p class="or" style="margin-top:0">optional — each filled field adds its own page after the copyright</p>
+        <div class="row">
+          <div class="field wide"><label>Dedication</label>
+            <span class="hint">Short, personal — "For Sarah, who believed."</span>
+            <textarea name="dedication" rows="3">{{ form.get('dedication','') }}</textarea></div>
+        </div>
+        <div class="row">
+          <div class="field wide"><label>Epigraph</label>
+            <span class="hint">A quoted passage. Put the attribution on the last line, starting with —</span>
+            <textarea name="epigraph" rows="4">{{ form.get('epigraph','') }}</textarea></div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Back matter</legend>
+      <div class="fs-body">
+        <p class="or" style="margin-top:0">optional — each filled field adds its own page after the last chapter</p>
+        <div class="row">
+          <div class="field wide"><label>Acknowledgments</label>
+            <textarea name="acknowledgments" rows="4">{{ form.get('acknowledgments','') }}</textarea></div>
+        </div>
+        <div class="row">
+          <div class="field wide"><label>About the Author</label>
+            <textarea name="about_author" rows="4">{{ form.get('about_author','') }}</textarea></div>
+        </div>
+        <div class="row">
+          <div class="field wide"><label>Also By</label>
+            <span class="hint">One title per line</span>
+            <textarea name="also_by" rows="4">{{ form.get('also_by','') }}</textarea></div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
       <legend>Output format</legend>
       <div class="fs-body">
         <div class="row">
