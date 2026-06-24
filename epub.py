@@ -85,6 +85,11 @@ p.scene-break {
 .matter-epigraph { margin: 0 10%; padding-top: 25%; }
 .matter-epigraph p { text-indent: 0; margin: 0.3em 0; }
 .matter-epigraph .attr { text-align: right; color: #555; font-size: 0.9em; margin-top: 0.6em; }
+.toc-list { list-style: none; padding: 0; margin: 0; }
+.toc-list li { padding: 0.25em 0; border-bottom: 1px solid #eee; }
+.toc-list li a { text-decoration: none; color: inherit; }
+.toc-part { font-weight: bold; margin-top: 0.8em; border-bottom: none !important; }
+.toc-indent { padding-left: 1.5em; }
 .matter-alsoby { text-align: center; }
 .matter-alsoby .matter-head { font-size: 1.2em; font-weight: bold; margin: 2em 0 1em; }
 .matter-alsoby p { text-indent: 0; margin: 0.3em 0; }
@@ -118,6 +123,30 @@ def _default_copyright(meta):
     if meta.get('publisher'):
         lines += ['', meta['publisher']]
     return '\n'.join(lines)
+
+
+def _toc_page_xhtml(chapters, preset):
+    """In-text TOC page for EPUB — chapter links, no page numbers."""
+    c        = preset.get('chapter', {})
+    show_num = c.get('show_number', True)
+    num_fmt  = c.get('number_format', 'Chapter {n}')
+    pd       = preset.get('part_divider', {})
+    pd_fmt   = pd.get('number_format', 'Part {n}')
+
+    body = '<div class="matter-body">\n  <h1 class="matter-head">Contents</h1>\n  <ul class="toc-list">\n'
+    current_part_num = None
+    for idx, ch in enumerate(chapters, start=1):
+        ch_part     = ch.get('part')
+        ch_part_num = ch_part['number'] if ch_part else None
+        if ch_part_num is not None and ch_part_num != current_part_num:
+            part_label = ch_part.get('title') or pd_fmt.format(n=ch_part_num)
+            body += f'    <li class="toc-part"><a href="part{ch_part_num:03d}.xhtml">{part_label}</a></li>\n'
+            current_part_num = ch_part_num
+        label = ch.get('title') or (num_fmt.format(n=idx) if show_num else f'Chapter {idx}')
+        indent = ' class="toc-indent"' if ch_part_num is not None else ''
+        body += f'    <li{indent}><a href="chapter{idx:03d}.xhtml">{label}</a></li>\n'
+    body += '  </ul>\n</div>\n'
+    return _xhtml('Contents', body)
 
 
 def _part_xhtml(part_num, title, preset):
@@ -293,6 +322,8 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None):
         toc.append(('cover.xhtml', 'Cover'))
     if has_front:
         toc.append(('front.xhtml', 'Front Matter'))
+    if meta.get('include_toc'):
+        toc.append(('toc.xhtml', 'Contents'))
     if meta.get('dedication', '').strip():
         toc.append(('dedication.xhtml', 'Dedication'))
     if meta.get('epigraph', '').strip():
@@ -381,6 +412,11 @@ def build_epub(manuscript, preset, out_path, meta):
                                 'type': 'application/xhtml+xml'})
         spine_items.append('front')
 
+    if meta.get('include_toc'):
+        manifest_items.append({'id': 'toc-page', 'href': 'toc.xhtml',
+                                'type': 'application/xhtml+xml'})
+        spine_items.append('toc-page')
+
     _front_extras = [('dedication', 'ded'), ('epigraph', 'epi')]
     for _fkey, _fid in _front_extras:
         if meta.get(_fkey, '').strip():
@@ -431,6 +467,9 @@ def build_epub(manuscript, preset, out_path, meta):
 
         if has_front:
             zf.writestr('OEBPS/front.xhtml', _front_xhtml(meta))
+
+        if meta.get('include_toc'):
+            zf.writestr('OEBPS/toc.xhtml', _toc_page_xhtml(chapters, preset))
 
         if meta.get('dedication', '').strip():
             zf.writestr('OEBPS/dedication.xhtml',

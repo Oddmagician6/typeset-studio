@@ -16,6 +16,7 @@ Imposition produced:
 
 import os
 import re
+import math
 import tempfile
 
 try:
@@ -142,6 +143,28 @@ class OpenerMarker(Flowable):
     def draw(self): self.canv._is_opener = True
 
 
+class TocMarker(Flowable):
+    """Chapter opener marker that also records its page for TOC generation."""
+    width = height = 0
+
+    def __init__(self, idx, title, part=None):
+        super().__init__()
+        self.idx, self.title, self.part = idx, title, part
+
+    def wrap(self, w, h): return (0, 0)
+
+    def draw(self):
+        self.canv._is_opener = True
+        doc = self.canv._doctemplate
+        if hasattr(doc, '_toc_entries'):
+            doc._toc_entries.append({
+                'idx':   self.idx,
+                'title': self.title,
+                'part':  self.part,
+                'page':  self.canv.getPageNumber(),
+            })
+
+
 class HRule(Flowable):
     """Thin horizontal rule for framing document blocks."""
     def __init__(self, color=(0.55, 0.55, 0.55), thickness=0.5):
@@ -212,7 +235,8 @@ class BookDoc(BaseDocTemplate):
     def __init__(self, filename, preset, meta, head_font, cover=None, **kw):
         self.preset, self.meta = preset, meta
         self.head_font = head_font
-        self._body_start = None            # page number of the first chapter opener
+        self._body_start  = None           # page number of the first chapter opener
+        self._toc_entries = []             # filled by TocMarker during build
         self._cover = cover or {}          # {path, overlay, color, title_font}
         trim = preset['trim']
         pw, ph = trim['w'] * inch, trim['h'] * inch
@@ -546,7 +570,8 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
     return out
 
 
-def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False, avail_w=0, hyph=None):
+def _build_story(manuscript, preset, meta, fonts, st, head_font,
+                 has_cover=False, avail_w=0, hyph=None, toc_flowables=None):
     glyph = preset['scene_break']['glyph']
     story = []
 
@@ -595,6 +620,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False
             story += copyright_page()
         elif level == 'copyright':
             story += copyright_page()
+
+    # ---- table of contents (inserted after copyright, before front extras) ----
+    if toc_flowables:
+        story.append(RectoBreak() if rhs else PageBreak())
+        story.extend(toc_flowables)
 
     # ---- front matter extras (dedication, epigraph) ----
     sq = meta.get('smartquotes', True)
@@ -648,7 +678,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False
             story.append(PageBreak())
         need_break = True
 
-        story.append(OpenerMarker())
+        story.append(TocMarker(idx, ch.get('title'), ch.get('part')))
         story.append(Spacer(1, c['sink'] * inch))
         if c.get('show_number', True):
             label = c.get('number_format', 'Chapter {n}').format(n=idx)
@@ -708,6 +738,58 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False
     return story
 
 
+def _build_toc(entries, body_start, avail_w, preset, fonts, st, folio_offset=0):
+    """Return flowables for the Contents page(s)."""
+    c       = preset['chapter']
+    num_fmt = c.get('number_format', 'Chapter {n}')
+    size    = st['body'].fontSize
+    lead    = st['body'].leading
+    font    = fonts['regular']
+
+    toc_ch  = ParagraphStyle('toc_ch',  fontName=font, fontSize=size,   leading=lead,    firstLineIndent=0)
+    toc_pt  = ParagraphStyle('toc_pt',  fontName=fonts.get('bold', font),
+                              fontSize=size, leading=lead + 2, firstLineIndent=0,
+                              spaceBefore=4, textColor=(0.2, 0.2, 0.2))
+
+    out = [BlankMarker(), Paragraph('Contents', st['chap_title']), Spacer(1, 0.4 * inch)]
+
+    dot_char = '.'
+    last_part = None
+
+    for e in entries:
+        folio = (e['page'] - (body_start or 1) + 1) + folio_offset
+        if folio < 1:
+            folio = 1
+
+        # Part heading (no page number)
+        part = e.get('part')
+        if part and part != last_part:
+            out.append(Paragraph(part.get('title') or
+                                 f"Part {part['number']}", toc_pt))
+            last_part = part
+
+        # Chapter line with dot leaders
+        label    = e.get('title') or num_fmt.format(n=e['idx'])
+        folio_s  = str(folio)
+        lw       = stringWidth(label + '  ',  font, size)
+        fw       = stringWidth('  ' + folio_s, font, size)
+        n_dots   = max(3, int((avail_w - lw - fw) / stringWidth(dot_char, font, size)))
+        line     = f'{label}  {dot_char * n_dots}  {folio_s}'
+        indent   = 0.18 * inch if part else 0
+        s = ParagraphStyle('toc_line', parent=toc_ch, leftIndent=indent)
+        out.append(Paragraph(line, s))
+
+    return out
+
+
+def _estimate_toc_pages(toc_flowables, preset):
+    m  = preset['margins']
+    ph = (preset['trim']['h'] - m['top'] - m['bottom']) * inch
+    pw = (preset['trim']['w'] - m['inside'] - m['outside']) * inch
+    total = sum(f.wrap(pw, ph)[1] for f in toc_flowables if hasattr(f, 'wrap'))
+    return max(1, math.ceil(total / ph))
+
+
 def _prepare_cover(meta, preset):
     """Crop/scale the cover art to the trim at 300 dpi. Returns a temp path or None."""
     src = meta.get('cover_image')
@@ -744,12 +826,45 @@ def build_pdf(manuscript, preset, out_path, meta):
     m       = preset['margins']
     avail_w = (preset['trim']['w'] - m['inside'] - m['outside']) * inch
     hyph    = _pyphen.Pyphen(lang='en_US') if (preset['body'].get('hyphenate') and _HAVE_PYPHEN) else None
-    story   = _build_story(manuscript, preset, meta, fonts, st, head_font,
-                           has_cover=bool(cover), avail_w=avail_w, hyph=hyph)
-    doc = BookDoc(out_path, preset, meta, head_font, cover=cover,
-                  title=meta.get('title', ''), author=meta.get('author', ''))
-    doc.build(story)
-    page_count = doc.page
+
+    def _make_doc(path):
+        return BookDoc(path, preset, meta, head_font, cover=cover,
+                       title=meta.get('title', ''), author=meta.get('author', ''))
+
+    if meta.get('include_toc'):
+        # Pass 1 — no TOC, just capture chapter positions
+        fd, tmp = tempfile.mkstemp(suffix='.pdf')
+        os.close(fd)
+        story1 = _build_story(manuscript, preset, meta, fonts, st, head_font,
+                              has_cover=bool(cover), avail_w=avail_w, hyph=hyph)
+        doc1 = _make_doc(tmp)
+        doc1.build(story1)
+        body_start = doc1._body_start or 1
+        entries    = doc1._toc_entries
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+        # Estimate TOC page count, then rebuild TOC with adjusted folios
+        toc_draft = _build_toc(entries, body_start, avail_w, preset, fonts, st)
+        toc_pages = _estimate_toc_pages(toc_draft, preset)
+        toc_final = _build_toc(entries, body_start, avail_w, preset, fonts, st,
+                                folio_offset=toc_pages)
+
+        # Pass 2 — with TOC injected
+        story2 = _build_story(manuscript, preset, meta, fonts, st, head_font,
+                               has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
+                               toc_flowables=toc_final)
+        doc2 = _make_doc(out_path)
+        doc2.build(story2)
+        page_count = doc2.page
+    else:
+        story = _build_story(manuscript, preset, meta, fonts, st, head_font,
+                             has_cover=bool(cover), avail_w=avail_w, hyph=hyph)
+        doc = _make_doc(out_path)
+        doc.build(story)
+        page_count = doc.page
     if cover_path:
         try:
             os.remove(cover_path)

@@ -120,6 +120,8 @@
         </div>
         <div class="check"><input type="checkbox" id="rhs" name="right_hand_starts" {{ 'checked' if proj.right_hand_starts }}>
           <label for="rhs">Add blank pages so the story and each chapter start on a right-hand page</label></div>
+        <div class="check"><input type="checkbox" id="toc" name="include_toc" {{ 'checked' if proj.get('include_toc') }}>
+          <label for="toc">Include a table of contents</label></div>
       </div>
     </fieldset>
 

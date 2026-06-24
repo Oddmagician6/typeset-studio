@@ -138,6 +138,8 @@
               {{ 'checked' if form.get('right_hand_starts') or not form }}>
           <label for="rhs">Add blank pages so the story and each chapter start on a
             right-hand page (standard for print books — uncheck for no blank pages)</label></div>
+        <div class="check"><input type="checkbox" id="toc" name="include_toc" {{ 'checked' if form.get('include_toc') }}>
+          <label for="toc">Include a table of contents</label></div>
       </div>
     </fieldset>
 
