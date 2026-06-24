@@ -4,23 +4,42 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Typeset Studio{% endblock %}</title>
+<!-- Apply saved theme before paint to prevent flash -->
+<script>(function(){var t=localStorage.getItem('ts-theme');if(!t)t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';if(t==='dark')document.documentElement.dataset.theme='dark';})()</script>
 <style>
   :root{
-    --bg:#e7e4dc;          /* cool press-paper grey */
-    --surface:#f7f5f0;     /* lighter paper for cards */
-    --surface-2:#fbfaf6;
+    --bg:#e7e4dc;          /* press-paper grey */
+    --surface:#f7f5f0;     /* card surface */
+    --surface-2:#fbfaf6;   /* input background */
     --ink:#1b1a18;         /* warm near-black */
-    --muted:#6c665b;       /* pencil grey */
-    --faint:#928c80;
-    --rule:#cbc6ba;        /* hairline */
+    --muted:#6c665b;       /* secondary text */
+    --faint:#928c80;       /* placeholder / label */
+    --rule:#cbc6ba;        /* hairline border */
     --rule-strong:#b4ae9f;
     --red:#b12a1d;         /* proofreader's red */
     --red-deep:#8f2014;
     --shadow:0 1px 0 rgba(27,26,24,.04), 0 14px 30px -22px rgba(27,26,24,.5);
+    --stripe:rgba(27,26,24,.04);   /* ruled-line stripe in specimen areas */
     --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
     --sans:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
     --mono:"Consolas","SF Mono","Cascadia Mono",Menlo,"Liberation Mono",monospace;
   }
+
+  html[data-theme="dark"]{
+    --bg:#1c1b19;
+    --surface:#242320;
+    --surface-2:#2b2a27;
+    --ink:#e4dfd5;
+    --muted:#9c9287;
+    --faint:#6b6258;
+    --rule:#38352f;
+    --rule-strong:#4a4640;
+    --red:#c9372a;
+    --red-deep:#e04030;
+    --shadow:0 1px 0 rgba(0,0,0,.3), 0 14px 30px -22px rgba(0,0,0,.7);
+    --stripe:rgba(255,255,255,.04);
+  }
+
   *{box-sizing:border-box}
   html,body{margin:0}
   body{
@@ -51,8 +70,14 @@
     font-family:var(--sans);font-size:13px;text-decoration:none;color:var(--muted);
     padding:6px 12px;border-radius:2px;letter-spacing:.01em;
   }
-  .nav a:hover{color:var(--ink);background:rgba(27,26,24,.05)}
+  .nav a:hover{color:var(--ink);background:rgba(127,127,127,.1)}
   .nav a.active{color:var(--ink);box-shadow:inset 0 -2px 0 var(--red)}
+  #theme-toggle{
+    font-family:var(--mono);font-size:13px;padding:5px 9px;margin-left:4px;
+    background:transparent;border:1px solid var(--rule-strong);border-radius:2px;
+    color:var(--faint);cursor:pointer;line-height:1;
+  }
+  #theme-toggle:hover{color:var(--ink);border-color:var(--muted)}
 
   /* ---- page frame ---- */
   main{max-width:1040px;margin:0 auto;padding:34px 22px 80px}
@@ -62,9 +87,7 @@
   .pagehead p{margin:0;color:var(--muted);max-width:60ch}
 
   /* ---- flash ---- */
-  .flash{
-    max-width:1040px;margin:16px auto 0;padding:0 22px;
-  }
+  .flash{max-width:1040px;margin:16px auto 0;padding:0 22px;}
   .flash div{
     background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--red);
     padding:10px 14px;font-size:14px;color:var(--ink);border-radius:2px;
@@ -81,14 +104,26 @@
   .btn-primary:hover{background:var(--red-deep);border-color:var(--red-deep);color:#fff}
   .btn-sm{padding:6px 11px;font-size:13px}
   .btn-ghost{background:transparent;border-color:transparent;color:var(--muted)}
-  .btn-ghost:hover{color:var(--red-deep);background:rgba(177,42,29,.06)}
+  .btn-ghost:hover{color:var(--red-deep);background:rgba(177,42,29,.08)}
 
   .inline-form{display:inline}
 
-  /* ---- spec readout (signature) ---- */
+  /* ---- spec readout ---- */
   .spec{font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.7}
   .spec b{color:var(--ink);font-weight:600}
   .spec .k{color:var(--faint)}
+
+  /* ---- ruled specimen stripe (index + editor preview cards) ---- */
+  .specimen{
+    background:
+      repeating-linear-gradient(transparent,transparent 27px,var(--stripe) 27px,var(--stripe) 28px)
+      !important;
+  }
+
+  /* ---- dark-mode input/select focus override ---- */
+  html[data-theme="dark"] input:focus,
+  html[data-theme="dark"] select:focus,
+  html[data-theme="dark"] textarea:focus{background:var(--surface-2)!important;color:var(--ink)!important}
 
   @media (prefers-reduced-motion:no-preference){
     .card{animation:rise .4s ease both}
@@ -107,6 +142,7 @@
         <a href="{{ url_for('index') }}" class="{{ 'active' if active=='styles' }}">Styles</a>
         <a href="{{ url_for('projects') }}" class="{{ 'active' if active=='projects' }}">Projects</a>
         <a href="{{ url_for('generate') }}" class="{{ 'active' if active=='generate' }}">Set a book</a>
+        <button id="theme-toggle" title="Toggle dark mode" onclick="toggleTheme()">◑</button>
       </nav>
     </div>
   </header>
@@ -120,5 +156,18 @@
   <main>
     {% block body %}{% endblock %}
   </main>
+
+  <script>
+    function toggleTheme(){
+      var html=document.documentElement;
+      var dark=html.dataset.theme==='dark';
+      html.dataset.theme=dark?'light':'dark';
+      localStorage.setItem('ts-theme',dark?'light':'dark');
+      document.getElementById('theme-toggle').textContent=dark?'◑':'◐';
+    }
+    // Set initial toggle icon to match current theme
+    document.getElementById('theme-toggle').textContent=
+      document.documentElement.dataset.theme==='dark'?'◐':'◑';
+  </script>
 </body>
 </html>
