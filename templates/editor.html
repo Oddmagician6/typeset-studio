@@ -162,12 +162,22 @@
         <legend>Scene breaks</legend>
         <div class="fs-body">
           <div class="row">
-            <div class="field"><label>Mark</label><span class="hint">what prints between scenes</span>
-              <input type="text" id="f-glyph" name="s_glyph" value="{{ p.scene_break.glyph }}"></div>
-            <div class="field num"><label>Mark size</label><span class="hint">points</span>
+            <div class="field"><label>Type</label>
+              {% set sbt = p.scene_break.get('type', 'glyph') %}
+              <select name="sb_type">
+                <option value="glyph" {{ 'selected' if sbt=='glyph' }}>Text glyph</option>
+                <option value="image" {{ 'selected' if sbt=='image' }}>Image ornament</option>
+              </select></div>
+            <div class="field num"><label>Size</label><span class="hint">points · height for images</span>
               <input type="number" step="0.5" name="s_size" value="{{ p.scene_break.size }}"></div>
             <div class="field num"><label>Space around</label><span class="hint">points</span>
               <input type="number" step="0.5" name="s_gap" value="{{ p.scene_break.gap }}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Glyph</label><span class="hint">used when type is Text glyph</span>
+              <input type="text" id="f-glyph" name="s_glyph" value="{{ p.scene_break.glyph }}"></div>
+            <div class="field"><label>Ornament image</label><span class="hint">filename in /fonts or full path · PNG/JPG</span>
+              <input type="text" name="sb_image" value="{{ p.scene_break.get('image','') }}"></div>
           </div>
         </div>
       </fieldset>

@@ -95,9 +95,10 @@ def register_fonts(preset):
 
 # ---------------------------------------------------------------- flowables
 class SceneBreak(Flowable):
-    def __init__(self, glyph, font, size, gap):
+    def __init__(self, glyph, font, size, gap, image_path=None):
         super().__init__()
         self.glyph, self.font, self.size, self.gap = glyph, font, size, gap
+        self.image_path = image_path
 
     def wrap(self, w, h):
         self.width = w
@@ -105,6 +106,20 @@ class SceneBreak(Flowable):
         return (w, self.height)
 
     def draw(self):
+        if self.image_path and os.path.exists(self.image_path):
+            try:
+                from reportlab.lib.utils import ImageReader
+                ir  = ImageReader(self.image_path)
+                iw, ih = ir.getSize()
+                img_h = self.size
+                img_w = img_h * (iw / ih)
+                x = (self.width - img_w) / 2.0
+                self.canv.drawImage(self.image_path, x, self.gap,
+                                    width=img_w, height=img_h, mask='auto')
+                return
+            except Exception:
+                pass
+        # Fallback: text glyph
         self.canv.setFont(self.font, self.size)
         self.canv.drawCentredString(self.width / 2.0, self.gap, self.glyph)
 
@@ -644,9 +659,13 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font, has_cover=False
         flush_next = False  # paragraph right after scene/subhead: no indent
         for kind, val in ch['blocks']:
             if kind == 'scene':
-                story.append(SceneBreak(glyph, head_font,
-                                        preset['scene_break']['size'],
-                                        preset['scene_break']['gap']))
+                sb = preset['scene_break']
+                img_path = None
+                if sb.get('type') == 'image' and sb.get('image', '').strip():
+                    raw_img = sb['image'].strip()
+                    img_path = raw_img if os.path.isabs(raw_img) else os.path.join(FONT_DIR, raw_img)
+                story.append(SceneBreak(glyph, head_font, sb['size'], sb['gap'],
+                                        image_path=img_path))
                 flush_next = True
             elif kind == 'subhead':
                 story.append(Paragraph(val, st['subhead']))
