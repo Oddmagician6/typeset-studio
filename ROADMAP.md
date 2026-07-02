@@ -24,11 +24,12 @@ app.py            Flask routes + preset/project CRUD + form parsing. Entry point
 engine.py         The typesetting engine (ReportLab). Builds the PDF. Two-pass when TOC enabled.
 manuscript.py     Parses Markdown / imports .docx → a chapters/blocks structure.
 epub.py           EPUB 3 builder — consumes the same parsed structure as engine.py.
+checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
-                  generate, result, projects, project_edit.
-presets/*.json    One file per style. Cloneable per customer.
+                  generate, result, projects, project_edit, continuity_result.
+presets/*.json    One file per style. Cloneable per customer. Seven presets ship by default.
 fonts/*.ttf       Embeddable TrueType faces (family "Book"). Also stores scene-break ornament images.
-sample/sample.md  Demo manuscript.
+sample/sample.md  Demo manuscript (3 chapters; Chapter 3 exercises all 5 epistolary block types).
 out/              Composed PDFs / EPUBs land here (also served for download).
 uploads/          User-uploaded manuscripts / cover art (created at runtime).
 projects/         One .json per saved project.
@@ -62,8 +63,10 @@ part_divider:  {show_number, number_format, number_size, title_size, sink}
                sink is a 0–1 fraction of the text-area height
 scene_break:   {type, glyph, size, gap, image}
                type: "glyph" | "image"; image is a filename in fonts/ or absolute path
-document_block:{frame, indent, font_size, first_indent, space_around}
+document_block:{frame, indent, font_size, first_indent, space_around,
+               header_size, dateline_style}
                frame: "none" | "ruled" | "box"
+               dateline_style: "italic" | "bold" | "smallcaps"
 running_head:  {show, caps, size, gap}       gap in inches
 folio:         {show, position, size, gap, hide_on_opener}   position: "outer" | "center"
 ```
@@ -106,6 +109,7 @@ block = ("para", html_text)
       | ("subhead", html_text)
       | ("scene", None)
       | ("doc_block", [("para", html_text), ...])
+      | ("doc_block", [("para", html_text), ...], {"_type": str, attr: str, ...})
 ```
 
 Inline emphasis is converted to ReportLab markup (`<b>`, `<i>`), with optional smart
@@ -117,10 +121,23 @@ punctuation applied first. Markup conventions:
 | `# Chapter title`  | starts a new chapter           |
 | `## Subhead`       | a centered section subhead     |
 | `* * *` (own line) | a scene break                  |
-| `~~~` … `~~~`      | an epistolary / document block |
+| `~~~` … `~~~`      | plain document block (indented / ruled / boxed per preset) |
+| `~~~ letter from="X" to="Y" date="Z"` | typed epistolary block (see below) |
 | `*italic*`         | *italic*                       |
 | `**bold**`         | **bold**                       |
 | blank line         | new paragraph                  |
+
+Typed epistolary block types (opening fence declares type + attributes):
+```
+~~~ letter    from="…" to="…" date="…"
+~~~ journal   date="…" author="…"
+~~~ telegram  to="…"
+~~~ newspaper headline="…" date="…" source="…"
+~~~ redacted  classification="…"
+```
+Each type has a distinct visual signature in PDF (header between rules, italic body,
+Courier uppercase, bold headline, classification banner) and semantic CSS classes in
+EPUB (`doc-block-letter`, etc.). Plain `~~~` with no type is unchanged.
 
 `.docx` import (`manuscript.import_docx`) maps Heading 1 → chapter, runs → bold/italic.
 
@@ -203,12 +220,21 @@ created, updated    ISO 8601 datetime strings
   `Table` so ReportLab can split it across pages with proper borders. The `ruled` and `none`
   styles use plain `Paragraph` flowables. Never use `KeepTogether` for long blocks.
 
+- **`doc_block` is a 2- or 3-tuple:** `('doc_block', paras)` for plain blocks;
+  `('doc_block', paras, meta_dict)` for typed blocks where `meta_dict['_type']` is the
+  block type. All dispatch code must index by position (`block[0]`, `block[1]`,
+  `block[2] if len(block) > 2 else {}`) — never unpack with `kind, val = block` as that
+  crashes on 3-tuples. `checker.py` uses `block[1]` only and is safe.
+
+- **Telegram font:** uses ReportLab's built-in `'Courier'` — always available, no
+  registration needed. No other epistolary type introduces a new font dependency.
+
+- **`dateline_style: "smallcaps"`** is faked as uppercase + bold (no true small-caps font
+  registered). Text is uppercased in `_ep_dtext()` before being passed to the bold font.
+
 ---
 
 ## Feature status
-
-All Tier 1–3 backlog items and the Tier 4 EPUB export are **shipped**. The list below
-shows what was built and where to find it.
 
 ### ✓ Tier 1 — shipped
 
@@ -228,15 +254,34 @@ and flags inside-margin adequacy for KDP and IngramSpark after every PDF build.
 · `templates/result.html` (Preflight card). Checks: font loading, fonts embedded, page
 count within KDP range. Red ✗ with explanation on failure; green ✓ when clear.
 
-**4. Epistolary / document block style**
-`manuscript.py` (`DOCBLOCK_RE`, `~~~ … ~~~` parsing → `('doc_block', [...])` blocks) ·
-`engine.py` (`HRule` flowable, `_render_doc_block()`) · `epub.py` (`.doc-block` CSS +
-`<div>` output) · `templates/editor.html` (Document blocks fieldset with frame/indent/size).
+**4. Epistolary / mixed-media document blocks**
+`manuscript.py` (`DOCBLOCK_RE`, `_parse_block_header()`; plain `~~~` → 2-tuple;
+typed `~~~ letter from="…"` etc. → 3-tuple with `_type` + attrs) · `engine.py`
+(`_render_doc_block()` dispatches to five type-specific render functions: letter, journal,
+telegram, newspaper, redacted; `_ep_plain()`, `_ep_dfont()`, `_ep_dtext()` helpers) ·
+`epub.py` (per-type CSS classes + semantic `<header>` element) ·
+`templates/editor.html` (Document blocks fieldset: frame/indent/size/header size/dateline
+style + typed syntax hint).
 
 **12. EPUB export** *(moved up from Tier 4)*
 `epub.py` (stdlib-only EPUB 3 builder: manifest, spine, nav, CSS, chapter XHTML, cover,
 part pages, matter pages, TOC page) · `app.py` (format selector in generate + projects) ·
 `templates/generate.html` (Output format fieldset: PDF / EPUB / Both).
+
+**13. Continuity checker**
+`checker.py` (`run_tier1()`: duplicate chapter titles, name spelling variants via difflib,
+POV pronoun drift, repeated sentences ≥10 words, thin/empty chapters; `run_tier2()`:
+Claude Haiku semantic analysis when `ANTHROPIC_API_KEY` is set) ·
+`templates/continuity_result.html` (two-card preflight layout, badge-ok / badge-warn) ·
+`app.py` (`POST /project/<pid>/continuity` route) ·
+`templates/projects.html` (Check button on each project card).
+
+**14. Genre presets (×7)**
+`presets/`: Classic Literary 6×9, Gothic/Horror 5.5×8.5, Modern Clean 6×9,
+Thriller/Crime 5.5×8.5 (bare numeral headings, em-dash scene break),
+Mass Market Paperback 4.25×6.87 (9.5pt, hyphenation on),
+Romance/Women's Fiction 5.5×8.5 (raised initial, 16pt leading),
+Science Fiction & Fantasy 6×9 (dropcap, deep sink).
 
 ### ✓ Tier 2 — shipped
 
