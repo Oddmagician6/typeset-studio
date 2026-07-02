@@ -226,6 +226,25 @@
             <div class="field num"><label>Space around</label><span class="hint">points</span>
               <input type="number" step="0.5" name="db_space_around" value="{{ db.get('space_around', 12.0) }}"></div>
           </div>
+          <div class="row">
+            <div class="field num"><label>Header size</label><span class="hint">points · dateline, byline, labels</span>
+              <input type="number" step="0.25" name="db_header_size" value="{{ db.get('header_size', 9.5) }}"></div>
+            <div class="field"><label>Dateline style</label><span class="hint">typed blocks — From/To/Date lines</span>
+              <select name="db_dateline_style">
+                {% set dds = db.get('dateline_style', 'italic') %}
+                <option value="italic"    {{ 'selected' if dds=='italic'    }}>Italic</option>
+                <option value="bold"      {{ 'selected' if dds=='bold'      }}>Bold</option>
+                <option value="smallcaps" {{ 'selected' if dds=='smallcaps' }}>Small caps (uppercase bold)</option>
+              </select></div>
+          </div>
+          <p class="hint" style="margin-top:6px;line-height:1.6">
+            <b>Typed block syntax</b> — add a type after <code>~~~</code> on the opening line:<br>
+            <code>~~~ letter from="Sender" to="Recipient" date="Date"</code><br>
+            <code>~~~ journal date="Thursday" author="Mina"</code><br>
+            <code>~~~ telegram to="Mr. Hawkins"</code><br>
+            <code>~~~ newspaper headline="…" date="…" source="…"</code><br>
+            <code>~~~ redacted classification="EYES ONLY"</code>
+          </p>
         </div>
       </fieldset>
 

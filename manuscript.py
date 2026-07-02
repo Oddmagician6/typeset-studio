@@ -10,6 +10,13 @@ Conventions
   * * *  /  ***  /  ---  -> a scene break (on its own line)
   blank line             -> paragraph separator
   *italic*  **bold**     -> inline emphasis
+  ~~~                    -> plain document block (indented / ruled / boxed per preset)
+  ~~~ type key="value"   -> typed epistolary block; supported types:
+                            letter   from="…" to="…" date="…"
+                            journal  date="…" author="…"
+                            telegram to="…"
+                            newspaper headline="…" date="…" source="…"
+                            redacted classification="…"
 
 Anything before the first "# " is treated as the opening of an untitled first
 chapter, so a plain manuscript with no headings still works.
@@ -22,8 +29,9 @@ import html
 SCENE_BREAK_RE = re.compile(r'^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$')
 CHAPTER_RE     = re.compile(r'^#\s+(.*)$')
 SUBHEAD_RE     = re.compile(r'^##\s+(.*)$')
-DOCBLOCK_RE    = re.compile(r'^\s*~~~')
+DOCBLOCK_RE    = re.compile(r'^\s*~~~(.*)')
 PART_RE        = re.compile(r'^\s*===\s*(.*)')
+_ATTR_RE       = re.compile(r'(\w+)="([^"]*)"')
 
 
 def _smarten(text):
@@ -60,12 +68,26 @@ def _inline(text, smartquotes=True):
     return text
 
 
+def _parse_block_header(header):
+    """Parse '~~~ type key="value" …' into (type_str, attrs_dict).
+
+    Returns ('', {}) for a plain ~~~ fence with no header text.
+    """
+    parts = header.strip().split(None, 1)
+    if not parts:
+        return '', {}
+    block_type = parts[0].lower()
+    attrs = dict(_ATTR_RE.findall(parts[1])) if len(parts) > 1 else {}
+    return block_type, attrs
+
+
 def parse_markdown(raw, smartquotes=True):
     """Return {'chapters': [{'title': str|None, 'part': dict|None, 'blocks': [...] }]}.
 
     Each block is:
       ('para', text) | ('subhead', text) | ('scene', None)
       | ('doc_block', [('para', text), ...])
+      | ('doc_block', [('para', text), ...], {'_type': str, attr: str, ...})
 
     'part' on each chapter is {'title': str|None, 'number': int} or None.
     """
@@ -82,6 +104,8 @@ def parse_markdown(raw, smartquotes=True):
     in_block       = False
     block_buf      = []
     block_para_buf = []
+    block_type     = ''
+    block_attrs    = {}
 
     def flush_para():
         nonlocal para_buf
@@ -116,18 +140,25 @@ def parse_markdown(raw, smartquotes=True):
                 current_part = {'title': part_title, 'number': part_number}
                 continue
 
-        # ~~~ fence — toggle doc-block mode (optional label after ~~~ is ignored)
-        if DOCBLOCK_RE.match(line):
+        # ~~~ fence — toggle doc-block mode; optional type + attrs on opening line
+        m_doc = DOCBLOCK_RE.match(line)
+        if m_doc:
             if in_block:
                 flush_block_para()
                 if block_buf:
-                    cur['blocks'].append(('doc_block', list(block_buf)))
+                    blk = ('doc_block', list(block_buf))
+                    if block_type:
+                        blk = blk + ({'_type': block_type, **block_attrs},)
+                    cur['blocks'].append(blk)
                 block_buf[:] = []
+                block_type = ''
+                block_attrs = {}
                 in_block = False
             else:
                 flush_para()
                 if cur is None:
                     new_chapter(None)
+                block_type, block_attrs = _parse_block_header(m_doc.group(1))
                 in_block = True
             continue
 
@@ -163,7 +194,10 @@ def parse_markdown(raw, smartquotes=True):
     if in_block:
         flush_block_para()
         if block_buf:
-            cur['blocks'].append(('doc_block', list(block_buf)))
+            blk = ('doc_block', list(block_buf))
+            if block_type:
+                blk = blk + ({'_type': block_type, **block_attrs},)
+            cur['blocks'].append(blk)
     flush_para()
 
     chapters = [c for c in chapters if c['blocks'] or c['title']]

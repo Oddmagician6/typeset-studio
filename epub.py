@@ -74,6 +74,14 @@ p.scene-break {
   font-size: 0.95em;
 }
 .doc-block p { text-indent: 0; margin: 0.4em 0; }
+.doc-block header { font-style: italic; font-size: 0.9em; color: #555; margin-bottom: 0.5em; border-bottom: 1px solid #ccc; padding-bottom: 0.3em; }
+.doc-block-journal { font-style: italic; }
+.doc-block-telegram { font-family: monospace; border: 1px solid #888; padding: 0.7em 1em; }
+.doc-block-telegram header { font-family: serif; font-weight: bold; font-style: normal; text-align: center; font-size: 1em; color: #222; border-bottom: 1px solid #888; }
+.doc-block-newspaper header { font-size: 1.05em; font-weight: bold; font-style: normal; text-align: center; color: #111; border-bottom: 2px solid #333; padding-bottom: 0.2em; }
+.doc-block-newspaper header span.byline { display: block; font-size: 0.85em; font-weight: normal; font-style: italic; color: #555; }
+.doc-block-redacted { border: 1px solid #333; }
+.doc-block-redacted header { font-weight: bold; font-style: normal; text-align: center; background: #e8e8e8; color: #111; padding: 0.3em; margin: -0.7em -0em 0.5em; font-size: 0.85em; letter-spacing: 0.05em; }
 .part-page { margin: 0 5%; text-align: center; padding-top: 30%; }
 .part-page .part-num { font-size: 0.9em; color: #666; margin: 0 0 0.5em; letter-spacing: 0.06em; }
 .part-page .part-title { font-size: 1.6em; font-weight: bold; margin: 0; }
@@ -235,7 +243,9 @@ def _chapter_xhtml(idx, chapter, preset):
     opened         = False
     no_indent_next = False
 
-    for kind, val in chapter.get('blocks', []):
+    for block in chapter.get('blocks', []):
+        kind = block[0]
+        val  = block[1]
         if kind == 'scene':
             lines.append(f'  <p class="scene-break">{scene_glyph}</p>')
             no_indent_next = True
@@ -243,10 +253,49 @@ def _chapter_xhtml(idx, chapter, preset):
             lines.append(f'  <h2>{_markup_to_html(val)}</h2>')
             no_indent_next = True
         elif kind == 'doc_block':
-            lines.append('  <div class="doc-block">')
+            meta   = block[2] if len(block) > 2 else {}
+            btype  = meta.get('_type', '')
+            attrs  = {k: v for k, v in meta.items() if k != '_type'}
+            cls    = f'doc-block doc-block-{btype}' if btype else 'doc-block'
+            lines.append(f'  <div class="{cls}">')
+            # Per-type header element
+            if btype == 'letter':
+                parts = []
+                if attrs.get('from') and attrs.get('to'):
+                    parts.append(f'{attrs["from"]} to {attrs["to"]}')
+                elif attrs.get('from'):
+                    parts.append(attrs['from'])
+                elif attrs.get('to'):
+                    parts.append(f'To: {attrs["to"]}')
+                if attrs.get('date'):
+                    parts.append(attrs['date'])
+                if parts:
+                    lines.append(f'    <header>{" · ".join(parts)}</header>')
+            elif btype == 'journal':
+                parts = [p for p in (attrs.get('date', ''), attrs.get('author', '')) if p]
+                if parts:
+                    lines.append(f'    <header>{" · ".join(parts)}</header>')
+            elif btype == 'telegram':
+                lines.append('    <header>TELEGRAM</header>')
+                if attrs.get('to'):
+                    lines.append(f'    <p class="no-indent">To: {attrs["to"].upper()}</p>')
+            elif btype == 'newspaper':
+                hl = attrs.get('headline', '')
+                src = attrs.get('source', '')
+                date = attrs.get('date', '')
+                byline_parts = [p for p in (src, date) if p]
+                hdr = (f'<span class="headline">{hl.upper()}</span>' if hl else '') + \
+                      (f'<span class="byline">{" · ".join(byline_parts)}</span>' if byline_parts else '')
+                if hdr:
+                    lines.append(f'    <header>{hdr}</header>')
+            elif btype == 'redacted':
+                classification = attrs.get('classification', '')
+                if classification:
+                    lines.append(f'    <header>{classification.upper()}</header>')
             for bi, (_, btext) in enumerate(val):
-                cls = ' class="no-indent"' if bi == 0 else ''
-                lines.append(f'    <p{cls}>{_markup_to_html(btext)}</p>')
+                body_text = btext.upper() if btype == 'telegram' else _markup_to_html(btext)
+                cls_p = ' class="no-indent"' if bi == 0 else ''
+                lines.append(f'    <p{cls_p}>{body_text}</p>')
             lines.append('  </div>')
             no_indent_next = True
         else:

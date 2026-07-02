@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% set active = 'projects' %}
+{% block title %}Continuity Report · Typeset Studio{% endblock %}
+
+{% block style %}
+  .galley{max-width:640px}
+  .ok{color:#2a7a2a}.warn{color:var(--red)}.info-clr{color:var(--muted)}
+  .preflight{margin-top:18px;background:var(--surface);border:1px solid var(--rule);border-radius:3px;box-shadow:var(--shadow);overflow:hidden}
+  .preflight .head{padding:12px 24px;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .preflight .head-label{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--red)}
+  .preflight .badge{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:2px;font-weight:600}
+  .preflight .badge-ok{background:#e6f4e6;color:#2a7a2a}
+  .preflight .badge-warn{background:#fce9e7;color:var(--red)}
+  .preflight .badge-info{background:var(--surface-2);color:var(--muted);border:1px solid var(--rule)}
+  .preflight ul{list-style:none;margin:0;padding:10px 24px 14px}
+  .preflight li{display:flex;align-items:baseline;gap:8px;padding:5px 0;font-size:13.5px;border-bottom:1px solid var(--rule)}
+  .preflight li:last-child{border-bottom:none}
+  .preflight .icon{font-size:11px;flex-shrink:0;width:14px;text-align:center}
+  .preflight .chk-label{font-weight:600;min-width:0;flex:0 0 auto;max-width:340px}
+  .preflight .chk-detail{color:var(--muted);font-size:12.5px;flex:1}
+  .loc{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:2px;display:block}
+  .powered{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .more{margin-top:22px}
+  .more a{font-size:14px}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);padding:1px 5px;border-radius:2px;border:1px solid var(--rule)}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">{{ proj.title or proj.name }}</div>
+    <h1>Continuity Report</h1>
+    <p>Automated checks for <em>{{ proj.title or proj.name }}</em>. Review each finding — not all warnings are errors.</p>
+  </div>
+
+  <div class="galley">
+
+    {# ── Tier 1: Rule-based ── #}
+    {% set t1_warns = issues_t1 | selectattr('severity', 'equalto', 'warn') | list %}
+    <div class="preflight">
+      <div class="head">
+        <span class="head-label">Rule-Based Checks</span>
+        {% if t1_warns %}
+          <span class="badge badge-warn">{{ t1_warns | length }} warning{{ 's' if t1_warns | length != 1 }}</span>
+        {% else %}
+          <span class="badge badge-ok">All clear</span>
+        {% endif %}
+      </div>
+      <ul>
+        {% if issues_t1 %}
+          {% for issue in issues_t1 %}
+          <li>
+            <span class="icon {{ 'warn' if issue.severity == 'warn' else 'info-clr' }}">{{ '✗' if issue.severity == 'warn' else 'ℹ' }}</span>
+            <span class="chk-label {{ 'warn' if issue.severity == 'warn' }}">{{ issue.label }}</span>
+            <span class="chk-detail">
+              {{ issue.detail }}
+              {% if issue.location %}<span class="loc">{{ issue.location }}</span>{% endif %}
+            </span>
+          </li>
+          {% endfor %}
+        {% else %}
+        <li>
+          <span class="icon ok">✓</span>
+          <span class="chk-label ok">No issues found</span>
+          <span class="chk-detail">Duplicate titles, name variants, POV drift, and repeated sentences all look clean.</span>
+        </li>
+        {% endif %}
+      </ul>
+    </div>
+
+    {# ── Tier 2: Claude ── #}
+    {% set t2_warns = issues_t2 | selectattr('severity', 'equalto', 'warn') | list %}
+    <div class="preflight" style="margin-top:14px">
+      <div class="head">
+        <span class="head-label">Claude Analysis</span>
+        {% if not api_enabled %}
+          <span class="badge badge-info">Disabled</span>
+        {% elif issues_t2 and issues_t2[0].severity == 'info' %}
+          <span class="badge badge-warn">Error</span>
+        {% elif t2_warns %}
+          <span class="badge badge-warn">{{ t2_warns | length }} finding{{ 's' if t2_warns | length != 1 }}</span>
+        {% else %}
+          <span class="badge badge-ok">All clear</span>
+        {% endif %}
+        <span class="powered">Powered by Claude Haiku</span>
+      </div>
+      <ul>
+        {% if not api_enabled %}
+        <li>
+          <span class="icon info-clr">ℹ</span>
+          <span class="chk-label">Not enabled</span>
+          <span class="chk-detail">
+            Set <code>ANTHROPIC_API_KEY</code> in your environment and restart to enable deep semantic analysis (character descriptions, timelines, location conflicts).
+          </span>
+        </li>
+        {% elif issues_t2 %}
+          {% for issue in issues_t2 %}
+          <li>
+            <span class="icon {{ 'warn' if issue.severity == 'warn' else 'info-clr' }}">{{ '✗' if issue.severity == 'warn' else 'ℹ' }}</span>
+            <span class="chk-label {{ 'warn' if issue.severity == 'warn' }}">{{ issue.label }}</span>
+            <span class="chk-detail">
+              {{ issue.detail }}
+              {% if issue.location %}<span class="loc">{{ issue.location }}</span>{% endif %}
+            </span>
+          </li>
+          {% endfor %}
+        {% else %}
+        <li>
+          <span class="icon ok">✓</span>
+          <span class="chk-label ok">No issues found</span>
+          <span class="chk-detail">Claude found no continuity problems in the manuscript summaries.</span>
+        </li>
+        {% endif %}
+      </ul>
+    </div>
+
+    <p class="more">
+      <a href="{{ url_for('projects') }}">&#8592; Back to projects</a>
+    </p>
+
+  </div>
+{% endblock %}

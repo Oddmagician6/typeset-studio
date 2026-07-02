@@ -53,6 +53,9 @@
               <button class="btn btn-primary btn-sm" type="submit">Regenerate</button>
             </form>
             <a class="btn btn-sm" href="{{ url_for('project_edit', pid=item.id) }}">Edit</a>
+            <form class="inline-form" method="post" action="{{ url_for('project_continuity', pid=item.id) }}">
+              <button class="btn btn-sm" type="submit">Check</button>
+            </form>
             {% if p.last_pdf %}
               <a class="btn btn-sm" href="{{ url_for('download', fn=p.last_pdf) }}">Last PDF</a>
             {% endif %}

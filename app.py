@@ -28,6 +28,7 @@ from werkzeug.utils import secure_filename
 import engine
 import epub
 import manuscript
+import checker
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRESET_DIR    = os.path.join(HERE, 'presets')
@@ -155,7 +156,8 @@ DEFAULTS = {
     'part_divider': {'show_number': True, 'number_format': 'Part {n}',
                      'number_size': 13.0, 'title_size': 26.0, 'sink': 0.38},
     'document_block': {'frame': 'ruled', 'indent': 0.25, 'font_size': 0,
-                       'first_indent': 0.0, 'space_around': 12.0},
+                       'first_indent': 0.0, 'space_around': 12.0,
+                       'header_size': 9.5, 'dateline_style': 'italic'},
     'scene_break': {'type': 'glyph', 'glyph': '* * *', 'size': 11.0, 'gap': 9.0, 'image': ''},
     'running_head': {'show': True, 'caps': True, 'size': 8.5, 'gap': 0.28},
     'folio': {'show': True, 'position': 'outer', 'size': 9.5, 'gap': 0.42,
@@ -284,11 +286,13 @@ def parse_preset_form(form):
             'sink':          _f(form, 'pd_sink', 0.38),
         },
         'document_block': {
-            'frame':        form.get('db_frame', 'ruled'),
-            'indent':       _f(form, 'db_indent', 0.25),
-            'font_size':    _f(form, 'db_font_size', 0),
-            'first_indent': _f(form, 'db_first_indent', 0.0),
-            'space_around': _f(form, 'db_space_around', 12.0),
+            'frame':          form.get('db_frame', 'ruled'),
+            'indent':         _f(form, 'db_indent', 0.25),
+            'font_size':      _f(form, 'db_font_size', 0),
+            'first_indent':   _f(form, 'db_first_indent', 0.0),
+            'space_around':   _f(form, 'db_space_around', 12.0),
+            'header_size':    _f(form, 'db_header_size', 9.5),
+            'dateline_style': form.get('db_dateline_style', 'italic'),
         },
         'scene_break': {
             'type':  form.get('sb_type', 'glyph'),
@@ -679,7 +683,6 @@ def project_generate(pid):
         if os.path.exists(cp):
             cover_path = cp
 
-    ms_parsed = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
     meta = {
         'title':            proj.get('title', ''),
         'subtitle':         proj.get('subtitle', ''),
@@ -699,6 +702,7 @@ def project_generate(pid):
         'about_author':   proj.get('about_author', ''),
         'also_by':        proj.get('also_by', ''),
     }
+    ms_parsed = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     base  = slugify(meta['title'] or proj.get('name', 'book'))
     fmt   = proj.get('format', 'pdf')
@@ -740,6 +744,49 @@ def project_generate(pid):
                            chapters=chapters, ms_path='', ms_type=ms_type,
                            cover_path=cover_path, from_project=pid, fmt=fmt,
                            spec=spec, preflight=preflight)
+
+
+@app.route('/project/<pid>/continuity', methods=['POST'])
+def project_continuity(pid):
+    proj = load_project(pid)
+
+    ms_type = proj.get('manuscript_type', 'file')
+    ms_file = proj.get('manuscript_file', '')
+    raw = None
+
+    if ms_type == 'sample':
+        raw = open(SAMPLE, encoding='utf-8').read()
+    elif ms_file:
+        ms_path = os.path.join(PROJECT_MS_DIR, ms_file)
+        if not os.path.exists(ms_path):
+            flash('Manuscript file not found — please replace it via Edit.')
+            return redirect(url_for('projects'))
+        if ms_file.lower().endswith('.docx'):
+            try:
+                raw = manuscript.import_docx(ms_path)
+            except Exception as exc:
+                logging.error('docx import failed: %s', traceback.format_exc())
+                flash(f'Could not read the Word file: {exc}')
+                return redirect(url_for('projects'))
+        else:
+            raw = open(ms_path, encoding='utf-8', errors='replace').read()
+
+    if not raw:
+        flash('No manuscript found for this project.')
+        return redirect(url_for('projects'))
+
+    parsed = manuscript.parse_markdown(raw, smartquotes=proj.get('smartquotes', True))
+
+    issues_t1 = checker.run_tier1(parsed)
+
+    api_key   = os.environ.get('ANTHROPIC_API_KEY', '')
+    issues_t2 = checker.run_tier2(parsed, api_key) if api_key else []
+
+    return render_template('continuity_result.html',
+                           proj=proj, pid=pid,
+                           issues_t1=issues_t1,
+                           issues_t2=issues_t2,
+                           api_enabled=bool(api_key))
 
 
 @app.route('/project/<pid>/delete', methods=['POST'])

@@ -1,0 +1,36 @@
+{
+  "name": "Romance / Women’s Fiction (5.5×8.5)",
+  "description": "Warm and flowing. Raised initial chapter opening, generous leading, prominent chapter titles. Suits romance, women’s fiction, and emotional literary fiction.",
+  "trim": { "w": 5.5, "h": 8.5 },
+  "margins": { "top": 0.75, "bottom": 0.8, "inside": 0.8, "outside": 0.55 },
+  "font_family": "Book",
+  "font_files": {
+    "regular": "Book-Regular.ttf",
+    "bold": "Book-Bold.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "body": {
+    "size": 11.0,
+    "leading": 16.0,
+    "indent": 0.3,
+    "justify": true,
+    "hyphenate": false
+  },
+  "chapter": {
+    "start": "recto",
+    "sink": 1.0,
+    "show_number": true,
+    "number_format": "Chapter {n}",
+    "number_size": 10.5,
+    "title_size": 20.0,
+    "after_title": 0.5,
+    "open_style": "raised_initial",
+    "leadin_words": 4,
+    "dropcap_lines": 3
+  },
+  "part_divider": { "show_number": true, "number_format": "Part {n}", "number_size": 11.0, "title_size": 24.0, "sink": 0.4 },
+  "document_block": { "frame": "ruled", "indent": 0.25, "font_size": 0, "first_indent": 0.0, "space_around": 12.0, "header_size": 9.5, "dateline_style": "italic" },
+  "scene_break": { "type": "glyph", "glyph": "·  ·  ·", "size": 12.0, "gap": 10.0, "image": "" },
+  "running_head": { "show": true, "caps": false, "size": 8.5, "gap": 0.28 },
+  "folio": { "show": true, "position": "outer", "size": 9.5, "gap": 0.42, "hide_on_opener": true }
+}

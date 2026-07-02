@@ -465,8 +465,264 @@ def _default_copyright(meta):
     return '\n'.join(lines)
 
 
-def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None):
+# ---------------------------------------------------------------- epistolary helpers
+
+_EP_TAG_RE = re.compile(r'<[^>]+>')
+
+
+def _ep_plain(markup):
+    """Strip ReportLab XML tags for plain-text extraction (used by telegram)."""
+    s = _EP_TAG_RE.sub('', markup)
+    return s.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+
+
+def _ep_dfont(fonts, dateline_style):
+    return fonts['bold'] if dateline_style in ('bold', 'smallcaps') else fonts['italic']
+
+
+def _ep_dtext(s, dateline_style):
+    return s.upper() if dateline_style == 'smallcaps' else s
+
+
+def _render_letter_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
+                          header_size, dateline_style):
+    """Letter: From/To/Date header between rules, body with no first-line indent."""
+    indent  = db.get('indent', 0.25) * inch
+    space   = db.get('space_around', 12.0)
+    size    = db.get('font_size', 0) or st['body'].fontSize
+    lead    = size * 1.45
+    dfont   = _ep_dfont(fonts, dateline_style)
+
+    hdr_s = ParagraphStyle('ltr-hdr', parent=st['body'],
+                            fontName=dfont, fontSize=header_size,
+                            leading=header_size * 1.45,
+                            leftIndent=indent, rightIndent=indent,
+                            firstLineIndent=0, spaceBefore=0, spaceAfter=1)
+    body_s = ParagraphStyle('ltr-body', parent=st['body'],
+                             fontName=fonts['regular'],
+                             fontSize=size, leading=lead,
+                             leftIndent=indent, rightIndent=indent,
+                             firstLineIndent=0, spaceBefore=0, spaceAfter=2)
+
+    out = [Spacer(1, space), HRule(), Spacer(1, 6)]
+
+    sender    = attrs.get('from', '').strip()
+    recipient = attrs.get('to',   '').strip()
+    date      = attrs.get('date', '').strip()
+    parts = []
+    if sender and recipient:
+        parts.append(f'{sender} to {recipient}')
+    elif sender:
+        parts.append(sender)
+    elif recipient:
+        parts.append(f'To {recipient}')
+    if date:
+        parts.append(date)
+    if parts:
+        hdr_text = '  ·  '.join(_ep_dtext(p, dateline_style) for p in parts)
+        out += [Paragraph(hdr_text, hdr_s), Spacer(1, 6)]
+
+    out += [HRule(), Spacer(1, 8)]
+    for _, text in block_paras:
+        t = _hyphenate_markup(text, hyph) if hyph else text
+        out.append(Paragraph(t, body_s))
+    out += [Spacer(1, 5), HRule(), Spacer(1, space)]
+    return out
+
+
+def _render_journal_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
+                           header_size, dateline_style):
+    """Journal entry: date/author header between rules, body in italic."""
+    indent  = db.get('indent', 0.25) * inch
+    space   = db.get('space_around', 12.0)
+    size    = db.get('font_size', 0) or st['body'].fontSize
+    lead    = size * 1.45
+    dfont   = _ep_dfont(fonts, dateline_style)
+
+    hdr_s = ParagraphStyle('jnl-hdr', parent=st['body'],
+                            fontName=dfont, fontSize=header_size,
+                            leading=header_size * 1.45,
+                            leftIndent=indent, rightIndent=indent,
+                            firstLineIndent=0, spaceBefore=0, spaceAfter=0)
+    body_s = ParagraphStyle('jnl-body', parent=st['body'],
+                             fontName=fonts['italic'],
+                             fontSize=size, leading=lead,
+                             leftIndent=indent, rightIndent=indent,
+                             firstLineIndent=0, spaceBefore=0, spaceAfter=2)
+
+    out = [Spacer(1, space), HRule(), Spacer(1, 6)]
+
+    date   = attrs.get('date',   '').strip()
+    author = attrs.get('author', '').strip()
+    parts  = []
+    if date:
+        parts.append(date)
+    if author:
+        parts.append(author)
+    if parts:
+        hdr_text = '  ·  '.join(_ep_dtext(p, dateline_style) for p in parts)
+        out += [Paragraph(hdr_text, hdr_s), Spacer(1, 6)]
+
+    out += [HRule(), Spacer(1, 8)]
+    for _, text in block_paras:
+        t = _hyphenate_markup(text, hyph) if hyph else text
+        out.append(Paragraph(t, body_s))
+    out += [Spacer(1, 5), HRule(), Spacer(1, space)]
+    return out
+
+
+def _render_telegram_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
+                            header_size, dateline_style):
+    """Telegram: boxed with 'TELEGRAM' banner, Courier uppercase body."""
+    indent  = db.get('indent', 0.25) * inch
+    space   = db.get('space_around', 12.0)
+    size    = db.get('font_size', 0) or st['body'].fontSize
+    lead    = size * 1.45
+
+    banner_s = ParagraphStyle('tel-banner', parent=st['body'],
+                               fontName=fonts['bold'], fontSize=header_size + 1,
+                               leading=(header_size + 1) * 1.4,
+                               alignment=TA_CENTER,
+                               firstLineIndent=0, spaceBefore=0, spaceAfter=0)
+    meta_s   = ParagraphStyle('tel-meta', parent=st['body'],
+                               fontName=fonts['regular'], fontSize=header_size - 1,
+                               leading=header_size * 1.4,
+                               firstLineIndent=0, spaceBefore=0, spaceAfter=0)
+    body_s   = ParagraphStyle('tel-body', parent=st['body'],
+                               fontName='Courier', fontSize=size - 0.5,
+                               leading=lead,
+                               firstLineIndent=0, spaceBefore=0, spaceAfter=2)
+
+    col_w   = avail_w - 2 * indent
+    to_val  = attrs.get('to', '').strip()
+    rows    = [[Paragraph('TELEGRAM', banner_s)]]
+    n_hdr   = 1
+    if to_val:
+        rows.append([Paragraph(f'To: {to_val.upper()}', meta_s)])
+        n_hdr = 2
+    for _, text in block_paras:
+        rows.append([Paragraph(_ep_plain(text).upper(), body_s)])
+
+    t = Table(rows, colWidths=[col_w])
+    t.setStyle(TableStyle([
+        ('BOX',          (0, 0),           (-1, -1),         1.0, _colors.Color(.3, .3, .3)),
+        ('LINEBELOW',    (0, n_hdr - 1),   (0, n_hdr - 1),   0.5, _colors.Color(.4, .4, .4)),
+        ('BACKGROUND',   (0, 0),           (0, 0),                _colors.Color(.93, .93, .93)),
+        ('LEFTPADDING',  (0, 0),           (-1, -1),         10),
+        ('RIGHTPADDING', (0, 0),           (-1, -1),         10),
+        ('TOPPADDING',   (0, 0),           (-1, -1),          4),
+        ('BOTTOMPADDING',(0, 0),           (-1, -1),          4),
+    ]))
+    return [Spacer(1, space), t, Spacer(1, space)]
+
+
+def _render_newspaper_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
+                             header_size, dateline_style):
+    """Newspaper clipping: bold headline, source/date, ruled separator, body."""
+    indent  = db.get('indent', 0.25) * inch
+    space   = db.get('space_around', 12.0)
+    size    = db.get('font_size', 0) or st['body'].fontSize
+    lead    = size * 1.45
+    hl_size = min(st['body'].fontSize * 1.4, 15.0)
+
+    hl_s = ParagraphStyle('np-hl', parent=st['body'],
+                           fontName=fonts['bold'], fontSize=hl_size,
+                           leading=hl_size * 1.25, alignment=TA_CENTER,
+                           firstLineIndent=0, spaceBefore=0, spaceAfter=0)
+    byline_s = ParagraphStyle('np-byline', parent=st['body'],
+                               fontName=fonts['italic'], fontSize=header_size - 0.5,
+                               leading=header_size * 1.4, alignment=TA_CENTER,
+                               firstLineIndent=0, spaceBefore=0, spaceAfter=0)
+    body_s = ParagraphStyle('np-body', parent=st['body'],
+                             fontName=fonts['regular'],
+                             fontSize=size - 0.5, leading=lead,
+                             leftIndent=indent, rightIndent=indent,
+                             firstLineIndent=0, spaceBefore=0, spaceAfter=2)
+
+    out = [Spacer(1, space), HRule(thickness=1.0), Spacer(1, 5)]
+
+    headline = attrs.get('headline', '').strip()
+    if headline:
+        out += [Paragraph(headline.upper(), hl_s), Spacer(1, 3)]
+
+    byline_parts = [p for p in (attrs.get('source', '').strip(),
+                                 attrs.get('date',   '').strip()) if p]
+    if byline_parts:
+        out += [Paragraph('  ·  '.join(byline_parts), byline_s), Spacer(1, 4)]
+
+    out += [HRule(), Spacer(1, 6)]
+    for _, text in block_paras:
+        t = _hyphenate_markup(text, hyph) if hyph else text
+        out.append(Paragraph(t, body_s))
+    out += [Spacer(1, 4), HRule(thickness=1.0), Spacer(1, space)]
+    return out
+
+
+def _render_redacted_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
+                            header_size, dateline_style):
+    """Redacted document: classification banner + dark-bordered box body."""
+    indent  = db.get('indent', 0.25) * inch
+    space   = db.get('space_around', 12.0)
+    size    = db.get('font_size', 0) or st['body'].fontSize
+    lead    = size * 1.45
+    col_w   = avail_w - 2 * indent
+
+    class_s = ParagraphStyle('red-class', parent=st['body'],
+                              fontName=fonts['bold'], fontSize=header_size,
+                              leading=header_size * 1.45, alignment=TA_CENTER,
+                              firstLineIndent=0, spaceBefore=0, spaceAfter=0)
+    body_s  = ParagraphStyle('red-body', parent=st['body'],
+                              fontName=fonts['regular'],
+                              fontSize=size, leading=lead,
+                              firstLineIndent=0, spaceBefore=0, spaceAfter=2)
+
+    classification = attrs.get('classification', '').strip()
+    rows = []
+    if classification:
+        rows.append([Paragraph(classification.upper(), class_s)])
+    for _, text in block_paras:
+        t = _hyphenate_markup(text, hyph) if hyph else text
+        rows.append([Paragraph(t, body_s)])
+
+    t_styles = [
+        ('BOX',          (0, 0), (-1, -1), 1.0, _colors.Color(.2, .2, .2)),
+        ('LEFTPADDING',  (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+        ('TOPPADDING',   (0, 0), (-1, -1),  4),
+        ('BOTTOMPADDING',(0, 0), (-1, -1),  4),
+    ]
+    if classification:
+        t_styles += [
+            ('BACKGROUND', (0, 0), (0, 0),        _colors.Color(.85, .85, .85)),
+            ('LINEBELOW',  (0, 0), (0, 0), 0.75,  _colors.Color(.2, .2, .2)),
+        ]
+
+    tbl = Table(rows, colWidths=[col_w])
+    tbl.setStyle(TableStyle(t_styles))
+    return [Spacer(1, space), tbl, Spacer(1, space)]
+
+
+def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_meta=None):
     """Return flowables for one ~~~ … ~~~ document block."""
+    meta  = block_meta or {}
+    btype = meta.get('_type', '')
+    if btype:
+        attrs          = {k: v for k, v in meta.items() if k != '_type'}
+        db             = preset.get('document_block', {})
+        header_size    = db.get('header_size', 9.5)
+        dateline_style = db.get('dateline_style', 'italic')
+        dispatch = {
+            'letter':    _render_letter_block,
+            'journal':   _render_journal_block,
+            'telegram':  _render_telegram_block,
+            'newspaper': _render_newspaper_block,
+            'redacted':  _render_redacted_block,
+        }
+        fn = dispatch.get(btype)
+        if fn:
+            return fn(block_paras, attrs, db, fonts, st, avail_w, hyph,
+                      header_size, dateline_style)
+
     db     = preset.get('document_block', {})
     frame  = db.get('frame', 'ruled')
     indent = db.get('indent', 0.25) * inch
@@ -689,7 +945,9 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         story.append(Spacer(1, c['after_title'] * inch))
         opened = False
         flush_next = False  # paragraph right after scene/subhead: no indent
-        for kind, val in ch['blocks']:
+        for block in ch['blocks']:
+            kind = block[0]
+            val  = block[1]
             if kind == 'scene':
                 sb = preset['scene_break']
                 img_path = None
@@ -705,7 +963,9 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             elif kind == 'doc_block':
                 if not opened:
                     opened = True
-                story.extend(_render_doc_block(val, preset, fonts, st, avail_w, hyph=hyph))
+                blk_meta = block[2] if len(block) > 2 else {}
+                story.extend(_render_doc_block(val, preset, fonts, st, avail_w,
+                                               hyph=hyph, block_meta=blk_meta))
                 flush_next = True
             else:
                 if not opened:

@@ -1,8 +1,16 @@
 {
-  "name": "Gothic / Horror (5.5\u00d78.5)",
+  "name": "Gothic / Horror (5.5×8.5)",
   "description": "Tighter trim, denser page, sunken drop-cap openings. Suits horror, gothic, and literary-dark fiction.",
-  "trim": { "w": 5.5, "h": 8.5 },
-  "margins": { "top": 0.7, "bottom": 0.75, "inside": 0.8, "outside": 0.55 },
+  "trim": {
+    "w": 5.5,
+    "h": 8.5
+  },
+  "margins": {
+    "top": 0.7,
+    "bottom": 0.75,
+    "inside": 0.8,
+    "outside": 0.55
+  },
   "font_family": "Book",
   "font_files": {
     "regular": "Book-Regular.ttf",
@@ -28,9 +36,40 @@
     "leadin_words": 4,
     "dropcap_lines": 3
   },
-  "part_divider": { "show_number": true, "number_format": "Part {n}", "number_size": 12.0, "title_size": 24.0, "sink": 0.4 },
-  "document_block": { "frame": "ruled", "indent": 0.3, "font_size": 10.0, "first_indent": 0.0, "space_around": 11.0 },
-  "scene_break": { "type": "glyph", "glyph": "\u2014  \u2014  \u2014", "size": 10.5, "gap": 9.0, "image": "" },
-  "running_head": { "show": true, "caps": true, "size": 8.0, "gap": 0.26 },
-  "folio": { "show": true, "position": "outer", "size": 9.0, "gap": 0.4, "hide_on_opener": true }
+  "part_divider": {
+    "show_number": true,
+    "number_format": "Part {n}",
+    "number_size": 12.0,
+    "title_size": 24.0,
+    "sink": 0.4
+  },
+  "document_block": {
+    "frame": "ruled",
+    "indent": 0.3,
+    "font_size": 10.0,
+    "first_indent": 0.0,
+    "space_around": 11.0,
+    "header_size": 9.0,
+    "dateline_style": "smallcaps"
+  },
+  "scene_break": {
+    "type": "glyph",
+    "glyph": "—  —  —",
+    "size": 10.5,
+    "gap": 9.0,
+    "image": ""
+  },
+  "running_head": {
+    "show": true,
+    "caps": true,
+    "size": 8.0,
+    "gap": 0.26
+  },
+  "folio": {
+    "show": true,
+    "position": "outer",
+    "size": 9.0,
+    "gap": 0.4,
+    "hide_on_opener": true
+  }
 }
