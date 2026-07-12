@@ -32,12 +32,13 @@ import checker
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRESET_DIR    = os.path.join(HERE, 'presets')
+COVER_DIR     = os.path.join(HERE, 'covers')
 OUT_DIR       = os.path.join(HERE, 'out')
 UPLOAD_DIR    = os.path.join(HERE, 'uploads')
 PROJECT_DIR   = os.path.join(HERE, 'projects')
 PROJECT_MS_DIR = os.path.join(PROJECT_DIR, 'manuscripts')
 SAMPLE = os.path.join(HERE, 'sample', 'sample.md')
-for d in (PRESET_DIR, OUT_DIR, UPLOAD_DIR, PROJECT_DIR, PROJECT_MS_DIR):
+for d in (PRESET_DIR, COVER_DIR, OUT_DIR, UPLOAD_DIR, PROJECT_DIR, PROJECT_MS_DIR):
     os.makedirs(d, exist_ok=True)
 
 app = Flask(__name__)
@@ -191,6 +192,30 @@ def load_preset(pid):
         return json.load(f)
 
 
+def list_cover_templates():
+    """Text-driven cover templates from ./covers, one JSON per house style."""
+    items = []
+    for fn in sorted(os.listdir(COVER_DIR)):
+        if fn.endswith('.json'):
+            try:
+                with open(os.path.join(COVER_DIR, fn), encoding='utf-8') as f:
+                    data = json.load(f)
+                items.append({'id': fn[:-5], 'data': data})
+            except Exception:
+                pass
+    return items
+
+
+def load_cover_template(cid):
+    if not cid:
+        return None
+    path = os.path.join(COVER_DIR, secure_filename(cid) + '.json')
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+
 def save_preset(pid, data):
     path = os.path.join(PRESET_DIR, secure_filename(pid) + '.json')
     with open(path, 'w', encoding='utf-8') as f:
@@ -310,6 +335,11 @@ def parse_preset_form(form):
 
 
 # ----------------------------------------------------------------- routes
+@app.context_processor
+def _inject_cover_templates():
+    return {'cover_templates': list_cover_templates()}
+
+
 @app.route('/')
 def index():
     return render_template('index.html', presets=list_presets())
@@ -408,12 +438,18 @@ def generate():
         return render_template('generate.html', presets=presets, form=form)
 
     # optional cover art
+    cover_mode = form.get('cover_mode', 'none')
     cover_path = ''
     cov = request.files.get('cover')
     if cov and cov.filename:
         cfn = secure_filename(cov.filename)
         cover_path = os.path.join(UPLOAD_DIR, cfn)
         cov.save(cover_path)
+    if cover_mode == 'none':
+        cover_path = ''
+
+    cover_template = form.get('cover_template', '') or 'ashforge-house'
+    cover_template_data = load_cover_template(cover_template) if cover_mode == 'designed' else None
 
     meta = {
         'title': form.get('title', '').strip(),
@@ -424,6 +460,14 @@ def generate():
         'front_matter': form.get('front_matter', 'full'),
         'right_hand_starts': 'right_hand_starts' in form,
         'cover_image': cover_path,
+        'cover_mode': cover_mode,
+        'cover_template': cover_template,
+        'cover_template_data': cover_template_data,
+        'cover_collection': form.get('cover_collection', '').strip(),
+        'cover_kicker': form.get('cover_kicker', '').strip(),
+        'cover_accent': form.get('cover_accent', '').strip(),
+        'cover_epigraph': form.get('cover_epigraph', '').strip(),
+        'cover_studio': form.get('cover_studio', '').strip(),
         'cover_overlay': 'cover_overlay' in form,
         'cover_color': form.get('cover_color', 'light'),
         'include_toc':    'include_toc' in form,

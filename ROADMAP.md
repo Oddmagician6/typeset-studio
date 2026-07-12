@@ -28,6 +28,7 @@ checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku a
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
 presets/*.json    One file per style. Cloneable per customer. Seven presets ship by default.
+covers/*.json     One file per designed cover template (text-driven page-1 layout). Cloneable per line.
 fonts/*.ttf       Embeddable TrueType faces (family "Book"). Also stores scene-break ornament images.
 sample/sample.md  Demo manuscript (3 chapters; Chapter 3 exercises all 5 epistolary block types).
 out/              Composed PDFs / EPUBs land here (also served for download).
@@ -80,9 +81,17 @@ title, subtitle, author, year, publisher
 copyright            optional override string; else engine._default_copyright(meta)
 front_matter         "full" | "title" | "copyright" | "none"
 right_hand_starts    bool — insert blank pages so sections open on a recto
-cover_image          path to uploaded art ('' if none)
-cover_overlay        bool — print title/author over the art
-cover_color          "light" | "dark"   (overlay text colour)
+cover_mode           "none" | "image" | "designed"   (page-1 cover style)
+cover_image          path to uploaded art ('' if none; image mode)
+cover_overlay        bool — print title/author over the art (image mode)
+cover_color          "light" | "dark"   (overlay text colour; image mode)
+cover_template       id of a covers/*.json template (designed mode)
+cover_template_data  the loaded template dict (designed mode; app.py injects it)
+cover_collection     top+bottom letterspaced line, e.g. "Edenfall Collection" (designed)
+cover_kicker         italic line under the collection, e.g. "player options" (designed)
+cover_accent         teal line under the title, e.g. "& Feats" (designed)
+cover_epigraph       italic cover passage; falls back to `epigraph` (designed)
+cover_studio         footer line; falls back to `publisher` (designed)
 include_toc          bool — generate a Contents page (triggers two-pass build)
 smartquotes          bool — apply curly quotes / em dashes / ellipsis (default True)
 format               "pdf" | "epub" | "both"
@@ -181,9 +190,20 @@ created, updated    ISO 8601 datetime strings
   measuring text `x0` on odd vs even pages (recto≈inside, verso≈outside).
 
 - **Cover** is a full-bleed page-1 template (`id='cover'`, `onPage=_draw_cover`). When a
-  cover exists it is inserted at template index 0 so page 1 paints the art; the story then
-  switches to a normal template. Art is pre-cropped to trim @300dpi with Pillow
-  (`_prepare_cover`) and the temp file is deleted after build.
+  cover exists it is inserted at template index 0 so page 1 paints it; the story then
+  switches to a normal template. Two modes, chosen by `meta['cover_mode']`:
+  - **image** — uploaded art, pre-cropped to trim @300dpi with Pillow (`_prepare_cover`);
+    the temp file is deleted after build. Optional title/author overlay.
+  - **designed** — `_draw_designed_cover` renders a text-driven layout from a `covers/*.json`
+    template (palette, double-rule border + corner brackets, letterspaced lines, wrapped
+    display title with **shrink-to-fit**, teal accent, vector-diamond ornament, italic
+    epigraph, studio footer). Cover fonts register separately via `_register_cover_fonts`
+    (prefix `Cover-`) so they can differ from the interior family; missing faces fall back
+    to the interior fonts, then Times. Text is drawn with `_tracked_centre` (letterspacing
+    via a text object's `setCharSpace` — the canvas has no `setCharSpace` in this ReportLab).
+  Designed covers are **PDF-only** (EPUB stays image-only) and are **not yet persisted in
+  saved projects** (the one-off generate flow carries them; the project build path falls
+  back safely to no/image cover).
 
 - **Scene-break glyphs must exist in the body font.** Libre Baskerville ("Book") lacks many
   ornaments. Presets ship with font-safe marks (`* * *`, em-dashes, middots). Use the image
@@ -282,6 +302,19 @@ Thriller/Crime 5.5×8.5 (bare numeral headings, em-dash scene break),
 Mass Market Paperback 4.25×6.87 (9.5pt, hyphenation on),
 Romance/Women's Fiction 5.5×8.5 (raised initial, 16pt leading),
 Science Fiction & Fantasy 6×9 (dropcap, deep sink).
+
+**15. Designed cover templates (text-driven)**
+`covers/*.json` (new subsystem, parallel to presets — one file per house style;
+`ashforge-house.json` ships: dark navy gradient, gold double border + corner brackets,
+letterspaced collection lines, gold display title, teal accent, diamond ornament, italic
+epigraph, studio footer) · `engine.py` (`_draw_designed_cover`, `_register_cover_fonts`,
+and `_hex` / `_tracked_centre` / `_wrap_tracked` / `_diamond` helpers; `build_pdf` branches
+on `cover_mode`) · `app.py` (`list_cover_templates()`, `load_cover_template()`, a context
+processor exposing templates to all pages, and the `cover_*` meta keys) ·
+`templates/generate.html` (Cover fieldset: mode selector None/Designed/Upload + template
+dropdown + text fields, with a small toggle script). Fonts are swappable via the template
+JSON — the shipped file approximates the house display serif with the "Book" faces. Known
+gaps: EPUB and saved projects don't carry designed covers yet.
 
 ### ✓ Tier 2 — shipped
 
