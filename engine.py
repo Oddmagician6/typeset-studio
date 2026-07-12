@@ -473,9 +473,10 @@ class BookDoc(BaseDocTemplate):
                 last_y = yy
                 yy -= leading
 
-        # -- accent line ("& FEATS" / author) — teal, cleared below the title
+        # -- accent line — teal, cleared below the title.
+        # Defaults to the Author; the cover_accent field overrides it (e.g. "& Feats").
         ac = tpl.get('accent', {})
-        accent = (meta.get('cover_accent') or '').upper()
+        accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
         if accent:
             asize = ac.get('size', 21)
             # clearance = title descender room + this line's cap height + tunable gap
