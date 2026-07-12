@@ -454,9 +454,9 @@ class BookDoc(BaseDocTemplate):
         tt = tpl.get('title', {})
         title = (meta.get('title') or '').upper()
         last_y = ph * tt.get('y', 0.585)
+        tsize = tt.get('size', 40)
         if title:
             maxw = inner_w - 0.4 * inch
-            tsize = tt.get('size', 40)
             trk = tt.get('tracking', 0.6)
             # shrink to fit: the longest word must not cross the border
             lines = _wrap_tracked(title, cf['display'], tsize, maxw, trk)
@@ -473,14 +473,17 @@ class BookDoc(BaseDocTemplate):
                 last_y = yy
                 yy -= leading
 
-        # -- accent line ("& FEATS") — teal
+        # -- accent line ("& FEATS" / author) — teal, cleared below the title
         ac = tpl.get('accent', {})
         accent = (meta.get('cover_accent') or '').upper()
         if accent:
-            last_y = last_y - ac.get('gap', 0.026) * ph
+            asize = ac.get('size', 21)
+            # clearance = title descender room + this line's cap height + tunable gap
+            clearance = tsize * 0.42 + asize * 0.55 + ac.get('gap', 0.008) * ph
+            last_y = last_y - clearance
             canv.setFillColor(C(ac.get('color', 'teal')))
             _tracked_centre(canv, cx, last_y, accent, cf['display'],
-                            ac.get('size', 21), ac.get('tracking', 1.4))
+                            asize, ac.get('tracking', 1.4))
 
         # -- ornament — three vector diamonds flanked by thin rules
         orn = tpl.get('ornament', {})
