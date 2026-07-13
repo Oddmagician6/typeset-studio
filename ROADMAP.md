@@ -432,6 +432,19 @@ transparent PNG logos), positioned by `cover_back_image_w`/`cover_back_image_y`.
 fields; the front-cover live preview strips the file from its FormData so a photo isn't
 re-uploaded on every keystroke. Drawn between the blurb and the barcode reserve.
 
+**26. Manuscript editor — styled-Markdown surface (Phase B, dependency-free)**
+`templates/manuscript_editor.html` (client-side only): the plain textarea is now a
+**highlight overlay** — a painted backdrop `<div>` behind a transparent-text textarea, so the
+textarea remains the source of truth (autosave, find/replace, outline, mirror-scroll all keep
+working). `buildHighlightHTML` colours chapters/subheads/parts, bold/italic, scene breaks and
+`~~~` fences; character content is preserved exactly (verified invariant) so the caret stays
+aligned. Requires a **monospace** surface and **colour/weight/italic only, no font-size change**
+(a larger heading would desync the caret vs the textarea's uniform metrics). Backdrop width is
+matched to `textarea.clientWidth` (scrollbar), scroll synced via `translate`, re-render throttled
+with `requestAnimationFrame`. Degrades gracefully: highlighting is JS-gated via a `hl-active`
+class, so without JS the textarea shows normal text. No dependency, no build step — see the
+Tier-4 decision.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -499,13 +512,19 @@ runs through `manuscript.parse_markdown` → PDF/EPUB/continuity/preview unchang
   surface with a formatting toolbar, live word/chapter counts, debounced autosave, a page
   preview, an outline sidebar (chapters, parts, subheads, and scenes) with jump-to navigation,
   and find/replace. Phase-A polish complete.
-- **Phase B (optional, bigger):** true WYSIWYG via a *vendored* structured editor
-  (ProseMirror / TipTap / Lexical) constrained to the block/style set, still emitting the
-  same Markdown.
+- **Phase B — SHIPPED as styled-Markdown highlighting (feature #26):** the dependency-free
+  path was chosen (see decision below). The writing surface now paints live Markdown styling
+  (coloured/bold headings, bold/italic, styled scene breaks/fences) instead of a raw textarea,
+  while the textarea stays the source of truth. A *true* hide-the-markup WYSIWYG via a vendored
+  structured editor (ProseMirror / TipTap / Lexical) remains an optional, heavier future path —
+  it would need the build-step reversal below.
 
-**Decision to make first (blocks Phase B, not Phase A):** stay dependency-free / no bundled
-JS, or adopt a locally-vendored editor library with a build step? This reverses the current
-"no external assets, tiny inline JS" convention and shapes everything downstream.
+**Decision made (2026-07): stay dependency-free.** No bundled JS / build step — the offline,
+no-CDN, tiny-inline-JS convention is preserved. A Node toolchain inside a Python-first,
+solo-maintained app was judged not worth it, especially since the live page-preview already
+shows true typeset fidelity. Phase B was therefore delivered as an aligned highlight overlay
+(monospace surface; colour/weight/italic only, no resize — a larger heading would desync the
+caret). Revisit only if true hide-the-markup WYSIWYG becomes a hard requirement.
 
 **New obligation once people author in-app:** autosave + backups + no data loss — a higher
 bar than a tool that only transforms files the user already has stored elsewhere. Keep

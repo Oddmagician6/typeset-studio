@@ -36,13 +36,38 @@
   .toolbar .div{width:1px;height:20px;background:var(--rule);margin:0 3px}
   .toolbar .b{font-weight:700}
   .toolbar .i{font-style:italic}
-  textarea#ms{
-    width:100%;min-height:70vh;resize:vertical;
-    font-family:var(--serif);font-size:16px;line-height:1.75;color:var(--ink);
-    background:var(--surface);border:1px solid var(--rule);border-radius:0 0 3px 3px;
-    padding:22px 26px;box-sizing:border-box;
+  /* --- writing surface: styled-Markdown overlay (textarea + painted backdrop) --- */
+  .ms-wrap{
+    position:relative;border:1px solid var(--rule);border-radius:0 0 3px 3px;
+    background:var(--surface);overflow:hidden;
   }
-  textarea#ms:focus{outline:none;border-color:var(--rule-strong)}
+  .ms-wrap:focus-within{border-color:var(--rule-strong)}
+  /* shared metrics — textarea and backdrop MUST render identically for caret alignment */
+  #ms, .ms-highlights{
+    font-family:"Cascadia Code","Consolas","SF Mono","Menlo","DejaVu Sans Mono",monospace;
+    font-size:14.5px;line-height:1.75;letter-spacing:0;tab-size:4;
+    padding:22px 26px;margin:0;border:0;box-sizing:border-box;width:100%;
+    white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;
+  }
+  #ms{
+    position:relative;z-index:2;display:block;min-height:70vh;resize:vertical;
+    background:transparent;color:var(--ink);caret-color:var(--ink);
+  }
+  #ms:focus{outline:none}
+  .ms-backdrop{position:absolute;inset:0;z-index:1;overflow:hidden;display:none;pointer-events:none}
+  .ms-highlights{color:var(--ink)}
+  /* when JS enables highlighting, hide the textarea's own text and show the backdrop */
+  .hl-active .ms-backdrop{display:block}
+  .hl-active #ms{color:transparent}
+  #ms::selection{background:rgba(177,42,29,.22)}
+  .hl-ch{color:var(--red-deep);font-weight:700}
+  .hl-sub{color:var(--red);font-weight:700}
+  .hl-part{color:var(--red-deep);font-weight:700}
+  .hl-scene{color:var(--muted)}
+  .hl-fence,.hl-doc{color:var(--muted)}
+  .hl-b{font-weight:700}
+  .hl-i{font-style:italic}
+  .hl-mark{opacity:.45}
   .cheat{margin-top:12px;font-size:13px;color:var(--muted)}
   .cheat summary{cursor:pointer;font-family:var(--mono);font-size:11px;
     text-transform:uppercase;letter-spacing:.16em;color:var(--faint)}
@@ -121,7 +146,10 @@
         <button type="button" id="f-close" title="Close (Esc)">✕</button>
       </div>
 
-      <textarea id="ms" spellcheck="true">{{ text }}</textarea>
+      <div class="ms-wrap" id="ms-wrap">
+        <div class="ms-backdrop" aria-hidden="true"><div id="ms-hl" class="ms-highlights"></div></div>
+        <textarea id="ms" spellcheck="true">{{ text }}</textarea>
+      </div>
 
       <details class="cheat">
         <summary>Formatting guide</summary>
@@ -269,6 +297,7 @@
         dirty = true;
         updateStats();
         buildOutline();
+        scheduleHighlight();
         status('Editing…');
         clearTimeout(timer);
         timer = setTimeout(save, 1200);
@@ -447,6 +476,52 @@
       document.addEventListener('keydown', function(e){
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f'){ e.preventDefault(); openFind(); }
       });
+
+      // -- styled-Markdown highlight overlay (textarea stays the source of truth) --
+      var hl = document.getElementById('ms-hl');
+      var msWrap = document.getElementById('ms-wrap');
+      var hlRAF = null;
+
+      function hlInline(s){
+        // s is already HTML-escaped; wrap emphasis without altering character content
+        s = s.replace(/\*\*([^*\n]+)\*\*/g, '<span class="hl-b">**$1**</span>');
+        s = s.replace(/(^|[^*<>])\*([^*\n]+)\*(?!\*)/g, '$1<span class="hl-i">*$2*</span>');
+        s = s.replace(/(^|[^_\w>])_([^_\n]+)_/g, '$1<span class="hl-i">_$2_</span>');
+        return s;
+      }
+      function buildHighlightHTML(text){
+        var lines = text.split('\n'), out = [], inFence = false;
+        for (var i = 0; i < lines.length; i++){
+          var ln = lines[i], e = esc(ln);
+          if (/^\s*~~~/.test(ln)){ out.push('<span class="hl-fence">' + e + '</span>'); inFence = !inFence; continue; }
+          if (inFence){ out.push('<span class="hl-doc">' + e + '</span>'); continue; }
+          if (/^===/.test(ln)){ out.push('<span class="hl-part">' + e + '</span>'); continue; }
+          if (/^##\s/.test(ln)){ out.push('<span class="hl-sub">' + e + '</span>'); continue; }
+          if (/^#\s/.test(ln)){ out.push('<span class="hl-ch">' + e + '</span>'); continue; }
+          if (SCENE_RE.test(ln)){ out.push('<span class="hl-scene">' + e + '</span>'); continue; }
+          out.push(hlInline(e));
+        }
+        var html = out.join('\n');
+        // trailing empty line needs a character so the backdrop keeps its height
+        if (text.length === 0 || text.charCodeAt(text.length - 1) === 10) html += ' ';
+        return html;
+      }
+      function syncHlScroll(){
+        hl.style.transform = 'translate(' + (-ta.scrollLeft) + 'px,' + (-ta.scrollTop) + 'px)';
+      }
+      function renderHighlights(){
+        hl.style.width = ta.clientWidth + 'px';   // match wrap width incl. any scrollbar
+        hl.innerHTML = buildHighlightHTML(ta.value);
+        syncHlScroll();
+      }
+      function scheduleHighlight(){
+        if (hlRAF) return;
+        hlRAF = requestAnimationFrame(function(){ hlRAF = null; renderHighlights(); });
+      }
+      ta.addEventListener('scroll', syncHlScroll);
+      window.addEventListener('resize', scheduleHighlight);
+      msWrap.classList.add('hl-active');
+      renderHighlights();
 
       buildOutline();   // initial chapter list
     })();
