@@ -343,6 +343,23 @@ saved to `fonts/` only if ReportLab can register them (so they will embed); the 
 built-in `Book-*` faces are protected from deletion and name-collision. Both editors and the
 `register_fonts` / `_register_cover_fonts` paths pick up new faces immediately.
 
+**18. Full print wrap — back + spine + front (Cover Studio Tier 3)**
+`engine.py`: the front-cover renderer was refactored into rect-based module painters
+(`_paint_gradient`, `_paint_border`, `_paint_cover_panel`, plus `_pal_color`) so the same code
+draws the standalone front (page 1) and the wrap's front panel; added `_paint_back_panel`
+(collection line, centred serif blurb, studio footer, white ISBN/barcode reserve zone),
+`_paint_spine` (title + author rotated −90°, top-to-bottom, auto-sized to spine width; skipped
+under ~0.32" / ~140pp), `_paint_wrap_guides` (dashed fold + trim proof lines), and
+`build_cover_wrap(tpl, cf, meta, dims, out_path, guides)` — a standalone `reportlab.pdfgen`
+canvas at `2·trim_w + spine + 2·bleed` × `trim_h + 2·bleed`. `_draw_designed_cover` now just
+calls the shared painters. `app.py`: `_wrap_from_form` (spine from page count × paper `ppi`,
+reusing `_PAPER`), routes `/cover/wrap` (returns the wrap PDF as a download) and
+`/cover/wrap/preview` (base64 PNG + computed dims). `templates/cover_editor.html`: a Print
+wrap fieldset (trim, page count, paper, bleed, proof-guides toggle, back-cover blurb) with
+Preview-wrap and Download-wrap-PDF buttons. New meta key `cover_blurb`. The wrap is a separate
+deliverable (the interior PDF is unchanged); page count comes from the interior build shown on
+the result page.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -389,9 +406,10 @@ dot leaders and part headings; `_estimate_toc_pages()`; two-pass in `build_pdf()
 
 ### ◻ Tier 4 — planned / backlog
 
-**Cover Studio Tier 3 — full print wrap** *(Tier 2 shipped as feature #17)*
-Front + spine + back on one page, spine width from page count/paper (reuse `print_spec`
-math); back-cover blurb + barcode zone.
+*(Cover Studio Tiers 1–3 all shipped: features #16 designed templates + editor, #17 font
+library, #18 full print wrap. Possible follow-ups: wire the wrap's page count directly from
+a completed interior build on the result page; per-retailer wrap presets; author-photo /
+logo image on the back panel.)*
 
 **In-app manuscript editor — author a book start to finish** *(large; a product-identity
 step from "typesetting tool" toward "authoring + typesetting suite")*

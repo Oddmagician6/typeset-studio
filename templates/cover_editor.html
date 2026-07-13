@@ -268,6 +268,41 @@
         </div>
       </fieldset>
 
+      <fieldset>
+        <legend>Print wrap · back + spine + front</legend>
+        <div class="fs-body">
+          <p class="hint" style="margin:2px 0 0">A single flat cover PDF for print-on-demand.
+            The spine width is computed from the page count and paper. Not saved into the
+            template — set it here when you export.</p>
+          <div class="row">
+            {{ nf('Trim width', 'wrap_trim_w', 6, 'inches') }}
+            {{ nf('Trim height', 'wrap_trim_h', 9, 'inches') }}
+            {{ nf('Bleed', 'wrap_bleed', 0.125, 'inches per side') }}
+          </div>
+          <div class="row">
+            {{ nf('Page count', 'wrap_pages', 200, 'from the interior build') }}
+            <div class="field"><label>Paper</label><span class="hint">sets spine thickness</span>
+              <select name="wrap_paper">
+                <option value="white">White (60 lb)</option>
+                <option value="cream">Cream (60 lb)</option>
+                <option value="color">Color</option>
+              </select></div>
+            <div class="check"><input type="checkbox" id="wrap-guides" name="wrap_guides" value="1">
+              <label for="wrap-guides">Proof guides (fold &amp; trim lines)</label></div>
+          </div>
+          <div class="row">
+            <div class="field wide"><label>Back-cover blurb</label>
+              <span class="hint">shown centred on the back · blank line starts a new paragraph</span>
+              <textarea name="wrap_blurb" rows="4"></textarea></div>
+          </div>
+          <div class="formbar" style="margin-top:14px">
+            <button type="button" id="wrap-pv" class="btn">Preview wrap</button>
+            <button type="button" id="wrap-dl" class="btn btn-primary">Download wrap PDF</button>
+            <span id="wrap-status" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+        </div>
+      </fieldset>
+
       <div class="formbar">
         <button class="btn btn-primary" type="submit">{{ 'Create cover' if is_new else 'Save changes' }}</button>
         <a class="btn" href="{{ url_for('covers') }}">Cancel</a>
@@ -316,6 +351,38 @@
         clearTimeout(timer);
         timer = setTimeout(render, 400);
       }
+
+      // -- Print wrap: on-demand preview + PDF download
+      var wstatus = document.getElementById('wrap-status');
+      document.getElementById('wrap-pv').addEventListener('click', async () => {
+        wstatus.textContent = 'Rendering wrap…';
+        status.textContent = '';
+        try {
+          var res  = await fetch('/cover/wrap/preview', {method: 'POST', body: new FormData(form)});
+          var json = await res.json();
+          if (json.ok) {
+            img.src = json.image; img.style.display = 'block'; ph.style.display = 'none';
+            wstatus.textContent = json.info;
+          } else {
+            wstatus.textContent = json.error || 'Wrap preview failed.';
+          }
+        } catch (e) { wstatus.textContent = 'Wrap preview failed.'; }
+      });
+      document.getElementById('wrap-dl').addEventListener('click', async () => {
+        wstatus.textContent = 'Building PDF…';
+        try {
+          var res = await fetch('/cover/wrap', {method: 'POST', body: new FormData(form)});
+          if (!res.ok) { wstatus.textContent = 'Wrap failed.'; return; }
+          var blob = await res.blob();
+          var url  = URL.createObjectURL(blob);
+          var a    = document.createElement('a');
+          var nm   = (document.querySelector('[name=name]').value || 'cover');
+          a.href = url; a.download = nm.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-wrap.pdf';
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url);
+          wstatus.textContent = 'Downloaded.';
+        } catch (e) { wstatus.textContent = 'Wrap failed.'; }
+      });
 
       form.addEventListener('input', schedule);
       render();   // first paint on load
