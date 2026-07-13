@@ -377,6 +377,13 @@ conventions), live word count, chapter count, debounced autosave (+ Ctrl/⌘-S a
 Reuses `manuscript.parse_markdown` and the interior build unchanged — no new dependency, no
 break of the offline / no-CDN convention. Phase B (vendored WYSIWYG) still open; see backlog.
 
+**20. Manuscript editor — chapter outline + jump-to nav**
+`templates/manuscript_editor.html` (client-side only): a live **Chapters** panel in the editor
+sidebar lists each `# chapter` (numbered when untitled) and `=== part`, rebuilt on every edit;
+clicking an entry scrolls the writing pane to that heading. Scrolling is wrapping-aware — a
+hidden mirror `<div>` mirrors the textarea's font/width/padding to compute the caret's pixel
+top (a plain line-count × line-height would drift once paragraphs wrap). No backend change.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -441,10 +448,10 @@ maps 1:1 onto the existing blocks.
 Cheapest, safest route reuses everything: an editor that **emits the existing Markdown**
 runs through `manuscript.parse_markdown` → PDF/EPUB/continuity/preview unchanged.
 
-- **Phase A — SHIPPED (feature #19):** a project-integrated Markdown authoring surface with
-  a formatting toolbar, live word/chapter counts, debounced autosave, and a page preview.
-  Remaining Phase-A polish (not yet done): chapter-jump navigation, find/replace, and a
-  scrivener-style scene/chapter outline sidebar.
+- **Phase A — SHIPPED (features #19, #20):** a project-integrated Markdown authoring surface
+  with a formatting toolbar, live word/chapter counts, debounced autosave, a page preview, and
+  a chapter outline sidebar with jump-to navigation. Remaining Phase-A polish (not yet done):
+  find/replace, and scene-level entries in the outline.
 - **Phase B (optional, bigger):** true WYSIWYG via a *vendored* structured editor
   (ProseMirror / TipTap / Lexical) constrained to the block/style set, still emitting the
   same Markdown.

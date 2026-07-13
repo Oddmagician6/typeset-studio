@@ -46,6 +46,15 @@
   .pvbox .label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.2em;color:var(--faint);margin:0 0 8px}
   .pvbox img{width:100%;display:block;border:1px solid var(--rule);border-radius:2px;margin-bottom:6px}
   .pvbox .status{font-size:12px;color:var(--muted);min-height:1.2em}
+  .outline{max-height:38vh;overflow:auto;display:flex;flex-direction:column;gap:1px}
+  .outline a{display:block;padding:4px 7px;border-radius:2px;font-size:13px;color:var(--ink);
+    cursor:pointer;text-decoration:none;line-height:1.35;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .outline a:hover{background:var(--surface-2);color:var(--red-deep)}
+  .outline a.ol-part{font-family:var(--mono);font-weight:700;text-transform:uppercase;
+    font-size:10.5px;letter-spacing:.1em;color:var(--muted);margin-top:6px}
+  .outline a.ol-ch{padding-left:12px}
+  .outline .ol-empty{font-size:12.5px;color:var(--muted);padding:2px}
   @media (max-width:880px){.work{grid-template-columns:1fr}.side{position:static}}
 {% endblock %}
 
@@ -103,6 +112,10 @@
         <span class="status" id="save-status">Saved</span>
       </div>
       <div class="pvbox">
+        <p class="label">Chapters</p>
+        <div id="outline" class="outline"></div>
+      </div>
+      <div class="pvbox">
         <p class="label">Page preview</p>
         <button type="button" id="pv-btn" class="btn btn-sm" style="margin-bottom:10px">Preview pages</button>
         <div id="pv-imgs"></div>
@@ -123,6 +136,67 @@
 
       function updateStats(){ document.getElementById('st-words').textContent = countWords(ta.value); }
 
+      // -- chapter outline + jump-to (wrapping-aware scroll via a hidden mirror)
+      var mirror = document.createElement('div');
+      mirror.style.position = 'absolute';
+      mirror.style.visibility = 'hidden';
+      mirror.style.left = '-9999px';
+      mirror.style.top = '0';
+      mirror.style.whiteSpace = 'pre-wrap';
+      mirror.style.wordWrap = 'break-word';
+      document.body.appendChild(mirror);
+
+      function caretTop(index){
+        var cs = getComputedStyle(ta);
+        ['fontFamily','fontSize','fontWeight','fontStyle','lineHeight','letterSpacing',
+         'paddingTop','paddingRight','paddingBottom','paddingLeft','boxSizing'
+        ].forEach(function(p){ mirror.style[p] = cs[p]; });
+        mirror.style.width = ta.clientWidth + 'px';
+        mirror.textContent = ta.value.slice(0, index);
+        var mk = document.createElement('span');
+        mk.textContent = '​';
+        mirror.appendChild(mk);
+        return mk.offsetTop;
+      }
+
+      function jumpTo(offset){
+        ta.focus();
+        ta.setSelectionRange(offset, offset);
+        var pad = parseFloat(getComputedStyle(ta).paddingTop) || 0;
+        ta.scrollTop = Math.max(0, caretTop(offset) - pad - 8);
+      }
+
+      function esc(s){
+        return s.replace(/[&<>]/g, function(c){
+          return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];
+        });
+      }
+
+      function buildOutline(){
+        var lines = ta.value.split('\n');
+        var box = document.getElementById('outline');
+        var offset = 0, chap = 0, html = '';
+        for (var i = 0; i < lines.length; i++){
+          var ln = lines[i];
+          var mPart = /^===\s*(.*)$/.exec(ln);
+          var mCh   = /^#\s+(.*)$/.exec(ln);
+          if (mPart){
+            html += '<a class="ol-part" data-off="' + offset + '">' +
+                    esc(mPart[1].trim() || 'Part') + '</a>';
+          } else if (mCh){
+            chap++;
+            html += '<a class="ol-ch" data-off="' + offset + '">' +
+                    esc(mCh[1].trim() || ('Chapter ' + chap)) + '</a>';
+          }
+          offset += ln.length + 1;   // +1 for the newline
+        }
+        box.innerHTML = html ||
+          '<span class="ol-empty">No chapters yet — add one with the Chapter button.</span>';
+        box.querySelectorAll('a').forEach(function(a){
+          a.addEventListener('click', function(){ jumpTo(parseInt(a.dataset.off, 10)); });
+        });
+      }
+
       async function save(){
         dirty = false;
         status('Saving…');
@@ -138,6 +212,7 @@
       function changed(){
         dirty = true;
         updateStats();
+        buildOutline();
         status('Editing…');
         clearTimeout(timer);
         timer = setTimeout(save, 1200);
@@ -209,6 +284,8 @@
           } else { st.textContent = j.error || 'Preview failed.'; }
         } catch(e){ st.textContent = 'Preview failed.'; }
       });
+
+      buildOutline();   // initial chapter list
     })();
   </script>
 {% endblock %}
