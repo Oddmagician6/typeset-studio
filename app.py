@@ -256,12 +256,29 @@ def unique_cover_id(base):
     return cid
 
 
+# fonts that ship with the app — protected from deletion/overwrite in the Fonts manager
+BUILTIN_FONTS = {'Book-Regular.ttf', 'Book-Bold.ttf', 'Book-Italic.ttf'}
+FONT_EXTS = ('.ttf', '.otf')
+
+
 def list_fonts():
-    """TrueType faces available in fonts/, for the cover editor's font pickers."""
+    """Embeddable faces available in fonts/, for the editors' font pickers."""
     try:
-        return sorted(f for f in os.listdir(FONT_DIR) if f.lower().endswith('.ttf'))
+        return sorted(f for f in os.listdir(FONT_DIR)
+                      if f.lower().endswith(FONT_EXTS))
     except OSError:
         return []
+
+
+def _is_embeddable_font(path):
+    """True if ReportLab can register the file (i.e. it will embed in a PDF)."""
+    try:
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfbase import pdfmetrics
+        pdfmetrics.registerFont(TTFont(f'_probe_{os.path.basename(path)}', path))
+        return True
+    except Exception:
+        return False
 
 
 def save_preset(pid, data):
@@ -479,12 +496,14 @@ def index():
 
 @app.route('/editor/new')
 def editor_new():
-    return render_template('editor.html', pid=None, p=DEFAULTS, is_new=True)
+    return render_template('editor.html', pid=None, p=DEFAULTS, is_new=True,
+                           fonts=list_fonts())
 
 
 @app.route('/editor/<pid>')
 def editor(pid):
-    return render_template('editor.html', pid=pid, p=load_preset(pid), is_new=False)
+    return render_template('editor.html', pid=pid, p=load_preset(pid), is_new=False,
+                           fonts=list_fonts())
 
 
 @app.route('/save', methods=['POST'])
@@ -618,6 +637,58 @@ def cover_preview():
     except Exception as exc:
         logging.error('cover preview failed: %s', traceback.format_exc())
         return jsonify({'ok': False, 'error': str(exc)})
+
+
+# ------------------------------------------------------------- font manager
+@app.route('/fonts')
+def fonts_page():
+    items = [{'name': f, 'builtin': f in BUILTIN_FONTS} for f in list_fonts()]
+    return render_template('fonts.html', fonts=items)
+
+
+@app.route('/fonts/upload', methods=['POST'])
+def fonts_upload():
+    saved, skipped = [], []
+    for up in request.files.getlist('fonts'):
+        if not up or not up.filename:
+            continue
+        fn = secure_filename(up.filename)
+        if not fn.lower().endswith(FONT_EXTS):
+            skipped.append(f'{up.filename} (not a .ttf/.otf)')
+            continue
+        if fn in BUILTIN_FONTS:
+            skipped.append(f'{fn} (built-in name is protected)')
+            continue
+        dest = os.path.join(FONT_DIR, fn)
+        up.save(dest)
+        if _is_embeddable_font(dest):
+            saved.append(fn)
+        else:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+            skipped.append(f'{fn} (not an embeddable font — OTF/CFF outlines aren’t supported)')
+    if saved:
+        flash('Added ' + ', '.join(saved) + '.')
+    if skipped:
+        flash('Skipped ' + '; '.join(skipped) + '.')
+    if not saved and not skipped:
+        flash('Choose one or more .ttf or .otf files to upload.')
+    return redirect(url_for('fonts_page'))
+
+
+@app.route('/fonts/delete/<name>', methods=['POST'])
+def fonts_delete(name):
+    fn = secure_filename(name)
+    if fn in BUILTIN_FONTS:
+        flash('That font ships with the app and can’t be deleted.')
+        return redirect(url_for('fonts_page'))
+    path = os.path.join(FONT_DIR, fn)
+    if os.path.exists(path) and fn.lower().endswith(FONT_EXTS):
+        os.remove(path)
+        flash(f'Removed {fn}. Styles or covers that referenced it fall back to Times.')
+    return redirect(url_for('fonts_page'))
 
 
 @app.route('/generate', methods=['GET', 'POST'])

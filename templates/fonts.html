@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% set active = 'fonts' %}
+{% block title %}Fonts · Typeset Studio{% endblock %}
+
+{% block style %}
+  .panel{
+    background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+    box-shadow:var(--shadow);padding:0;margin:0 0 22px;
+  }
+  .panel .hd{padding:16px 22px;border-bottom:1px solid var(--rule)}
+  .panel .hd h2{font-family:var(--serif);font-size:19px;margin:0}
+  .panel .hd p{color:var(--muted);font-size:13.5px;margin:4px 0 0}
+  .panel .bd{padding:16px 22px 20px}
+
+  .flist{display:flex;flex-direction:column}
+  .frow{
+    display:flex;align-items:center;gap:14px;padding:11px 4px;
+    border-bottom:1px solid var(--rule);
+  }
+  .frow:last-child{border-bottom:0}
+  .frow .fn{font-family:var(--mono);font-size:13px;color:var(--ink)}
+  .frow .tag{
+    font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.14em;
+    color:var(--faint);border:1px solid var(--rule-strong);border-radius:2px;padding:2px 6px;
+  }
+  .frow .sep{flex:1}
+
+  .uprow{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .uprow input[type=file]{
+    font-family:var(--sans);font-size:14px;color:var(--ink);background:var(--surface-2);
+    border:1px solid var(--rule-strong);border-radius:2px;padding:8px 10px;flex:1 1 260px;
+  }
+  .note{color:var(--muted);font-size:13px;margin:14px 0 0;line-height:1.5}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">Type library</div>
+    <h1>Fonts</h1>
+    <p>Faces here are available to every style and cover. Upload a licensed <code>.ttf</code>
+       (or TrueType-flavoured <code>.otf</code>) and it appears in the font pickers. Fonts are
+       embedded in the exported PDF, so you need the right to embed anything you add.</p>
+  </div>
+
+  <div class="panel">
+    <div class="hd">
+      <h2>Add a font</h2>
+      <p>Choose one or more font files. Each is checked to make sure it will embed in a PDF.</p>
+    </div>
+    <div class="bd">
+      <form class="uprow" method="post" action="{{ url_for('fonts_upload') }}"
+            enctype="multipart/form-data">
+        <input type="file" name="fonts" accept=".ttf,.otf" multiple>
+        <button class="btn btn-primary" type="submit">Upload</button>
+      </form>
+      <p class="note">Tip: a display family usually comes as separate files for regular, bold,
+        and italic. Upload all of them, then pick each in the style or cover editor.</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="hd">
+      <h2>Installed fonts</h2>
+      <p>{{ fonts|length }} face{{ '' if fonts|length == 1 else 's' }} available.</p>
+    </div>
+    <div class="bd">
+      <div class="flist">
+        {% for f in fonts %}
+          <div class="frow">
+            <span class="fn">{{ f.name }}</span>
+            {% if f.builtin %}<span class="tag">built-in</span>{% endif %}
+            <span class="sep"></span>
+            {% if f.builtin %}
+              <button class="btn btn-ghost btn-sm" type="button" disabled
+                      title="Ships with the app">Protected</button>
+            {% else %}
+              <form class="inline-form" method="post"
+                    action="{{ url_for('fonts_delete', name=f.name) }}"
+                    onsubmit="return confirm('Remove {{ f.name }}? Styles or covers using it will fall back to Times.');">
+                <button class="btn btn-ghost btn-sm" type="submit">Remove</button>
+              </form>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

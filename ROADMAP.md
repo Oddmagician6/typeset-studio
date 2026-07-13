@@ -330,8 +330,18 @@ pattern: `/cover/preview` builds a one-off designed cover via `engine.build_pdf`
 `DEFAULTS` + `PREVIEW_SAMPLE` and returns page 1 as a base64 PNG. Element colours are chosen
 from palette keys (gold/teal/ink/muted); palette values are `<input type=color>` hex.
 New templates appear in the Generate dropdown automatically (context processor). No engine
-changes were needed — the renderer was already fully parametric. Tier 2/3 (font upload,
-full front+spine+back wrap) remain.
+changes were needed — the renderer was already fully parametric.
+
+**17. Font library — browser font upload (Cover Studio Tier 2)**
+`app.py` (`BUILTIN_FONTS`, `FONT_EXTS`, `_is_embeddable_font()` validation via ReportLab
+`TTFont`, and routes `/fonts`, `/fonts/upload`, `/fonts/delete/<name>`) ·
+`templates/fonts.html` (upload form + installed-font list with per-file Remove) ·
+`templates/base.html` (Fonts nav link) · `templates/editor.html` (preset font fields are now
+dropdowns from the library, preserving any existing custom path via a `fontsel` macro) ·
+`templates/cover_editor.html` (link to the Fonts page). Uploaded `.ttf`/`.otf` files are
+saved to `fonts/` only if ReportLab can register them (so they will embed); the three
+built-in `Book-*` faces are protected from deletion and name-collision. Both editors and the
+`register_fonts` / `_register_cover_fonts` paths pick up new faces immediately.
 
 ### ✓ Tier 2 — shipped
 
@@ -379,11 +389,9 @@ dot leaders and part headings; `_estimate_toc_pages()`; two-pass in `build_pdf()
 
 ### ◻ Tier 4 — planned / backlog
 
-**Cover Studio Tier 2/3** *(follows feature #16)*
-Tier 2: upload fonts through the browser (a route that saves `.ttf` into `fonts/`, plus a
-picker in the cover editor and the preset editor). Tier 3: full print **wrap** — front +
-spine + back on one page, spine width from page count/paper (reuse `print_spec` math);
-back-cover blurb + barcode zone.
+**Cover Studio Tier 3 — full print wrap** *(Tier 2 shipped as feature #17)*
+Front + spine + back on one page, spine width from page count/paper (reuse `print_spec`
+math); back-cover blurb + barcode zone.
 
 **In-app manuscript editor — author a book start to finish** *(large; a product-identity
 step from "typesetting tool" toward "authoring + typesetting suite")*
