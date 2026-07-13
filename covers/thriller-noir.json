@@ -1,0 +1,73 @@
+{
+  "name": "Thriller Noir",
+  "description": "Stark black field, blood-red rule and byline, bold bone-white title. For thrillers, crime, and suspense.",
+  "fonts": {
+    "display": "Book-Bold.ttf",
+    "serif": "Book-Regular.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "palette": {
+    "bg_top": "#16181d",
+    "bg_bottom": "#050506",
+    "gold": "#ece8e0",
+    "teal": "#c62828",
+    "ink": "#e6e1d8",
+    "muted": "#7c8088"
+  },
+  "border": {
+    "color": "teal",
+    "inset": 0.5,
+    "gap": 0.05,
+    "line": 0.9,
+    "corner": 0.35,
+    "corner_line": 1.0
+  },
+  "collection": {
+    "size": 12,
+    "tracking": 4.0,
+    "color": "gold",
+    "top": 0.72,
+    "bottom": 0.11
+  },
+  "kicker": {
+    "size": 10.5,
+    "tracking": 0.5,
+    "color": "muted",
+    "y": 0.675
+  },
+  "title": {
+    "size": 46,
+    "leading": 50,
+    "tracking": 0.4,
+    "color": "gold",
+    "y": 0.6
+  },
+  "accent": {
+    "size": 18,
+    "tracking": 3.0,
+    "color": "teal",
+    "gap": 0.01
+  },
+  "ornament": {
+    "color": "teal",
+    "size": 2.0,
+    "spacing": 8,
+    "rule": 0.9,
+    "rule_len": 0.7,
+    "gap": 0.05
+  },
+  "epigraph": {
+    "size": 10,
+    "leading": 14.5,
+    "tracking": 0.3,
+    "color": "muted",
+    "width": 0.6,
+    "top": 0.26
+  },
+  "studio": {
+    "size": 8,
+    "tracking": 3.0,
+    "color": "muted",
+    "y": 0.085
+  }
+}

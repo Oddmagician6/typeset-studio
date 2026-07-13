@@ -1,0 +1,73 @@
+{
+  "name": "Literary Ivory",
+  "description": "Understated ivory with deep-ink type and a fine classic rule. For literary and book-club fiction.",
+  "fonts": {
+    "display": "Book-Bold.ttf",
+    "serif": "Book-Regular.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "palette": {
+    "bg_top": "#f8f4ea",
+    "bg_bottom": "#efe8d7",
+    "gold": "#2c2926",
+    "teal": "#8a6a37",
+    "ink": "#3a352e",
+    "muted": "#8c857a"
+  },
+  "border": {
+    "color": "gold",
+    "inset": 0.5,
+    "gap": 0.05,
+    "line": 0.6,
+    "corner": 0.3,
+    "corner_line": 0.8
+  },
+  "collection": {
+    "size": 11.5,
+    "tracking": 4.0,
+    "color": "gold",
+    "top": 0.71,
+    "bottom": 0.11
+  },
+  "kicker": {
+    "size": 11,
+    "tracking": 0.4,
+    "color": "muted",
+    "y": 0.665
+  },
+  "title": {
+    "size": 36,
+    "leading": 42,
+    "tracking": 1.2,
+    "color": "gold",
+    "y": 0.575
+  },
+  "accent": {
+    "size": 16,
+    "tracking": 2.2,
+    "color": "teal",
+    "gap": 0.012
+  },
+  "ornament": {
+    "color": "teal",
+    "size": 1.8,
+    "spacing": 8,
+    "rule": 0.6,
+    "rule_len": 0.7,
+    "gap": 0.05
+  },
+  "epigraph": {
+    "size": 10.5,
+    "leading": 15.5,
+    "tracking": 0.2,
+    "color": "muted",
+    "width": 0.6,
+    "top": 0.26
+  },
+  "studio": {
+    "size": 8,
+    "tracking": 2.6,
+    "color": "muted",
+    "y": 0.085
+  }
+}
