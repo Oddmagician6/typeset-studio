@@ -384,6 +384,14 @@ clicking an entry scrolls the writing pane to that heading. Scrolling is wrappin
 hidden mirror `<div>` mirrors the textarea's font/width/padding to compute the caret's pixel
 top (a plain line-count × line-height would drift once paragraphs wrap). No backend change.
 
+**21. Manuscript editor — find / replace**
+`templates/manuscript_editor.html` (client-side only): a floating find bar (Find button on the
+toolbar or Ctrl/⌘-F) with find field, replace field, match-case toggle, live match count
+(`n / total`), next/prev (Enter / Shift-Enter, wrapping), Replace, Replace all, and Esc to
+close. Next/prev select the match and scroll to it via the same mirror-based caret measurement
+as the chapter outline; edits route through `changed()` so autosave, word count, and the
+outline stay in sync. No backend change.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -448,10 +456,10 @@ maps 1:1 onto the existing blocks.
 Cheapest, safest route reuses everything: an editor that **emits the existing Markdown**
 runs through `manuscript.parse_markdown` → PDF/EPUB/continuity/preview unchanged.
 
-- **Phase A — SHIPPED (features #19, #20):** a project-integrated Markdown authoring surface
-  with a formatting toolbar, live word/chapter counts, debounced autosave, a page preview, and
-  a chapter outline sidebar with jump-to navigation. Remaining Phase-A polish (not yet done):
-  find/replace, and scene-level entries in the outline.
+- **Phase A — SHIPPED (features #19–#21):** a project-integrated Markdown authoring surface
+  with a formatting toolbar, live word/chapter counts, debounced autosave, a page preview, a
+  chapter outline sidebar with jump-to navigation, and find/replace. Remaining Phase-A polish
+  (not yet done): scene-level entries in the outline.
 - **Phase B (optional, bigger):** true WYSIWYG via a *vendored* structured editor
   (ProseMirror / TipTap / Lexical) constrained to the block/style set, still emitting the
   same Markdown.

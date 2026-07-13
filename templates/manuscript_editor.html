@@ -4,7 +4,25 @@
 
 {% block style %}
   .work{display:grid;grid-template-columns:1fr 320px;gap:28px;align-items:start}
-  .pane{display:flex;flex-direction:column;gap:0}
+  .pane{display:flex;flex-direction:column;gap:0;position:relative}
+  .findbar{
+    position:absolute;top:52px;right:14px;z-index:5;display:flex;gap:6px;align-items:center;
+    background:var(--surface);border:1px solid var(--rule-strong);border-radius:3px;
+    padding:8px 10px;box-shadow:var(--shadow);
+  }
+  .findbar[hidden]{display:none}
+  .findbar input[type=text]{
+    font-family:var(--sans);font-size:13px;padding:5px 8px;width:132px;color:var(--ink);
+    background:var(--surface-2);border:1px solid var(--rule-strong);border-radius:2px;
+  }
+  .findbar input:focus{outline:none;border-color:var(--red)}
+  .findbar button{
+    font-family:var(--sans);font-size:12.5px;padding:5px 9px;color:var(--ink);cursor:pointer;
+    background:var(--surface-2);border:1px solid var(--rule-strong);border-radius:2px;
+  }
+  .findbar button:hover{border-color:var(--red);color:var(--red-deep)}
+  .findbar label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:3px;cursor:pointer}
+  .findbar .fb-count{font-family:var(--mono);font-size:11px;color:var(--muted);min-width:54px;text-align:center}
   .toolbar{
     display:flex;flex-wrap:wrap;gap:6px;align-items:center;
     padding:10px 12px;border:1px solid var(--rule);border-bottom:0;border-radius:3px 3px 0 0;
@@ -86,7 +104,21 @@
         <button type="button" class="i" data-act="italic">I</button>
         <span class="div"></span>
         <button type="button" data-act="letter">Letter block</button>
+        <button type="button" data-act="find">Find</button>
       </div>
+
+      <div class="findbar" id="findbar" hidden>
+        <input type="text" id="f-find" placeholder="Find" spellcheck="false">
+        <input type="text" id="f-repl" placeholder="Replace" spellcheck="false">
+        <label title="Match case"><input type="checkbox" id="f-case"> Aa</label>
+        <span class="fb-count" id="f-count"></span>
+        <button type="button" id="f-prev" title="Previous (Shift+Enter)">‹</button>
+        <button type="button" id="f-next" title="Next (Enter)">›</button>
+        <button type="button" id="f-rep">Replace</button>
+        <button type="button" id="f-all">All</button>
+        <button type="button" id="f-close" title="Close (Esc)">✕</button>
+      </div>
+
       <textarea id="ms" spellcheck="true">{{ text }}</textarea>
 
       <details class="cheat">
@@ -248,6 +280,7 @@
         bold:    function(){ surround('**','**'); },
         italic:  function(){ surround('*','*'); },
         letter:  function(){ insertBlock('\n~~~ letter from="" to="" date=""\n\n~~~\n\n'); },
+        find:    function(){ openFind(); },
       };
       document.querySelectorAll('.toolbar button').forEach(function(b){
         b.addEventListener('click', function(){ (ACTS[b.dataset.act] || function(){})(); });
@@ -283,6 +316,112 @@
             document.getElementById('st-ch').textContent = j.chapters;
           } else { st.textContent = j.error || 'Preview failed.'; }
         } catch(e){ st.textContent = 'Preview failed.'; }
+      });
+
+      // -- find / replace
+      var findbar = document.getElementById('findbar');
+      var fFind = document.getElementById('f-find');
+      var fRepl = document.getElementById('f-repl');
+      var fCase = document.getElementById('f-case');
+      var fCount = document.getElementById('f-count');
+      var matches = [], curMatch = -1;
+
+      function computeMatches(){
+        var q = fFind.value;
+        matches = [];
+        if (!q) return;
+        var ci = !fCase.checked;
+        var hay = ci ? ta.value.toLowerCase() : ta.value;
+        var ndl = ci ? q.toLowerCase() : q;
+        var i = hay.indexOf(ndl);
+        while (i !== -1){ matches.push(i); i = hay.indexOf(ndl, i + Math.max(ndl.length, 1)); }
+      }
+      function showCount(){
+        if (!fFind.value){ fCount.textContent = ''; return; }
+        fCount.textContent = matches.length
+          ? ((curMatch >= 0 ? curMatch + 1 : '–') + ' / ' + matches.length) : 'none';
+      }
+      function selectRange(s, e){
+        ta.focus();
+        ta.setSelectionRange(s, e);
+        var pad = parseFloat(getComputedStyle(ta).paddingTop) || 0;
+        ta.scrollTop = Math.max(0, caretTop(s) - pad - 40);
+      }
+      function findStep(dir){
+        computeMatches();
+        if (!matches.length){ curMatch = -1; showCount(); return; }
+        var qlen = fFind.value.length;
+        var pos = ta.selectionStart;
+        var idx;
+        if (dir > 0){
+          idx = matches.findIndex(function(m){ return m > pos; });
+          if (idx === -1) idx = 0;              // wrap to first
+        } else {
+          idx = -1;
+          for (var k = matches.length - 1; k >= 0; k--){ if (matches[k] < pos){ idx = k; break; } }
+          if (idx === -1) idx = matches.length - 1;
+        }
+        curMatch = idx;
+        selectRange(matches[idx], matches[idx] + qlen);
+        showCount();
+      }
+      function replaceCurrent(){
+        var q = fFind.value;
+        if (!q) return;
+        var s = ta.selectionStart, e = ta.selectionEnd;
+        var sel = ta.value.slice(s, e);
+        var eq = fCase.checked ? (sel === q) : (sel.toLowerCase() === q.toLowerCase());
+        if (eq){
+          var rep = fRepl.value;
+          ta.value = ta.value.slice(0, s) + rep + ta.value.slice(e);
+          ta.setSelectionRange(s, s + rep.length);
+          changed();
+        }
+        findStep(1);
+      }
+      function replaceAll(){
+        var q = fFind.value;
+        if (!q) return;
+        computeMatches();
+        if (!matches.length){ showCount(); return; }
+        var rep = fRepl.value, qlen = q.length, out = '', last = 0;
+        for (var k = 0; k < matches.length; k++){
+          out += ta.value.slice(last, matches[k]) + rep;
+          last = matches[k] + qlen;
+        }
+        out += ta.value.slice(last);
+        var n = matches.length;
+        ta.value = out;
+        changed();
+        matches = []; curMatch = -1;
+        fCount.textContent = 'replaced ' + n;
+      }
+      function openFind(){
+        findbar.hidden = false;
+        var sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+        if (sel && sel.indexOf('\n') === -1) fFind.value = sel;
+        fFind.focus(); fFind.select();
+        computeMatches(); curMatch = -1; showCount();
+      }
+      function closeFind(){ findbar.hidden = true; ta.focus(); }
+
+      fFind.addEventListener('input', function(){ curMatch = -1; computeMatches(); showCount(); });
+      fFind.addEventListener('keydown', function(e){
+        if (e.key === 'Enter'){ e.preventDefault(); findStep(e.shiftKey ? -1 : 1); }
+        else if (e.key === 'Escape'){ e.preventDefault(); closeFind(); }
+      });
+      fRepl.addEventListener('keydown', function(e){
+        if (e.key === 'Enter'){ e.preventDefault(); replaceCurrent(); }
+        else if (e.key === 'Escape'){ e.preventDefault(); closeFind(); }
+      });
+      fCase.addEventListener('change', function(){ curMatch = -1; computeMatches(); showCount(); });
+      document.getElementById('f-next').addEventListener('click', function(){ findStep(1); });
+      document.getElementById('f-prev').addEventListener('click', function(){ findStep(-1); });
+      document.getElementById('f-rep').addEventListener('click', replaceCurrent);
+      document.getElementById('f-all').addEventListener('click', replaceAll);
+      document.getElementById('f-close').addEventListener('click', closeFind);
+      document.addEventListener('keydown', function(e){
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f'){ e.preventDefault(); openFind(); }
       });
 
       buildOutline();   // initial chapter list
