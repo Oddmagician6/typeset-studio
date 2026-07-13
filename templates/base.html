@@ -141,6 +141,7 @@
       <nav class="nav">
         <a href="{{ url_for('index') }}" class="{{ 'active' if active=='styles' }}">Styles</a>
         <a href="{{ url_for('covers') }}" class="{{ 'active' if active=='covers' }}">Covers</a>
+        <a href="{{ url_for('fonts_page') }}" class="{{ 'active' if active=='fonts' }}">Fonts</a>
         <a href="{{ url_for('projects') }}" class="{{ 'active' if active=='projects' }}">Projects</a>
         <a href="{{ url_for('generate') }}" class="{{ 'active' if active=='generate' }}">Set a book</a>
         <button id="theme-toggle" title="Toggle dark mode" onclick="toggleTheme()">◑</button>

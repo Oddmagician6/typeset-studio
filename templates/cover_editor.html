@@ -132,8 +132,9 @@
             {{ fsel('Serif (labels)', 'font_serif', c.fonts.serif) }}
             {{ fsel('Italic (kicker/epigraph)', 'font_italic', c.fonts.italic) }}
           </div>
-          <p class="hint" style="margin-top:12px">Only fonts in the <code>fonts/</code> folder appear here.
-            Drop a licensed <code>.ttf</code> there to use it.</p>
+          <p class="hint" style="margin-top:12px">Only fonts in your library appear here.
+            <a href="{{ url_for('fonts_page') }}" target="_blank">Manage fonts</a> to upload a licensed
+            <code>.ttf</code>, then reload this page.</p>
         </div>
       </fieldset>
 

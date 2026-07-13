@@ -281,6 +281,14 @@
         </div>
       </fieldset>
 
+      {% macro fontsel(label, name, value, hint='') %}
+        <div class="field"><label>{{ label }}</label>{% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+          <select name="{{ name }}">
+            {% set opts = fonts or [] %}
+            {% if value and value not in opts %}<option value="{{ value }}" selected>{{ value }}</option>{% endif %}
+            {% for f in opts %}<option value="{{ f }}" {{ 'selected' if value==f }}>{{ f }}</option>{% endfor %}
+          </select></div>
+      {%- endmacro %}
       <fieldset>
         <legend>Fonts</legend>
         <div class="fs-body">
@@ -289,13 +297,12 @@
               <input type="text" id="f-fam" name="font_family" value="{{ p.font_family }}"></div>
           </div>
           <div class="row">
-            <div class="field"><label>Regular</label><span class="hint">.ttf in /fonts or full path</span>
-              <input type="text" name="font_regular" value="{{ p.font_files.regular }}"></div>
-            <div class="field"><label>Bold</label><span class="hint">.ttf</span>
-              <input type="text" name="font_bold" value="{{ p.font_files.bold }}"></div>
-            <div class="field"><label>Italic</label><span class="hint">.ttf</span>
-              <input type="text" name="font_italic" value="{{ p.font_files.italic }}"></div>
+            {{ fontsel('Regular', 'font_regular', p.font_files.regular, 'from your font library') }}
+            {{ fontsel('Bold', 'font_bold', p.font_files.bold) }}
+            {{ fontsel('Italic', 'font_italic', p.font_files.italic) }}
           </div>
+          <p class="hint" style="margin-top:12px">Need another face?
+            <a href="{{ url_for('fonts_page') }}" target="_blank">Manage fonts</a> to upload it.</p>
         </div>
       </fieldset>
 
