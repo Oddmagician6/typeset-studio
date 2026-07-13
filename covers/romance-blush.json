@@ -1,0 +1,73 @@
+{
+  "name": "Romance Blush",
+  "description": "Soft blush gradient, rose and warm-gold type, elegant italics. For romance and women's fiction.",
+  "fonts": {
+    "display": "Book-Bold.ttf",
+    "serif": "Book-Regular.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "palette": {
+    "bg_top": "#fbeef1",
+    "bg_bottom": "#f2dbe1",
+    "gold": "#8c5563",
+    "teal": "#b0894f",
+    "ink": "#574049",
+    "muted": "#a98a91"
+  },
+  "border": {
+    "color": "gold",
+    "inset": 0.46,
+    "gap": 0.06,
+    "line": 0.8,
+    "corner": 0.45,
+    "corner_line": 1.0
+  },
+  "collection": {
+    "size": 12,
+    "tracking": 3.2,
+    "color": "gold",
+    "top": 0.71,
+    "bottom": 0.115
+  },
+  "kicker": {
+    "size": 12,
+    "tracking": 0.3,
+    "color": "muted",
+    "y": 0.66
+  },
+  "title": {
+    "size": 38,
+    "leading": 44,
+    "tracking": 0.8,
+    "color": "gold",
+    "y": 0.58
+  },
+  "accent": {
+    "size": 19,
+    "tracking": 1.6,
+    "color": "teal",
+    "gap": 0.01
+  },
+  "ornament": {
+    "color": "gold",
+    "size": 2.2,
+    "spacing": 9,
+    "rule": 0.7,
+    "rule_len": 0.8,
+    "gap": 0.05
+  },
+  "epigraph": {
+    "size": 10.5,
+    "leading": 15,
+    "tracking": 0.2,
+    "color": "muted",
+    "width": 0.62,
+    "top": 0.26
+  },
+  "studio": {
+    "size": 8.5,
+    "tracking": 2.6,
+    "color": "muted",
+    "y": 0.088
+  }
+}

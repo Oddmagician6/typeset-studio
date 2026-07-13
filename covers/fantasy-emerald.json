@@ -1,0 +1,73 @@
+{
+  "name": "Fantasy Emerald",
+  "description": "Deep forest green with antique gold and a heavier ornamented rule. For fantasy and epic adventure.",
+  "fonts": {
+    "display": "Book-Bold.ttf",
+    "serif": "Book-Regular.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "palette": {
+    "bg_top": "#103027",
+    "bg_bottom": "#071410",
+    "gold": "#c9a24b",
+    "teal": "#7fc09a",
+    "ink": "#ece2cd",
+    "muted": "#8a9a88"
+  },
+  "border": {
+    "color": "gold",
+    "inset": 0.42,
+    "gap": 0.06,
+    "line": 1.1,
+    "corner": 0.55,
+    "corner_line": 1.4
+  },
+  "collection": {
+    "size": 12.5,
+    "tracking": 3.4,
+    "color": "gold",
+    "top": 0.7,
+    "bottom": 0.115
+  },
+  "kicker": {
+    "size": 11,
+    "tracking": 0.4,
+    "color": "muted",
+    "y": 0.665
+  },
+  "title": {
+    "size": 40,
+    "leading": 46,
+    "tracking": 0.6,
+    "color": "gold",
+    "y": 0.585
+  },
+  "accent": {
+    "size": 20,
+    "tracking": 1.6,
+    "color": "teal",
+    "gap": 0.008
+  },
+  "ornament": {
+    "color": "gold",
+    "size": 2.6,
+    "spacing": 9,
+    "rule": 0.9,
+    "rule_len": 0.85,
+    "gap": 0.05
+  },
+  "epigraph": {
+    "size": 10.5,
+    "leading": 15,
+    "tracking": 0.2,
+    "color": "muted",
+    "width": 0.62,
+    "top": 0.26
+  },
+  "studio": {
+    "size": 8.5,
+    "tracking": 2.4,
+    "color": "muted",
+    "y": 0.088
+  }
+}

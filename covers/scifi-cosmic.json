@@ -1,0 +1,73 @@
+{
+  "name": "Sci-Fi Cosmic",
+  "description": "Deep indigo space with an icy title and cyan accents. For science fiction and space opera.",
+  "fonts": {
+    "display": "Book-Bold.ttf",
+    "serif": "Book-Regular.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "palette": {
+    "bg_top": "#0b1533",
+    "bg_bottom": "#04050d",
+    "gold": "#cfe6ff",
+    "teal": "#3fd0c6",
+    "ink": "#d7e2f2",
+    "muted": "#6a789c"
+  },
+  "border": {
+    "color": "teal",
+    "inset": 0.4,
+    "gap": 0.05,
+    "line": 0.9,
+    "corner": 0.6,
+    "corner_line": 1.2
+  },
+  "collection": {
+    "size": 12,
+    "tracking": 4.2,
+    "color": "gold",
+    "top": 0.7,
+    "bottom": 0.115
+  },
+  "kicker": {
+    "size": 10.5,
+    "tracking": 0.6,
+    "color": "muted",
+    "y": 0.665
+  },
+  "title": {
+    "size": 40,
+    "leading": 45,
+    "tracking": 1.0,
+    "color": "gold",
+    "y": 0.585
+  },
+  "accent": {
+    "size": 19,
+    "tracking": 2.0,
+    "color": "teal",
+    "gap": 0.01
+  },
+  "ornament": {
+    "color": "teal",
+    "size": 2.4,
+    "spacing": 10,
+    "rule": 0.8,
+    "rule_len": 0.8,
+    "gap": 0.05
+  },
+  "epigraph": {
+    "size": 10.5,
+    "leading": 15,
+    "tracking": 0.3,
+    "color": "muted",
+    "width": 0.62,
+    "top": 0.26
+  },
+  "studio": {
+    "size": 8.5,
+    "tracking": 2.8,
+    "color": "muted",
+    "y": 0.088
+  }
+}

@@ -445,6 +445,16 @@ with `requestAnimationFrame`. Degrades gracefully: highlighting is JS-gated via 
 class, so without JS the textarea shows normal text. No dependency, no build step — see the
 Tier-4 decision.
 
+**27. Genre cover presets (×5)**
+`covers/`: Thriller Noir (black + blood-red rule/byline, bold bone title), Romance Blush
+(light blush gradient, rose + warm-gold, elegant italics), Sci-Fi Cosmic (deep indigo, icy
+title, cyan accents), Fantasy Emerald (forest green + antique gold, heavier rule), Literary
+Ivory (light ivory, deep-ink type, fine classic rule). Data-only (no renderer change) — each
+is a palette/border/type variation on the shared cover renderer; they appear automatically in
+the Covers gallery and the Generate dropdown. First exercise of the renderer on **light
+backgrounds** (Romance/Literary) — confirmed legible. Epigraph placed low (0.26) as a tagline
+so it clears the dynamic ornament.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
