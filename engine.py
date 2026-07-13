@@ -319,6 +319,23 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
                 _tracked_centre(canv, cx, yy, ln, cf['serif'], size, 0.0)
                 yy -= lead
 
+    # optional author photo / publisher logo — centred, aspect preserved
+    bimg = meta.get('cover_back_image')
+    if bimg and os.path.exists(bimg):
+        try:
+            from reportlab.lib.utils import ImageReader
+            ir = ImageReader(bimg)
+            iw, ih = ir.getSize()
+            tw = max(meta.get('cover_back_image_w', 1.5), 0.25) * inch
+            tw = min(tw, (bx1 - bx0) - 2 * gap)          # keep inside the frame
+            thh = tw * (ih / iw) if iw else tw
+            icx = cx
+            icy = y0 + h * min(max(meta.get('cover_back_image_y', 0.4), 0.0), 1.0)
+            canv.drawImage(ir, icx - tw / 2.0, icy - thh / 2.0, width=tw, height=thh,
+                           preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+
     # barcode reserve zone — white box, lower-right, KDP-style ~2.0" x 1.2"
     bw, bh = 2.0 * inch, 1.2 * inch
     bxr = bx1 - gap - bw
