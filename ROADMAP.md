@@ -377,6 +377,45 @@ dot leaders and part headings; `_estimate_toc_pages()`; two-pass in `build_pdf()
 `epub.py` (`_toc_page_xhtml()` clickable chapter list) · `templates/generate.html` +
 `templates/project_edit.html` (Include table of contents checkbox, off by default).
 
+### ◻ Tier 4 — planned / backlog
+
+**Cover Studio Tier 2/3** *(follows feature #16)*
+Tier 2: upload fonts through the browser (a route that saves `.ttf` into `fonts/`, plus a
+picker in the cover editor and the preset editor). Tier 3: full print **wrap** — front +
+spine + back on one page, spine width from page count/paper (reuse `print_spec` math);
+back-cover blurb + barcode zone.
+
+**In-app manuscript editor — author a book start to finish** *(large; a product-identity
+step from "typesetting tool" toward "authoring + typesetting suite")*
+
+Reframe before building: **not** a Word-style WYSIWYG. The engine deliberately consumes a
+*semantic* block model (`para` / `subhead` / `scene` / `doc_block` + typed epistolary), and
+the whole value proposition is that the **preset** owns typography while the manuscript
+carries only structure + emphasis. A free-form formatting editor would fight that. Target a
+*structured* editor (à la Ulysses / iA Writer / Docs "pageless") with a fixed style set that
+maps 1:1 onto the existing blocks.
+
+Cheapest, safest route reuses everything: an editor that **emits the existing Markdown**
+runs through `manuscript.parse_markdown` → PDF/EPUB/continuity/preview unchanged.
+
+- **Phase A (low risk, recommended first):** a Markdown authoring surface — writing pane
+  (word count, chapter nav, find/replace) + toolbar that inserts the app's own conventions
+  (`#`/`##`/`===`/`* * *`/`*..*`/`**..**`/`~~~ letter ~~~`), split-pane live preview (reuse
+  the PyMuPDF rasterizer), **autosave into the project manuscript file**. No new dependency,
+  no break of the offline / no-CDN / system-fonts convention. Pairs directly with the
+  continuity checker (write → check → typeset in one place).
+- **Phase B (optional, bigger):** true WYSIWYG via a *vendored* structured editor
+  (ProseMirror / TipTap / Lexical) constrained to the block/style set, still emitting the
+  same Markdown.
+
+**Decision to make first (blocks Phase B, not Phase A):** stay dependency-free / no bundled
+JS, or adopt a locally-vendored editor library with a build step? This reverses the current
+"no external assets, tiny inline JS" convention and shapes everything downstream.
+
+**New obligation once people author in-app:** autosave + backups + no data loss — a higher
+bar than a tool that only transforms files the user already has stored elsewhere. Keep
+`.docx` import as the on-ramp for existing manuscripts.
+
 ---
 
 ## Conventions for contributions
