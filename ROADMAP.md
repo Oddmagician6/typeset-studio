@@ -422,6 +422,16 @@ Paper calipers stay in `_PAPER` (standard by weight); the note reminds users to 
 the retailer's own cover template. So e.g. an 80-page book gets spine text on IngramSpark
 (min 48) but not KDP (min 100).
 
+**25. Cover wrap — back-cover image (author photo / logo)**
+`engine.py`: `_paint_back_panel` draws an optional image from `meta['cover_back_image']`
+(centred, aspect preserved via `ImageReader`, width clamped to the frame, `mask='auto'` for
+transparent PNG logos), positioned by `cover_back_image_w`/`cover_back_image_y`. ·
+`app.py`: `_save_back_image()` writes the upload to a temp file; both wrap routes read
+`request.files['wrap_back_image']`, pass the path through `_wrap_from_form`, and clean it up. ·
+`templates/cover_editor.html`: a Back-cover image file input plus width and vertical-position
+fields; the front-cover live preview strips the file from its FormData so a photo isn't
+re-uploaded on every keystroke. Drawn between the blurb and the barcode reserve.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -469,8 +479,8 @@ dot leaders and part headings; `_estimate_toc_pages()`; two-pass in `build_pdf()
 ### ◻ Tier 4 — planned / backlog
 
 *(Cover Studio Tiers 1–3 all shipped: features #16 designed templates + editor, #17 font
-library, #18 full print wrap; plus #22 wrap auto page-count and #24 per-retailer wrap presets.
-Possible follow-ups: author-photo / logo image on the back panel.)*
+library, #18 full print wrap; plus #22 wrap auto page-count, #24 per-retailer wrap presets,
+and #25 back-cover image. Cover Studio backlog clear.)*
 
 **In-app manuscript editor — author a book start to finish** *(large; a product-identity
 step from "typesetting tool" toward "authoring + typesetting suite")*

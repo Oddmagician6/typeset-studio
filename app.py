@@ -684,7 +684,20 @@ def cover_preview():
         return jsonify({'ok': False, 'error': str(exc)})
 
 
-def _wrap_from_form(form, out_path):
+def _save_back_image(f):
+    """Save an uploaded back-cover image (photo/logo) to a temp file. Returns path or None."""
+    if not f or not f.filename:
+        return None
+    ext = os.path.splitext(secure_filename(f.filename))[1].lower()
+    if ext not in ('.jpg', '.jpeg', '.png'):
+        return None
+    fd, tmp = tempfile.mkstemp(suffix=ext)
+    os.close(fd)
+    f.save(tmp)
+    return tmp
+
+
+def _wrap_from_form(form, out_path, back_image=None):
     """Build a full print wrap (back + spine + front + bleed) from the cover editor form."""
     tpl = parse_cover_form(form)
     interior = engine.register_fonts(DEFAULTS)
@@ -714,6 +727,9 @@ def _wrap_from_form(form, out_path):
         'cover_epigraph':   form.get('prev_epigraph', ''),
         'cover_studio':     form.get('prev_studio', ''),
         'cover_blurb':      form.get('wrap_blurb', ''),
+        'cover_back_image':   back_image or '',
+        'cover_back_image_w': _f(form, 'wrap_back_w', 1.5),
+        'cover_back_image_y': _f(form, 'wrap_back_y', 0.4),
     }
     guides = form.get('wrap_guides') == '1'
     res = engine.build_cover_wrap(tpl, cf, meta, dims, out_path, guides=guides)
@@ -724,15 +740,18 @@ def _wrap_from_form(form, out_path):
 def cover_wrap():
     fd, tmp = tempfile.mkstemp(suffix='.pdf')
     os.close(fd)
+    back = _save_back_image(request.files.get('wrap_back_image'))
     try:
-        _wrap_from_form(request.form, tmp)
+        _wrap_from_form(request.form, tmp, back_image=back)
         with open(tmp, 'rb') as f:
             data = f.read()
     finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        for p in (tmp, back):
+            if p and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
     name = slugify(request.form.get('name', 'cover')) + '-wrap.pdf'
     return Response(data, mimetype='application/pdf',
                     headers={'Content-Disposition': f'attachment; filename="{name}"'})
@@ -747,8 +766,9 @@ def cover_wrap_preview():
                         'error': 'pymupdf not installed - run: pip install pymupdf'})
     fd, tmp = tempfile.mkstemp(suffix='.pdf')
     os.close(fd)
+    back = _save_back_image(request.files.get('wrap_back_image'))
     try:
-        res, dims = _wrap_from_form(request.form, tmp)
+        res, dims = _wrap_from_form(request.form, tmp, back_image=back)
         doc = fitz.open(tmp)
         pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.1, 1.1), alpha=False)
         b64 = base64.b64encode(pix.tobytes('png')).decode()
@@ -761,10 +781,12 @@ def cover_wrap_preview():
         logging.error('wrap preview failed: %s', traceback.format_exc())
         return jsonify({'ok': False, 'error': str(exc)})
     finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        for p in (tmp, back):
+            if p and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
 
 # ------------------------------------------------------------- font manager

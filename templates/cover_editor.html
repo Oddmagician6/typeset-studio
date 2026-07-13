@@ -316,6 +316,15 @@
               <span class="hint">shown centred on the back · blank line starts a new paragraph</span>
               <textarea name="wrap_blurb" rows="4"></textarea></div>
           </div>
+          <div class="row">
+            <div class="field wide"><label>Back-cover image</label>
+              <span class="hint">optional · author photo or publisher logo · .jpg / .png (transparent PNG for a logo)</span>
+              <input type="file" name="wrap_back_image" accept=".jpg,.jpeg,.png"></div>
+          </div>
+          <div class="row">
+            {{ nf('Image width', 'wrap_back_w', 1.5, 'inches') }}
+            {{ nf('Image position', 'wrap_back_y', 0.4, '0–1 up the back panel') }}
+          </div>
           <div class="formbar" style="margin-top:14px">
             <button type="button" id="wrap-pv" class="btn">Preview wrap</button>
             <button type="button" id="wrap-dl" class="btn btn-primary">Download wrap PDF</button>
@@ -354,7 +363,9 @@
         pending = false;
         status.textContent = 'Rendering…';
         try {
-          var res  = await fetch('/cover/preview', {method: 'POST', body: new FormData(form)});
+          var frontData = new FormData(form);
+          frontData.delete('wrap_back_image');   // front preview doesn't need the back image
+          var res  = await fetch('/cover/preview', {method: 'POST', body: frontData});
           var json = await res.json();
           if (json.ok) {
             img.src = json.image;
