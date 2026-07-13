@@ -403,6 +403,13 @@ last build: N pages" note (or a prompt to build the book first). The picker `<se
 `name`, so it never enters the saved template. Removes the manual page-count entry for the
 common case.
 
+**23. Manuscript editor — scene-level outline entries**
+`templates/manuscript_editor.html` (client-side): `buildOutline` now nests **subheads**
+(`## …`, by title) and **scene breaks** (`* * *` / `***` / `---` / `###`, labelled with a
+6-word snippet of the following line, or "Scene N") under each chapter, indented and muted.
+Each jumps to that line via the existing mirror-based caret scroll. Scene detection mirrors
+`manuscript.SCENE_BREAK_RE`. No backend change.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -466,10 +473,10 @@ maps 1:1 onto the existing blocks.
 Cheapest, safest route reuses everything: an editor that **emits the existing Markdown**
 runs through `manuscript.parse_markdown` → PDF/EPUB/continuity/preview unchanged.
 
-- **Phase A — SHIPPED (features #19–#21):** a project-integrated Markdown authoring surface
-  with a formatting toolbar, live word/chapter counts, debounced autosave, a page preview, a
-  chapter outline sidebar with jump-to navigation, and find/replace. Remaining Phase-A polish
-  (not yet done): scene-level entries in the outline.
+- **Phase A — SHIPPED (features #19–#21, #23):** a project-integrated Markdown authoring
+  surface with a formatting toolbar, live word/chapter counts, debounced autosave, a page
+  preview, an outline sidebar (chapters, parts, subheads, and scenes) with jump-to navigation,
+  and find/replace. Phase-A polish complete.
 - **Phase B (optional, bigger):** true WYSIWYG via a *vendored* structured editor
   (ProseMirror / TipTap / Lexical) constrained to the block/style set, still emitting the
   same Markdown.
