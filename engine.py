@@ -128,6 +128,294 @@ def _register_cover_fonts(tpl, interior):
     return out
 
 
+# ---------------------------------------------------------------- cover panels
+# The designed cover is drawn into an arbitrary rectangle so the same code paints
+# a standalone front cover (page 1 of the interior) and the front panel of a full
+# print wrap (back + spine + front + bleed).
+
+def _pal_color(tpl, name):
+    """Resolve a palette key (e.g. 'gold') or a literal hex to a Color."""
+    pal = tpl.get('palette', {})
+    v = pal.get(name, name)
+    return _hex(v if isinstance(v, str) else '#000000')
+
+
+def _paint_gradient(canv, pal, x, y, w, h):
+    """Fill a rect with the vertical background gradient (solid base as a safety net)."""
+    canv.saveState()
+    canv.setFillColor(_hex(pal.get('bg_bottom', '#080d15')))
+    canv.rect(x, y, w, h, stroke=0, fill=1)
+    try:
+        p = canv.beginPath()
+        p.rect(x, y, w, h)
+        canv.clipPath(p, stroke=0, fill=0)
+        canv.linearGradient(x, y + h, x, y,
+                            [_hex(pal.get('bg_top', '#101a29')),
+                             _hex(pal.get('bg_bottom', '#080d15'))],
+                            extend=True)
+    except Exception:
+        pass
+    canv.restoreState()
+
+
+def _paint_border(canv, tpl, x0, y0, w, h):
+    """Double rule + outward corner brackets inset into (x0,y0,w,h). Returns inner box."""
+    b = tpl.get('border', {})
+    inset = b.get('inset', 0.42) * inch
+    gap = b.get('gap', 0.055) * inch
+    gold = _pal_color(tpl, b.get('color', 'gold'))
+    bx0, by0, bx1, by1 = x0 + inset, y0 + inset, x0 + w - inset, y0 + h - inset
+    canv.saveState()
+    canv.setStrokeColor(gold)
+    canv.setLineWidth(b.get('line', 1.0))
+    canv.rect(bx0, by0, bx1 - bx0, by1 - by0, stroke=1, fill=0)
+    canv.rect(bx0 + gap, by0 + gap, (bx1 - bx0) - 2 * gap, (by1 - by0) - 2 * gap,
+              stroke=1, fill=0)
+    bl = b.get('corner', 0.5) * inch
+    bo = gap * 1.6
+    canv.setLineWidth(b.get('corner_line', 1.3))
+    for (px, py, sx, sy) in ((bx0, by0, 1, 1), (bx1, by0, -1, 1),
+                             (bx0, by1, 1, -1), (bx1, by1, -1, -1)):
+        ox, oy = px - sx * bo, py - sy * bo
+        canv.line(ox, oy, ox + sx * bl, oy)
+        canv.line(ox, oy, ox, oy + sy * bl)
+    canv.restoreState()
+    return bx0, by0, bx1, by1, gap
+
+
+def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h):
+    """The full designed front cover, drawn inside (x0,y0,w,h)."""
+    cx = x0 + w / 2.0
+    canv.saveState()
+    bx0, by0, bx1, by1, gap = _paint_border(canv, tpl, x0, y0, w, h)
+    inner_w = (bx1 - bx0) - 2 * gap
+
+    def yat(frac):
+        return y0 + h * frac
+
+    # collection line (top)
+    cc = tpl.get('collection', {})
+    coll = (meta.get('cover_collection') or '').upper()
+    if coll:
+        canv.setFillColor(_pal_color(tpl, cc.get('color', 'gold')))
+        _tracked_centre(canv, cx, yat(cc.get('top', 0.70)), coll,
+                        cf['serif'], cc.get('size', 12.5), cc.get('tracking', 3.4))
+
+    # kicker (italic)
+    kk = tpl.get('kicker', {})
+    kick = meta.get('cover_kicker', '')
+    if kick:
+        canv.setFillColor(_pal_color(tpl, kk.get('color', 'muted')))
+        _tracked_centre(canv, cx, yat(kk.get('y', 0.665)), kick,
+                        cf['italic'], kk.get('size', 11), kk.get('tracking', 0.4))
+
+    # title — wrapped, letterspaced, shrink-to-fit
+    tt = tpl.get('title', {})
+    title = (meta.get('title') or '').upper()
+    last_y = yat(tt.get('y', 0.585))
+    tsize = tt.get('size', 40)
+    if title:
+        maxw = inner_w - 0.4 * inch
+        trk = tt.get('tracking', 0.6)
+        lines = _wrap_tracked(title, cf['display'], tsize, maxw, trk)
+        while tsize > 14 and any(
+                stringWidth(ln, cf['display'], tsize) + trk * max(len(ln) - 1, 0) > maxw
+                for ln in lines):
+            tsize -= 1
+            lines = _wrap_tracked(title, cf['display'], tsize, maxw, trk)
+        leading = tt.get('leading', 46) * (tsize / tt.get('size', 40))
+        canv.setFillColor(_pal_color(tpl, tt.get('color', 'gold')))
+        yy = yat(tt.get('y', 0.585))
+        for ln in lines:
+            _tracked_centre(canv, cx, yy, ln, cf['display'], tsize, trk)
+            last_y = yy
+            yy -= leading
+
+    # accent line (author) — cleared below the title
+    ac = tpl.get('accent', {})
+    accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
+    if accent:
+        asize = ac.get('size', 21)
+        clearance = tsize * 0.42 + asize * 0.55 + ac.get('gap', 0.008) * h
+        last_y = last_y - clearance
+        canv.setFillColor(_pal_color(tpl, ac.get('color', 'teal')))
+        _tracked_centre(canv, cx, last_y, accent, cf['display'],
+                        asize, ac.get('tracking', 1.4))
+
+    # ornament
+    orn = tpl.get('ornament', {})
+    oy = last_y - orn.get('gap', 0.05) * h
+    ocol = _pal_color(tpl, orn.get('color', 'gold'))
+    canv.setFillColor(ocol)
+    canv.setStrokeColor(ocol)
+    r = orn.get('size', 2.4)
+    sp = orn.get('spacing', 9)
+    for i, dx in enumerate((-sp, 0, sp)):
+        _diamond(canv, cx + dx, oy, r * (1.25 if i == 1 else 1.0))
+    rl = orn.get('rule_len', 0.8) * inch
+    if orn.get('rule', 0.8):
+        canv.setLineWidth(orn.get('rule', 0.8))
+        inn = sp + r + 7
+        canv.line(cx - inn - rl, oy, cx - inn, oy)
+        canv.line(cx + inn, oy, cx + inn + rl, oy)
+
+    # epigraph
+    ep = tpl.get('epigraph', {})
+    epi = meta.get('cover_epigraph') or meta.get('epigraph') or ''
+    if epi:
+        ew = (bx1 - bx0) * ep.get('width', 0.62)
+        lines = _wrap_tracked(epi, cf['italic'], ep.get('size', 10.5),
+                              ew, ep.get('tracking', 0.2))
+        canv.setFillColor(_pal_color(tpl, ep.get('color', 'muted')))
+        yy = yat(ep.get('top', 0.375))
+        for ln in lines:
+            _tracked_centre(canv, cx, yy, ln, cf['italic'],
+                            ep.get('size', 10.5), ep.get('tracking', 0.2))
+            yy -= ep.get('leading', 15)
+
+    # collection (bottom) + studio footer
+    if coll:
+        canv.setFillColor(_pal_color(tpl, cc.get('color', 'gold')))
+        _tracked_centre(canv, cx, yat(cc.get('bottom', 0.115)), coll,
+                        cf['serif'], cc.get('size', 12.5) * 0.82, cc.get('tracking', 3.4))
+    st = tpl.get('studio', {})
+    studio = (meta.get('cover_studio') or meta.get('publisher') or '').upper()
+    if studio:
+        canv.setFillColor(_pal_color(tpl, st.get('color', 'muted')))
+        _tracked_centre(canv, cx, yat(st.get('y', 0.088)), studio,
+                        cf['serif'], st.get('size', 8.5), st.get('tracking', 2.4))
+    canv.restoreState()
+
+
+def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
+    """Back cover: border, collection line, blurb, studio footer, and a barcode zone."""
+    cx = x0 + w / 2.0
+    canv.saveState()
+    bx0, by0, bx1, by1, gap = _paint_border(canv, tpl, x0, y0, w, h)
+
+    def yat(frac):
+        return y0 + h * frac
+
+    cc = tpl.get('collection', {})
+    coll = (meta.get('cover_collection') or '').upper()
+    if coll:
+        canv.setFillColor(_pal_color(tpl, cc.get('color', 'gold')))
+        _tracked_centre(canv, cx, yat(0.86), coll,
+                        cf['serif'], cc.get('size', 12.5) * 0.85, cc.get('tracking', 3.4))
+
+    # blurb — centred serif block in the upper-middle
+    blurb = meta.get('cover_blurb') or ''
+    if blurb:
+        size = 11.0
+        lead = 16.0
+        colw = (bx1 - bx0) * 0.82
+        canv.setFillColor(_pal_color(tpl, 'ink'))
+        yy = yat(0.72)
+        for para in blurb.split('\n'):
+            if not para.strip():
+                yy -= lead * 0.6
+                continue
+            for ln in _wrap_tracked(para, cf['serif'], size, colw, 0.0):
+                _tracked_centre(canv, cx, yy, ln, cf['serif'], size, 0.0)
+                yy -= lead
+
+    # barcode reserve zone — white box, lower-right, KDP-style ~2.0" x 1.2"
+    bw, bh = 2.0 * inch, 1.2 * inch
+    bxr = bx1 - gap - bw
+    byr = by0 + gap + 0.15 * inch
+    canv.setFillColorRGB(1, 1, 1)
+    canv.setStrokeGray(0.6)
+    canv.setLineWidth(0.6)
+    canv.rect(bxr, byr, bw, bh, stroke=1, fill=1)
+    canv.setFillGray(0.55)
+    canv.setFont(cf['serif'], 7.5)
+    canv.drawCentredString(bxr + bw / 2.0, byr + bh / 2.0 - 2, 'ISBN / barcode area')
+
+    # studio footer — centred in the space to the LEFT of the barcode so they never collide
+    st = tpl.get('studio', {})
+    studio = (meta.get('cover_studio') or meta.get('publisher') or '').upper()
+    if studio:
+        foot_cx = (bx0 + gap + (bxr - 0.12 * inch)) / 2.0
+        canv.setFillColor(_pal_color(tpl, st.get('color', 'muted')))
+        _tracked_centre(canv, foot_cx, byr + bh / 2.0 - st.get('size', 8.5) * 0.35, studio,
+                        cf['serif'], st.get('size', 8.5), st.get('tracking', 2.4))
+    canv.restoreState()
+
+
+def _paint_spine(canv, tpl, cf, meta, x0, y0, w, h):
+    """Rotated spine text (title + author), if the spine is wide enough to carry it."""
+    if w < 0.32 * inch:            # too narrow for legible spine type (~<140pp)
+        return
+    title = (meta.get('title') or '').upper()
+    author = (meta.get('cover_accent') or meta.get('author') or '').upper()
+    if not title and not author:
+        return
+    cx = x0 + w / 2.0
+    cy = y0 + h / 2.0
+    avail = h * 0.82               # length available along the spine
+    # size the title to the spine width, but no longer than the spine allows
+    tsize = min(w * 0.55, 15.0)
+    while tsize > 6 and stringWidth(title, cf['display'], tsize) > avail:
+        tsize -= 0.5
+    asize = tsize * 0.62
+    canv.saveState()
+    canv.translate(cx, cy)
+    canv.rotate(-90)               # reads top-to-bottom (US/UK convention)
+    if title:
+        canv.setFillColor(_pal_color(tpl, tpl.get('title', {}).get('color', 'gold')))
+        canv.setFont(cf['display'], tsize)
+        canv.drawCentredString(0, w * 0.10, title)
+    if author:
+        canv.setFillColor(_pal_color(tpl, tpl.get('accent', {}).get('color', 'teal')))
+        canv.setFont(cf['display'], asize)
+        canv.drawCentredString(0, -w * 0.28, author)
+    canv.restoreState()
+
+
+def _paint_wrap_guides(canv, W, H, bl, tw, sp, th):
+    """Dashed proof guides at the trim box and the two spine folds (not for final print)."""
+    canv.saveState()
+    canv.setStrokeColorRGB(0.85, 0.2, 0.5)
+    canv.setLineWidth(0.5)
+    canv.setDash(4, 3)
+    xs = [bl, bl + tw, bl + tw + sp, bl + tw + sp + tw]   # left trim, fold, fold, right trim
+    for x in xs:
+        canv.line(x, 0, x, H)
+    canv.line(0, bl, W, bl)
+    canv.line(0, bl + th, W, bl + th)
+    canv.restoreState()
+
+
+def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
+    """Render a standalone print-ready wrap PDF: back + spine + front + bleed.
+
+    dims: {'trim_w','trim_h','spine_w','bleed'} in inches.
+    Returns dict of the finished wrap dimensions (inches).
+    """
+    from reportlab.pdfgen import canvas as _canvas
+    tw = dims['trim_w'] * inch
+    th = dims['trim_h'] * inch
+    sp = max(dims.get('spine_w', 0.0), 0.0) * inch
+    bl = dims.get('bleed', 0.125) * inch
+    W = 2 * tw + sp + 2 * bl
+    H = th + 2 * bl
+    c = _canvas.Canvas(out_path, pagesize=(W, H))
+    pal = tpl.get('palette', {})
+    _paint_gradient(c, pal, 0, 0, W, H)
+    back_x = bl
+    spine_x = bl + tw
+    front_x = bl + tw + sp
+    _paint_back_panel(c, tpl, cf, meta, back_x, bl, tw, th)
+    _paint_spine(c, tpl, cf, meta, spine_x, bl, sp, th)
+    _paint_cover_panel(c, tpl, cf, meta, front_x, bl, tw, th)
+    if guides:
+        _paint_wrap_guides(c, W, H, bl, tw, sp, th)
+    c.showPage()
+    c.save()
+    return {'wrap_w': round(W / inch, 3), 'wrap_h': round(H / inch, 3),
+            'spine_w': round(sp / inch, 4)}
+
+
 # ---------------------------------------------------------------- fonts
 def register_fonts(preset):
     fam   = preset.get('font_family', 'Book')
@@ -385,151 +673,12 @@ class BookDoc(BaseDocTemplate):
 
     def _draw_designed_cover(self, canv):
         """Render a text-driven cover from a covers/*.json template on page 1."""
-        cv   = self._cover
-        tpl  = cv.get('template', {})
-        cf   = cv.get('fonts', {'display': self.head_font,
-                                'serif': self.head_font, 'italic': self.head_font})
-        meta = self.meta
-        pw, ph = self._pw, self._ph
-        cx = pw / 2.0
-        pal = tpl.get('palette', {})
-
-        def C(name):
-            """Resolve a palette key or literal hex to a Color."""
-            v = pal.get(name, name)
-            return _hex(v if isinstance(v, str) else '#000000')
-
-        canv.saveState()
-
-        # -- background: solid base + vertical gradient (navy top -> darker bottom)
-        canv.setFillColor(_hex(pal.get('bg_bottom', '#080d15')))
-        canv.rect(0, 0, pw, ph, stroke=0, fill=1)
-        try:
-            canv.linearGradient(0, ph, 0, 0,
-                                [_hex(pal.get('bg_top', '#101a29')),
-                                 _hex(pal.get('bg_bottom', '#080d15'))],
-                                extend=True)
-        except Exception:
-            pass
-
-        # -- border: double gold rule with outward corner brackets
-        b = tpl.get('border', {})
-        inset = b.get('inset', 0.42) * inch
-        gap   = b.get('gap', 0.055) * inch
-        gold  = C(b.get('color', 'gold'))
-        x0, y0, x1, y1 = inset, inset, pw - inset, ph - inset
-        canv.setStrokeColor(gold)
-        canv.setLineWidth(b.get('line', 1.0))
-        canv.rect(x0, y0, x1 - x0, y1 - y0, stroke=1, fill=0)
-        canv.rect(x0 + gap, y0 + gap, (x1 - x0) - 2 * gap, (y1 - y0) - 2 * gap,
-                  stroke=1, fill=0)
-        bl = b.get('corner', 0.5) * inch
-        bo = gap * 1.6
-        canv.setLineWidth(b.get('corner_line', 1.3))
-        for (px, py, sx, sy) in ((x0, y0, 1, 1), (x1, y0, -1, 1),
-                                 (x0, y1, 1, -1), (x1, y1, -1, -1)):
-            ox, oy = px - sx * bo, py - sy * bo
-            canv.line(ox, oy, ox + sx * bl, oy)
-            canv.line(ox, oy, ox, oy + sy * bl)
-
-        inner_w = (x1 - x0) - 2 * gap
-
-        # -- collection line (top) — letterspaced small caps
-        cc = tpl.get('collection', {})
-        coll = (meta.get('cover_collection') or '').upper()
-        if coll:
-            canv.setFillColor(C(cc.get('color', 'gold')))
-            _tracked_centre(canv, cx, ph * cc.get('top', 0.70), coll,
-                            cf['serif'], cc.get('size', 12.5), cc.get('tracking', 3.4))
-
-        # -- kicker ("player options") — italic, muted
-        kk = tpl.get('kicker', {})
-        kick = meta.get('cover_kicker', '')
-        if kick:
-            canv.setFillColor(C(kk.get('color', 'muted')))
-            _tracked_centre(canv, cx, ph * kk.get('y', 0.665), kick,
-                            cf['italic'], kk.get('size', 11), kk.get('tracking', 0.4))
-
-        # -- title — big display serif, wrapped, letterspaced
-        tt = tpl.get('title', {})
-        title = (meta.get('title') or '').upper()
-        last_y = ph * tt.get('y', 0.585)
-        tsize = tt.get('size', 40)
-        if title:
-            maxw = inner_w - 0.4 * inch
-            trk = tt.get('tracking', 0.6)
-            # shrink to fit: the longest word must not cross the border
-            lines = _wrap_tracked(title, cf['display'], tsize, maxw, trk)
-            while tsize > 14 and any(
-                    stringWidth(ln, cf['display'], tsize) + trk * max(len(ln) - 1, 0) > maxw
-                    for ln in lines):
-                tsize -= 1
-                lines = _wrap_tracked(title, cf['display'], tsize, maxw, trk)
-            leading = tt.get('leading', 46) * (tsize / tt.get('size', 40))
-            canv.setFillColor(C(tt.get('color', 'gold')))
-            yy = ph * tt.get('y', 0.585)
-            for ln in lines:
-                _tracked_centre(canv, cx, yy, ln, cf['display'], tsize, trk)
-                last_y = yy
-                yy -= leading
-
-        # -- accent line — teal, cleared below the title.
-        # Defaults to the Author; the cover_accent field overrides it (e.g. "& Feats").
-        ac = tpl.get('accent', {})
-        accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
-        if accent:
-            asize = ac.get('size', 21)
-            # clearance = title descender room + this line's cap height + tunable gap
-            clearance = tsize * 0.42 + asize * 0.55 + ac.get('gap', 0.008) * ph
-            last_y = last_y - clearance
-            canv.setFillColor(C(ac.get('color', 'teal')))
-            _tracked_centre(canv, cx, last_y, accent, cf['display'],
-                            asize, ac.get('tracking', 1.4))
-
-        # -- ornament — three vector diamonds flanked by thin rules
-        orn = tpl.get('ornament', {})
-        oy = last_y - orn.get('gap', 0.05) * ph
-        ocol = C(orn.get('color', 'gold'))
-        canv.setFillColor(ocol)
-        canv.setStrokeColor(ocol)
-        r = orn.get('size', 2.4)
-        sp = orn.get('spacing', 9)
-        for i, dx in enumerate((-sp, 0, sp)):
-            _diamond(canv, cx + dx, oy, r * (1.25 if i == 1 else 1.0))
-        rl = orn.get('rule_len', 0.8) * inch
-        if orn.get('rule', 0.8):
-            canv.setLineWidth(orn.get('rule', 0.8))
-            inner = sp + r + 7
-            canv.line(cx - inner - rl, oy, cx - inner, oy)
-            canv.line(cx + inner, oy, cx + inner + rl, oy)
-
-        # -- epigraph — italic, muted, centred, wrapped to a narrow column
-        ep = tpl.get('epigraph', {})
-        epi = meta.get('cover_epigraph') or meta.get('epigraph') or ''
-        if epi:
-            ew = (x1 - x0) * ep.get('width', 0.62)
-            lines = _wrap_tracked(epi, cf['italic'], ep.get('size', 10.5),
-                                  ew, ep.get('tracking', 0.2))
-            canv.setFillColor(C(ep.get('color', 'muted')))
-            yy = ph * ep.get('top', 0.375)
-            for ln in lines:
-                _tracked_centre(canv, cx, yy, ln, cf['italic'],
-                                ep.get('size', 10.5), ep.get('tracking', 0.2))
-                yy -= ep.get('leading', 15)
-
-        # -- collection line (bottom) + studio footer
-        if coll:
-            canv.setFillColor(C(cc.get('color', 'gold')))
-            _tracked_centre(canv, cx, ph * cc.get('bottom', 0.115), coll,
-                            cf['serif'], cc.get('size', 12.5) * 0.82, cc.get('tracking', 3.4))
-        st = tpl.get('studio', {})
-        studio = (meta.get('cover_studio') or meta.get('publisher') or '').upper()
-        if studio:
-            canv.setFillColor(C(st.get('color', 'muted')))
-            _tracked_centre(canv, cx, ph * st.get('y', 0.088), studio,
-                            cf['serif'], st.get('size', 8.5), st.get('tracking', 2.4))
-
-        canv.restoreState()
+        cv  = self._cover
+        tpl = cv.get('template', {})
+        cf  = cv.get('fonts', {'display': self.head_font,
+                               'serif': self.head_font, 'italic': self.head_font})
+        _paint_gradient(canv, tpl.get('palette', {}), 0, 0, self._pw, self._ph)
+        _paint_cover_panel(canv, tpl, cf, self.meta, 0, 0, self._pw, self._ph)
 
     def handle_pageBegin(self):
         self.canv._is_opener = False

@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s %(levelname)s %(message)s')
 
 from flask import (Flask, request, redirect, url_for, render_template,
-                   send_from_directory, abort, flash, jsonify)
+                   send_from_directory, abort, flash, jsonify, Response)
 from werkzeug.utils import secure_filename
 
 import engine
@@ -637,6 +637,85 @@ def cover_preview():
     except Exception as exc:
         logging.error('cover preview failed: %s', traceback.format_exc())
         return jsonify({'ok': False, 'error': str(exc)})
+
+
+def _wrap_from_form(form, out_path):
+    """Build a full print wrap (back + spine + front + bleed) from the cover editor form."""
+    tpl = parse_cover_form(form)
+    interior = engine.register_fonts(DEFAULTS)
+    cf = engine._register_cover_fonts(tpl, interior)
+    try:
+        pages = max(int(_f(form, 'wrap_pages', 200)), 0)
+    except (TypeError, ValueError):
+        pages = 200
+    paper = form.get('wrap_paper', 'white')
+    ppi = _PAPER.get(paper, _PAPER['white'])['ppi']
+    dims = {
+        'trim_w': _f(form, 'wrap_trim_w', 6.0),
+        'trim_h': _f(form, 'wrap_trim_h', 9.0),
+        'spine_w': pages * ppi,
+        'bleed':  _f(form, 'wrap_bleed', 0.125),
+    }
+    meta = {
+        'title':  form.get('prev_title', ''),
+        'author': form.get('prev_author', ''),
+        'publisher': form.get('prev_studio', ''),
+        'cover_collection': form.get('prev_collection', ''),
+        'cover_kicker':     form.get('prev_kicker', ''),
+        'cover_accent':     form.get('prev_accent', ''),
+        'cover_epigraph':   form.get('prev_epigraph', ''),
+        'cover_studio':     form.get('prev_studio', ''),
+        'cover_blurb':      form.get('wrap_blurb', ''),
+    }
+    guides = form.get('wrap_guides') == '1'
+    res = engine.build_cover_wrap(tpl, cf, meta, dims, out_path, guides=guides)
+    return res, dims
+
+
+@app.route('/cover/wrap', methods=['POST'])
+def cover_wrap():
+    fd, tmp = tempfile.mkstemp(suffix='.pdf')
+    os.close(fd)
+    try:
+        _wrap_from_form(request.form, tmp)
+        with open(tmp, 'rb') as f:
+            data = f.read()
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    name = slugify(request.form.get('name', 'cover')) + '-wrap.pdf'
+    return Response(data, mimetype='application/pdf',
+                    headers={'Content-Disposition': f'attachment; filename="{name}"'})
+
+
+@app.route('/cover/wrap/preview', methods=['POST'])
+def cover_wrap_preview():
+    try:
+        import fitz
+    except ImportError:
+        return jsonify({'ok': False,
+                        'error': 'pymupdf not installed - run: pip install pymupdf'})
+    fd, tmp = tempfile.mkstemp(suffix='.pdf')
+    os.close(fd)
+    try:
+        res, dims = _wrap_from_form(request.form, tmp)
+        doc = fitz.open(tmp)
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.1, 1.1), alpha=False)
+        b64 = base64.b64encode(pix.tobytes('png')).decode()
+        doc.close()
+        info = (f"{dims['trim_w']:g}×{dims['trim_h']:g}\" · spine {res['spine_w']:g}\" · "
+                f"full {res['wrap_w']:g}×{res['wrap_h']:g}\"")
+        return jsonify({'ok': True, 'image': f'data:image/png;base64,{b64}', 'info': info})
+    except Exception as exc:
+        logging.error('wrap preview failed: %s', traceback.format_exc())
+        return jsonify({'ok': False, 'error': str(exc)})
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 # ------------------------------------------------------------- font manager
