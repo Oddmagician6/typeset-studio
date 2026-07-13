@@ -360,6 +360,23 @@ Preview-wrap and Download-wrap-PDF buttons. New meta key `cover_blurb`. The wrap
 deliverable (the interior PDF is unchanged); page count comes from the interior build shown on
 the result page.
 
+**19. In-app manuscript editor — Phase A (Markdown authoring)**
+A project-integrated writing surface, so a book can be drafted start to finish in the app.
+`app.py`: `_project_manuscript_text(proj)` (loads a project's manuscript as editable Markdown,
+importing `.docx`/sample as needed — also the shared loader for future reuse),
+`_load_preset_or_default`, `_wordcount`, and routes `/project/new-draft` (creates an empty
+project seeded with `STARTER_DRAFT` and opens the editor), `/project/<pid>/write` (editor),
+`/project/<pid>/write/save` (autosave → writes `<pid>.md`, switches `manuscript_type` to
+`markdown`, returns word/chapter counts), `/project/<pid>/write/preview` (builds the real
+manuscript with the project's preset, returns the first ≤6 pages as PNGs). ·
+`templates/manuscript_editor.html`: textarea writing surface + formatting toolbar (Chapter /
+Subhead / Part / Scene break / Bold / Italic / Letter block insert the existing Markdown
+conventions), live word count, chapter count, debounced autosave (+ Ctrl/⌘-S and a
+`sendBeacon` flush on page-hide), a page-preview pane, and a Typeset button. ·
+`templates/projects.html`: a "Start writing" new-draft field and a per-card **Write** button.
+Reuses `manuscript.parse_markdown` and the interior build unchanged — no new dependency, no
+break of the offline / no-CDN convention. Phase B (vendored WYSIWYG) still open; see backlog.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -424,12 +441,10 @@ maps 1:1 onto the existing blocks.
 Cheapest, safest route reuses everything: an editor that **emits the existing Markdown**
 runs through `manuscript.parse_markdown` → PDF/EPUB/continuity/preview unchanged.
 
-- **Phase A (low risk, recommended first):** a Markdown authoring surface — writing pane
-  (word count, chapter nav, find/replace) + toolbar that inserts the app's own conventions
-  (`#`/`##`/`===`/`* * *`/`*..*`/`**..**`/`~~~ letter ~~~`), split-pane live preview (reuse
-  the PyMuPDF rasterizer), **autosave into the project manuscript file**. No new dependency,
-  no break of the offline / no-CDN / system-fonts convention. Pairs directly with the
-  continuity checker (write → check → typeset in one place).
+- **Phase A — SHIPPED (feature #19):** a project-integrated Markdown authoring surface with
+  a formatting toolbar, live word/chapter counts, debounced autosave, and a page preview.
+  Remaining Phase-A polish (not yet done): chapter-jump navigation, find/replace, and a
+  scrivener-style scene/chapter outline sidebar.
 - **Phase B (optional, bigger):** true WYSIWYG via a *vendored* structured editor
   (ProseMirror / TipTap / Lexical) constrained to the block/style set, still emitting the
   same Markdown.

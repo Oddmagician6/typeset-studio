@@ -28,6 +28,13 @@
     <h1>Projects</h1>
     <p>Each project stores a book's manuscript, style, and title-page settings so you can
        regenerate the PDF any time without re-entering everything.</p>
+    <form method="post" action="{{ url_for('project_new_draft') }}"
+          style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap">
+      <input type="text" name="name" placeholder="New draft title…"
+             style="font-family:var(--sans);font-size:14px;padding:8px 10px;
+                    border:1px solid var(--rule-strong);border-radius:2px;background:var(--surface-2);color:var(--ink)">
+      <button class="btn btn-primary btn-sm" type="submit">Start writing</button>
+    </form>
   </div>
 
   <div class="grid">
@@ -49,8 +56,9 @@
             {% if p.manuscript_type == 'sample' %}<br><b>Manuscript</b> bundled sample{% elif p.manuscript_file %}<br><b>Manuscript</b> {{ p.manuscript_file }}{% endif %}
           </div>
           <div class="actions">
+            <a class="btn btn-primary btn-sm" href="{{ url_for('project_write', pid=item.id) }}">Write</a>
             <form class="inline-form" method="post" action="{{ url_for('project_generate', pid=item.id) }}">
-              <button class="btn btn-primary btn-sm" type="submit">Regenerate</button>
+              <button class="btn btn-sm" type="submit">Regenerate</button>
             </form>
             <a class="btn btn-sm" href="{{ url_for('project_edit', pid=item.id) }}">Edit</a>
             <form class="inline-form" method="post" action="{{ url_for('project_continuity', pid=item.id) }}">

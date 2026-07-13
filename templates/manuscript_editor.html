@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% set active = 'projects' %}
+{% block title %}Write · {{ proj.name or 'Manuscript' }}{% endblock %}
+
+{% block style %}
+  .work{display:grid;grid-template-columns:1fr 320px;gap:28px;align-items:start}
+  .pane{display:flex;flex-direction:column;gap:0}
+  .toolbar{
+    display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+    padding:10px 12px;border:1px solid var(--rule);border-bottom:0;border-radius:3px 3px 0 0;
+    background:var(--surface);
+  }
+  .toolbar button{
+    font-family:var(--sans);font-size:12.5px;color:var(--ink);background:var(--surface-2);
+    border:1px solid var(--rule-strong);border-radius:2px;padding:5px 9px;cursor:pointer;
+  }
+  .toolbar button:hover{border-color:var(--red);color:var(--red-deep)}
+  .toolbar .div{width:1px;height:20px;background:var(--rule);margin:0 3px}
+  .toolbar .b{font-weight:700}
+  .toolbar .i{font-style:italic}
+  textarea#ms{
+    width:100%;min-height:70vh;resize:vertical;
+    font-family:var(--serif);font-size:16px;line-height:1.75;color:var(--ink);
+    background:var(--surface);border:1px solid var(--rule);border-radius:0 0 3px 3px;
+    padding:22px 26px;box-sizing:border-box;
+  }
+  textarea#ms:focus{outline:none;border-color:var(--rule-strong)}
+  .cheat{margin-top:12px;font-size:13px;color:var(--muted)}
+  .cheat summary{cursor:pointer;font-family:var(--mono);font-size:11px;
+    text-transform:uppercase;letter-spacing:.16em;color:var(--faint)}
+  .cheat table{margin-top:10px;border-collapse:collapse;width:100%}
+  .cheat td{padding:3px 10px 3px 0;vertical-align:top}
+  .cheat code{font-family:var(--mono);font-size:12px;background:var(--surface-2);
+    border:1px solid var(--rule);border-radius:2px;padding:1px 5px}
+
+  .side{position:sticky;top:22px;display:flex;flex-direction:column;gap:16px}
+  .stats{
+    background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:14px 16px;
+    display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:baseline;
+  }
+  .stats .k{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--faint)}
+  .stats .v{font-family:var(--serif);font-size:18px;font-weight:600}
+  .savebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .savebar .status{font-size:12px;color:var(--muted)}
+  .pvbox{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:12px}
+  .pvbox .label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.2em;color:var(--faint);margin:0 0 8px}
+  .pvbox img{width:100%;display:block;border:1px solid var(--rule);border-radius:2px;margin-bottom:6px}
+  .pvbox .status{font-size:12px;color:var(--muted);min-height:1.2em}
+  @media (max-width:880px){.work{grid-template-columns:1fr}.side{position:static}}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead" style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap">
+    <div>
+      <div class="eyebrow">Writing</div>
+      <h1 style="margin:0">{{ proj.name or 'Manuscript' }}</h1>
+    </div>
+    <div class="savebar">
+      <button type="button" id="save-btn" class="btn btn-sm">Save</button>
+      <a class="btn btn-sm" href="{{ url_for('project_edit', pid=pid) }}">Book settings</a>
+      <form class="inline-form" method="post" action="{{ url_for('project_generate', pid=pid) }}">
+        <button class="btn btn-primary btn-sm" type="submit">Typeset</button>
+      </form>
+      <a class="btn btn-sm" href="{{ url_for('projects') }}">Projects</a>
+    </div>
+  </div>
+
+  <div class="work">
+    <div class="pane">
+      <div class="toolbar">
+        <button type="button" data-act="chapter">Chapter</button>
+        <button type="button" data-act="subhead">Subhead</button>
+        <button type="button" data-act="part">Part</button>
+        <button type="button" data-act="scene">Scene break</button>
+        <span class="div"></span>
+        <button type="button" class="b" data-act="bold">B</button>
+        <button type="button" class="i" data-act="italic">I</button>
+        <span class="div"></span>
+        <button type="button" data-act="letter">Letter block</button>
+      </div>
+      <textarea id="ms" spellcheck="true">{{ text }}</textarea>
+
+      <details class="cheat">
+        <summary>Formatting guide</summary>
+        <table>
+          <tr><td><code># Chapter Title</code></td><td>start a new chapter</td></tr>
+          <tr><td><code>## Subhead</code></td><td>a centred section subhead</td></tr>
+          <tr><td><code>=== Part Title</code></td><td>a part divider page</td></tr>
+          <tr><td><code>* * *</code></td><td>a scene break (own line)</td></tr>
+          <tr><td><code>*italic*</code> · <code>**bold**</code></td><td>inline emphasis</td></tr>
+          <tr><td><code>~~~ letter from="…" to="…"</code> … <code>~~~</code></td><td>a letter/journal/telegram block</td></tr>
+          <tr><td>blank line</td><td>new paragraph</td></tr>
+        </table>
+      </details>
+    </div>
+
+    <aside class="side">
+      <div class="stats">
+        <span class="k">Words</span><span class="v" id="st-words">{{ words }}</span>
+        <span class="k">Chapters</span><span class="v" id="st-ch">{{ chapters }}</span>
+      </div>
+      <div class="savebar">
+        <span class="status" id="save-status">Saved</span>
+      </div>
+      <div class="pvbox">
+        <p class="label">Page preview</p>
+        <button type="button" id="pv-btn" class="btn btn-sm" style="margin-bottom:10px">Preview pages</button>
+        <div id="pv-imgs"></div>
+        <p class="status" id="pv-status"></p>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    (function () {
+      var ta = document.getElementById('ms');
+      var SAVE_URL = "{{ url_for('project_write_save', pid=pid) }}";
+      var PV_URL   = "{{ url_for('project_write_preview', pid=pid) }}";
+      var timer = null, dirty = false;
+
+      function status(t){ document.getElementById('save-status').textContent = t; }
+      function countWords(s){ var m = s.match(/[\w'’-]+/g); return m ? m.length : 0; }
+
+      function updateStats(){ document.getElementById('st-words').textContent = countWords(ta.value); }
+
+      async function save(){
+        dirty = false;
+        status('Saving…');
+        try {
+          var fd = new FormData(); fd.append('text', ta.value);
+          var r = await fetch(SAVE_URL, {method:'POST', body:fd});
+          var j = await r.json();
+          if (j.ok){ status('Saved ' + j.saved_at); document.getElementById('st-ch').textContent = j.chapters; }
+          else status('Save failed');
+        } catch(e){ status('Save failed'); }
+      }
+
+      function changed(){
+        dirty = true;
+        updateStats();
+        status('Editing…');
+        clearTimeout(timer);
+        timer = setTimeout(save, 1200);
+      }
+
+      // toolbar actions
+      function surround(before, after){
+        var s = ta.selectionStart, e = ta.selectionEnd, v = ta.value;
+        ta.value = v.slice(0,s) + before + v.slice(s,e) + after + v.slice(e);
+        ta.selectionStart = s + before.length; ta.selectionEnd = e + before.length;
+        ta.focus(); changed();
+      }
+      function linePrefix(prefix){
+        var s = ta.selectionStart, v = ta.value;
+        var ls = v.lastIndexOf('\n', s-1) + 1;
+        ta.value = v.slice(0,ls) + prefix + v.slice(ls);
+        ta.selectionStart = ta.selectionEnd = s + prefix.length;
+        ta.focus(); changed();
+      }
+      function insertBlock(text){
+        var s = ta.selectionStart, v = ta.value;
+        var pre = (s > 0 && v[s-1] !== '\n') ? '\n' : '';
+        ta.value = v.slice(0,s) + pre + text + v.slice(s);
+        var pos = s + pre.length + text.length;
+        ta.selectionStart = ta.selectionEnd = pos;
+        ta.focus(); changed();
+      }
+      var ACTS = {
+        chapter: function(){ linePrefix('# '); },
+        subhead: function(){ linePrefix('## '); },
+        part:    function(){ linePrefix('=== '); },
+        scene:   function(){ insertBlock('\n* * *\n\n'); },
+        bold:    function(){ surround('**','**'); },
+        italic:  function(){ surround('*','*'); },
+        letter:  function(){ insertBlock('\n~~~ letter from="" to="" date=""\n\n~~~\n\n'); },
+      };
+      document.querySelectorAll('.toolbar button').forEach(function(b){
+        b.addEventListener('click', function(){ (ACTS[b.dataset.act] || function(){})(); });
+      });
+
+      ta.addEventListener('input', changed);
+      ta.addEventListener('keydown', function(e){
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's'){ e.preventDefault(); save(); }
+      });
+      document.getElementById('save-btn').addEventListener('click', save);
+
+      // flush on leaving the page
+      window.addEventListener('pagehide', function(){
+        if (dirty && navigator.sendBeacon){
+          var fd = new FormData(); fd.append('text', ta.value);
+          navigator.sendBeacon(SAVE_URL, fd);
+        }
+      });
+
+      // page preview
+      document.getElementById('pv-btn').addEventListener('click', async function(){
+        var st = document.getElementById('pv-status');
+        st.textContent = 'Rendering…';
+        try {
+          var fd = new FormData(); fd.append('text', ta.value);
+          var r = await fetch(PV_URL, {method:'POST', body:fd});
+          var j = await r.json();
+          if (j.ok){
+            document.getElementById('pv-imgs').innerHTML =
+              j.images.map(function(src){ return '<img src="'+src+'">'; }).join('');
+            var more = j.pages > j.images.length ? (' (first ' + j.images.length + ' of ' + j.pages + ')') : '';
+            st.textContent = j.pages + ' page' + (j.pages !== 1 ? 's' : '') + ' · ' + j.chapters + ' chapters' + more;
+            document.getElementById('st-ch').textContent = j.chapters;
+          } else { st.textContent = j.error || 'Preview failed.'; }
+        } catch(e){ st.textContent = 'Preview failed.'; }
+      });
+    })();
+  </script>
+{% endblock %}

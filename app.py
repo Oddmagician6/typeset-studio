@@ -1075,6 +1075,160 @@ def project_edit(pid):
     return render_template('project_edit.html', pid=pid, proj=proj, presets=presets)
 
 
+# ---------------------------------------------------------- manuscript editor
+STARTER_DRAFT = ("# Chapter One\n\n"
+                 "Your story starts here. Delete this line and begin writing.\n\n"
+                 "Use a blank line between paragraphs. Mark emphasis with *italics* or "
+                 "**bold**, start a new chapter with a line like `# Chapter Two`, and drop a "
+                 "scene break with `* * *` on its own line.\n")
+
+
+def _project_manuscript_text(proj):
+    """Return a project's manuscript as editable Markdown text ('' if none)."""
+    ms_type = proj.get('manuscript_type', 'file')
+    ms_file = proj.get('manuscript_file', '')
+    if ms_type == 'sample':
+        try:
+            return open(SAMPLE, encoding='utf-8').read()
+        except OSError:
+            return ''
+    if ms_file:
+        path = os.path.join(PROJECT_MS_DIR, ms_file)
+        if os.path.exists(path):
+            if ms_file.lower().endswith('.docx'):
+                try:
+                    return manuscript.import_docx(path)
+                except Exception:
+                    return ''
+            return open(path, encoding='utf-8', errors='replace').read()
+    return ''
+
+
+def _load_preset_or_default(pid):
+    """Load a preset by id, falling back to DEFAULTS (never 404s — for previews)."""
+    if pid:
+        path = os.path.join(PRESET_DIR, secure_filename(pid) + '.json')
+        if os.path.exists(path):
+            try:
+                with open(path, encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+    return DEFAULTS
+
+
+def _wordcount(text):
+    return len(re.findall(r"\b[\w'’-]+\b", text or ''))
+
+
+@app.route('/project/new-draft', methods=['POST'])
+def project_new_draft():
+    name = request.form.get('name', '').strip() or 'Untitled draft'
+    pid = unique_project_id(slugify(name) or 'draft')
+    presets = list_presets()
+    ms_file = pid + '.md'
+    with open(os.path.join(PROJECT_MS_DIR, ms_file), 'w', encoding='utf-8') as f:
+        f.write(STARTER_DRAFT)
+    now = datetime.now().isoformat(timespec='seconds')
+    data = {
+        'name': name, 'preset': presets[0]['id'] if presets else '',
+        'title': name, 'subtitle': '', 'author': '', 'year': '', 'publisher': '',
+        'front_matter': 'full', 'right_hand_starts': True,
+        'cover_overlay': False, 'cover_color': 'light',
+        'format': 'pdf', 'include_toc': False, 'smartquotes': True,
+        'dedication': '', 'epigraph': '', 'acknowledgments': '',
+        'about_author': '', 'also_by': '',
+        'manuscript_file': ms_file, 'manuscript_type': 'markdown',
+        'cover_file': '', 'last_pdf': '', 'last_epub': '',
+        'created': now, 'updated': now,
+    }
+    save_project_file(pid, data)
+    return redirect(url_for('project_write', pid=pid))
+
+
+@app.route('/project/<pid>/write')
+def project_write(pid):
+    proj = load_project(pid)
+    text = _project_manuscript_text(proj)
+    parsed = manuscript.parse_markdown(text, smartquotes=False)
+    return render_template('manuscript_editor.html', pid=pid, proj=proj, text=text,
+                           words=_wordcount(text), chapters=len(parsed['chapters']))
+
+
+@app.route('/project/<pid>/write/save', methods=['POST'])
+def project_write_save(pid):
+    proj = load_project(pid)
+    text = request.form.get('text', '')
+    new_file = pid + '.md'
+    with open(os.path.join(PROJECT_MS_DIR, new_file), 'w', encoding='utf-8') as f:
+        f.write(text)
+    old = proj.get('manuscript_file', '')
+    if old and old != new_file:
+        old_path = os.path.join(PROJECT_MS_DIR, old)
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+    proj['manuscript_file'] = new_file
+    proj['manuscript_type'] = 'markdown'
+    proj['updated'] = datetime.now().isoformat(timespec='seconds')
+    save_project_file(pid, proj)
+    parsed = manuscript.parse_markdown(text, smartquotes=False)
+    return jsonify({'ok': True, 'saved_at': datetime.now().strftime('%H:%M:%S'),
+                    'words': _wordcount(text), 'chapters': len(parsed['chapters'])})
+
+
+@app.route('/project/<pid>/write/preview', methods=['POST'])
+def project_write_preview(pid):
+    try:
+        import fitz
+    except ImportError:
+        return jsonify({'ok': False,
+                        'error': 'pymupdf not installed - run: pip install pymupdf'})
+    proj = load_project(pid)
+    preset = _load_preset_or_default(proj.get('preset', ''))
+    text = request.form.get('text', '')
+    meta = {
+        'title': proj.get('title', ''), 'subtitle': proj.get('subtitle', ''),
+        'author': proj.get('author', ''),
+        'year': proj.get('year', '') or str(datetime.now().year),
+        'publisher': proj.get('publisher', ''),
+        'front_matter': proj.get('front_matter', 'full'),
+        'right_hand_starts': proj.get('right_hand_starts', True),
+        'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
+        'include_toc': False, 'smartquotes': proj.get('smartquotes', True),
+        'dedication': proj.get('dedication', ''), 'epigraph': proj.get('epigraph', ''),
+        'acknowledgments': proj.get('acknowledgments', ''),
+        'about_author': proj.get('about_author', ''), 'also_by': proj.get('also_by', ''),
+    }
+    ms = manuscript.parse_markdown(text, smartquotes=meta['smartquotes'])
+    fd, tmp = tempfile.mkstemp(suffix='.pdf')
+    os.close(fd)
+    try:
+        engine.build_pdf(ms, preset, tmp, meta)
+        doc = fitz.open(tmp)
+        images = []
+        for page in doc:
+            if len(images) >= 6:
+                break
+            pix = page.get_pixmap(matrix=fitz.Matrix(1.4, 1.4), alpha=False)
+            images.append('data:image/png;base64,' +
+                          base64.b64encode(pix.tobytes('png')).decode())
+        total = doc.page_count
+        doc.close()
+        return jsonify({'ok': True, 'images': images, 'pages': total,
+                        'chapters': len(ms['chapters']), 'words': _wordcount(text)})
+    except Exception as exc:
+        logging.error('manuscript preview failed: %s', traceback.format_exc())
+        return jsonify({'ok': False, 'error': str(exc)})
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 @app.route('/project/<pid>/generate', methods=['POST'])
 def project_generate(pid):
     proj   = load_project(pid)
