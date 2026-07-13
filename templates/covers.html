@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% set active = 'covers' %}
+{% block title %}Covers · Typeset Studio{% endblock %}
+
+{% block style %}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px}
+  .card{
+    background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+    box-shadow:var(--shadow);padding:0;display:flex;flex-direction:column;overflow:hidden;
+  }
+  .card .swatchbar{display:flex;height:8px}
+  .card .swatchbar span{flex:1}
+  .card .specimen{padding:20px 22px 16px;border-bottom:1px solid var(--rule)}
+  .card .specimen .name{font-family:var(--serif);font-size:22px;font-weight:600;line-height:1.15;margin:0}
+  .card .specimen .desc{color:var(--muted);font-size:13.5px;margin:4px 0 0}
+  .card .body{padding:14px 22px 18px;display:flex;flex-direction:column;gap:14px;flex:1}
+  .card .spec{display:grid;grid-template-columns:auto 1fr;gap:2px 14px}
+  .card .spec .k{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em}
+  .card .actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:auto}
+  .card .actions .sep{flex:1}
+  .newcard{
+    border:1px dashed var(--rule-strong);background:transparent;box-shadow:none;
+    align-items:center;justify-content:center;min-height:200px;text-decoration:none;color:var(--muted);
+    display:flex;flex-direction:column;gap:8px;border-radius:3px;
+  }
+  .newcard:hover{border-color:var(--red);color:var(--red-deep);background:rgba(177,42,29,.03)}
+  .newcard .plus{font-family:var(--serif);font-size:34px;line-height:1}
+  .empty{color:var(--muted);font-size:15px}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">Cover design</div>
+    <h1>Covers</h1>
+    <p>Each cover template is a reusable house style, drawn onto page&nbsp;1 of a book from
+       the title, author, and a few optional lines. Duplicate one to make a variant, then
+       tweak the colours, border, and type. Pick a cover on the <b>Set a book</b> page.</p>
+  </div>
+
+  <div class="grid">
+    {% for item in covers %}
+      {% set c = item.data %}
+      {% set pal = c.palette or {} %}
+      <article class="card">
+        <div class="swatchbar">
+          <span style="background:{{ pal.bg_bottom or '#0a0f18' }}"></span>
+          <span style="background:{{ pal.bg_top or '#101a29' }}"></span>
+          <span style="background:{{ pal.gold or '#c6a866' }}"></span>
+          <span style="background:{{ pal.teal or '#5fb2b2' }}"></span>
+          <span style="background:{{ pal.muted or '#8b93a3' }}"></span>
+        </div>
+        <div class="specimen">
+          <p class="name">{{ c.name or 'Untitled cover' }}</p>
+          <p class="desc">{{ c.description or '—' }}</p>
+        </div>
+        <div class="body">
+          <div class="spec">
+            <span class="k">Title</span><span><b>{{ '%g'|format(c.title.size) }}pt</b> {{ c.fonts.display }}</span>
+            <span class="k">Accent</span><span>{{ c.accent.color }} · {{ '%g'|format(c.accent.size) }}pt</span>
+            <span class="k">Border</span><span>{{ c.border.color }}, {{ '%g'|format(c.border.inset) }}" inset</span>
+          </div>
+          <div class="actions">
+            <a class="btn btn-primary btn-sm" href="{{ url_for('generate') }}">Set a book</a>
+            <a class="btn btn-sm" href="{{ url_for('cover_editor', cid=item.id) }}">Edit</a>
+            <form class="inline-form" method="post" action="{{ url_for('cover_clone', cid=item.id) }}">
+              <button class="btn btn-sm" type="submit">Duplicate</button>
+            </form>
+            <span class="sep"></span>
+            <form class="inline-form" method="post" action="{{ url_for('cover_delete', cid=item.id) }}"
+                  onsubmit="return confirm('Delete the “{{ c.name }}” cover template? This cannot be undone.');">
+              <button class="btn btn-ghost btn-sm" type="submit">Delete</button>
+            </form>
+          </div>
+        </div>
+      </article>
+    {% endfor %}
+
+    <a class="newcard" href="{{ url_for('cover_new') }}">
+      <span class="plus">+</span>
+      <span>New cover</span>
+    </a>
+  </div>
+
+  {% if not covers %}
+    <p class="empty">No cover templates yet. Start one with <b>New cover</b>.</p>
+  {% endif %}
+{% endblock %}

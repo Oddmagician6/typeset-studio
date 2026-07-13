@@ -29,6 +29,7 @@ templates/        Jinja2 UI: base, index (styles), editor (preset form + live pr
                   generate, result, projects, project_edit, continuity_result.
 presets/*.json    One file per style. Cloneable per customer. Seven presets ship by default.
 covers/*.json     One file per designed cover template (text-driven page-1 layout). Cloneable per line.
+                  Edited in the browser via the Cover Studio (no hand-editing needed).
 fonts/*.ttf       Embeddable TrueType faces (family "Book"). Also stores scene-break ornament images.
 sample/sample.md  Demo manuscript (3 chapters; Chapter 3 exercises all 5 epistolary block types).
 out/              Composed PDFs / EPUBs land here (also served for download).
@@ -315,6 +316,22 @@ processor exposing templates to all pages, and the `cover_*` meta keys) ·
 dropdown + text fields, with a small toggle script). Fonts are swappable via the template
 JSON — the shipped file approximates the house display serif with the "Book" faces. Known
 gaps: EPUB and saved projects don't carry designed covers yet.
+
+**16. Cover Studio — browser editor for cover templates**
+`app.py` (`COVER_DEFAULTS`, `parse_cover_form()` mirroring `parse_preset_form`,
+`save_cover_template`/`unique_cover_id`/`list_fonts` helpers, and routes `/covers`,
+`/cover/new`, `/cover/<cid>`, `/cover/save[/<cid>]`, `/cover/clone/<cid>`,
+`/cover/delete/<cid>`, `/cover/preview`) · `templates/covers.html` (gallery with palette
+swatches, mirrors index.html) · `templates/cover_editor.html` (full form over the cover
+schema: identity, sample preview text, font pickers from `fonts/`, palette colour inputs,
+border, and per-element type controls; debounced live preview that re-renders on every
+edit) · `templates/base.html` (Covers nav link). The preview reuses the #10 rasterizer
+pattern: `/cover/preview` builds a one-off designed cover via `engine.build_pdf` over
+`DEFAULTS` + `PREVIEW_SAMPLE` and returns page 1 as a base64 PNG. Element colours are chosen
+from palette keys (gold/teal/ink/muted); palette values are `<input type=color>` hex.
+New templates appear in the Generate dropdown automatically (context processor). No engine
+changes were needed — the renderer was already fully parametric. Tier 2/3 (font upload,
+full front+spine+back wrap) remain.
 
 ### ✓ Tier 2 — shipped
 

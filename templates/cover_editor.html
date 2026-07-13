@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+{% set active = 'covers' %}
+{% block title %}{{ 'New cover' if is_new else 'Edit cover' }} · Typeset Studio{% endblock %}
+
+{% block style %}
+  .work{display:grid;grid-template-columns:1fr 340px;gap:34px;align-items:start}
+  form.editor{display:flex;flex-direction:column;gap:22px}
+  fieldset{border:1px solid var(--rule);border-radius:3px;background:var(--surface);padding:0;margin:0}
+  legend{
+    font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--red);
+    padding:0 8px;margin-left:12px;
+  }
+  .fs-body{padding:6px 20px 20px}
+  .row{display:flex;flex-wrap:wrap;gap:18px}
+  .field{display:flex;flex-direction:column;gap:4px;margin-top:14px;flex:1 1 140px}
+  .field.wide{flex-basis:100%}
+  .field label{font-size:13px;color:var(--ink);font-weight:600}
+  .field .hint{font-family:var(--mono);font-size:10px;color:var(--faint)}
+  .field input[type=text],.field input[type=number],.field select,.field textarea{
+    font-family:var(--sans);font-size:14px;color:var(--ink);background:var(--surface-2);
+    border:1px solid var(--rule-strong);border-radius:2px;padding:8px 10px;width:100%;
+  }
+  .field input[type=color]{
+    width:100%;height:38px;padding:2px;background:var(--surface-2);
+    border:1px solid var(--rule-strong);border-radius:2px;cursor:pointer;
+  }
+  .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--red);background:#fff}
+  .field textarea{resize:vertical;min-height:54px}
+  .num{max-width:140px}
+  .formbar{display:flex;gap:10px;align-items:center;padding:4px 0 0}
+
+  .preview{position:sticky;top:22px}
+  .preview .label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.2em;color:var(--faint);margin:0 0 8px}
+  .preview .frame{
+    background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+    box-shadow:var(--shadow);padding:12px;
+  }
+  .preview img{width:100%;display:block;border-radius:2px}
+  .preview .placeholder{
+    aspect-ratio:2/3;display:flex;align-items:center;justify-content:center;
+    color:var(--faint);font-size:13px;background:var(--surface-2);border-radius:2px;
+  }
+  .preview .status{font-size:12px;color:var(--muted);margin:8px 2px 0;min-height:1.2em}
+  @media (max-width:900px){.work{grid-template-columns:1fr}.preview{position:static}}
+{% endblock %}
+
+{% macro nf(label, name, value, hint='') %}
+  <div class="field"><label>{{ label }}</label>{% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+    <input class="num" type="number" step="any" name="{{ name }}" value="{{ value }}"></div>
+{%- endmacro %}
+
+{% macro ck(label, name, value) %}
+  <div class="field"><label>{{ label }}</label><span class="hint">palette colour</span>
+    <select name="{{ name }}">
+      {% for k in palette_keys %}<option value="{{ k }}" {{ 'selected' if value==k }}>{{ k }}</option>{% endfor %}
+    </select></div>
+{%- endmacro %}
+
+{% macro cp(label, name, value) %}
+  <div class="field"><label>{{ label }}</label>
+    <input type="color" name="{{ name }}" value="{{ value }}"></div>
+{%- endmacro %}
+
+{% macro fsel(label, name, value) %}
+  <div class="field"><label>{{ label }}</label>
+    <select name="{{ name }}">
+      {% for f in fonts %}<option value="{{ f }}" {{ 'selected' if value==f }}>{{ f }}</option>{% endfor %}
+    </select></div>
+{%- endmacro %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">{{ 'New cover' if is_new else 'Editing' }}</div>
+    <h1>{{ 'Compose a new cover' if is_new else c.name }}</h1>
+    <p>Design a reusable cover. The big title and the accent line fill from a book's Title and
+       Author when you set a book — the sample text below is just for this preview. Positions are
+       a fraction of the page height (0 = bottom, 1 = top); sizes are in points.</p>
+  </div>
+
+  <div class="work">
+    <form class="editor" method="post"
+          action="{{ url_for('cover_save') if is_new else url_for('cover_save', cid=cid) }}">
+
+      <fieldset>
+        <legend>Identity</legend>
+        <div class="fs-body">
+          <div class="row">
+            <div class="field"><label>Cover name</label>
+              <input type="text" name="name" value="{{ c.name }}" placeholder="e.g. Edenfall House Style"></div>
+          </div>
+          <div class="row">
+            <div class="field wide"><label>Description</label>
+              <input type="text" name="description" value="{{ c.description or '' }}"
+                     placeholder="A short note about when to use this cover"></div>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Preview text · not saved</legend>
+        <div class="fs-body">
+          <div class="row">
+            <div class="field"><label>Sample title</label>
+              <input type="text" name="prev_title" value="What the Monk Saw"></div>
+            <div class="field"><label>Sample author</label>
+              <input type="text" name="prev_author" value="Matthias Moore"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Collection line</label>
+              <input type="text" name="prev_collection" value="Edenfall Fiction"></div>
+            <div class="field"><label>Kicker</label>
+              <input type="text" name="prev_kicker" value=""></div>
+            <div class="field"><label>Studio footer</label>
+              <input type="text" name="prev_studio" value="Ashforge Studio"></div>
+          </div>
+          <div class="row">
+            <div class="field wide"><label>Epigraph</label>
+              <textarea name="prev_epigraph"></textarea></div>
+          </div>
+          <div class="row">
+            {{ nf('Preview width', 'prev_w', 6, 'inches') }}
+            {{ nf('Preview height', 'prev_h', 9, 'inches') }}
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Fonts</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ fsel('Display (title)', 'font_display', c.fonts.display) }}
+            {{ fsel('Serif (labels)', 'font_serif', c.fonts.serif) }}
+            {{ fsel('Italic (kicker/epigraph)', 'font_italic', c.fonts.italic) }}
+          </div>
+          <p class="hint" style="margin-top:12px">Only fonts in the <code>fonts/</code> folder appear here.
+            Drop a licensed <code>.ttf</code> there to use it.</p>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Palette</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ cp('Background top', 'pal_bg_top', c.palette.bg_top) }}
+            {{ cp('Background bottom', 'pal_bg_bottom', c.palette.bg_bottom) }}
+            {{ cp('Gold', 'pal_gold', c.palette.gold) }}
+          </div>
+          <div class="row">
+            {{ cp('Teal', 'pal_teal', c.palette.teal) }}
+            {{ cp('Ink', 'pal_ink', c.palette.ink) }}
+            {{ cp('Muted', 'pal_muted', c.palette.muted) }}
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Border</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ ck('Colour', 'bd_color', c.border.color) }}
+            {{ nf('Inset', 'bd_inset', c.border.inset, 'inches from edge') }}
+            {{ nf('Rule gap', 'bd_gap', c.border.gap, 'inches between the two lines') }}
+          </div>
+          <div class="row">
+            {{ nf('Line weight', 'bd_line', c.border.line, 'points') }}
+            {{ nf('Corner length', 'bd_corner', c.border.corner, 'inches') }}
+            {{ nf('Corner weight', 'bd_corner_line', c.border.corner_line, 'points') }}
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Collection line (top &amp; bottom)</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ nf('Size', 'col_size', c.collection.size, 'points') }}
+            {{ nf('Tracking', 'col_tracking', c.collection.tracking, 'letter spacing') }}
+            {{ ck('Colour', 'col_color', c.collection.color) }}
+          </div>
+          <div class="row">
+            {{ nf('Top position', 'col_top', c.collection.top, '0–1 up the page') }}
+            {{ nf('Bottom position', 'col_bottom', c.collection.bottom, '0–1 up the page') }}
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Kicker (italic line)</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ nf('Size', 'kick_size', c.kicker.size, 'points') }}
+            {{ nf('Tracking', 'kick_tracking', c.kicker.tracking) }}
+            {{ ck('Colour', 'kick_color', c.kicker.color) }}
+            {{ nf('Position', 'kick_y', c.kicker.y, '0–1 up the page') }}
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Title</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ nf('Size', 'title_size', c.title.size, 'points · shrinks to fit') }}
+            {{ nf('Leading', 'title_leading', c.title.leading, 'line spacing') }}
+            {{ nf('Tracking', 'title_tracking', c.title.tracking) }}
+          </div>
+          <div class="row">
+            {{ ck('Colour', 'title_color', c.title.color) }}
+            {{ nf('Position', 'title_y', c.title.y, '0–1 up the page (first line)') }}
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Accent line (author)</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ nf('Size', 'acc_size', c.accent.size, 'points') }}
+            {{ nf('Tracking', 'acc_tracking', c.accent.tracking) }}
+            {{ ck('Colour', 'acc_color', c.accent.color) }}
+            {{ nf('Extra gap', 'acc_gap', c.accent.gap, 'fine-tune space below title') }}
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Ornament (diamonds)</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ ck('Colour', 'orn_color', c.ornament.color) }}
+            {{ nf('Diamond size', 'orn_size', c.ornament.size, 'points') }}
+            {{ nf('Spacing', 'orn_spacing', c.ornament.spacing, 'points between diamonds') }}
+          </div>
+          <div class="row">
+            {{ nf('Rule weight', 'orn_rule', c.ornament.rule, 'points (0 = none)') }}
+            {{ nf('Rule length', 'orn_rule_len', c.ornament.rule_len, 'inches') }}
+            {{ nf('Gap above', 'orn_gap', c.ornament.gap, '0–1 below the accent') }}
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Epigraph</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ nf('Size', 'epi_size', c.epigraph.size, 'points') }}
+            {{ nf('Leading', 'epi_leading', c.epigraph.leading, 'line spacing') }}
+            {{ nf('Tracking', 'epi_tracking', c.epigraph.tracking) }}
+          </div>
+          <div class="row">
+            {{ ck('Colour', 'epi_color', c.epigraph.color) }}
+            {{ nf('Column width', 'epi_width', c.epigraph.width, '0–1 of the frame') }}
+            {{ nf('Top position', 'epi_top', c.epigraph.top, '0–1 up the page') }}
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Studio footer</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ nf('Size', 'std_size', c.studio.size, 'points') }}
+            {{ nf('Tracking', 'std_tracking', c.studio.tracking) }}
+            {{ ck('Colour', 'std_color', c.studio.color) }}
+            {{ nf('Position', 'std_y', c.studio.y, '0–1 up the page') }}
+          </div>
+        </div>
+      </fieldset>
+
+      <div class="formbar">
+        <button class="btn btn-primary" type="submit">{{ 'Create cover' if is_new else 'Save changes' }}</button>
+        <a class="btn" href="{{ url_for('covers') }}">Cancel</a>
+      </div>
+    </form>
+
+    <aside class="preview">
+      <p class="label">Live preview</p>
+      <div class="frame">
+        <div id="pv-placeholder" class="placeholder">Rendering…</div>
+        <img id="pv-img" alt="Cover preview" style="display:none">
+      </div>
+      <p class="status" id="pv-status"></p>
+    </aside>
+  </div>
+
+  <script>
+    (function () {
+      var form   = document.querySelector('form.editor');
+      var img    = document.getElementById('pv-img');
+      var ph     = document.getElementById('pv-placeholder');
+      var status = document.getElementById('pv-status');
+      var timer  = null, pending = false;
+
+      async function render() {
+        pending = false;
+        status.textContent = 'Rendering…';
+        try {
+          var res  = await fetch('/cover/preview', {method: 'POST', body: new FormData(form)});
+          var json = await res.json();
+          if (json.ok) {
+            img.src = json.image;
+            img.style.display = 'block';
+            ph.style.display = 'none';
+            status.textContent = 'Updated ' + new Date().toLocaleTimeString();
+          } else {
+            status.textContent = json.error || 'Preview failed.';
+          }
+        } catch (e) {
+          status.textContent = 'Preview failed.';
+        }
+      }
+
+      function schedule() {
+        pending = true;
+        clearTimeout(timer);
+        timer = setTimeout(render, 400);
+      }
+
+      form.addEventListener('input', schedule);
+      render();   // first paint on load
+    })();
+  </script>
+{% endblock %}
