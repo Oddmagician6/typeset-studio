@@ -72,6 +72,8 @@
   .outline a.ol-part{font-family:var(--mono);font-weight:700;text-transform:uppercase;
     font-size:10.5px;letter-spacing:.1em;color:var(--muted);margin-top:6px}
   .outline a.ol-ch{padding-left:12px}
+  .outline a.ol-sub{padding-left:26px;color:var(--muted)}
+  .outline a.ol-scene{padding-left:26px;color:var(--muted);font-size:12px}
   .outline .ol-empty{font-size:12.5px;color:var(--muted);padding:2px}
   @media (max-width:880px){.work{grid-template-columns:1fr}.side{position:static}}
 {% endblock %}
@@ -204,21 +206,43 @@
         });
       }
 
+      var SCENE_RE = /^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$/;
+
+      function sceneSnippet(lines, i){
+        for (var j = i + 1; j < lines.length; j++){
+          var nx = lines[j].trim();
+          if (!nx) continue;
+          if (/^(#|===)/.test(nx) || SCENE_RE.test(nx)) break;   // reached next heading/scene
+          var words = nx.replace(/[*_`]/g, '').split(/\s+/).slice(0, 6).join(' ');
+          return words ? words + '…' : '';
+        }
+        return '';
+      }
+
       function buildOutline(){
         var lines = ta.value.split('\n');
         var box = document.getElementById('outline');
-        var offset = 0, chap = 0, html = '';
+        var offset = 0, chap = 0, scene = 1, html = '';
         for (var i = 0; i < lines.length; i++){
           var ln = lines[i];
           var mPart = /^===\s*(.*)$/.exec(ln);
           var mCh   = /^#\s+(.*)$/.exec(ln);
+          var mSub  = /^##\s+(.*)$/.exec(ln);
           if (mPart){
             html += '<a class="ol-part" data-off="' + offset + '">' +
                     esc(mPart[1].trim() || 'Part') + '</a>';
+          } else if (mSub){
+            html += '<a class="ol-sub" data-off="' + offset + '">' +
+                    esc(mSub[1].trim() || 'Subhead') + '</a>';
           } else if (mCh){
-            chap++;
+            chap++; scene = 1;
             html += '<a class="ol-ch" data-off="' + offset + '">' +
                     esc(mCh[1].trim() || ('Chapter ' + chap)) + '</a>';
+          } else if (SCENE_RE.test(ln)){
+            scene++;
+            var snip = sceneSnippet(lines, i);
+            html += '<a class="ol-scene" data-off="' + offset + '">◇ ' +
+                    esc(snip || ('Scene ' + scene)) + '</a>';
           }
           offset += ln.length + 1;   // +1 for the newline
         }
