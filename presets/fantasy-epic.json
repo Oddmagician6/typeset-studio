@@ -1,0 +1,36 @@
+{
+  "name": "Fantasy (Epic) (6×9)",
+  "description": "Ornate and traditional — deep drop-cap chapter openings, airy leading, generous margins, and a decorative scene break. Suits epic and high fantasy. Pairs with the Fantasy Emerald cover.",
+  "trim": { "w": 6.0, "h": 9.0 },
+  "margins": { "top": 0.85, "bottom": 0.9, "inside": 0.95, "outside": 0.7 },
+  "font_family": "Book",
+  "font_files": {
+    "regular": "Book-Regular.ttf",
+    "bold": "Book-Bold.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "body": {
+    "size": 11.5,
+    "leading": 16.5,
+    "indent": 0.3,
+    "justify": true,
+    "hyphenate": false
+  },
+  "chapter": {
+    "start": "recto",
+    "sink": 1.4,
+    "show_number": true,
+    "number_format": "Chapter {n}",
+    "number_size": 12.0,
+    "title_size": 22.0,
+    "after_title": 0.5,
+    "open_style": "dropcap",
+    "leadin_words": 4,
+    "dropcap_lines": 3
+  },
+  "part_divider": { "show_number": true, "number_format": "Part {n}", "number_size": 14.0, "title_size": 30.0, "sink": 0.5 },
+  "document_block": { "frame": "ruled", "indent": 0.3, "font_size": 0, "first_indent": 0.0, "space_around": 12.0, "header_size": 9.5, "dateline_style": "italic" },
+  "scene_break": { "type": "glyph", "glyph": "•   •   •", "size": 12.0, "gap": 12.0, "image": "" },
+  "running_head": { "show": true, "caps": true, "size": 8.5, "gap": 0.3 },
+  "folio": { "show": true, "position": "outer", "size": 9.5, "gap": 0.42, "hide_on_opener": true }
+}

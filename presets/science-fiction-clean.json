@@ -1,0 +1,36 @@
+{
+  "name": "Science Fiction (Clean) (6×9)",
+  "description": "Modern and uncluttered — large bare-numeral chapter openings, open leading, hyphenated justification, and a minimal single-rule scene break. Suits science fiction and near-future. Pairs with the Sci-Fi Cosmic cover.",
+  "trim": { "w": 6.0, "h": 9.0 },
+  "margins": { "top": 0.75, "bottom": 0.8, "inside": 0.85, "outside": 0.65 },
+  "font_family": "Book",
+  "font_files": {
+    "regular": "Book-Regular.ttf",
+    "bold": "Book-Bold.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "body": {
+    "size": 10.5,
+    "leading": 15.5,
+    "indent": 0.28,
+    "justify": true,
+    "hyphenate": true
+  },
+  "chapter": {
+    "start": "recto",
+    "sink": 1.1,
+    "show_number": true,
+    "number_format": "{n}",
+    "number_size": 30.0,
+    "title_size": 15.0,
+    "after_title": 0.4,
+    "open_style": "none",
+    "leadin_words": 4,
+    "dropcap_lines": 3
+  },
+  "part_divider": { "show_number": true, "number_format": "Part {n}", "number_size": 12.0, "title_size": 24.0, "sink": 0.4 },
+  "document_block": { "frame": "ruled", "indent": 0.25, "font_size": 0, "first_indent": 0.0, "space_around": 11.0, "header_size": 9.0, "dateline_style": "smallcaps" },
+  "scene_break": { "type": "glyph", "glyph": "—", "size": 11.0, "gap": 10.0, "image": "" },
+  "running_head": { "show": true, "caps": true, "size": 8.0, "gap": 0.28 },
+  "folio": { "show": true, "position": "outer", "size": 9.0, "gap": 0.4, "hide_on_opener": true }
+}

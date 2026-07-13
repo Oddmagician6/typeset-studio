@@ -455,6 +455,16 @@ the Covers gallery and the Generate dropdown. First exercise of the renderer on 
 backgrounds** (Romance/Literary) — confirmed legible. Epigraph placed low (0.26) as a tagline
 so it clears the dynamic ornament.
 
+**28. Genre interior presets — Fantasy + Sci-Fi split (×2)**
+`presets/`: Fantasy (Epic) 6×9 (deep drop-cap openings, airy 11.5/16.5 leading, generous
+margins, decorative `•  •  •` break) and Science Fiction (Clean) 6×9 (large bare-numeral
+`{n}` openers at 30pt, `open_style: none`, hyphenated justification, minimal single `—` break).
+Splits the combined `science-fiction-fantasy` preset so the two distinct cover genres (#27
+Fantasy Emerald / Sci-Fi Cosmic) each have a matching interior. Data-only (existing schema
+fields); the combined preset and the existing thriller/romance/literary interiors — which
+already pair with their covers — were left untouched to avoid duplicates. Verified via rendered
+chapter-opener proofs.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
