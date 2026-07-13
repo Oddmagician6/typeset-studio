@@ -32,12 +32,14 @@ import checker
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PRESET_DIR    = os.path.join(HERE, 'presets')
+COVER_DIR     = os.path.join(HERE, 'covers')
+FONT_DIR      = os.path.join(HERE, 'fonts')
 OUT_DIR       = os.path.join(HERE, 'out')
 UPLOAD_DIR    = os.path.join(HERE, 'uploads')
 PROJECT_DIR   = os.path.join(HERE, 'projects')
 PROJECT_MS_DIR = os.path.join(PROJECT_DIR, 'manuscripts')
 SAMPLE = os.path.join(HERE, 'sample', 'sample.md')
-for d in (PRESET_DIR, OUT_DIR, UPLOAD_DIR, PROJECT_DIR, PROJECT_MS_DIR):
+for d in (PRESET_DIR, COVER_DIR, OUT_DIR, UPLOAD_DIR, PROJECT_DIR, PROJECT_MS_DIR):
     os.makedirs(d, exist_ok=True)
 
 app = Flask(__name__)
@@ -165,6 +167,30 @@ DEFAULTS = {
 }
 
 
+COVER_DEFAULTS = {
+    'name': 'Untitled cover', 'description': '',
+    'fonts': {'display': 'Book-Bold.ttf', 'serif': 'Book-Regular.ttf',
+              'italic': 'Book-Italic.ttf'},
+    'palette': {'bg_top': '#101a29', 'bg_bottom': '#080d15', 'gold': '#c6a866',
+                'teal': '#5fb2b2', 'ink': '#ece3d0', 'muted': '#8b93a3'},
+    'border': {'color': 'gold', 'inset': 0.42, 'gap': 0.055, 'line': 1.0,
+               'corner': 0.5, 'corner_line': 1.3},
+    'collection': {'size': 12.5, 'tracking': 3.4, 'color': 'gold',
+                   'top': 0.70, 'bottom': 0.115},
+    'kicker': {'size': 11, 'tracking': 0.4, 'color': 'muted', 'y': 0.665},
+    'title': {'size': 40, 'leading': 46, 'tracking': 0.6, 'color': 'gold', 'y': 0.585},
+    'accent': {'size': 21, 'tracking': 1.4, 'color': 'teal', 'gap': 0.008},
+    'ornament': {'color': 'gold', 'size': 2.4, 'spacing': 9, 'rule': 0.8,
+                 'rule_len': 0.8, 'gap': 0.05},
+    'epigraph': {'size': 10.5, 'leading': 15, 'tracking': 0.2, 'color': 'muted',
+                 'width': 0.62, 'top': 0.375},
+    'studio': {'size': 8.5, 'tracking': 2.4, 'color': 'muted', 'y': 0.088},
+}
+
+# palette keys an element's colour may reference (the editor offers these as a dropdown)
+COVER_PALETTE_KEYS = ['gold', 'teal', 'ink', 'muted']
+
+
 def slugify(name):
     s = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
     return s or 'style'
@@ -189,6 +215,53 @@ def load_preset(pid):
         abort(404)
     with open(path, encoding='utf-8') as f:
         return json.load(f)
+
+
+def list_cover_templates():
+    """Text-driven cover templates from ./covers, one JSON per house style."""
+    items = []
+    for fn in sorted(os.listdir(COVER_DIR)):
+        if fn.endswith('.json'):
+            try:
+                with open(os.path.join(COVER_DIR, fn), encoding='utf-8') as f:
+                    data = json.load(f)
+                items.append({'id': fn[:-5], 'data': data})
+            except Exception:
+                pass
+    return items
+
+
+def load_cover_template(cid):
+    if not cid:
+        return None
+    path = os.path.join(COVER_DIR, secure_filename(cid) + '.json')
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def save_cover_template(cid, data):
+    path = os.path.join(COVER_DIR, secure_filename(cid) + '.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def unique_cover_id(base):
+    cid, n = base, 2
+    existing = {i['id'] for i in list_cover_templates()}
+    while cid in existing:
+        cid = f'{base}-{n}'
+        n += 1
+    return cid
+
+
+def list_fonts():
+    """TrueType faces available in fonts/, for the cover editor's font pickers."""
+    try:
+        return sorted(f for f in os.listdir(FONT_DIR) if f.lower().endswith('.ttf'))
+    except OSError:
+        return []
 
 
 def save_preset(pid, data):
@@ -309,7 +382,96 @@ def parse_preset_form(form):
     }
 
 
+def _hexf(form, key, default):
+    """Read a colour field; keep a valid #rrggbb, else fall back."""
+    v = (form.get(key, '') or '').strip()
+    return v if re.fullmatch(r'#[0-9a-fA-F]{6}', v) else default
+
+
+def parse_cover_form(form):
+    """Flat cover-editor form fields -> the nested covers/*.json schema."""
+    d = COVER_DEFAULTS
+    return {
+        'name': form.get('name', '').strip() or 'Untitled cover',
+        'description': form.get('description', '').strip(),
+        'fonts': {
+            'display': form.get('font_display', d['fonts']['display']) or d['fonts']['display'],
+            'serif':   form.get('font_serif',   d['fonts']['serif'])   or d['fonts']['serif'],
+            'italic':  form.get('font_italic',  d['fonts']['italic'])  or d['fonts']['italic'],
+        },
+        'palette': {
+            'bg_top':    _hexf(form, 'pal_bg_top',    d['palette']['bg_top']),
+            'bg_bottom': _hexf(form, 'pal_bg_bottom', d['palette']['bg_bottom']),
+            'gold':      _hexf(form, 'pal_gold',      d['palette']['gold']),
+            'teal':      _hexf(form, 'pal_teal',      d['palette']['teal']),
+            'ink':       _hexf(form, 'pal_ink',       d['palette']['ink']),
+            'muted':     _hexf(form, 'pal_muted',     d['palette']['muted']),
+        },
+        'border': {
+            'color':       form.get('bd_color', 'gold'),
+            'inset':       _f(form, 'bd_inset', d['border']['inset']),
+            'gap':         _f(form, 'bd_gap', d['border']['gap']),
+            'line':        _f(form, 'bd_line', d['border']['line']),
+            'corner':      _f(form, 'bd_corner', d['border']['corner']),
+            'corner_line': _f(form, 'bd_corner_line', d['border']['corner_line']),
+        },
+        'collection': {
+            'size':     _f(form, 'col_size', d['collection']['size']),
+            'tracking': _f(form, 'col_tracking', d['collection']['tracking']),
+            'color':    form.get('col_color', 'gold'),
+            'top':      _f(form, 'col_top', d['collection']['top']),
+            'bottom':   _f(form, 'col_bottom', d['collection']['bottom']),
+        },
+        'kicker': {
+            'size':     _f(form, 'kick_size', d['kicker']['size']),
+            'tracking': _f(form, 'kick_tracking', d['kicker']['tracking']),
+            'color':    form.get('kick_color', 'muted'),
+            'y':        _f(form, 'kick_y', d['kicker']['y']),
+        },
+        'title': {
+            'size':     _f(form, 'title_size', d['title']['size']),
+            'leading':  _f(form, 'title_leading', d['title']['leading']),
+            'tracking': _f(form, 'title_tracking', d['title']['tracking']),
+            'color':    form.get('title_color', 'gold'),
+            'y':        _f(form, 'title_y', d['title']['y']),
+        },
+        'accent': {
+            'size':     _f(form, 'acc_size', d['accent']['size']),
+            'tracking': _f(form, 'acc_tracking', d['accent']['tracking']),
+            'color':    form.get('acc_color', 'teal'),
+            'gap':      _f(form, 'acc_gap', d['accent']['gap']),
+        },
+        'ornament': {
+            'color':    form.get('orn_color', 'gold'),
+            'size':     _f(form, 'orn_size', d['ornament']['size']),
+            'spacing':  _f(form, 'orn_spacing', d['ornament']['spacing']),
+            'rule':     _f(form, 'orn_rule', d['ornament']['rule']),
+            'rule_len': _f(form, 'orn_rule_len', d['ornament']['rule_len']),
+            'gap':      _f(form, 'orn_gap', d['ornament']['gap']),
+        },
+        'epigraph': {
+            'size':     _f(form, 'epi_size', d['epigraph']['size']),
+            'leading':  _f(form, 'epi_leading', d['epigraph']['leading']),
+            'tracking': _f(form, 'epi_tracking', d['epigraph']['tracking']),
+            'color':    form.get('epi_color', 'muted'),
+            'width':    _f(form, 'epi_width', d['epigraph']['width']),
+            'top':      _f(form, 'epi_top', d['epigraph']['top']),
+        },
+        'studio': {
+            'size':     _f(form, 'std_size', d['studio']['size']),
+            'tracking': _f(form, 'std_tracking', d['studio']['tracking']),
+            'color':    form.get('std_color', 'muted'),
+            'y':        _f(form, 'std_y', d['studio']['y']),
+        },
+    }
+
+
 # ----------------------------------------------------------------- routes
+@app.context_processor
+def _inject_cover_templates():
+    return {'cover_templates': list_cover_templates()}
+
+
 @app.route('/')
 def index():
     return render_template('index.html', presets=list_presets())
@@ -353,6 +515,109 @@ def delete(pid):
         os.remove(path)
         flash('Style deleted.')
     return redirect(url_for('index'))
+
+
+# ------------------------------------------------------- cover template routes
+@app.route('/covers')
+def covers():
+    return render_template('covers.html', covers=list_cover_templates())
+
+
+@app.route('/cover/new')
+def cover_new():
+    return render_template('cover_editor.html', cid=None, c=COVER_DEFAULTS,
+                           is_new=True, fonts=list_fonts(),
+                           palette_keys=COVER_PALETTE_KEYS)
+
+
+@app.route('/cover/<cid>')
+def cover_editor(cid):
+    data = load_cover_template(cid)
+    if data is None:
+        abort(404)
+    return render_template('cover_editor.html', cid=cid, c=data, is_new=False,
+                           fonts=list_fonts(), palette_keys=COVER_PALETTE_KEYS)
+
+
+@app.route('/cover/save', methods=['POST'])
+@app.route('/cover/save/<cid>', methods=['POST'])
+def cover_save(cid=None):
+    data = parse_cover_form(request.form)
+    if cid is None:
+        cid = unique_cover_id(slugify(data['name']))
+    save_cover_template(cid, data)
+    flash(f'Saved “{data["name"]}”.')
+    return redirect(url_for('covers'))
+
+
+@app.route('/cover/clone/<cid>', methods=['POST'])
+def cover_clone(cid):
+    data = load_cover_template(cid)
+    if data is None:
+        abort(404)
+    data['name'] = data.get('name', 'Cover') + ' (copy)'
+    new_id = unique_cover_id(slugify(data['name']))
+    save_cover_template(new_id, data)
+    flash('Created a copy you can rename and tweak.')
+    return redirect(url_for('cover_editor', cid=new_id))
+
+
+@app.route('/cover/delete/<cid>', methods=['POST'])
+def cover_delete(cid):
+    path = os.path.join(COVER_DIR, secure_filename(cid) + '.json')
+    if os.path.exists(path):
+        os.remove(path)
+        flash('Cover template deleted.')
+    return redirect(url_for('covers'))
+
+
+@app.route('/cover/preview', methods=['POST'])
+def cover_preview():
+    try:
+        import fitz
+    except ImportError:
+        return jsonify({'ok': False,
+                        'error': 'pymupdf not installed - run: pip install pymupdf'})
+    try:
+        form = request.form
+        preset = dict(DEFAULTS)
+        preset['trim'] = {'w': _f(form, 'prev_w', 6.0), 'h': _f(form, 'prev_h', 9.0)}
+        meta = {
+            'title':  form.get('prev_title', 'What the Monk Saw'),
+            'author': form.get('prev_author', 'Matthias Moore'),
+            'year': '2026', 'publisher': form.get('prev_studio', 'Edenfall Fiction'),
+            'front_matter': 'none', 'right_hand_starts': False,
+            'smartquotes': True,
+            'cover_mode': 'designed',
+            'cover_template': 'preview',
+            'cover_template_data': parse_cover_form(form),
+            'cover_collection': form.get('prev_collection', 'Edenfall Fiction'),
+            'cover_kicker': form.get('prev_kicker', ''),
+            'cover_accent': form.get('prev_accent', ''),
+            'cover_epigraph': form.get('prev_epigraph', ''),
+            'cover_studio': form.get('prev_studio', 'Ashforge Studio'),
+            'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
+            'dedication': '', 'epigraph': '', 'acknowledgments': '',
+            'about_author': '', 'also_by': '',
+        }
+        ms = manuscript.parse_markdown(PREVIEW_SAMPLE, smartquotes=True)
+        fd, tmp_path = tempfile.mkstemp(suffix='.pdf')
+        os.close(fd)
+        try:
+            engine.build_pdf(ms, preset, tmp_path, meta)
+            doc = fitz.open(tmp_path)
+            pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+            b64 = base64.b64encode(pix.tobytes('png')).decode()
+            doc.close()
+            return jsonify({'ok': True, 'image': f'data:image/png;base64,{b64}'})
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+    except Exception as exc:
+        logging.error('cover preview failed: %s', traceback.format_exc())
+        return jsonify({'ok': False, 'error': str(exc)})
 
 
 @app.route('/generate', methods=['GET', 'POST'])
@@ -408,12 +673,18 @@ def generate():
         return render_template('generate.html', presets=presets, form=form)
 
     # optional cover art
+    cover_mode = form.get('cover_mode', 'none')
     cover_path = ''
     cov = request.files.get('cover')
     if cov and cov.filename:
         cfn = secure_filename(cov.filename)
         cover_path = os.path.join(UPLOAD_DIR, cfn)
         cov.save(cover_path)
+    if cover_mode == 'none':
+        cover_path = ''
+
+    cover_template = form.get('cover_template', '') or 'ashforge-house'
+    cover_template_data = load_cover_template(cover_template) if cover_mode == 'designed' else None
 
     meta = {
         'title': form.get('title', '').strip(),
@@ -424,6 +695,14 @@ def generate():
         'front_matter': form.get('front_matter', 'full'),
         'right_hand_starts': 'right_hand_starts' in form,
         'cover_image': cover_path,
+        'cover_mode': cover_mode,
+        'cover_template': cover_template,
+        'cover_template_data': cover_template_data,
+        'cover_collection': form.get('cover_collection', '').strip(),
+        'cover_kicker': form.get('cover_kicker', '').strip(),
+        'cover_accent': form.get('cover_accent', '').strip(),
+        'cover_epigraph': form.get('cover_epigraph', '').strip(),
+        'cover_studio': form.get('cover_studio', '').strip(),
         'cover_overlay': 'cover_overlay' in form,
         'cover_color': form.get('cover_color', 'light'),
         'include_toc':    'include_toc' in form,

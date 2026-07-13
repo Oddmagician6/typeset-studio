@@ -83,27 +83,73 @@
     </fieldset>
 
     <fieldset>
-      <legend>Cover art</legend>
+      <legend>Cover</legend>
       <div class="fs-body">
-        <p class="or" style="margin-top:0">optional</p>
+        {% set cmode = form.get('cover_mode','none') %}
         <div class="row">
-          <div class="field wide"><label>Cover image</label>
-            <span class="hint">.jpg or .png · becomes a full-bleed first page, cropped to the trim</span>
-            <input type="file" name="cover" accept=".jpg,.jpeg,.png"></div>
-        </div>
-        <div class="check"><input type="checkbox" id="cov-ov" name="cover_overlay">
-          <label for="cov-ov">Print the title and author over the art</label></div>
-        <div class="row">
-          <div class="field"><label>Overlay text colour</label>
-            <span class="hint">if the art is dark, choose light</span>
-            <select name="cover_color">
-              <option value="light">Light text (for dark art)</option>
-              <option value="dark">Dark text (for light art)</option>
+          <div class="field"><label>Cover for page 1</label>
+            <span class="hint">the cover becomes an all-in-one PDF first page — print platforms still take the cover separately</span>
+            <select name="cover_mode" id="cover-mode">
+              <option value="none"     {{ 'selected' if cmode=='none' }}>None</option>
+              <option value="designed" {{ 'selected' if cmode=='designed' }}>Designed template (built from text)</option>
+              <option value="image"    {{ 'selected' if cmode=='image' }}>Upload finished art</option>
             </select></div>
         </div>
-        <div class="conv"><p>If your art already has the title on it, leave the overlay
-          unchecked and the image prints as-is. The cover is for proofing or an all-in-one
-          PDF — print platforms still take the cover as a separate file.</p></div>
+
+        <div id="cover-designed" class="cover-panel">
+          <div class="row">
+            <div class="field"><label>Template</label>
+              <span class="hint">house style — clone a covers/*.json to add more</span>
+              <select name="cover_template">
+                {% set ctpl = form.get('cover_template','ashforge-house') %}
+                {% for c in cover_templates %}
+                  <option value="{{ c.id }}" {{ 'selected' if ctpl==c.id }}>{{ c.data.name }}</option>
+                {% endfor %}
+              </select></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Collection line</label><span class="hint">top &amp; bottom · e.g. Edenfall Collection</span>
+              <input type="text" name="cover_collection" value="{{ form.get('cover_collection','') }}"></div>
+            <div class="field"><label>Kicker</label><span class="hint">italic line under it · e.g. player options</span>
+              <input type="text" name="cover_kicker" value="{{ form.get('cover_kicker','') }}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Accent line</label><span class="hint">teal line under the title · defaults to the Author · override e.g. &amp; Feats</span>
+              <input type="text" name="cover_accent" value="{{ form.get('cover_accent','') }}"></div>
+            <div class="field"><label>Studio footer</label><span class="hint">defaults to Publisher · e.g. Ashforge Studio</span>
+              <input type="text" name="cover_studio" value="{{ form.get('cover_studio','') }}"></div>
+          </div>
+          <div class="row">
+            <div class="field wide"><label>Cover epigraph</label>
+              <span class="hint">short italic passage on the cover · defaults to the front-matter epigraph</span>
+              <textarea name="cover_epigraph" rows="3">{{ form.get('cover_epigraph','') }}</textarea></div>
+          </div>
+          <div class="conv"><p>The big title comes from the <strong>Title</strong> field below.
+            Colours and fonts live in the template JSON — the built-in fonts approximate the
+            house display serif; drop the real faces into <code>fonts/</code> and point the
+            template at them for exact fidelity.</p></div>
+        </div>
+
+        <div id="cover-image" class="cover-panel">
+          <div class="row">
+            <div class="field wide"><label>Cover image</label>
+              <span class="hint">.jpg or .png · full-bleed first page, cropped to the trim</span>
+              <input type="file" name="cover" accept=".jpg,.jpeg,.png"></div>
+          </div>
+          <div class="check"><input type="checkbox" id="cov-ov" name="cover_overlay"
+                {{ 'checked' if form.get('cover_overlay') }}>
+            <label for="cov-ov">Print the title and author over the art</label></div>
+          <div class="row">
+            <div class="field"><label>Overlay text colour</label>
+              <span class="hint">if the art is dark, choose light</span>
+              <select name="cover_color">
+                <option value="light">Light text (for dark art)</option>
+                <option value="dark">Dark text (for light art)</option>
+              </select></div>
+          </div>
+          <div class="conv"><p>If your art already has the title on it, leave the overlay
+            unchecked and the image prints as-is.</p></div>
+        </div>
       </div>
     </fieldset>
 
@@ -201,4 +247,26 @@
     </div>
   </form>
   {% endif %}
+
+  <style>
+    .cover-panel { display: none; }
+    .cover-panel.on { display: block; }
+  </style>
+  <script>
+    (function () {
+      var sel = document.getElementById('cover-mode');
+      if (!sel) return;
+      var panels = {
+        designed: document.getElementById('cover-designed'),
+        image: document.getElementById('cover-image')
+      };
+      function sync() {
+        for (var k in panels) {
+          if (panels[k]) panels[k].classList.toggle('on', sel.value === k);
+        }
+      }
+      sel.addEventListener('change', sync);
+      sync();
+    })();
+  </script>
 {% endblock %}

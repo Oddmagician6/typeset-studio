@@ -1,0 +1,73 @@
+{
+  "name": "Ashforge House Style (dark)",
+  "description": "Dark navy field, gold double-rule border with corner brackets, letterspaced collection lines, a display-serif title with a teal accent line, an italic epigraph, and a studio footer. The Edenfall / Ashforge house cover. Text is drawn from the cover fields on the generate form; colours and fonts are set here so you can clone this file per line or per customer.",
+  "fonts": {
+    "display": "Book-Bold.ttf",
+    "serif": "Book-Regular.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "palette": {
+    "bg_top": "#101a29",
+    "bg_bottom": "#080d15",
+    "gold": "#c6a866",
+    "teal": "#5fb2b2",
+    "ink": "#ece3d0",
+    "muted": "#8b93a3"
+  },
+  "border": {
+    "color": "gold",
+    "inset": 0.42,
+    "gap": 0.055,
+    "line": 1.0,
+    "corner": 0.5,
+    "corner_line": 1.3
+  },
+  "collection": {
+    "size": 12.5,
+    "tracking": 3.4,
+    "color": "gold",
+    "top": 0.70,
+    "bottom": 0.115
+  },
+  "kicker": {
+    "size": 11,
+    "tracking": 0.4,
+    "color": "muted",
+    "y": 0.665
+  },
+  "title": {
+    "size": 40,
+    "leading": 46,
+    "tracking": 0.6,
+    "color": "gold",
+    "y": 0.585
+  },
+  "accent": {
+    "size": 21,
+    "tracking": 1.4,
+    "color": "teal",
+    "gap": 0.008
+  },
+  "ornament": {
+    "color": "gold",
+    "size": 2.4,
+    "spacing": 9,
+    "rule": 0.8,
+    "rule_len": 0.8,
+    "gap": 0.05
+  },
+  "epigraph": {
+    "size": 10.5,
+    "leading": 15,
+    "tracking": 0.2,
+    "color": "muted",
+    "width": 0.62,
+    "top": 0.375
+  },
+  "studio": {
+    "size": 8.5,
+    "tracking": 2.4,
+    "color": "muted",
+    "y": 0.088
+  }
+}
