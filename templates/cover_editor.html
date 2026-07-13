@@ -275,6 +275,17 @@
             The spine width is computed from the page count and paper. Not saved into the
             template — set it here when you export.</p>
           <div class="row">
+            <div class="field wide"><label>From a book</label>
+              <span class="hint">fill trim, page count, title &amp; author from a saved project</span>
+              <select id="wrap-from">
+                <option value="">— choose a project —</option>
+                {% for pr in wrap_projects %}
+                  <option value="{{ pr.id }}">{{ pr.name }}{% if pr.page_count %} · {{ pr.page_count }} pp{% else %} · not built yet{% endif %}</option>
+                {% endfor %}
+              </select>
+              <span class="hint" id="wrap-from-note"></span></div>
+          </div>
+          <div class="row">
             {{ nf('Trim width', 'wrap_trim_w', 6, 'inches') }}
             {{ nf('Trim height', 'wrap_trim_h', 9, 'inches') }}
             {{ nf('Bleed', 'wrap_bleed', 0.125, 'inches per side') }}
@@ -319,6 +330,7 @@
     </aside>
   </div>
 
+  <script id="wrap-projects" type="application/json">{{ wrap_projects|tojson }}</script>
   <script>
     (function () {
       var form   = document.querySelector('form.editor');
@@ -351,6 +363,33 @@
         clearTimeout(timer);
         timer = setTimeout(render, 400);
       }
+
+      // -- Print wrap: fill from a saved book
+      var wrapProjects = [];
+      try { wrapProjects = JSON.parse(document.getElementById('wrap-projects').textContent || '[]'); }
+      catch (e) { wrapProjects = []; }
+      function setField(name, val){
+        var el = form.querySelector('[name=' + name + ']');
+        if (el && val !== undefined && val !== null && val !== '') el.value = val;
+      }
+      var wrapFrom = document.getElementById('wrap-from');
+      if (wrapFrom) wrapFrom.addEventListener('change', function(){
+        var note = document.getElementById('wrap-from-note');
+        var pr = wrapProjects.find(function(p){ return p.id === wrapFrom.value; });
+        if (!pr){ note.textContent = ''; return; }
+        setField('wrap_trim_w', pr.trim_w);
+        setField('wrap_trim_h', pr.trim_h);
+        setField('prev_title', pr.title);
+        setField('prev_author', pr.author);
+        setField('prev_studio', pr.publisher);
+        if (pr.page_count){
+          setField('wrap_pages', pr.page_count);
+          note.textContent = 'Spine from last build: ' + pr.page_count + ' pages.';
+        } else {
+          note.textContent = 'This book has no build yet — regenerate its PDF to get a page count.';
+        }
+        render();   // refresh the front preview with the pulled title/author
+      });
 
       // -- Print wrap: on-demand preview + PDF download
       var wstatus = document.getElementById('wrap-status');

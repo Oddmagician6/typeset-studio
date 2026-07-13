@@ -392,6 +392,17 @@ close. Next/prev select the match and scroll to it via the same mirror-based car
 as the chapter outline; edits route through `changed()` so autosave, word count, and the
 outline stay in sync. No backend change.
 
+**22. Cover wrap — auto page-count from a book**
+`app.py`: `project_generate` stores `last_page_count` on the project after a PDF build (and
+`project_create` carries it from the result page via a new hidden `page_count` field in
+`templates/result.html`); `_projects_for_wrap()` summarises projects (name, page count, preset
+trim, title/author/publisher) and is passed to the cover editor. ·
+`templates/cover_editor.html`: a **From a book** picker in the Print wrap section fills trim,
+page count, and the preview title/author/studio from the chosen project, showing a "Spine from
+last build: N pages" note (or a prompt to build the book first). The picker `<select>` has no
+`name`, so it never enters the saved template. Removes the manual page-count entry for the
+common case.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -439,9 +450,8 @@ dot leaders and part headings; `_estimate_toc_pages()`; two-pass in `build_pdf()
 ### ◻ Tier 4 — planned / backlog
 
 *(Cover Studio Tiers 1–3 all shipped: features #16 designed templates + editor, #17 font
-library, #18 full print wrap. Possible follow-ups: wire the wrap's page count directly from
-a completed interior build on the result page; per-retailer wrap presets; author-photo /
-logo image on the back panel.)*
+library, #18 full print wrap; plus #22 wrap auto page-count. Possible follow-ups: per-retailer
+wrap presets; author-photo / logo image on the back panel.)*
 
 **In-app manuscript editor — author a book start to finish** *(large; a product-identity
 step from "typesetting tool" toward "authoring + typesetting suite")*

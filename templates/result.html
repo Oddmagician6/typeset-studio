@@ -173,6 +173,7 @@
           <input type="hidden" name="about_author"    value="{{ meta.get('about_author','') }}">
           <input type="hidden" name="also_by"         value="{{ meta.get('also_by','') }}">
           <input type="hidden" name="last_epub"         value="{{ epub_name }}">
+          <input type="hidden" name="page_count"        value="{{ spec.page_count if spec else '' }}">
           <div class="row">
             <input type="text" name="project_name" value="{{ meta.title }}" placeholder="Project name">
             <button class="btn btn-primary" type="submit">Save as project</button>

@@ -261,6 +261,25 @@ BUILTIN_FONTS = {'Book-Regular.ttf', 'Book-Bold.ttf', 'Book-Italic.ttf'}
 FONT_EXTS = ('.ttf', '.otf')
 
 
+def _projects_for_wrap():
+    """Summaries used by the cover editor's 'From a book' wrap picker."""
+    out = []
+    for item in list_projects():
+        p = item['data']
+        trim = _load_preset_or_default(p.get('preset', '')).get('trim', {})
+        out.append({
+            'id': item['id'],
+            'name': p.get('name') or p.get('title') or item['id'],
+            'page_count': p.get('last_page_count', ''),
+            'trim_w': trim.get('w', 6.0),
+            'trim_h': trim.get('h', 9.0),
+            'title': p.get('title', ''),
+            'author': p.get('author', ''),
+            'publisher': p.get('publisher', ''),
+        })
+    return out
+
+
 def list_fonts():
     """Embeddable faces available in fonts/, for the editors' font pickers."""
     try:
@@ -546,7 +565,8 @@ def covers():
 def cover_new():
     return render_template('cover_editor.html', cid=None, c=COVER_DEFAULTS,
                            is_new=True, fonts=list_fonts(),
-                           palette_keys=COVER_PALETTE_KEYS)
+                           palette_keys=COVER_PALETTE_KEYS,
+                           wrap_projects=_projects_for_wrap())
 
 
 @app.route('/cover/<cid>')
@@ -555,7 +575,8 @@ def cover_editor(cid):
     if data is None:
         abort(404)
     return render_template('cover_editor.html', cid=cid, c=data, is_new=False,
-                           fonts=list_fonts(), palette_keys=COVER_PALETTE_KEYS)
+                           fonts=list_fonts(), palette_keys=COVER_PALETTE_KEYS,
+                           wrap_projects=_projects_for_wrap())
 
 
 @app.route('/cover/save', methods=['POST'])
@@ -1000,6 +1021,7 @@ def project_create():
         'cover_file': cover_file,
         'last_pdf': form.get('last_pdf', ''),
         'last_epub': form.get('last_epub', ''),
+        'last_page_count': form.get('page_count', ''),
         'created': now,
         'updated': now,
     }
@@ -1316,6 +1338,8 @@ def project_generate(pid):
 
     proj['last_pdf']  = out_name
     proj['last_epub'] = epub_name
+    if page_count:
+        proj['last_page_count'] = page_count
     proj['updated']   = datetime.now().isoformat(timespec='seconds')
     save_project_file(pid, proj)
 
