@@ -410,6 +410,18 @@ common case.
 Each jumps to that line via the existing mirror-based caret scroll. Scene detection mirrors
 `manuscript.SCENE_BREAK_RE`. No backend change.
 
+**24. Cover wrap — per-retailer presets**
+`app.py`: `WRAP_RETAILERS` (Amazon KDP, IngramSpark, Generic) bundling `bleed` and a
+`spine_text_min` page count plus a guidance note; `_wrap_from_form` reads `wrap_retailer` and
+passes `pages` + `spine_text_min` into the wrap. · `engine.py`: `build_cover_wrap` gates spine
+text on `pages >= spine_text_min` (and a physical floor) via a new `draw_text` arg on
+`_paint_spine`, and reports `spine_text` in its result. · `templates/cover_editor.html`: a
+Retailer select in the Print wrap section that pre-fills bleed and shows a live note
+("spine text included/omitted (N pp)"); the wrap preview info reports the spine-text state.
+Paper calipers stay in `_PAPER` (standard by weight); the note reminds users to verify against
+the retailer's own cover template. So e.g. an 80-page book gets spine text on IngramSpark
+(min 48) but not KDP (min 100).
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -457,8 +469,8 @@ dot leaders and part headings; `_estimate_toc_pages()`; two-pass in `build_pdf()
 ### ◻ Tier 4 — planned / backlog
 
 *(Cover Studio Tiers 1–3 all shipped: features #16 designed templates + editor, #17 font
-library, #18 full print wrap; plus #22 wrap auto page-count. Possible follow-ups: per-retailer
-wrap presets; author-photo / logo image on the back panel.)*
+library, #18 full print wrap; plus #22 wrap auto page-count and #24 per-retailer wrap presets.
+Possible follow-ups: author-photo / logo image on the back panel.)*
 
 **In-app manuscript editor — author a book start to finish** *(large; a product-identity
 step from "typesetting tool" toward "authoring + typesetting suite")*

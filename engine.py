@@ -342,9 +342,9 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
     canv.restoreState()
 
 
-def _paint_spine(canv, tpl, cf, meta, x0, y0, w, h):
-    """Rotated spine text (title + author), if the spine is wide enough to carry it."""
-    if w < 0.32 * inch:            # too narrow for legible spine type (~<140pp)
+def _paint_spine(canv, tpl, cf, meta, x0, y0, w, h, draw_text=True):
+    """Rotated spine text (title + author), if allowed and wide enough to carry it."""
+    if not draw_text or w < 0.10 * inch:   # retailer minimum not met, or physically too thin
         return
     title = (meta.get('title') or '').upper()
     author = (meta.get('cover_accent') or meta.get('author') or '').upper()
@@ -389,14 +389,18 @@ def _paint_wrap_guides(canv, W, H, bl, tw, sp, th):
 def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
     """Render a standalone print-ready wrap PDF: back + spine + front + bleed.
 
-    dims: {'trim_w','trim_h','spine_w','bleed'} in inches.
-    Returns dict of the finished wrap dimensions (inches).
+    dims: {'trim_w','trim_h','spine_w','bleed'} in inches, plus optional
+    'pages' and 'spine_text_min' (retailer rule for when spine text is allowed).
+    Returns the finished wrap dimensions (inches) and whether spine text was drawn.
     """
     from reportlab.pdfgen import canvas as _canvas
     tw = dims['trim_w'] * inch
     th = dims['trim_h'] * inch
     sp = max(dims.get('spine_w', 0.0), 0.0) * inch
     bl = dims.get('bleed', 0.125) * inch
+    pages = dims.get('pages')
+    smin = dims.get('spine_text_min', 0) or 0
+    draw_spine = (pages is None or pages >= smin) and sp >= 0.10 * inch
     W = 2 * tw + sp + 2 * bl
     H = th + 2 * bl
     c = _canvas.Canvas(out_path, pagesize=(W, H))
@@ -406,14 +410,14 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
     spine_x = bl + tw
     front_x = bl + tw + sp
     _paint_back_panel(c, tpl, cf, meta, back_x, bl, tw, th)
-    _paint_spine(c, tpl, cf, meta, spine_x, bl, sp, th)
+    _paint_spine(c, tpl, cf, meta, spine_x, bl, sp, th, draw_text=draw_spine)
     _paint_cover_panel(c, tpl, cf, meta, front_x, bl, tw, th)
     if guides:
         _paint_wrap_guides(c, W, H, bl, tw, sp, th)
     c.showPage()
     c.save()
     return {'wrap_w': round(W / inch, 3), 'wrap_h': round(H / inch, 3),
-            'spine_w': round(sp / inch, 4)}
+            'spine_w': round(sp / inch, 4), 'spine_text': bool(draw_spine)}
 
 
 # ---------------------------------------------------------------- fonts

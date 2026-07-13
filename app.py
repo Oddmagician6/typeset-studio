@@ -84,6 +84,28 @@ _PAPER = {
 _KDP_MARGINS    = [(24,150,.375),(151,300,.5),(301,500,.625),(501,700,.75),(701,828,.875)]
 _INGRAM_MARGINS = [(1,100,.375),(101,200,.5),(201,300,.625),(301,400,.75),(401,600,.875),(601,9999,1.0)]
 
+# Per-retailer print-wrap presets. Bleed and the spine-text minimum are the
+# differences that actually change the exported wrap; paper calipers (spine
+# thickness) are standard by weight and stay in _PAPER. Always verify against
+# the retailer's own downloadable cover template for a given trim.
+WRAP_RETAILERS = {
+    'kdp': {
+        'label': 'Amazon KDP', 'bleed': 0.125, 'spine_text_min': 100,
+        'note': 'KDP allows spine text at 100+ pages · 0.125" bleed. '
+                'Confirm spine width with KDP’s cover template for your trim.',
+    },
+    'ingramspark': {
+        'label': 'IngramSpark', 'bleed': 0.125, 'spine_text_min': 48,
+        'note': 'IngramSpark perfect-bound spine text from ~48 pages · 0.125" bleed. '
+                'Download IngramSpark’s cover template to confirm the spine.',
+    },
+    'generic': {
+        'label': 'Generic / other POD', 'bleed': 0.125, 'spine_text_min': 80,
+        'note': 'General POD defaults · 0.125" bleed. Verify bleed, spine, and safe '
+                'margins against your printer’s template.',
+    },
+}
+
 
 def _min_inside(pages, table):
     for lo, hi, m in table:
@@ -566,7 +588,8 @@ def cover_new():
     return render_template('cover_editor.html', cid=None, c=COVER_DEFAULTS,
                            is_new=True, fonts=list_fonts(),
                            palette_keys=COVER_PALETTE_KEYS,
-                           wrap_projects=_projects_for_wrap())
+                           wrap_projects=_projects_for_wrap(),
+                           wrap_retailers=WRAP_RETAILERS)
 
 
 @app.route('/cover/<cid>')
@@ -576,7 +599,8 @@ def cover_editor(cid):
         abort(404)
     return render_template('cover_editor.html', cid=cid, c=data, is_new=False,
                            fonts=list_fonts(), palette_keys=COVER_PALETTE_KEYS,
-                           wrap_projects=_projects_for_wrap())
+                           wrap_projects=_projects_for_wrap(),
+                           wrap_retailers=WRAP_RETAILERS)
 
 
 @app.route('/cover/save', methods=['POST'])
@@ -671,11 +695,14 @@ def _wrap_from_form(form, out_path):
         pages = 200
     paper = form.get('wrap_paper', 'white')
     ppi = _PAPER.get(paper, _PAPER['white'])['ppi']
+    rc = WRAP_RETAILERS.get(form.get('wrap_retailer', 'kdp'), WRAP_RETAILERS['kdp'])
     dims = {
         'trim_w': _f(form, 'wrap_trim_w', 6.0),
         'trim_h': _f(form, 'wrap_trim_h', 9.0),
         'spine_w': pages * ppi,
-        'bleed':  _f(form, 'wrap_bleed', 0.125),
+        'bleed':  _f(form, 'wrap_bleed', rc['bleed']),
+        'pages':  pages,
+        'spine_text_min': rc['spine_text_min'],
     }
     meta = {
         'title':  form.get('prev_title', ''),
@@ -726,8 +753,9 @@ def cover_wrap_preview():
         pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.1, 1.1), alpha=False)
         b64 = base64.b64encode(pix.tobytes('png')).decode()
         doc.close()
+        spine_txt = 'spine text on' if res.get('spine_text') else 'spine text off (too few pages)'
         info = (f"{dims['trim_w']:g}×{dims['trim_h']:g}\" · spine {res['spine_w']:g}\" · "
-                f"full {res['wrap_w']:g}×{res['wrap_h']:g}\"")
+                f"full {res['wrap_w']:g}×{res['wrap_h']:g}\" · {spine_txt}")
         return jsonify({'ok': True, 'image': f'data:image/png;base64,{b64}', 'info': info})
     except Exception as exc:
         logging.error('wrap preview failed: %s', traceback.format_exc())

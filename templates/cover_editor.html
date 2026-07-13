@@ -275,6 +275,16 @@
             The spine width is computed from the page count and paper. Not saved into the
             template — set it here when you export.</p>
           <div class="row">
+            <div class="field wide"><label>Retailer preset</label>
+              <span class="hint">sets bleed and the spine-text page minimum</span>
+              <select name="wrap_retailer" id="wrap-retailer">
+                {% for rid, rc in wrap_retailers.items() %}
+                  <option value="{{ rid }}">{{ rc.label }}</option>
+                {% endfor %}
+              </select>
+              <span class="hint" id="wrap-retailer-note"></span></div>
+          </div>
+          <div class="row">
             <div class="field wide"><label>From a book</label>
               <span class="hint">fill trim, page count, title &amp; author from a saved project</span>
               <select id="wrap-from">
@@ -331,6 +341,7 @@
   </div>
 
   <script id="wrap-projects" type="application/json">{{ wrap_projects|tojson }}</script>
+  <script id="wrap-retailers" type="application/json">{{ wrap_retailers|tojson }}</script>
   <script>
     (function () {
       var form   = document.querySelector('form.editor');
@@ -388,8 +399,39 @@
         } else {
           note.textContent = 'This book has no build yet — regenerate its PDF to get a page count.';
         }
+        updateRetailerNote();
         render();   // refresh the front preview with the pulled title/author
       });
+
+      // -- Print wrap: retailer preset (bleed + spine-text minimum)
+      var retailerData = {};
+      try { retailerData = JSON.parse(document.getElementById('wrap-retailers').textContent || '{}'); }
+      catch (e) { retailerData = {}; }
+      var retailerSel = document.getElementById('wrap-retailer');
+      var retailerNote = document.getElementById('wrap-retailer-note');
+      function updateRetailerNote(){
+        if (!retailerSel) return;
+        var r = retailerData[retailerSel.value];
+        if (!r){ retailerNote.textContent = ''; return; }
+        var pagesEl = form.querySelector('[name=wrap_pages]');
+        var pages = parseInt(pagesEl && pagesEl.value, 10) || 0;
+        var status = pages
+          ? (pages >= r.spine_text_min
+              ? ('spine text included (' + pages + ' pp ≥ ' + r.spine_text_min + ')')
+              : ('spine text omitted (' + pages + ' pp < ' + r.spine_text_min + ')'))
+          : ('spine text at ' + r.spine_text_min + '+ pages');
+        retailerNote.textContent = r.note + ' — ' + status;
+      }
+      if (retailerSel){
+        retailerSel.addEventListener('change', function(){
+          var r = retailerData[retailerSel.value];
+          if (r) setField('wrap_bleed', r.bleed);
+          updateRetailerNote();
+        });
+        var pagesEl0 = form.querySelector('[name=wrap_pages]');
+        if (pagesEl0) pagesEl0.addEventListener('input', updateRetailerNote);
+        updateRetailerNote();
+      }
 
       // -- Print wrap: on-demand preview + PDF download
       var wstatus = document.getElementById('wrap-status');
