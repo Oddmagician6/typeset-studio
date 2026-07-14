@@ -573,7 +573,21 @@ things authors otherwise pay for (typesetting, cover design, formatting). Rank f
 
 *Packaging plan: (1) data-dir refactor — DONE; (2) PyInstaller onedir spec + test build —
 DONE; (3) Inno Setup installer script — DONE (compile on Windows); (4) polish: app icon +
-quiet frozen logging — DONE; pywebview native window still optional.*
+quiet frozen logging — DONE; (5) pywebview native window — DONE (window itself needs an
+interactive Windows check).*
+
+**Step 5 shipped** (`app.py`, `requirements.txt`, `.spec`): the packaged app opens in a native
+desktop window (pywebview / Edge WebView2) instead of a browser tab; closing it quits. Entry
+point serves Flask on a **free port** (`_free_port`, falls back off 5050 if busy) in a daemon
+thread, then `webview.start()` on the main thread — with a **browser fallback** if the window
+can't initialise, so a webview failure never bricks the app. `_want_window()` gates it: on when
+frozen, off in dev (opt in with `TS_WINDOW=1`; `TS_NO_WINDOW=1` forces the browser — used to
+smoke-test the frozen server path). `.spec` collects `webview` data/submodules; `pywebview` added
+to `requirements.txt` (browser fallback if absent). Verified here: decision logic, and a frozen
+build that bundles the WebView2 backend (`Microsoft.Web.WebView2.Core.dll`) + `clr_loader` with
+no errors (~97 MB). The **window rendering itself needs an interactive run on Windows** — can't
+drive a GUI window here. Once confirmed, flip the `.spec` to `console=False` for a windowed
+(no-console) app.
 
 **Step 4 polish shipped** (`app.ico`, `app.py`, `.spec`, `.iss`): a brand `app.ico`
 (navy + gold serif "T" in Book-Bold, echoing the cover frame; multi-size 16–256) wired into the

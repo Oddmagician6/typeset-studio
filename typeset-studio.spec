@@ -30,8 +30,10 @@ datas = [
 ]
 datas += collect_data_files('pyphen')       # hyphenation dictionaries
 datas += collect_data_files('reportlab')    # bundled fonts / encodings
+datas += collect_data_files('webview')      # pywebview backend assets (native window)
 
 hiddenimports = collect_submodules('reportlab')
+hiddenimports += collect_submodules('webview')
 
 excludes = ['anthropic', 'tkinter']
 

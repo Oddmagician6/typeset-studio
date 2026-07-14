@@ -1544,11 +1544,65 @@ def _open_browser():
     webbrowser.open('http://127.0.0.1:5050/')
 
 
+def _free_port(preferred=5050):
+    """Return the preferred port if free, else an OS-assigned one."""
+    import socket
+    for p in (preferred, 0):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.bind(('127.0.0.1', p))
+            port = s.getsockname()[1]
+            s.close()
+            return port
+        except OSError:
+            continue
+    return preferred
+
+
+def _serve(port):
+    """Run the server (no reloader) — used as the background thread for the window."""
+    app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False, threaded=True)
+
+
+def _want_window():
+    """Show a native desktop window (pywebview) instead of a browser tab?
+
+    On by default in a frozen/installed build; off when running from source
+    (set TS_WINDOW=1 to try it in dev). TS_NO_WINDOW=1 forces the browser.
+    """
+    if os.environ.get('TS_NO_WINDOW') == '1':
+        return False
+    if not IS_FROZEN and os.environ.get('TS_WINDOW') != '1':
+        return False
+    try:
+        import webview  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 if __name__ == '__main__':
-    # debug + auto-reloader are for development only; a frozen/installed build
-    # must run them off (the reloader re-execs the interpreter, which breaks in
-    # a bundle).
-    dev = not IS_FROZEN
-    if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
-        threading.Timer(1.0, _open_browser).start()
-    app.run(host='127.0.0.1', port=5050, debug=dev, use_reloader=dev)
+    if _want_window():
+        # native window: serve in a background thread, show the app in an OS
+        # webview on the main thread. Closing the window quits (server is a
+        # daemon thread). Falls back to the browser if the window can't start.
+        port = _free_port(5050)
+        url = f'http://127.0.0.1:{port}/'
+        threading.Thread(target=_serve, args=(port,), daemon=True).start()
+        try:
+            import webview
+            webview.create_window('Typeset Studio', url,
+                                  width=1180, height=820, min_size=(900, 640))
+            webview.start()
+        except Exception:
+            logging.exception('Native window failed; opening in the browser instead.')
+            webbrowser.open(url)
+            threading.Event().wait()
+    else:
+        # browser tab. In dev, keep Flask's debug + auto-reloader; a frozen build
+        # runs them off (the reloader re-execs the interpreter, which breaks in a
+        # bundle).
+        dev = not IS_FROZEN
+        if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+            threading.Timer(1.0, _open_browser).start()
+        app.run(host='127.0.0.1', port=5050, debug=dev, use_reloader=dev, threaded=True)
