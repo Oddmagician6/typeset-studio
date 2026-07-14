@@ -5,3 +5,5 @@ Pillow>=10.0
 pyphen>=0.14
 pymupdf>=1.23
 anthropic>=0.40
+# desktop window for the packaged app; the app falls back to a browser tab if absent
+pywebview>=5.0
