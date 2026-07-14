@@ -62,7 +62,7 @@ exe = EXE(
     upx=False,
     console=True,            # keeps a "close this window to quit" console; set False once pywebview lands
     disable_windowed_traceback=False,
-    icon=None,               # point at app.ico when branding is ready
+    icon='app.ico',
 )
 
 coll = COLLECT(
