@@ -15,3 +15,7 @@ __pycache__/
 # OS noise
 .DS_Store
 Thumbs.db
+
+# PyInstaller build output (the .spec is tracked; build artifacts are not)
+build/
+dist/

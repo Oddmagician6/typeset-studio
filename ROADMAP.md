@@ -571,9 +571,21 @@ far more than WYSIWYG or more presets. The donation pitch is already strong — 
 things authors otherwise pay for (typesetting, cover design, formatting). Rank for reach:
 **distribution/packaging > more genre presets & polish > WYSIWYG.**
 
-*Packaging plan: (1) data-dir refactor — DONE; (2) PyInstaller onedir spec + test build;
-(3) Inno Setup installer (Start-menu/desktop shortcut + uninstaller); (4) optional pywebview
-native window + icon.* **Step 1 shipped** (`app.py`): a `resource_path()` helper resolves
+*Packaging plan: (1) data-dir refactor — DONE; (2) PyInstaller onedir spec + test build —
+DONE; (3) Inno Setup installer (Start-menu/desktop shortcut + uninstaller); (4) optional
+pywebview native window + icon.*
+
+**Step 2 shipped** (`typeset-studio.spec`, `build.bat`, `requirements-build.txt`): onedir
+PyInstaller spec bundling `templates`/`sample`/default `presets`/`covers`/`fonts` at their
+resource paths, `collect_data_files` for **pyphen** (hyphenation dicts) and **reportlab**, and
+`excludes=['anthropic','tkinter']` (anthropic is a lazy import → droppable). Built and
+**smoke-tested the actual .exe**: with `%APPDATA%` redirected to a temp dir it served `/`,
+`/covers`, `/fonts` and completed a `POST /cover/preview` PDF build (exercising reportlab +
+PyMuPDF + pyphen), and first-run seeding copied the 9 presets in. ~91 MB onedir, no missing-
+module warnings, debug/reloader off when frozen. `build/` + `dist/` gitignored; the `.spec` is
+tracked. Building/running must be done on Windows (can't drive a GUI from CI here).
+
+**Step 1 shipped** (`app.py`): a `resource_path()` helper resolves
 read-only bundled assets (`templates/`, `sample/`, default `presets`/`covers`/`fonts`) via
 `sys._MEIPASS` when frozen; a `_user_data_root()` puts writable data (`out`, `uploads`,
 `projects`, and the **editable** `presets`/`covers`/`fonts`) under `%APPDATA%\Typeset Studio`
