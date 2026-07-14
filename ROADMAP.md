@@ -546,6 +546,15 @@ shows true typeset fidelity. Phase B was therefore delivered as an aligned highl
 (monospace surface; colour/weight/italic only, no resize — a larger heading would desync the
 caret). Revisit only if true hide-the-markup WYSIWYG becomes a hard requirement.
 
+**Entry point if revisited — a serialization spike (do this before building anything).** The
+riskiest part of a real WYSIWYG is lossless round-tripping, not the editor UI. So the first
+step is a throwaway script: Markdown → a ProseMirror/TipTap document model → back to Markdown,
+run over `sample/sample.md` and any real manuscripts, asserting `parse → serialize → parse` is
+stable (especially the custom `~~~ letter from="…"` doc-blocks, epigraph/attribution lines, and
+smart-quote interplay). A few hours; it surfaces the real pain and tells us whether the full
+build (schema, two-way serialization, rewired toolbar/outline/find, Node bundling) is worth it.
+Only commit to the heavy build if the spike round-trips cleanly.
+
 **New obligation once people author in-app:** autosave + backups + no data loss — a higher
 bar than a tool that only transforms files the user already has stored elsewhere. Keep
 `.docx` import as the on-ramp for existing manuscripts.
