@@ -19,3 +19,6 @@ Thumbs.db
 # PyInstaller build output (the .spec is tracked; build artifacts are not)
 build/
 dist/
+
+# Inno Setup output (the .iss is tracked; the built Setup.exe is not)
+dist_installer/
