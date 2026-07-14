@@ -559,6 +559,34 @@ Only commit to the heavy build if the spike round-trips cleanly.
 bar than a tool that only transforms files the user already has stored elsewhere. Keep
 `.docx` import as the on-ramp for existing manuscripts.
 
+### ◻ Strategy notes (context for prioritising, not committed work)
+
+**Distribution / packaging — the real reach lever (free + donate model).** The app is
+released free with an optional donate button, not sold. In that model "value" = reach and
+goodwill, and the dominant adoption barrier is **not** any editor feature — it's that this is a
+local Flask app you must install Python and run a server to use. So if broader adoption / more
+potential donors is ever a goal, **packaging beats polish**: a one-click installer (e.g.
+PyInstaller/briefcase bundling Python + a launcher) or a hosted version would move the needle
+far more than WYSIWYG or more presets. The donation pitch is already strong — the app replaces
+things authors otherwise pay for (typesetting, cover design, formatting). Rank for reach:
+**distribution/packaging > more genre presets & polish > WYSIWYG.**
+
+**Cover customization — enrich the template, do NOT build a freeform design studio.** A full
+in-app graphic editor (layers, shapes, drag-anything — a mini Canva via a vendored Fabric.js /
+Konva.js) is explicitly **not** the direction. It fights the app's core value the same way a
+Word-style editor would fight the interior engine: the cover system is good *because* it is
+constrained and opinionated (pick a genre house style, fill in text → a professional cover). A
+blank canvas hands non-designer authors the responsibility for good design and mostly produces
+worse covers — at enormous cost (building a vector editor; a bigger dependency/build-step
+reversal than the WYSIWYG one). The high-value, on-philosophy path is more *parametric* power:
+- layout archetypes beyond centred-classic (title-at-top, bottom band, split band, full-bleed
+  image with a title panel) — new `_paint_*` routines selected by a template `layout` key;
+- background options (background image/texture behind the frame, subtle vignette, pattern) —
+  partially exists for wraps;
+- a few positioned image/emblem "slots" (logo, series badge, author mark) as presets, not
+  freeform placement.
+These extend the existing `covers/*.json` renderer incrementally, keeping "good by default."
+
 ---
 
 ## Conventions for contributions
