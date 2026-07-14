@@ -575,6 +575,16 @@ things authors otherwise pay for (typesetting, cover design, formatting). Rank f
 DONE; (3) Inno Setup installer (Start-menu/desktop shortcut + uninstaller); (4) optional
 pywebview native window + icon.*
 
+**Step 3 written** (`typeset-studio.iss`, `make-installer.bat`): Inno Setup 6 script that wraps
+`dist\Typeset Studio\` into `TypesetStudio-Setup-<ver>.exe` — **per-user install**
+(`PrivilegesRequired=lowest`, no UAC), Start-menu shortcut, optional desktop shortcut, and an
+uninstaller. User data in `%APPDATA%\Typeset Studio` is deliberately **not** removed on
+uninstall (never deletes someone's books). Stable `AppId` GUID for clean upgrades. Build order:
+`build.bat` → `make-installer.bat` (finds `ISCC.exe`; `dist_installer/` gitignored). Not
+compiled here — Inno Setup isn't installed in this environment, so producing the actual
+`Setup.exe` must be done on Windows (`make-installer.bat` after installing Inno Setup 6).
+PyInstaller already bundles the VC++ runtime DLLs, so no separate redistributable is needed.
+
 **Step 2 shipped** (`typeset-studio.spec`, `build.bat`, `requirements-build.txt`): onedir
 PyInstaller spec bundling `templates`/`sample`/default `presets`/`covers`/`fonts` at their
 resource paths, `collect_data_files` for **pyphen** (hyphenation dicts) and **reportlab**, and
