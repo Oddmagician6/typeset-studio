@@ -571,6 +571,19 @@ far more than WYSIWYG or more presets. The donation pitch is already strong — 
 things authors otherwise pay for (typesetting, cover design, formatting). Rank for reach:
 **distribution/packaging > more genre presets & polish > WYSIWYG.**
 
+*Packaging plan: (1) data-dir refactor — DONE; (2) PyInstaller onedir spec + test build;
+(3) Inno Setup installer (Start-menu/desktop shortcut + uninstaller); (4) optional pywebview
+native window + icon.* **Step 1 shipped** (`app.py`): a `resource_path()` helper resolves
+read-only bundled assets (`templates/`, `sample/`, default `presets`/`covers`/`fonts`) via
+`sys._MEIPASS` when frozen; a `_user_data_root()` puts writable data (`out`, `uploads`,
+`projects`, and the **editable** `presets`/`covers`/`fonts`) under `%APPDATA%\Typeset Studio`
+when frozen, or the repo folder in dev (unchanged); `_seed_defaults()` copies bundled defaults
+into the user dir on first run; `engine.FONT_DIR` is pointed at the writable font library; the
+entry point disables Flask debug/reloader when `IS_FROZEN`. Verified via a simulated-frozen run
+(seeding + a full PDF build against `%APPDATA%`) and an unchanged dev run. Remaining: a free
+**code-signing** cert avoids the SmartScreen "unknown publisher" warning (skippable at first);
+consider making the `anthropic` dep a lazy import to slim the bundle.
+
 **Cover customization — enrich the template, do NOT build a freeform design studio.** A full
 in-app graphic editor (layers, shapes, drag-anything — a mini Canva via a vendored Fabric.js /
 Konva.js) is explicitly **not** the direction. It fights the app's core value the same way a

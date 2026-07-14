@@ -8,6 +8,7 @@ plain JSON files in ./presets so you can clone one per customer and tweak it.
 
 import os
 import re
+import sys
 import json
 import base64
 import shutil
@@ -31,18 +32,79 @@ import manuscript
 import checker
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PRESET_DIR    = os.path.join(HERE, 'presets')
-COVER_DIR     = os.path.join(HERE, 'covers')
-FONT_DIR      = os.path.join(HERE, 'fonts')
-OUT_DIR       = os.path.join(HERE, 'out')
-UPLOAD_DIR    = os.path.join(HERE, 'uploads')
-PROJECT_DIR   = os.path.join(HERE, 'projects')
+IS_FROZEN = getattr(sys, 'frozen', False)
+
+
+def resource_path(*parts):
+    """Path to a read-only bundled asset (works under PyInstaller and in dev)."""
+    base = getattr(sys, '_MEIPASS', HERE)
+    return os.path.join(base, *parts)
+
+
+def _user_data_root():
+    """Writable per-user data directory.
+
+    In dev (running from source) this is the repo folder, so behaviour and any
+    existing data are unchanged. When frozen into an installed app it is a
+    per-user app-data folder, because the install location is read-only.
+    """
+    if not IS_FROZEN:
+        return HERE
+    if os.name == 'nt':
+        base = os.environ.get('APPDATA') or os.path.expanduser('~')
+    elif sys.platform == 'darwin':
+        base = os.path.join(os.path.expanduser('~'), 'Library', 'Application Support')
+    else:
+        base = os.environ.get('XDG_DATA_HOME') or os.path.join(os.path.expanduser('~'), '.local', 'share')
+    return os.path.join(base, 'Typeset Studio')
+
+
+DATA_DIR = _user_data_root()
+
+# read-only bundled assets
+TEMPLATE_DIR = resource_path('templates')
+STATIC_DIR   = resource_path('static')
+SAMPLE       = resource_path('sample', 'sample.md')
+
+# writable, user-editable data — presets/covers/fonts are edited in-app, so they
+# live under DATA_DIR (seeded from the bundled defaults on first run), not in the
+# read-only install location.
+PRESET_DIR    = os.path.join(DATA_DIR, 'presets')
+COVER_DIR     = os.path.join(DATA_DIR, 'covers')
+FONT_DIR      = os.path.join(DATA_DIR, 'fonts')
+OUT_DIR       = os.path.join(DATA_DIR, 'out')
+UPLOAD_DIR    = os.path.join(DATA_DIR, 'uploads')
+PROJECT_DIR   = os.path.join(DATA_DIR, 'projects')
 PROJECT_MS_DIR = os.path.join(PROJECT_DIR, 'manuscripts')
-SAMPLE = os.path.join(HERE, 'sample', 'sample.md')
-for d in (PRESET_DIR, COVER_DIR, OUT_DIR, UPLOAD_DIR, PROJECT_DIR, PROJECT_MS_DIR):
+for d in (PRESET_DIR, COVER_DIR, FONT_DIR, OUT_DIR, UPLOAD_DIR, PROJECT_DIR, PROJECT_MS_DIR):
     os.makedirs(d, exist_ok=True)
 
-app = Flask(__name__)
+
+def _seed_defaults():
+    """First-run seeding: copy bundled default presets/covers/fonts into the
+    user data dir when a file is missing there. No-op in dev, where the bundled
+    and data locations are the same folder."""
+    for name in ('presets', 'covers', 'fonts'):
+        src = resource_path(name)
+        dst = os.path.join(DATA_DIR, name)
+        if os.path.abspath(src) == os.path.abspath(dst) or not os.path.isdir(src):
+            continue
+        for fn in os.listdir(src):
+            s, d = os.path.join(src, fn), os.path.join(dst, fn)
+            if os.path.isfile(s) and not os.path.exists(d):
+                try:
+                    shutil.copy2(s, d)
+                except OSError:
+                    pass
+
+
+_seed_defaults()
+
+# the engine resolves font (and scene-break ornament) filenames against the same
+# writable font library
+engine.FONT_DIR = FONT_DIR
+
+app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 app.secret_key = 'typeset-studio-local'
 
 PREVIEW_SAMPLE = """\
@@ -1480,6 +1542,10 @@ def _open_browser():
 
 
 if __name__ == '__main__':
+    # debug + auto-reloader are for development only; a frozen/installed build
+    # must run them off (the reloader re-execs the interpreter, which breaks in
+    # a bundle).
+    dev = not IS_FROZEN
     if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
         threading.Timer(1.0, _open_browser).start()
-    app.run(host='127.0.0.1', port=5050, debug=True)
+    app.run(host='127.0.0.1', port=5050, debug=dev, use_reloader=dev)
