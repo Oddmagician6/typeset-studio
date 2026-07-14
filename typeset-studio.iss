@@ -41,7 +41,7 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
-; SetupIconFile=app.ico     ; uncomment once an icon exists
+SetupIconFile=app.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

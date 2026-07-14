@@ -572,8 +572,15 @@ things authors otherwise pay for (typesetting, cover design, formatting). Rank f
 **distribution/packaging > more genre presets & polish > WYSIWYG.**
 
 *Packaging plan: (1) data-dir refactor — DONE; (2) PyInstaller onedir spec + test build —
-DONE; (3) Inno Setup installer (Start-menu/desktop shortcut + uninstaller); (4) optional
-pywebview native window + icon.*
+DONE; (3) Inno Setup installer script — DONE (compile on Windows); (4) polish: app icon +
+quiet frozen logging — DONE; pywebview native window still optional.*
+
+**Step 4 polish shipped** (`app.ico`, `app.py`, `.spec`, `.iss`): a brand `app.ico`
+(navy + gold serif "T" in Book-Bold, echoing the cover frame; multi-size 16–256) wired into the
+`.spec` (`icon='app.ico'`) and the installer (`SetupIconFile`) — rebuild confirmed PyInstaller
+embeds it ("Copying icon to EXE"). Logging drops to WARNING when frozen (DEBUG in dev), so the
+packaged console stays quiet while errors still surface (verified: root level 10 dev / 30
+frozen). Replace `app.ico` with a custom icon anytime — the wiring stays.
 
 **Step 3 written** (`typeset-studio.iss`, `make-installer.bat`): Inno Setup 6 script that wraps
 `dist\Typeset Studio\` into `TypesetStudio-Setup-<ver>.exe` — **per-user install**

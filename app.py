@@ -19,8 +19,11 @@ import traceback
 import webbrowser
 from datetime import datetime
 
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s %(levelname)s %(message)s')
+# Verbose in development; quiet in a frozen/installed build (the packaged app
+# shows a console window, so keep it to warnings/errors there).
+logging.basicConfig(
+    level=logging.WARNING if getattr(sys, 'frozen', False) else logging.DEBUG,
+    format='%(asctime)s %(levelname)s %(message)s')
 
 from flask import (Flask, request, redirect, url_for, render_template,
                    send_from_directory, abort, flash, jsonify, Response)
