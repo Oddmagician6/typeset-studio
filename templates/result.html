@@ -164,6 +164,13 @@
           <input type="hidden" name="right_hand_starts" value="{{ '1' if meta.right_hand_starts else '' }}">
           <input type="hidden" name="cover_overlay"     value="{{ '1' if meta.cover_overlay else '' }}">
           <input type="hidden" name="cover_color"       value="{{ meta.cover_color }}">
+          <input type="hidden" name="cover_mode"        value="{{ meta.get('cover_mode','none') }}">
+          <input type="hidden" name="cover_template"    value="{{ meta.get('cover_template','') }}">
+          <input type="hidden" name="cover_collection"  value="{{ meta.get('cover_collection','') }}">
+          <input type="hidden" name="cover_kicker"      value="{{ meta.get('cover_kicker','') }}">
+          <input type="hidden" name="cover_accent"      value="{{ meta.get('cover_accent','') }}">
+          <input type="hidden" name="cover_epigraph"    value="{{ meta.get('cover_epigraph','') }}">
+          <input type="hidden" name="cover_studio"      value="{{ meta.get('cover_studio','') }}">
           <input type="hidden" name="fmt"               value="{{ fmt }}">
           <input type="hidden" name="include_toc"      value="{{ '1' if meta.get('include_toc') else '' }}">
           <input type="hidden" name="smartquotes"      value="{{ '1' if meta.smartquotes else '' }}">

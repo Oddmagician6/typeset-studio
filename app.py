@@ -1123,6 +1123,13 @@ def project_create():
         'right_hand_starts': form.get('right_hand_starts') == '1',
         'cover_overlay': form.get('cover_overlay') == '1',
         'cover_color': form.get('cover_color', 'light'),
+        'cover_mode':     form.get('cover_mode', 'none'),
+        'cover_template': form.get('cover_template', ''),
+        'cover_collection': form.get('cover_collection', '').strip(),
+        'cover_kicker':     form.get('cover_kicker', '').strip(),
+        'cover_accent':     form.get('cover_accent', '').strip(),
+        'cover_epigraph':   form.get('cover_epigraph', '').strip(),
+        'cover_studio':     form.get('cover_studio', '').strip(),
         'format':      form.get('fmt', 'pdf'),
         'include_toc': form.get('include_toc') == '1',
         'smartquotes': form.get('smartquotes') == '1',
@@ -1203,6 +1210,13 @@ def project_edit(pid):
             'right_hand_starts': 'right_hand_starts' in form,
             'cover_overlay':    'cover_overlay' in form,
             'cover_color':      form.get('cover_color', 'light'),
+            'cover_mode':       form.get('cover_mode', 'none'),
+            'cover_template':   form.get('cover_template', ''),
+            'cover_collection': form.get('cover_collection', '').strip(),
+            'cover_kicker':     form.get('cover_kicker', '').strip(),
+            'cover_accent':     form.get('cover_accent', '').strip(),
+            'cover_epigraph':   form.get('cover_epigraph', '').strip(),
+            'cover_studio':     form.get('cover_studio', '').strip(),
             'updated':          datetime.now().isoformat(timespec='seconds'),
         })
         save_project_file(pid, proj)
@@ -1403,6 +1417,7 @@ def project_generate(pid):
         if os.path.exists(cp):
             cover_path = cp
 
+    cover_mode = proj.get('cover_mode', 'none')
     meta = {
         'title':            proj.get('title', ''),
         'subtitle':         proj.get('subtitle', ''),
@@ -1414,6 +1429,15 @@ def project_generate(pid):
         'cover_image':   cover_path,
         'cover_overlay': proj.get('cover_overlay', False),
         'cover_color':   proj.get('cover_color', 'light'),
+        'cover_mode':       cover_mode,
+        'cover_template':   proj.get('cover_template', ''),
+        'cover_template_data': (load_cover_template(proj.get('cover_template', ''))
+                                if cover_mode == 'designed' else None),
+        'cover_collection': proj.get('cover_collection', ''),
+        'cover_kicker':     proj.get('cover_kicker', ''),
+        'cover_accent':     proj.get('cover_accent', ''),
+        'cover_epigraph':   proj.get('cover_epigraph', ''),
+        'cover_studio':     proj.get('cover_studio', ''),
         'include_toc':   proj.get('include_toc', False),
         'smartquotes':   proj.get('smartquotes', True),
         'dedication':     proj.get('dedication', ''),

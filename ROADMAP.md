@@ -315,7 +315,7 @@ processor exposing templates to all pages, and the `cover_*` meta keys) ·
 `templates/generate.html` (Cover fieldset: mode selector None/Designed/Upload + template
 dropdown + text fields, with a small toggle script). Fonts are swappable via the template
 JSON — the shipped file approximates the house display serif with the "Book" faces. Known
-gaps: EPUB and saved projects don't carry designed covers yet.
+gaps: EPUB doesn't carry designed covers yet. (Saved projects now do — see feature #29.)
 
 **16. Cover Studio — browser editor for cover templates**
 `app.py` (`COVER_DEFAULTS`, `parse_cover_form()` mirroring `parse_preset_form`,
@@ -464,6 +464,18 @@ Fantasy Emerald / Sci-Fi Cosmic) each have a matching interior. Data-only (exist
 fields); the combined preset and the existing thriller/romance/literary interiors — which
 already pair with their covers — were left untouched to avoid duplicates. Verified via rendered
 chapter-opener proofs.
+
+**29. Designed covers persist in saved projects (bug fix)**
+Closes the gap flagged in #15: a book generated with a designed cover, once saved as a project,
+lost the cover on edit/regenerate. Now the designed-cover fields (`cover_mode`,
+`cover_template`, `cover_collection`/`kicker`/`accent`/`epigraph`/`studio`) round-trip through
+the whole project flow — `app.py` `project_create` + `project_edit` persist them, `templates/
+result.html` passes them as hidden fields on **Save as project**, `project_generate` rebuilds
+the `meta` (loading `cover_template_data`) so regeneration reproduces the cover, and
+`templates/project_edit.html` gains a Cover section (mode selector + template dropdown + text
+fields) to edit it. Backward-compatible: old projects (no `cover_mode`) default to `none`/image
+as before. Verified end-to-end (save → persisted → edit shows fields → regenerate renders the
+designed cover on page 1).
 
 ### ✓ Tier 2 — shipped
 

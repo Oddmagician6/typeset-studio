@@ -70,27 +70,74 @@
     </fieldset>
 
     <fieldset>
-      <legend>Cover art</legend>
+      <legend>Cover</legend>
       <div class="fs-body">
-        {% if proj.cover_file %}
-          <p class="current-file">Current file: {{ proj.cover_file }}</p>
-        {% endif %}
+        {% set cmode = proj.get('cover_mode','none') %}
         <div class="row">
-          <div class="field wide"><label>Replace cover image</label>
-            <span class="hint">leave blank to keep the current cover · .jpg or .png</span>
-            <input type="file" name="cover" accept=".jpg,.jpeg,.png"></div>
-        </div>
-        <div class="check"><input type="checkbox" id="cov-ov" name="cover_overlay" {{ 'checked' if proj.cover_overlay }}>
-          <label for="cov-ov">Print the title and author over the art</label></div>
-        <div class="row" style="margin-top:14px">
-          <div class="field"><label>Overlay text colour</label>
-            <select name="cover_color">
-              <option value="light" {{ 'selected' if proj.cover_color == 'light' }}>Light text (for dark art)</option>
-              <option value="dark"  {{ 'selected' if proj.cover_color == 'dark' }}>Dark text (for light art)</option>
+          <div class="field"><label>Cover for page 1</label>
+            <select name="cover_mode" id="pe-cover-mode">
+              <option value="none"     {{ 'selected' if cmode=='none' }}>None</option>
+              <option value="designed" {{ 'selected' if cmode=='designed' }}>Designed template</option>
+              <option value="image"    {{ 'selected' if cmode=='image' }}>Uploaded image</option>
             </select></div>
+        </div>
+
+        <div id="pe-cover-designed" class="pe-cover-panel">
+          <div class="row">
+            <div class="field"><label>Template</label>
+              <select name="cover_template">
+                {% for c in cover_templates %}
+                  <option value="{{ c.id }}" {{ 'selected' if proj.get('cover_template')==c.id }}>{{ c.data.name }}</option>
+                {% endfor %}
+              </select></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Collection line</label>
+              <input type="text" name="cover_collection" value="{{ proj.get('cover_collection','') }}"></div>
+            <div class="field"><label>Kicker</label>
+              <input type="text" name="cover_kicker" value="{{ proj.get('cover_kicker','') }}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Accent line</label><span class="hint">defaults to the Author</span>
+              <input type="text" name="cover_accent" value="{{ proj.get('cover_accent','') }}"></div>
+            <div class="field"><label>Studio footer</label>
+              <input type="text" name="cover_studio" value="{{ proj.get('cover_studio','') }}"></div>
+          </div>
+          <div class="row">
+            <div class="field wide"><label>Cover epigraph</label>
+              <textarea name="cover_epigraph" rows="2">{{ proj.get('cover_epigraph','') }}</textarea></div>
+          </div>
+        </div>
+
+        <div id="pe-cover-image" class="pe-cover-panel">
+          {% if proj.cover_file %}<p class="current-file">Current file: {{ proj.cover_file }}</p>{% endif %}
+          <div class="row">
+            <div class="field wide"><label>Replace cover image</label>
+              <span class="hint">leave blank to keep the current cover · .jpg or .png</span>
+              <input type="file" name="cover" accept=".jpg,.jpeg,.png"></div>
+          </div>
+          <div class="check"><input type="checkbox" id="cov-ov" name="cover_overlay" {{ 'checked' if proj.cover_overlay }}>
+            <label for="cov-ov">Print the title and author over the art</label></div>
+          <div class="row" style="margin-top:14px">
+            <div class="field"><label>Overlay text colour</label>
+              <select name="cover_color">
+                <option value="light" {{ 'selected' if proj.cover_color == 'light' }}>Light text (for dark art)</option>
+                <option value="dark"  {{ 'selected' if proj.cover_color == 'dark' }}>Dark text (for light art)</option>
+              </select></div>
+          </div>
         </div>
       </div>
     </fieldset>
+    <style>.pe-cover-panel{display:none}.pe-cover-panel.on{display:block}</style>
+    <script>
+      (function(){
+        var sel=document.getElementById('pe-cover-mode');
+        var panels={designed:document.getElementById('pe-cover-designed'),
+                    image:document.getElementById('pe-cover-image')};
+        function sync(){for(var k in panels){if(panels[k])panels[k].classList.toggle('on',sel.value===k);}}
+        sel.addEventListener('change',sync);sync();
+      })();
+    </script>
 
     <fieldset>
       <legend>Title page</legend>
