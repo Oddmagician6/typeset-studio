@@ -1263,7 +1263,13 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
 
         def copyright_page():
             cp = meta.get('copyright') or _default_copyright(meta)
-            return [BlankMarker(), Spacer(1, 5.6 * inch),
+            # Anchor the block near the bottom, but leave enough room that the
+            # whole thing (incl. the publisher line) stays on this page — a fixed
+            # tall spacer overflows the last line onto the next page on shorter trims.
+            text_h = (preset['trim']['h'] - preset['margins']['top']
+                      - preset['margins']['bottom']) * inch
+            top_gap = max(text_h - 2.4 * inch, 0.5 * inch)
+            return [BlankMarker(), Spacer(1, top_gap),
                     Paragraph(cp.replace('\n', '<br/>'), small), PageBreak()]
 
         if level == 'full':

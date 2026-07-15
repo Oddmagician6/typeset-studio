@@ -83,6 +83,9 @@
         </div>
 
         <div id="pe-cover-designed" class="pe-cover-panel">
+          <p class="hint" style="margin:10px 0 2px">The big <strong>title</strong> and the coloured
+            <strong>author</strong> line come from this book's Title and Author automatically.
+            The fields below add the smaller lines around them.</p>
           <div class="row">
             <div class="field"><label>Template</label>
               <select name="cover_template">
@@ -92,19 +95,19 @@
               </select></div>
           </div>
           <div class="row">
-            <div class="field"><label>Collection line</label>
+            <div class="field"><label>Series / imprint</label><span class="hint">small-caps line, top &amp; bottom</span>
               <input type="text" name="cover_collection" value="{{ proj.get('cover_collection','') }}"></div>
-            <div class="field"><label>Kicker</label>
+            <div class="field"><label>Tagline</label><span class="hint">small italic line — not the title</span>
               <input type="text" name="cover_kicker" value="{{ proj.get('cover_kicker','') }}"></div>
           </div>
           <div class="row">
-            <div class="field"><label>Accent line</label><span class="hint">defaults to the Author</span>
+            <div class="field"><label>Author line override</label><span class="hint">defaults to the Author</span>
               <input type="text" name="cover_accent" value="{{ proj.get('cover_accent','') }}"></div>
-            <div class="field"><label>Studio footer</label>
+            <div class="field"><label>Publisher line</label><span class="hint">defaults to the Publisher</span>
               <input type="text" name="cover_studio" value="{{ proj.get('cover_studio','') }}"></div>
           </div>
           <div class="row">
-            <div class="field wide"><label>Cover epigraph</label>
+            <div class="field wide"><label>Cover quote</label>
               <textarea name="cover_epigraph" rows="2">{{ proj.get('cover_epigraph','') }}</textarea></div>
           </div>
         </div>
@@ -116,6 +119,14 @@
               <span class="hint">leave blank to keep the current cover · .jpg or .png</span>
               <input type="file" name="cover" accept=".jpg,.jpeg,.png"></div>
           </div>
+          {% set ns = namespace(trim=None) %}
+          {% for item in presets %}{% if item.id == proj.preset %}{% set ns.trim = item.data.trim %}{% endif %}{% endfor %}
+          {% if ns.trim %}
+            <p class="hint" style="margin:2px 0 6px;line-height:1.5">For your
+              <strong>{{ '%g'|format(ns.trim.w) }}×{{ '%g'|format(ns.trim.h) }}"</strong> trim, use art in the
+              same proportions, at least <strong>{{ (ns.trim.w*300)|round|int }} × {{ (ns.trim.h*300)|round|int }} px</strong>
+              (300 DPI). Smaller looks blurry in print; a different shape gets cropped to fill.</p>
+          {% endif %}
           <div class="check"><input type="checkbox" id="cov-ov" name="cover_overlay" {{ 'checked' if proj.cover_overlay }}>
             <label for="cov-ov">Print the title and author over the art</label></div>
           <div class="row" style="margin-top:14px">
