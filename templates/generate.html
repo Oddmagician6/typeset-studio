@@ -107,27 +107,27 @@
                 {% endfor %}
               </select></div>
           </div>
+          <p class="hint" style="margin:10px 0 2px">The big <strong>title</strong> and the coloured
+            <strong>author</strong> line come from your book's Title and Author (in the Title page
+            section) automatically. The fields below add the <em>smaller</em> lines around them —
+            leave any blank to omit it.</p>
           <div class="row">
-            <div class="field"><label>Collection line</label><span class="hint">top &amp; bottom · e.g. Edenfall Collection</span>
+            <div class="field"><label>Series / imprint</label><span class="hint">small-caps line, top &amp; bottom · e.g. Edenfall Fiction</span>
               <input type="text" name="cover_collection" value="{{ form.get('cover_collection','') }}"></div>
-            <div class="field"><label>Kicker</label><span class="hint">italic line under it · e.g. player options</span>
+            <div class="field"><label>Tagline</label><span class="hint">small italic line under the series · a tagline or series note — <em>not</em> the title</span>
               <input type="text" name="cover_kicker" value="{{ form.get('cover_kicker','') }}"></div>
           </div>
           <div class="row">
-            <div class="field"><label>Accent line</label><span class="hint">teal line under the title · defaults to the Author · override e.g. &amp; Feats</span>
+            <div class="field"><label>Author line override</label><span class="hint">the coloured line under the title · <em>defaults to your Author</em> · only fill to change it, e.g. &amp; Feats</span>
               <input type="text" name="cover_accent" value="{{ form.get('cover_accent','') }}"></div>
-            <div class="field"><label>Studio footer</label><span class="hint">defaults to Publisher · e.g. Ashforge Studio</span>
+            <div class="field"><label>Publisher line</label><span class="hint">small line at the very bottom · defaults to your Publisher</span>
               <input type="text" name="cover_studio" value="{{ form.get('cover_studio','') }}"></div>
           </div>
           <div class="row">
-            <div class="field wide"><label>Cover epigraph</label>
-              <span class="hint">short italic passage on the cover · defaults to the front-matter epigraph</span>
+            <div class="field wide"><label>Cover quote</label>
+              <span class="hint">short italic passage above the footer · defaults to the front-matter epigraph</span>
               <textarea name="cover_epigraph" rows="3">{{ form.get('cover_epigraph','') }}</textarea></div>
           </div>
-          <div class="conv"><p>The big title comes from the <strong>Title</strong> field below.
-            Colours and fonts live in the template JSON — the built-in fonts approximate the
-            house display serif; drop the real faces into <code>fonts/</code> and point the
-            template at them for exact fidelity.</p></div>
         </div>
 
         <div id="cover-image" class="cover-panel">
