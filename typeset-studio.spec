@@ -62,7 +62,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=True,            # keeps a "close this window to quit" console; set False once pywebview lands
+    console=False,           # windowed app — the pywebview window is the whole UI, no console box
     disable_windowed_traceback=False,
     icon='app.ico',
 )
