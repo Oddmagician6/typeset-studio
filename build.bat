@@ -2,11 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-if not exist ".venv\Scripts\activate.bat" (
-  echo No .venv found. Run run.bat once first to create the workspace, then re-run build.bat.
-  pause
-  exit /b 1
-)
+if not exist ".venv\Scripts\activate.bat" goto NOVENV
 
 call ".venv\Scripts\activate.bat"
 echo Installing build tools...
@@ -22,4 +18,13 @@ echo  Build complete.
 echo  App folder: dist\Typeset Studio\
 echo  Run it:     dist\Typeset Studio\Typeset Studio.exe
 echo ============================================================
+goto END
+
+:NOVENV
+echo.
+echo No .venv found. Run run.bat once first to create the workspace,
+echo then run build.bat again.
+
+:END
+echo.
 pause
