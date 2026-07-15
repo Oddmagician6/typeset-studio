@@ -119,6 +119,14 @@
               <span class="hint">leave blank to keep the current cover · .jpg or .png</span>
               <input type="file" name="cover" accept=".jpg,.jpeg,.png"></div>
           </div>
+          {% set ns = namespace(trim=None) %}
+          {% for item in presets %}{% if item.id == proj.preset %}{% set ns.trim = item.data.trim %}{% endif %}{% endfor %}
+          {% if ns.trim %}
+            <p class="hint" style="margin:2px 0 6px;line-height:1.5">For your
+              <strong>{{ '%g'|format(ns.trim.w) }}×{{ '%g'|format(ns.trim.h) }}"</strong> trim, use art in the
+              same proportions, at least <strong>{{ (ns.trim.w*300)|round|int }} × {{ (ns.trim.h*300)|round|int }} px</strong>
+              (300 DPI). Smaller looks blurry in print; a different shape gets cropped to fill.</p>
+          {% endif %}
           <div class="check"><input type="checkbox" id="cov-ov" name="cover_overlay" {{ 'checked' if proj.cover_overlay }}>
             <label for="cov-ov">Print the title and author over the art</label></div>
           <div class="row" style="margin-top:14px">
