@@ -1,0 +1,4 @@
+# Windows scripts must use CRLF — cmd.exe mis-parses .bat files with LF-only
+# line endings (multi-line blocks, goto/labels), and Inno Setup expects CRLF too.
+*.bat text eol=crlf
+*.iss text eol=crlf
