@@ -34,6 +34,40 @@ PART_RE        = re.compile(r'^\s*===\s*(.*)')
 _ATTR_RE       = re.compile(r'(\w+)="([^"]*)"')
 
 
+# Backslash escapes for literal emphasis / marker characters. A writer (or the
+# structured editor via doc_model) can type a literal '*' or '_' as \* or \_, a
+# literal backslash as \\, or start a paragraph line with a block marker via
+# \# / \~~~ / \=== . Escaped emphasis chars are parked on private-use codepoints
+# across the emphasis substitutions, then restored to literals. This is inert on
+# existing manuscripts, which contain no backslashes.
+_BSL        = chr(92)
+_PARK_STAR  = chr(0xE000)
+_PARK_UNDER = chr(0xE001)
+_PARK_BSL   = chr(0xE002)
+
+
+def _park_escapes(text):
+    text = text.replace(_BSL + _BSL, _PARK_BSL)      # \\  -> literal backslash
+    text = text.replace(_BSL + '*', _PARK_STAR)      # \*  -> literal *
+    text = text.replace(_BSL + '_', _PARK_UNDER)     # \_  -> literal _
+    return text
+
+
+def _restore_escapes(text):
+    return (text.replace(_PARK_STAR, '*')
+                .replace(_PARK_UNDER, '_')
+                .replace(_PARK_BSL, _BSL))
+
+
+def _is_block_line(line):
+    """True if a line would be parsed as a structural block (not a paragraph)."""
+    return bool(
+        SCENE_BREAK_RE.match(line) or CHAPTER_RE.match(line)
+        or SUBHEAD_RE.match(line) or DOCBLOCK_RE.match(line)
+        or PART_RE.match(line)
+    )
+
+
 def _smarten(text):
     """Convert ASCII punctuation to typographic equivalents.
 
@@ -58,14 +92,20 @@ def _smarten(text):
 
 
 def _inline(text, smartquotes=True):
-    """Escape XML, then re-introduce ReportLab markup for *italic* / **bold**."""
+    """Escape XML, then re-introduce ReportLab markup for *italic* / **bold**.
+
+    Backslash-escaped emphasis chars (\\* \\_ \\\\) are parked before the emphasis
+    substitutions and restored as literals afterwards, so a deliberately typed
+    asterisk or underscore renders literally instead of triggering markup.
+    """
+    text = _park_escapes(text)
     if smartquotes:
         text = _smarten(text)
     text = html.escape(text, quote=False)
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<i>\1</i>', text)
     text = re.sub(r'_(?!\s)(.+?)(?<!\s)_', r'<i>\1</i>', text)
-    return text
+    return _restore_escapes(text)
 
 
 def _parse_block_header(header):
@@ -130,6 +170,13 @@ def parse_markdown(raw, smartquotes=True):
         chapters.append(cur)
 
     for line in lines:
+        # A leading backslash guarding a block marker => literal paragraph text.
+        if not in_block and line[:1] == _BSL and _is_block_line(line[1:]):
+            if cur is None:
+                new_chapter(None)
+            para_buf.append(line[1:])
+            continue
+
         # === Part marker (only outside doc blocks)
         if not in_block:
             m_part = PART_RE.match(line)

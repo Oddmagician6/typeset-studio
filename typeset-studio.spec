@@ -23,6 +23,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 datas = [
     ('templates', 'templates'),
+    ('static', 'static'),
     ('sample', 'sample'),
     ('presets', 'presets'),
     ('covers', 'covers'),

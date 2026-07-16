@@ -61,9 +61,13 @@
         {% elif proj.manuscript_type == 'sample' %}
           <p class="current-file">Current: bundled sample</p>
         {% endif %}
+        <div class="row" style="align-items:center;gap:12px">
+          <a class="btn btn-primary btn-sm" href="{{ url_for('project_write', pid=pid) }}">✍ Write / edit manuscript text</a>
+          <span class="hint">Open the writing editor to add or change your chapters and prose.</span>
+        </div>
         <div class="row">
-          <div class="field wide"><label>Replace manuscript</label>
-            <span class="hint">leave blank to keep the current file · .docx, .md or .txt</span>
+          <div class="field wide"><label>Or replace the manuscript with a file</label>
+            <span class="hint">leave blank to keep the current text · .docx, .md or .txt</span>
             <input type="file" name="manuscript" accept=".docx,.md,.txt,.markdown"></div>
         </div>
       </div>
