@@ -100,6 +100,32 @@
   .outline a.ol-sub{padding-left:26px;color:var(--muted)}
   .outline a.ol-scene{padding-left:26px;color:var(--muted);font-size:12px}
   .outline .ol-empty{font-size:12.5px;color:var(--muted);padding:2px}
+  /* --- WYSIWYG (rich) surface: a view over the same content, synced to #ms --- */
+  .mode-toggle{font-weight:700}
+  .mode-toggle.on{border-color:var(--red)!important;color:var(--red-deep)!important}
+  .ms-rich{
+    display:none;position:relative;z-index:3;outline:none;
+    font-family:var(--serif);font-size:17px;line-height:1.7;
+    padding:26px 30px;min-height:70vh;color:var(--ink);background:var(--surface);
+  }
+  .rich-on .ms-rich{display:block}
+  .rich-on #ms,.rich-on .ms-backdrop{display:none}
+  .ms-rich .wb-chapter{font-family:var(--serif);font-size:26px;font-weight:700;
+    margin:28px 0 14px;color:var(--red-deep);border-bottom:1px solid var(--rule);padding-bottom:6px}
+  .ms-rich .wb-chapter:first-child{margin-top:0}
+  .ms-rich .wb-part{font-family:var(--mono);font-size:13px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--muted);margin:34px 0 16px}
+  .ms-rich .wb-subhead{text-align:center;font-weight:700;margin:22px 0;font-size:15px}
+  .ms-rich .wb-para{margin:0 0 12px}
+  .ms-rich .wb-scene{text-align:center;color:var(--muted);letter-spacing:.4em;
+    margin:20px 0;user-select:none}
+  .ms-rich .wb-doc{border-left:3px solid var(--rule-strong);background:var(--surface-2);
+    padding:10px 16px;margin:18px 0;border-radius:2px}
+  .ms-rich .wb-doc-head{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;
+    letter-spacing:.1em;color:var(--faint);margin-bottom:8px}
+  .ms-rich .wb-doc-para{margin:0 0 8px;font-style:italic}
+  .ms-rich strong{font-weight:700}
+  .ms-rich em{font-style:italic}
   @media (max-width:880px){.work{grid-template-columns:1fr}.side{position:static}}
 {% endblock %}
 
@@ -122,6 +148,9 @@
   <div class="work">
     <div class="pane">
       <div class="toolbar">
+        <button type="button" id="mode-toggle" class="mode-toggle"
+                title="Switch between rich (WYSIWYG) and Markdown editing">✍ Rich</button>
+        <span class="div"></span>
         <button type="button" data-act="chapter">Chapter</button>
         <button type="button" data-act="subhead">Subhead</button>
         <button type="button" data-act="part">Part</button>
@@ -149,6 +178,7 @@
       <div class="ms-wrap" id="ms-wrap">
         <div class="ms-backdrop" aria-hidden="true"><div id="ms-hl" class="ms-highlights"></div></div>
         <textarea id="ms" spellcheck="true">{{ text }}</textarea>
+        <div id="ms-rich" class="ms-rich" contenteditable="true" spellcheck="true"></div>
       </div>
 
       <details class="cheat">
@@ -186,6 +216,8 @@
     </aside>
   </div>
 
+  <script src="{{ url_for('static', filename='doc_model.js') }}"></script>
+  <script src="{{ url_for('static', filename='wysiwyg.js') }}"></script>
   <script>
     (function () {
       var ta = document.getElementById('ms');
@@ -282,6 +314,7 @@
       }
 
       async function save(){
+        richToTextarea();
         dirty = false;
         status('Saving…');
         try {
@@ -336,7 +369,12 @@
         find:    function(){ openFind(); },
       };
       document.querySelectorAll('.toolbar button').forEach(function(b){
-        b.addEventListener('click', function(){ (ACTS[b.dataset.act] || function(){})(); });
+        b.addEventListener('click', function(){
+          var act = b.dataset.act;
+          if (!act) return;                              // e.g. the mode toggle
+          if (richMode && RICH_ACTS[act]){ RICH_ACTS[act](); return; }
+          (ACTS[act] || function(){})();
+        });
       });
 
       ta.addEventListener('input', changed);
@@ -347,6 +385,7 @@
 
       // flush on leaving the page
       window.addEventListener('pagehide', function(){
+        richToTextarea();
         if (dirty && navigator.sendBeacon){
           var fd = new FormData(); fd.append('text', ta.value);
           navigator.sendBeacon(SAVE_URL, fd);
@@ -355,6 +394,7 @@
 
       // page preview
       document.getElementById('pv-btn').addEventListener('click', async function(){
+        richToTextarea();
         var st = document.getElementById('pv-status');
         st.textContent = 'Rendering…';
         try {
@@ -522,6 +562,115 @@
       window.addEventListener('resize', scheduleHighlight);
       msWrap.classList.add('hl-active');
       renderHighlights();
+
+      // ===================== WYSIWYG (rich) mode =====================
+      var rich = document.getElementById('ms-rich');
+      var modeBtn = document.getElementById('mode-toggle');
+      var richMode = false;
+      var richSyncTimer = null;
+
+      function richToTextarea(){
+        if (richMode) ta.value = DocModel.toMarkdown(WYS.read(rich));
+      }
+      function renderRich(){
+        rich.innerHTML = '';
+        rich.appendChild(WYS.render(DocModel.fromMarkdown(ta.value)));
+        if (!rich.firstChild){
+          var p = document.createElement('p');
+          p.className = 'wb wb-para'; p.dataset.block = 'para';
+          p.appendChild(document.createElement('br'));
+          rich.appendChild(p);
+        }
+      }
+      function syncFromRich(){ richToTextarea(); changed(); }
+
+      function enterRich(){
+        renderRich();
+        richMode = true;
+        try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch(e){}
+        msWrap.classList.add('rich-on');
+        modeBtn.textContent = '⌨ Markdown';
+        modeBtn.classList.add('on');
+        try { localStorage.setItem('ts-write-mode', 'rich'); } catch(e){}
+        rich.focus();
+      }
+      function exitRich(){
+        richToTextarea();
+        richMode = false;
+        msWrap.classList.remove('rich-on');
+        modeBtn.textContent = '✍ Rich';
+        modeBtn.classList.remove('on');
+        try { localStorage.setItem('ts-write-mode', 'markdown'); } catch(e){}
+        updateStats(); buildOutline(); renderHighlights();
+        ta.focus();
+      }
+      modeBtn.addEventListener('click', function(){ richMode ? exitRich() : enterRich(); });
+
+      rich.addEventListener('input', function(){
+        status('Editing…');
+        clearTimeout(richSyncTimer);
+        richSyncTimer = setTimeout(syncFromRich, 500);
+      });
+
+      function currentRichBlock(){
+        var sel = window.getSelection();
+        if (!sel.rangeCount) return null;
+        var n = sel.anchorNode;
+        while (n && n.parentNode !== rich) n = n.parentNode;
+        return (n && n.parentNode === rich) ? n : null;
+      }
+      function placeCaret(el){
+        var r = document.createRange(); r.selectNodeContents(el); r.collapse(true);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); rich.focus();
+      }
+      function convertBlock(type){
+        var el = currentRichBlock(); if (!el) return;
+        var text = el.textContent, neu;
+        if (type === 'chapter'){ neu = document.createElement('h1'); neu.className = 'wb wb-chapter'; neu.dataset.block = 'chapter'; neu.textContent = text; }
+        else if (type === 'part'){ neu = document.createElement('h2'); neu.className = 'wb wb-part'; neu.dataset.block = 'part'; neu.textContent = text; }
+        else if (type === 'subhead'){ neu = document.createElement('p'); neu.className = 'wb wb-subhead'; neu.dataset.block = 'subhead'; neu.textContent = text; }
+        else { neu = document.createElement('p'); neu.className = 'wb wb-para'; neu.dataset.block = 'para'; neu.textContent = text; }
+        if (!neu.textContent) neu.appendChild(document.createElement('br'));
+        el.replaceWith(neu); placeCaret(neu); syncFromRich();
+      }
+      var RICH_ACTS = {
+        chapter: function(){ convertBlock('chapter'); },
+        subhead: function(){ convertBlock('subhead'); },
+        part:    function(){ convertBlock('part'); },
+        scene:   function(){
+          var sc = WYS.renderBlock({type:'scene'}), p = WYS.renderBlock({type:'para', runs:[]});
+          var el = currentRichBlock();
+          if (el){ el.after(sc); sc.after(p); } else { rich.appendChild(sc); rich.appendChild(p); }
+          placeCaret(p); syncFromRich();
+        },
+        bold:    function(){ document.execCommand('bold'); syncFromRich(); },
+        italic:  function(){ document.execCommand('italic'); syncFromRich(); },
+        letter:  function(){
+          var lb = WYS.renderBlock({type:'docblock', block_type:'letter',
+                     attrs:{from:'', to:'', date:''}, children:[{type:'para', runs:[]}]});
+          var p = WYS.renderBlock({type:'para', runs:[]});
+          var el = currentRichBlock();
+          if (el){ el.after(lb); lb.after(p); } else { rich.appendChild(lb); rich.appendChild(p); }
+          placeCaret(lb.querySelector('.wb-doc-body > .wb-doc-para') || p); syncFromRich();
+        },
+        find:    function(){ exitRich(); openFind(); },
+      };
+
+      rich.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' && !e.shiftKey){
+          var el = currentRichBlock();
+          if (el && /wb-chapter|wb-part|wb-scene/.test(el.className)){
+            e.preventDefault();
+            var p = WYS.renderBlock({type:'para', runs:[]});
+            el.after(p); placeCaret(p); syncFromRich();
+          }
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's'){ e.preventDefault(); save(); }
+      });
+
+      var wantRich = /[?&]wysiwyg=1/.test(location.search);
+      try { if (!wantRich && localStorage.getItem('ts-write-mode') === 'rich') wantRich = true; } catch(e){}
+      if (wantRich) enterRich();
 
       buildOutline();   // initial chapter list
     })();
