@@ -527,6 +527,45 @@ dot leaders and part headings; `_estimate_toc_pages()`; two-pass in `build_pdf()
 library, #18 full print wrap; plus #22 wrap auto page-count, #24 per-retailer wrap presets,
 and #25 back-cover image. Cover Studio backlog clear.)*
 
+**New document types — reach more writers with the same engine** *(medium; extends the book
+model rather than forking it)*
+
+Deliberately **not** screenplays/scripts. A screenplay has exactly one correct format (Courier,
+sluglines, centered cues, indented dialogue, `(MORE)`/`(CONT'D)`, page ≈ minute) — it *inverts*
+the app's "preset owns typography" bet (no preset variety to offer), needs a different block
+model + paginator (effectively a second engine sharing only "emits a PDF via ReportLab"), and is
+already served by Fountain + free converters. It would be a product pivot to a different
+audience, not an extension. Same reasoning rules out stage plays. The high-value directions are
+the ones that reuse the existing book model, front matter, presets, cover wrap, and the
+doc_model / WYSIWYG round-trip:
+
+- **Poetry collections — strongest fit, do first.** A real gap in cheap tools, and genuinely
+  book-shaped. Core need: a `poem` block that **preserves line breaks** — the paragraph joiner
+  in `manuscript.parse_markdown` deliberately collapses wrapped lines with spaces, which is
+  exactly wrong for verse. Implement as a fenced block (`~~~ poem title="…"`) reusing the
+  existing doc-block plumbing, so it round-trips through `doc_model` and the WYSIWYG editor for
+  free. Engine: a `_paint_poem` routine — unjustified left/centered verse lines (per preset),
+  stanza spacing on blank lines, a poem-title style, and a **hanging runover indent** when a
+  single verse line wraps. Presets add genuine value here (a poetry house style is a legitimate
+  design axis), so it strengthens the core value prop instead of fighting it.
+
+- **Anthologies / essay collections — nearly free quick win.** Chapters already model
+  "stories/essays." Additions: an optional **per-piece byline** (author under the title) and a
+  per-piece epigraph/attribution, plus maybe a collection-level contributors page. Mostly a
+  chapter-opener + meta extension (`_paint` chapter opener + front matter); no new paginator.
+  Immediate reach for short-fiction and essay compilers.
+
+- **Nonfiction structure — footnotes/endnotes + simple figures** *(biggest lift of the three; do
+  last)*. **Endnotes** are tractable (collect per chapter/book, render a notes section).
+  **Footnotes** are hard — breakable notes anchored to their reference line, a bottom-of-page
+  note area, and numbering that resets per chapter; that's real paginator work in `engine.py`.
+  **Figures**: an image block with caption + placement. Broadens the book audience meaningfully
+  but sequence it after the two cheaper wins above.
+
+These grow *what* the app does; per the strategy note below, **packaging still grows *who* uses
+it**, and remains the bigger lever for a free+donate app. Rank poetry ≈ anthologies (cheap,
+on-philosophy) above nonfiction (heavier), and all below distribution.
+
 **In-app manuscript editor — author a book start to finish** *(large; a product-identity
 step from "typesetting tool" toward "authoring + typesetting suite")*
 
@@ -547,16 +586,24 @@ runs through `manuscript.parse_markdown` → PDF/EPUB/continuity/preview unchang
 - **Phase B — SHIPPED as styled-Markdown highlighting (feature #26):** the dependency-free
   path was chosen (see decision below). The writing surface now paints live Markdown styling
   (coloured/bold headings, bold/italic, styled scene breaks/fences) instead of a raw textarea,
-  while the textarea stays the source of truth. A *true* hide-the-markup WYSIWYG via a vendored
-  structured editor (ProseMirror / TipTap / Lexical) remains an optional, heavier future path —
-  it would need the build-step reversal below.
+  while the textarea stays the source of truth.
+- **Phase C — SHIPPED as a hand-rolled WYSIWYG (PR #24, 2026-07):** the true hide-the-markup
+  rich mode was built **without** a vendored framework or build step, so the dependency-free
+  convention held. A plain-JS `contenteditable` surface (`static/wysiwyg.js`) sits over a
+  Markdown⇄document-model round-trip layer (`doc_model.py` + a byte-identical JS port
+  `static/doc_model.js`), toggled beside the Phase-B Markdown view. The textarea stays the source
+  of truth; rich mode is a view that syncs into it, reusing all autosave / preview / outline /
+  find wiring. `manuscript.py` gained backward-compatible backslash escapes (`\*` `\_` `\\`,
+  line-start `\#` `\~~~` `\===`) so literal markup survives. Storage stays raw Markdown —
+  byte-identical whether edited in Markdown or rich mode. Validated by the serialization spike
+  below plus 66 headless-Chrome + Python round-trip checks.
 
-**Decision made (2026-07): stay dependency-free.** No bundled JS / build step — the offline,
-no-CDN, tiny-inline-JS convention is preserved. A Node toolchain inside a Python-first,
-solo-maintained app was judged not worth it, especially since the live page-preview already
-shows true typeset fidelity. Phase B was therefore delivered as an aligned highlight overlay
-(monospace surface; colour/weight/italic only, no resize — a larger heading would desync the
-caret). Revisit only if true hide-the-markup WYSIWYG becomes a hard requirement.
+**Decision (2026-07), since superseded by Phase C.** Phase B stayed dependency-free (no bundled
+JS / build step; offline, no-CDN, tiny-inline-JS convention preserved). The key insight that
+unblocked Phase C: a *true* WYSIWYG did **not** require the feared vendored framework / Node
+build-step reversal — a hand-rolled `contenteditable` over a lossless round-trip layer keeps the
+convention intact. The serialization spike (below) was the gate: it round-tripped cleanly, so the
+build was justified.
 
 **Entry point if revisited — a serialization spike (do this before building anything).** The
 riskiest part of a real WYSIWYG is lossless round-tripping, not the editor UI. So the first
