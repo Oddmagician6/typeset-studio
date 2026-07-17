@@ -4,6 +4,7 @@ Stdlib-only (zipfile, uuid, datetime) — no extra dependencies.
 Reuses the same parsed manuscript structure as engine.py.
 """
 
+import html
 import os
 import re
 import uuid
@@ -16,6 +17,20 @@ def _markup_to_html(text):
     """Convert ReportLab XML tags to HTML equivalents."""
     text = text.replace('<b>', '<strong>').replace('</b>', '</strong>')
     text = text.replace('<i>', '<em>').replace('</i>', '</em>')
+    return text
+
+
+def _md_emph_to_html(text):
+    """Escape XML, then convert Markdown emphasis to HTML (bold before italic).
+
+    Mirrors manuscript._inline's emphasis substitutions, for the few places that
+    render raw author text (e.g. the contributors page) rather than already-parsed
+    manuscript blocks.
+    """
+    text = html.escape(text, quote=False)
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<em>\1</em>', text)
+    text = re.sub(r'_(?!\s)(.+?)(?<!\s)_', r'<em>\1</em>', text)
     return text
 
 
@@ -44,6 +59,13 @@ h1.chapter-title {
   font-weight: bold;
   text-align: center;
   margin: 0.3em 0 1.5em;
+}
+p.chapter-byline {
+  font-style: italic;
+  text-align: center;
+  text-indent: 0;
+  color: #444;
+  margin: -1em 0 1.6em;
 }
 p { margin: 0; text-indent: 1.5em; }
 p.no-indent { text-indent: 0; }
@@ -104,6 +126,8 @@ p.scene-break {
 .matter-alsoby { text-align: center; }
 .matter-alsoby .matter-head { font-size: 1.2em; font-weight: bold; margin: 2em 0 1em; }
 .matter-alsoby p { text-indent: 0; margin: 0.3em 0; }
+.matter-contributors .matter-head { font-size: 1.4em; font-weight: bold; text-align: center; margin: 2em 0 1em; }
+.matter-contributors p { text-indent: 0; margin: 0.8em 0; }
 """
 
 
@@ -224,6 +248,18 @@ def _matter_xhtml(heading, text, css_class):
                 cls = ' class="attr"'
         elif css_class == 'matter-body' and i == 0:
             cls = ' class="no-indent"'
+        elif css_class == 'matter-contributors':
+            # Bold the name (text before an em dash / '--'); rest is the bio.
+            name, bio = b, ''
+            for sep in ('—', '--'):
+                if sep in b:
+                    name, bio = b.split(sep, 1)
+                    break
+            md = '**' + name.strip() + '**'
+            if bio.strip():
+                md += ' — ' + bio.strip()
+            body += f'  <p>{_md_emph_to_html(md)}</p>\n'
+            continue
         body += f'  <p{cls}>{_markup_to_html(b)}</p>\n'
     body += '</div>\n'
     return _xhtml(heading or 'Front Matter', body)
@@ -242,6 +278,9 @@ def _chapter_xhtml(idx, chapter, preset):
 
     if chapter.get('title'):
         lines.append(f'  <h1 class="chapter-title">{_markup_to_html(chapter["title"])}</h1>')
+
+    if chapter.get('byline'):
+        lines.append(f'  <p class="chapter-byline">{_markup_to_html(chapter["byline"])}</p>')
 
     opened         = False
     no_indent_next = False
@@ -400,6 +439,7 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None):
     author = meta.get('author', '')
     _back_nav = [
         ('acknowledgments', 'acknowledgments.xhtml', 'Acknowledgments'),
+        ('contributors',    'contributors.xhtml',    'Contributors'),
         ('about_author',    'about.xhtml',           'About the Author'),
         ('also_by',         'alsoby.xhtml',          f'Also by {author}'.strip() or 'Also By'),
     ]
@@ -499,6 +539,7 @@ def build_epub(manuscript, preset, out_path, meta):
     _author = meta.get('author', '')
     _back_items = [
         ('acknowledgments', 'ack',   'acknowledgments.xhtml', 'Acknowledgments'),
+        ('contributors',    'contrib', 'contributors.xhtml',  'Contributors'),
         ('about_author',    'about', 'about.xhtml',           'About the Author'),
         ('also_by',         'aby',   'alsoby.xhtml',          f'Also by {_author}'.strip() or 'Also By'),
     ]
@@ -550,7 +591,8 @@ def build_epub(manuscript, preset, out_path, meta):
             _btxt = meta.get(_bkey, '').strip()
             if not _btxt:
                 continue
-            _css = 'matter-alsoby' if _bkey == 'also_by' else 'matter-body'
+            _css = {'also_by': 'matter-alsoby',
+                    'contributors': 'matter-contributors'}.get(_bkey, 'matter-body')
             zf.writestr(f'OEBPS/{_bhref}', _matter_xhtml(_bhead, _btxt, _css))
 
     return out_path

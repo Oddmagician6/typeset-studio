@@ -1000,6 +1000,7 @@ def generate():
         'dedication':     form.get('dedication', '').strip(),
         'epigraph':       form.get('epigraph', '').strip(),
         'acknowledgments': form.get('acknowledgments', '').strip(),
+        'contributors':   form.get('contributors', '').strip(),
         'about_author':   form.get('about_author', '').strip(),
         'also_by':        form.get('also_by', '').strip(),
     }
@@ -1140,6 +1141,7 @@ def project_create():
         'dedication':     form.get('dedication', '').strip(),
         'epigraph':       form.get('epigraph', '').strip(),
         'acknowledgments': form.get('acknowledgments', '').strip(),
+        'contributors':   form.get('contributors', '').strip(),
         'about_author':   form.get('about_author', '').strip(),
         'also_by':        form.get('also_by', '').strip(),
         'manuscript_file': ms_file,
@@ -1203,6 +1205,7 @@ def project_edit(pid):
             'dedication':     form.get('dedication', '').strip(),
             'epigraph':       form.get('epigraph', '').strip(),
             'acknowledgments': form.get('acknowledgments', '').strip(),
+            'contributors':   form.get('contributors', '').strip(),
             'about_author':   form.get('about_author', '').strip(),
             'also_by':        form.get('also_by', '').strip(),
             'title':            form.get('title', '').strip(),
@@ -1355,6 +1358,7 @@ def project_write_preview(pid):
         'include_toc': False, 'smartquotes': proj.get('smartquotes', True),
         'dedication': proj.get('dedication', ''), 'epigraph': proj.get('epigraph', ''),
         'acknowledgments': proj.get('acknowledgments', ''),
+        'contributors': proj.get('contributors', ''),
         'about_author': proj.get('about_author', ''), 'also_by': proj.get('also_by', ''),
     }
     ms = manuscript.parse_markdown(text, smartquotes=meta['smartquotes'])
@@ -1447,6 +1451,7 @@ def project_generate(pid):
         'dedication':     proj.get('dedication', ''),
         'epigraph':       proj.get('epigraph', ''),
         'acknowledgments': proj.get('acknowledgments', ''),
+        'contributors':   proj.get('contributors', ''),
         'about_author':   proj.get('about_author', ''),
         'also_by':        proj.get('also_by', ''),
     }

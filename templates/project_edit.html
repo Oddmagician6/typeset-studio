@@ -210,6 +210,11 @@
             <textarea name="acknowledgments" rows="4">{{ proj.get('acknowledgments','') }}</textarea></div>
         </div>
         <div class="row">
+          <div class="field wide"><label>Contributors</label>
+            <span class="hint">For anthologies — one per blank-line block; name first, bio after an em dash</span>
+            <textarea name="contributors" rows="4">{{ proj.get('contributors','') }}</textarea></div>
+        </div>
+        <div class="row">
           <div class="field wide"><label>About the Author</label>
             <textarea name="about_author" rows="4">{{ proj.get('about_author','') }}</textarea></div>
         </div>

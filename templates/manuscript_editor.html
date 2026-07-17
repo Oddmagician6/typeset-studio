@@ -113,6 +113,10 @@
   .ms-rich .wb-chapter{font-family:var(--serif);font-size:26px;font-weight:700;
     margin:28px 0 14px;color:var(--red-deep);border-bottom:1px solid var(--rule);padding-bottom:6px}
   .ms-rich .wb-chapter:first-child{margin-top:0}
+  /* Anthology byline: shown under the title; edited in Markdown mode. */
+  .ms-rich .wb-chapter[data-byline]::after{content:attr(data-byline);display:block;
+    font-family:var(--serif);font-size:15px;font-weight:400;font-style:italic;
+    color:var(--muted);border:0;padding:0;margin-top:4px;letter-spacing:0;text-transform:none}
   .ms-rich .wb-part{font-family:var(--mono);font-size:13px;letter-spacing:.16em;
     text-transform:uppercase;color:var(--muted);margin:34px 0 16px}
   .ms-rich .wb-subhead{text-align:center;font-weight:700;margin:22px 0;font-size:15px}
@@ -191,6 +195,7 @@
         <summary>Formatting guide</summary>
         <table>
           <tr><td><code># Chapter Title</code></td><td>start a new chapter</td></tr>
+          <tr><td><code># Title | Author</code></td><td>chapter with a byline under the title (anthologies)</td></tr>
           <tr><td><code>## Subhead</code></td><td>a centred section subhead</td></tr>
           <tr><td><code>=== Part Title</code></td><td>a part divider page</td></tr>
           <tr><td><code>* * *</code></td><td>a scene break (own line)</td></tr>

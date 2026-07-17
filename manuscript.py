@@ -6,6 +6,7 @@ tool. A .docx can be imported and converted to the same convention.
 Conventions
 -----------
   # Chapter Title        -> starts a new chapter (the title line is optional text)
+  # Title | Author        -> chapter with an anthology byline under the title
   ##  Subhead            -> a centered subhead inside a chapter
   * * *  /  ***  /  ---  -> a scene break (on its own line)
   blank line             -> paragraph separator
@@ -28,6 +29,13 @@ import html
 
 SCENE_BREAK_RE = re.compile(r'^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$')
 CHAPTER_RE     = re.compile(r'^#\s+(.*)$')
+
+# Anthology byline: "# Piece Title | Author Name" attaches a per-chapter byline
+# (rendered under the title). The " | " separator is the KDP "Title | Subtitle"
+# idiom; a title that genuinely contains " | " is vanishingly rare. Only the
+# first separator splits, so any remainder stays with the byline (round-trip
+# stable). No byline => the chapter behaves exactly as before.
+BYLINE_SEP     = ' | '
 SUBHEAD_RE     = re.compile(r'^##\s+(.*)$')
 DOCBLOCK_RE    = re.compile(r'^\s*~~~(.*)')
 PART_RE        = re.compile(r'^\s*===\s*(.*)')
@@ -108,6 +116,20 @@ def _inline(text, smartquotes=True):
     return _restore_escapes(text)
 
 
+def _split_byline(title_line):
+    """Split a chapter heading body into (title|None, byline|None).
+
+    'The Lottery | Shirley Jackson' -> ('The Lottery', 'Shirley Jackson').
+    A heading with no ' | ' separator returns (title, None).
+    """
+    if title_line is None:
+        return None, None
+    if BYLINE_SEP in title_line:
+        title, byline = title_line.split(BYLINE_SEP, 1)
+        return (title.strip() or None), (byline.strip() or None)
+    return (title_line.strip() or None), None
+
+
 def _parse_block_header(header):
     """Parse '~~~ type key="value" …' into (type_str, attrs_dict).
 
@@ -122,7 +144,7 @@ def _parse_block_header(header):
 
 
 def parse_markdown(raw, smartquotes=True):
-    """Return {'chapters': [{'title': str|None, 'part': dict|None, 'blocks': [...] }]}.
+    """Return {'chapters': [{'title': str|None, 'byline': str|None, 'part': dict|None, 'blocks': [...] }]}.
 
     Each block is:
       ('para', text) | ('subhead', text) | ('scene', None)
@@ -173,10 +195,10 @@ def parse_markdown(raw, smartquotes=True):
                     block_buf.append(('para', _inline(joined, smartquotes)))
             block_para_buf = []
 
-    def new_chapter(title):
+    def new_chapter(title, byline=None):
         nonlocal cur
         flush_para() if cur else None
-        cur = {'title': title, 'part': current_part, 'blocks': []}
+        cur = {'title': title, 'byline': byline, 'part': current_part, 'blocks': []}
         chapters.append(cur)
 
     for line in lines:
@@ -230,7 +252,8 @@ def parse_markdown(raw, smartquotes=True):
         m_ch  = CHAPTER_RE.match(line)
         m_sub = SUBHEAD_RE.match(line)
         if m_ch:
-            new_chapter(m_ch.group(1).strip() or None)
+            _t, _by = _split_byline(m_ch.group(1))
+            new_chapter(_t, _by)
             continue
         if cur is None:
             new_chapter(None)

@@ -786,6 +786,10 @@ def _styles(preset, fonts):
     chap_num = ParagraphStyle('cnum', fontName=fonts['regular'],
                               fontSize=c['number_size'], leading=c['number_size'] * 1.2,
                               alignment=TA_CENTER, textColor=(0.3, 0.3, 0.3))
+    # Anthology byline: author line under the piece title.
+    chap_byline = ParagraphStyle('cbyl', fontName=fonts.get('italic', fonts['regular']),
+                                 fontSize=b['size'] + 1, leading=(b['size'] + 1) * 1.3,
+                                 alignment=TA_CENTER, textColor=(0.28, 0.28, 0.28))
     subhead = ParagraphStyle('sub', parent=body, fontName=fonts.get('bold', fonts['regular']),
                              firstLineIndent=0, alignment=TA_CENTER,
                              spaceBefore=b['leading'], spaceAfter=b['leading'] * 0.5)
@@ -799,6 +803,7 @@ def _styles(preset, fonts):
                                       leading=pd.get('title_size', 26.0) * 1.15,
                                       alignment=TA_CENTER)
     return dict(body=body, first=first, chap_title=chap_title, chap_num=chap_num,
+                chap_byline=chap_byline,
                 subhead=subhead, part_num=part_num_style, part_title=part_title_style)
 
 
@@ -1276,6 +1281,26 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
         for b in blocks:
             out.append(Paragraph(_ms_inline(b, smartquotes), s))
 
+    elif style == 'contributors':
+        # One contributor per blank-line-separated block. The name (text before an
+        # em dash / '--' separator) is set bold; any remainder is the bio.
+        out.append(Spacer(1, 1.0 * inch))
+        if heading:
+            out.append(Paragraph(heading, st['chap_title']))
+            out.append(Spacer(1, 0.4 * inch))
+        s = ParagraphStyle('contrib', parent=st['body'], firstLineIndent=0,
+                           spaceAfter=st['body'].leading * 0.6)
+        for b in blocks:
+            name, bio = b, ''
+            for sep in ('—', '--'):
+                if sep in b:
+                    name, bio = b.split(sep, 1)
+                    break
+            md = '**' + name.strip() + '**'
+            if bio.strip():
+                md += ' — ' + bio.strip()
+            out.append(Paragraph(_ms_inline(md, smartquotes), s))
+
     else:  # body: acknowledgments, about_author
         out.append(Spacer(1, 1.0 * inch))
         if heading:
@@ -1410,6 +1435,9 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             story.append(Spacer(1, 0.12 * inch))
         if ch['title']:
             story.append(Paragraph(ch['title'], st['chap_title']))
+        if ch.get('byline'):
+            story.append(Spacer(1, 0.12 * inch))
+            story.append(Paragraph(_ms_inline(ch['byline'], sq), st['chap_byline']))
         story.append(Spacer(1, c['after_title'] * inch))
         opened = False
         flush_next = False  # paragraph right after scene/subhead: no indent
@@ -1451,6 +1479,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     _author = meta.get('author', '')
     _back = [
         ('acknowledgments', 'Acknowledgments',                    'body'),
+        ('contributors',    'Contributors',                       'contributors'),
         ('about_author',    'About the Author',                   'body'),
         ('also_by',         f'Also by {_author}'.strip() or 'Also By', 'also_by'),
     ]

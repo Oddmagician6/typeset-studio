@@ -78,6 +78,10 @@
       el = document.createElement('h1');
       el.className = 'wb wb-chapter'; el.dataset.block = 'chapter';
       el.textContent = b.title || '';
+      // Byline rides on a data-attr (shown under the title via CSS ::after) and
+      // round-trips through read(); its text is edited in Markdown mode, like
+      // doc-block metadata. Kept out of textContent so title stays clean.
+      if (b.byline) el.dataset.byline = b.byline;
       if (!el.textContent) el.appendChild(document.createElement('br'));
     } else if (b.type === 'part') {
       el = document.createElement('h2');
@@ -213,7 +217,8 @@
 
   function readBlockEl(el) {
     var type = blockTypeOf(el);
-    if (type === 'chapter') return { type: 'chapter', title: titleOrNull(el) };
+    if (type === 'chapter') return { type: 'chapter', title: titleOrNull(el),
+                                     byline: (el.dataset && el.dataset.byline) || null };
     if (type === 'part')    return { type: 'part', title: titleOrNull(el) };
     if (type === 'subhead') return { type: 'subhead', runs: readInline(el) };
     if (type === 'scene')   return { type: 'scene' };

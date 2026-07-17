@@ -10,7 +10,7 @@
  *     DocModel.toMarkdown(blocks) -> string
  *
  * Block / run schema matches doc_model.py exactly:
- *     {type:"chapter",  title:str|null}
+ *     {type:"chapter",  title:str|null, byline:str|null}
  *     {type:"part",     title:str|null}
  *     {type:"subhead",  runs:[run,...]}
  *     {type:"para",     runs:[run,...]}
@@ -28,6 +28,19 @@
   var DOCBLOCK_RE    = /^\s*~~~(.*)/;
   var PART_RE        = /^\s*===\s*(.*)/;
   var ATTR_RE        = /(\w+)="([^"]*)"/g;
+  var BYLINE_SEP     = ' | ';   // "# Title | Author" anthology byline (mirror manuscript.py)
+
+  function splitByline(titleLine) {
+    // "The Lottery | Shirley Jackson" -> {title, byline}; no separator -> byline null.
+    if (titleLine == null) return { title: null, byline: null };
+    var i = titleLine.indexOf(BYLINE_SEP);
+    if (i !== -1) {
+      var title = titleLine.slice(0, i).trim();
+      var byline = titleLine.slice(i + BYLINE_SEP.length).trim();
+      return { title: title || null, byline: byline || null };
+    }
+    return { title: titleLine.trim() || null, byline: null };
+  }
 
   // ---- inline emphasis patterns (mirror doc_model.py; bold before italic) --
   var BOLD_RE         = /\*\*(.+?)\*\*/g;
@@ -226,7 +239,12 @@
         continue;
       }
       var mCh = CHAPTER_RE.exec(line), mSub = SUBHEAD_RE.exec(line);
-      if (mCh) { flushPara(); blocks.push({ type: 'chapter', title: mCh[1].trim() || null }); continue; }
+      if (mCh) {
+        flushPara();
+        var sb = splitByline(mCh[1]);
+        blocks.push({ type: 'chapter', title: sb.title, byline: sb.byline });
+        continue;
+      }
       if (SCENE_BREAK_RE.test(line)) { flushPara(); blocks.push({ type: 'scene' }); continue; }
       if (mSub) { flushPara(); blocks.push({ type: 'subhead', runs: parseInline(mSub[1].trim()) }); continue; }
       if (line.trim() === '') flushPara();
@@ -245,7 +263,9 @@
     var out = [];
     blocks.forEach(function (b) {
       if (b.type === 'chapter') {
-        out.push('# ' + (b.title || ''));
+        var title = b.title || '';
+        if (title && b.byline) out.push('# ' + title + BYLINE_SEP + b.byline);
+        else out.push('# ' + title);
       } else if (b.type === 'part') {
         out.push('=== ' + (b.title || ''));
       } else if (b.type === 'subhead') {

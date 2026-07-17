@@ -216,11 +216,60 @@ def test_poems():
     _check("editor-built poem model round-trips", back == built, _diff(back, built))
 
 
+BYLINE_MD = """# The Lottery | Shirley Jackson
+
+The morning of June 27th was clear and sunny.
+
+# An Untitled Piece
+
+Plain body here.
+
+# Notes | A. B. Author | with C. D.
+
+Body under a multi-pipe heading.
+"""
+
+
+def test_bylines():
+    """Anthology bylines ('# Title | Author') round-trip and parse correctly."""
+    print("\n[bylines]")
+    for smart in (True, False):
+        doc1 = doc_model.from_markdown(BYLINE_MD, smartquotes=smart)
+        md2 = doc_model.to_markdown(doc1)
+        doc2 = doc_model.from_markdown(md2, smartquotes=smart)
+        eng_a = manuscript.parse_markdown(BYLINE_MD, smartquotes=smart)
+        eng_b = manuscript.parse_markdown(md2, smartquotes=smart)
+        _check(f"byline engine fidelity (smart={smart})", eng_a == eng_b, _diff(eng_a, eng_b))
+        _check(f"byline model stability (smart={smart})", doc1 == doc2, _diff(doc1, doc2))
+
+    # engine parse: the byline lands on the chapter dict, title stays clean
+    chs = manuscript.parse_markdown(BYLINE_MD)["chapters"]
+    _check("chapter 1 title", chs[0]["title"] == "The Lottery")
+    _check("chapter 1 byline", chs[0]["byline"] == "Shirley Jackson")
+    _check("chapter 2 has no byline", chs[1]["byline"] is None)
+    _check("chapter 2 title intact", chs[1]["title"] == "An Untitled Piece")
+    # multi-pipe: split on the first separator only, remainder stays in the byline
+    _check("multi-pipe title", chs[2]["title"] == "Notes")
+    _check("multi-pipe byline", chs[2]["byline"] == "A. B. Author | with C. D.")
+
+    # editor document model: chapter carries a byline field
+    doc = doc_model.from_markdown(BYLINE_MD)
+    ch0 = [b for b in doc if b["type"] == "chapter"][0]
+    _check("model chapter byline", ch0.get("byline") == "Shirley Jackson")
+
+    # hand-built model with a byline serializes and re-parses identically
+    built = [{"type": "chapter", "title": "A Tale", "byline": "Jane Roe"},
+             {"type": "para", "runs": [doc_model._run("Once.")]}]
+    back = doc_model.from_markdown(doc_model.to_markdown(built))
+    _check("editor-built byline model round-trips", back == built, _diff(back, built))
+
+
 if __name__ == "__main__":
     test_roundtrips()
     test_adversarial()
     test_engine_escapes()
     test_poems()
+    test_bylines()
     print()
     if _failures:
         print(f"FAILED ({len(_failures)}): " + "; ".join(_failures))

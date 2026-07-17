@@ -216,6 +216,11 @@
             <textarea name="acknowledgments" rows="4">{{ form.get('acknowledgments','') }}</textarea></div>
         </div>
         <div class="row">
+          <div class="field wide"><label>Contributors</label>
+            <span class="hint">For anthologies — one contributor per blank-line-separated block. Start with the name; add a bio after an em dash, e.g. <code>Jane Doe — author of …</code></span>
+            <textarea name="contributors" rows="4">{{ form.get('contributors','') }}</textarea></div>
+        </div>
+        <div class="row">
           <div class="field wide"><label>About the Author</label>
             <textarea name="about_author" rows="4">{{ form.get('about_author','') }}</textarea></div>
         </div>

@@ -477,6 +477,49 @@ fields) to edit it. Backward-compatible: old projects (no `cover_mode`) default 
 as before. Verified end-to-end (save → persisted → edit shows fields → regenerate renders the
 designed cover on page 1).
 
+**30. Poetry collections — line-preserving poem blocks** *(first "new document type")*
+A poem is a typed fenced block `~~~ poem title="…"` … `~~~` whose content **preserves verse
+line breaks** (the paragraph joiner in `parse_markdown` deliberately space-joins wrapped prose,
+which is wrong for verse); a blank line starts a new stanza. It reuses the doc-block plumbing so
+it round-trips through `doc_model` and the WYSIWYG editor. `manuscript.py` (poem branch in
+`flush_block_para`, verse lines joined with `<br/>` to keep the doc_block tuple contract) ·
+`engine.py` (`_render_poem_block`: poem title + per-line flowables with a hanging **runover**
+indent; verse never hyphenated) · `app.py` `DEFAULTS` (a `poem` preset section:
+font/leading/indent/runover/stanza spacing/align/title styling) · `doc_model.py` +
+`static/doc_model.js` (stanza round-trip: poem `children` are `{type:'stanza', lines:[…]}`) ·
+`static/wysiwyg.js` (`renderPoem`/`readPoem`, full rich verse editing — Enter splits a verse) ·
+`templates/manuscript_editor.html` (Poem toolbar button + cheatsheet row) · `epub.py`
+(poem `<header>` title + `.doc-block-poem` CSS). Tested via `test_doc_model.py::test_poems`
+(engine fidelity + model stability), a live PDF render, and an EPUB build. v1 follow-ups: no
+`.docx` poem import; the 9 preset JSONs fall back to `DEFAULTS` (no per-preset `poem` section);
+EPUB runover indent is per-stanza not per-line.
+
+**31. Anthologies / essay collections — per-piece byline + contributors page** *(second "new
+document type"; the roadmap's "nearly free quick win")*
+Two additions that extend the book model without a new paginator:
+- **Per-piece byline.** A chapter heading `# Title | Author` attaches an author byline rendered
+  in italic under the piece title (the KDP "Title | Subtitle" idiom; split on the first ` | `
+  only, so a byline may itself contain a pipe and still round-trips). `manuscript.py`
+  (`BYLINE_SEP`, `_split_byline`, `ch['byline']`) · `engine.py` (`chap_byline` style + render
+  under the title) · `epub.py` (`p.chapter-byline` + CSS) · `doc_model.py` + `static/doc_model.js`
+  (chapter block gains a `byline` field) · `static/wysiwyg.js` (byline rides on `data-byline`,
+  shown under the title via CSS `::after`, round-trips through `read()`; its **text** is edited in
+  Markdown mode, like doc-block metadata) · `templates/manuscript_editor.html` (cheatsheet row +
+  rich-mode CSS). Tested via `test_doc_model.py::test_bylines` (fidelity + stability, incl.
+  multi-pipe) and a live PDF/EPUB render.
+- **Contributors page.** A collection-level back-matter page (`meta['contributors']`, one
+  contributor per blank-line block; the name before an em dash / `--` is set **bold**, the rest is
+  the bio). `engine.py` (`_back` entry + a `contributors` branch in `_matter_page`) · `epub.py`
+  (`_back_items`/`_back_nav` entries, `matter-contributors` CSS, and a local `_md_emph_to_html`
+  so raw author text bolds/italicises in EPUB) · `app.py` (threaded through the generate meta,
+  `project_create`/`project_edit` persistence, and both project-build meta dicts) ·
+  `templates/generate.html` + `project_edit.html` (Back-matter textarea) + `result.html` (hidden
+  field so **Save as project** carries it). Verified end-to-end (byline opener + Contributors page
+  render correctly in both PDF and EPUB). Deferred v1 follow-up: **per-piece epigraph/attribution**
+  (the third roadmap bullet) — a rarer need that would add heading-parse surface; left for a
+  follow-up. WYSIWYG byline editing is display-and-preserve (value edited in Markdown mode); the
+  contenteditable feel needs the same interactive pass PR #24 flagged (no node/Chrome harness here).
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -539,24 +582,19 @@ audience, not an extension. Same reasoning rules out stage plays. The high-value
 the ones that reuse the existing book model, front matter, presets, cover wrap, and the
 doc_model / WYSIWYG round-trip:
 
-- **Poetry collections — strongest fit, do first.** A real gap in cheap tools, and genuinely
-  book-shaped. Core need: a `poem` block that **preserves line breaks** — the paragraph joiner
-  in `manuscript.parse_markdown` deliberately collapses wrapped lines with spaces, which is
-  exactly wrong for verse. Implement as a fenced block (`~~~ poem title="…"`) reusing the
-  existing doc-block plumbing, so it round-trips through `doc_model` and the WYSIWYG editor for
-  free. Engine: a `_paint_poem` routine — unjustified left/centered verse lines (per preset),
-  stanza spacing on blank lines, a poem-title style, and a **hanging runover indent** when a
-  single verse line wraps. Presets add genuine value here (a poetry house style is a legitimate
-  design axis), so it strengthens the core value prop instead of fighting it.
+- **Poetry collections — SHIPPED (feature #30).** Line-preserving `~~~ poem` blocks with
+  stanza spacing, a poem-title style, and a hanging runover indent; round-trips through
+  `doc_model` + the WYSIWYG. v1 follow-ups noted in #30 (no `.docx` poem import; presets fall
+  back to `DEFAULTS`; EPUB runover is per-stanza).
 
-- **Anthologies / essay collections — nearly free quick win.** Chapters already model
-  "stories/essays." Additions: an optional **per-piece byline** (author under the title) and a
-  per-piece epigraph/attribution, plus maybe a collection-level contributors page. Mostly a
-  chapter-opener + meta extension (`_paint` chapter opener + front matter); no new paginator.
-  Immediate reach for short-fiction and essay compilers.
+- **Anthologies / essay collections — SHIPPED (feature #31).** Per-piece byline
+  (`# Title | Author`, italic under the title) + a collection-level Contributors back-matter page.
+  **Deferred:** per-piece epigraph/attribution (the third original bullet) — a rarer need that
+  adds heading-parse surface; left for a follow-up.
 
-- **Nonfiction structure — footnotes/endnotes + simple figures** *(biggest lift of the three; do
-  last)*. **Endnotes** are tractable (collect per chapter/book, render a notes section).
+- **Nonfiction structure — footnotes/endnotes + simple figures** *(the remaining "new document
+  type"; biggest lift, do last)*. **Endnotes** are tractable (collect per chapter/book, render a
+  notes section).
   **Footnotes** are hard — breakable notes anchored to their reference line, a bottom-of-page
   note area, and numbering that resets per chapter; that's real paginator work in `engine.py`.
   **Figures**: an image block with caption + placement. Broadens the book audience meaningfully

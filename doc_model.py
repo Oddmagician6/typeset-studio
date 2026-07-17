@@ -20,7 +20,8 @@ Document model
 --------------
 A document is a list of blocks. Each block is a plain JSON-able dict:
 
-    {"type": "chapter",  "title": str | None}          # "# ..."   title stored raw
+    {"type": "chapter",  "title": str | None,          # "# ..."   title stored raw
+                         "byline": str | None}          # "# Title | Author" anthology byline
     {"type": "part",     "title": str | None}          # "=== ..." title stored raw
     {"type": "subhead",  "runs": [run, ...]}           # "## ..."
     {"type": "para",     "runs": [run, ...]}           # a paragraph
@@ -295,7 +296,8 @@ def from_markdown(raw, smartquotes=True):
         m_sub = manuscript.SUBHEAD_RE.match(line)
         if m_ch:
             flush_para()
-            blocks.append({"type": "chapter", "title": m_ch.group(1).strip() or None})
+            title, byline = manuscript._split_byline(m_ch.group(1))
+            blocks.append({"type": "chapter", "title": title, "byline": byline})
             continue
         if manuscript.SCENE_BREAK_RE.match(line):
             flush_para()
@@ -327,7 +329,12 @@ def to_markdown(blocks):
     for b in blocks:
         t = b["type"]
         if t == "chapter":
-            out.append("# " + (b["title"] or ""))
+            title = b["title"] or ""
+            byline = b.get("byline")
+            if title and byline:                         # byline needs a title to round-trip
+                out.append("# " + title + manuscript.BYLINE_SEP + byline)
+            else:
+                out.append("# " + title)
         elif t == "part":
             out.append("=== " + (b["title"] or ""))
         elif t == "subhead":
