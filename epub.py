@@ -82,6 +82,9 @@ p.scene-break {
 .doc-block-newspaper header span.byline { display: block; font-size: 0.85em; font-weight: normal; font-style: italic; color: #555; }
 .doc-block-redacted { border: 1px solid #333; }
 .doc-block-redacted header { font-weight: bold; font-style: normal; text-align: center; background: #e8e8e8; color: #111; padding: 0.3em; margin: -0.7em -0em 0.5em; font-size: 0.85em; letter-spacing: 0.05em; }
+.doc-block-poem { border: 0; padding: 0; margin: 1.4em 6%; font-size: 1em; }
+.doc-block-poem header.poem-title { font-style: italic; font-weight: bold; text-align: left; color: #222; border-bottom: 0; margin-bottom: 0.6em; font-size: 1.05em; }
+.doc-block-poem p { text-align: left; margin: 0 0 0.8em; padding-left: 1.4em; text-indent: -1.4em; }
 .part-page { margin: 0 5%; text-align: center; padding-top: 30%; }
 .part-page .part-num { font-size: 0.9em; color: #666; margin: 0 0 0.5em; letter-spacing: 0.06em; }
 .part-page .part-title { font-size: 1.6em; font-weight: bold; margin: 0; }
@@ -292,6 +295,12 @@ def _chapter_xhtml(idx, chapter, preset):
                 classification = attrs.get('classification', '')
                 if classification:
                     lines.append(f'    <header>{classification.upper()}</header>')
+            elif btype == 'poem':
+                ptitle = attrs.get('title', '')
+                if ptitle:
+                    ptitle = (ptitle.replace('&', '&amp;')
+                                    .replace('<', '&lt;').replace('>', '&gt;'))
+                    lines.append(f'    <header class="poem-title">{ptitle}</header>')
             for bi, (_, btext) in enumerate(val):
                 body_text = btext.upper() if btype == 'telegram' else _markup_to_html(btext)
                 cls_p = ' class="no-indent"' if bi == 0 else ''

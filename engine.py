@@ -1103,12 +1103,73 @@ def _render_redacted_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
     return [Spacer(1, space), tbl, Spacer(1, space)]
 
 
+def _render_poem_block(block_paras, attrs, preset, fonts, st, avail_w):
+    """Flowables for a ~~~ poem … ~~~ block: optional title + line-preserved verse.
+
+    Each stanza arrives as one ('para', 'line<br/>line') tuple (see
+    manuscript.parse_markdown), so we split on <br/> and render every verse line
+    as its own flowable with a hanging *runover* indent (a line too long to fit
+    wraps under an indent instead of back to the margin). Verse is never
+    hyphenated. All style comes from preset['poem'] with sensible fallbacks, so
+    poems render even for presets that predate this block.
+    """
+    pm         = preset.get('poem', {})
+    size       = pm.get('font_size', 0) or st['body'].fontSize
+    lead       = size * pm.get('line_leading', 1.32)
+    indent     = pm.get('indent', 0.5) * inch
+    runover    = pm.get('runover_indent', 0.28) * inch
+    stanza_gap = pm.get('stanza_spacing', 9.0)
+    space      = pm.get('space_around', 14.0)
+    centered   = pm.get('align', 'left') == 'center'
+    alignment  = TA_CENTER if centered else TA_LEFT
+
+    verse_style = ParagraphStyle(
+        'poemline', parent=st['body'], fontName=fonts['regular'],
+        fontSize=size, leading=lead, alignment=alignment,
+        leftIndent=indent + (0 if centered else runover),
+        firstLineIndent=(0 if centered else -runover),
+        rightIndent=indent, spaceBefore=0, spaceAfter=0,
+    )
+
+    out = [Spacer(1, space)]
+
+    title = (attrs.get('title', '') or '').strip()
+    if title:
+        title = title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        tsize = pm.get('title_size', 0) or (size + 1.5)
+        tstyle_name = pm.get('title_style', 'italic')
+        if tstyle_name == 'bold':
+            tfont = fonts.get('bold', fonts['regular'])
+        elif tstyle_name == 'regular':
+            tfont = fonts['regular']
+        else:
+            tfont = fonts.get('italic', fonts['regular'])
+        tstyle = ParagraphStyle(
+            'poemtitle', parent=st['body'], fontName=tfont,
+            fontSize=tsize, leading=tsize * 1.2, alignment=alignment,
+            leftIndent=indent, rightIndent=indent,
+            spaceBefore=0, spaceAfter=pm.get('title_space', 8.0),
+        )
+        out.append(Paragraph(title, tstyle))
+
+    for si, (_, stanza) in enumerate(block_paras):
+        if si > 0:
+            out.append(Spacer(1, stanza_gap))
+        for ln in stanza.split('<br/>'):
+            out.append(Paragraph(ln or '&#160;', verse_style))
+
+    out.append(Spacer(1, space))
+    return out
+
+
 def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_meta=None):
     """Return flowables for one ~~~ … ~~~ document block."""
     meta  = block_meta or {}
     btype = meta.get('_type', '')
     if btype:
         attrs          = {k: v for k, v in meta.items() if k != '_type'}
+        if btype == 'poem':
+            return _render_poem_block(block_paras, attrs, preset, fonts, st, avail_w)
         db             = preset.get('document_block', {})
         header_size    = db.get('header_size', 9.5)
         dateline_style = db.get('dateline_style', 'italic')

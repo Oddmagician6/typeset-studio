@@ -237,10 +237,17 @@ def from_markdown(raw, smartquotes=True):
     def flush_block_para():
         nonlocal block_para_buf
         if block_para_buf:
-            joined = ' '.join(s.strip() for s in block_para_buf).strip()
-            if joined:
-                block_children.append({"type": "para",
-                                       "runs": _parse_inline(joined, smartquotes)})
+            if block_type == 'poem':
+                # Verse: each source line is a line; the group is one stanza.
+                lines = [{"runs": _parse_inline(s.strip(), smartquotes)}
+                         for s in block_para_buf if s.strip()]
+                if lines:
+                    block_children.append({"type": "stanza", "lines": lines})
+            else:
+                joined = ' '.join(s.strip() for s in block_para_buf).strip()
+                if joined:
+                    block_children.append({"type": "para",
+                                           "runs": _parse_inline(joined, smartquotes)})
             block_para_buf = []
 
     def close_block():
@@ -340,10 +347,17 @@ def to_markdown(blocks):
                     header += f' {k}="{v}"'
             out.append(header)
             kids = b["children"]
-            for i, kid in enumerate(kids):
-                out.append(_runs_to_md(kid["runs"]))
-                if i < len(kids) - 1:
-                    out.append("")                       # blank line between paras
+            if b["block_type"] == "poem":
+                for i, stanza in enumerate(kids):        # stanzas of verse lines
+                    if i > 0:
+                        out.append("")                   # blank line between stanzas
+                    for ln in stanza["lines"]:
+                        out.append(_runs_to_md(ln["runs"]))
+            else:
+                for i, kid in enumerate(kids):
+                    out.append(_runs_to_md(kid["runs"]))
+                    if i < len(kids) - 1:
+                        out.append("")                   # blank line between paras
             out.append("~~~")
         else:
             raise ValueError(f"unknown block type: {t!r}")

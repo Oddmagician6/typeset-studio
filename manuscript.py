@@ -158,9 +158,19 @@ def parse_markdown(raw, smartquotes=True):
     def flush_block_para():
         nonlocal block_para_buf
         if block_para_buf:
-            joined = ' '.join(s.strip() for s in block_para_buf).strip()
-            if joined:
-                block_buf.append(('para', _inline(joined, smartquotes)))
+            if block_type == 'poem':
+                # Verse: preserve line breaks. Each source line is a line of
+                # verse; the blank-line-delimited group is one stanza, emitted as
+                # a single 'para' with <br/> between lines. Keeps the doc_block
+                # tuple contract intact for the engine / epub / round-trip layers.
+                verse = [_inline(s.strip(), smartquotes) for s in block_para_buf
+                         if s.strip()]
+                if verse:
+                    block_buf.append(('para', '<br/>'.join(verse)))
+            else:
+                joined = ' '.join(s.strip() for s in block_para_buf).strip()
+                if joined:
+                    block_buf.append(('para', _inline(joined, smartquotes)))
             block_para_buf = []
 
     def new_chapter(title):

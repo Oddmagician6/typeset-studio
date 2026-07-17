@@ -124,6 +124,11 @@
   .ms-rich .wb-doc-head{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;
     letter-spacing:.1em;color:var(--faint);margin-bottom:8px}
   .ms-rich .wb-doc-para{margin:0 0 8px;font-style:italic}
+  .ms-rich .wb-poem{margin:18px 0;padding-left:14px;border-left:2px solid var(--rule)}
+  .ms-rich .wb-poem-title{font-style:italic;font-weight:600;margin-bottom:8px;color:var(--ink)}
+  .ms-rich .wb-poem-title:empty::before{content:"Poem title…";color:var(--faint);font-style:italic}
+  .ms-rich .wb-verse{padding-left:16px;text-indent:-16px;min-height:1.2em}
+  .ms-rich .wb-verse:empty{min-height:.9em}
   .ms-rich strong{font-weight:700}
   .ms-rich em{font-style:italic}
   @media (max-width:880px){.work{grid-template-columns:1fr}.side{position:static}}
@@ -160,6 +165,7 @@
         <button type="button" class="i" data-act="italic">I</button>
         <span class="div"></span>
         <button type="button" data-act="letter">Letter block</button>
+        <button type="button" data-act="poem">Poem</button>
         <button type="button" data-act="find">Find</button>
       </div>
 
@@ -190,6 +196,7 @@
           <tr><td><code>* * *</code></td><td>a scene break (own line)</td></tr>
           <tr><td><code>*italic*</code> · <code>**bold**</code></td><td>inline emphasis</td></tr>
           <tr><td><code>~~~ letter from="…" to="…"</code> … <code>~~~</code></td><td>a letter/journal/telegram block</td></tr>
+          <tr><td><code>~~~ poem title="…"</code> … <code>~~~</code></td><td>a poem (line breaks kept; blank line = new stanza)</td></tr>
           <tr><td>blank line</td><td>new paragraph</td></tr>
         </table>
       </details>
@@ -366,6 +373,7 @@
         bold:    function(){ surround('**','**'); },
         italic:  function(){ surround('*','*'); },
         letter:  function(){ insertBlock('\n~~~ letter from="" to="" date=""\n\n~~~\n\n'); },
+        poem:    function(){ insertBlock('\n~~~ poem title=""\n\n~~~\n\n'); },
         find:    function(){ openFind(); },
       };
       document.querySelectorAll('.toolbar button').forEach(function(b){
@@ -653,11 +661,60 @@
           if (el){ el.after(lb); lb.after(p); } else { rich.appendChild(lb); rich.appendChild(p); }
           placeCaret(lb.querySelector('.wb-doc-body > .wb-doc-para') || p); syncFromRich();
         },
+        poem:    function(){
+          var pm = WYS.renderBlock({type:'docblock', block_type:'poem', attrs:{title:''},
+                     children:[{type:'stanza', lines:[{runs:[]}]}]});
+          var p = WYS.renderBlock({type:'para', runs:[]});
+          var el = currentRichBlock();
+          if (el){ el.after(pm); pm.after(p); } else { rich.appendChild(pm); rich.appendChild(p); }
+          placeCaret(pm.querySelector('.wb-poem-body > .wb-verse') || p); syncFromRich();
+        },
         find:    function(){ exitRich(); openFind(); },
       };
 
+      // climb to the nearest ancestor (within the rich surface) carrying a class
+      function closestClass(node, cls){
+        var n = (node && node.nodeType === 3) ? node.parentNode : node;
+        while (n && n !== rich){
+          if (n.classList && n.classList.contains(cls)) return n;
+          n = n.parentNode;
+        }
+        return null;
+      }
+      // split a verse line at the caret into a new verse below (Enter in verse)
+      function splitVerse(verse){
+        var sel = window.getSelection();
+        var range = sel.getRangeAt(0);
+        var tail = range.cloneRange();
+        tail.selectNodeContents(verse);
+        tail.setStart(range.endContainer, range.endOffset);
+        var frag = tail.extractContents();
+        var nv = document.createElement('div'); nv.className = 'wb-verse';
+        if (frag && (frag.textContent || frag.childNodes.length)) nv.appendChild(frag);
+        else nv.appendChild(document.createElement('br'));
+        if (!verse.textContent) { verse.innerHTML = ''; verse.appendChild(document.createElement('br')); }
+        verse.after(nv);
+        var r = document.createRange(); r.selectNodeContents(nv); r.collapse(true);
+        sel.removeAllRanges(); sel.addRange(r);
+        syncFromRich();
+      }
+
       rich.addEventListener('keydown', function(e){
         if (e.key === 'Enter' && !e.shiftKey){
+          var sel = window.getSelection();
+          var anchor = sel.rangeCount ? sel.anchorNode : null;
+          // Enter inside verse => split into a new verse line
+          var verse = closestClass(anchor, 'wb-verse');
+          if (verse){ e.preventDefault(); splitVerse(verse); return; }
+          // Enter in a poem title => jump to the first verse line
+          var ptitle = closestClass(anchor, 'wb-poem-title');
+          if (ptitle){
+            e.preventDefault();
+            var poemEl = closestClass(ptitle, 'wb-poem');
+            var fv = poemEl && poemEl.querySelector('.wb-poem-body > .wb-verse');
+            if (fv) placeCaret(fv);
+            return;
+          }
           var el = currentRichBlock();
           if (el && /wb-chapter|wb-part|wb-scene/.test(el.className)){
             e.preventDefault();

@@ -174,8 +174,17 @@
     }
     function flushBlockPara() {
       if (blockParaBuf.length) {
-        var joined = blockParaBuf.map(function (s) { return s.trim(); }).join(' ').trim();
-        if (joined) blockChildren.push({ type: 'para', runs: parseInline(joined) });
+        if (blockType === 'poem') {
+          // Verse: each source line is a line; the group is one stanza.
+          var lines = [];
+          blockParaBuf.forEach(function (s) {
+            if (s.trim()) lines.push({ runs: parseInline(s.trim()) });
+          });
+          if (lines.length) blockChildren.push({ type: 'stanza', lines: lines });
+        } else {
+          var joined = blockParaBuf.map(function (s) { return s.trim(); }).join(' ').trim();
+          if (joined) blockChildren.push({ type: 'para', runs: parseInline(joined) });
+        }
         blockParaBuf = [];
       }
     }
@@ -255,9 +264,16 @@
         }
         out.push(header);
         var kids = b.children || [];
-        for (var i = 0; i < kids.length; i++) {
-          out.push(runsToMd(kids[i].runs));
-          if (i < kids.length - 1) out.push('');
+        if (b.block_type === 'poem') {
+          for (var si = 0; si < kids.length; si++) {     // stanzas of verse lines
+            if (si > 0) out.push('');                    // blank line between stanzas
+            kids[si].lines.forEach(function (ln) { out.push(runsToMd(ln.runs)); });
+          }
+        } else {
+          for (var i = 0; i < kids.length; i++) {
+            out.push(runsToMd(kids[i].runs));
+            if (i < kids.length - 1) out.push('');
+          }
         }
         out.push('~~~');
       } else {

@@ -165,10 +165,62 @@ def test_engine_escapes():
     _check("no private-use char leaks", not leaked)
 
 
+POEM_MD = """# Verse
+
+~~~ poem title="The Road Not Taken"
+Two roads diverged in a yellow wood,
+And sorry I could not travel both
+
+Then took the other, as just as fair,
+And *having* perhaps the better claim,
+~~~
+
+A prose line after the poem.
+"""
+
+
+def test_poems():
+    """Poem blocks preserve verse lines + stanzas through the round trip."""
+    print("\n[poems]")
+    for smart in (True, False):
+        doc1 = doc_model.from_markdown(POEM_MD, smartquotes=smart)
+        md2 = doc_model.to_markdown(doc1)
+        doc2 = doc_model.from_markdown(md2, smartquotes=smart)
+        eng_a = manuscript.parse_markdown(POEM_MD, smartquotes=smart)
+        eng_b = manuscript.parse_markdown(md2, smartquotes=smart)
+        _check(f"poem engine fidelity (smart={smart})", eng_a == eng_b, _diff(eng_a, eng_b))
+        _check(f"poem model stability (smart={smart})", doc1 == doc2, _diff(doc1, doc2))
+
+    # structural expectations on the parsed model
+    doc = doc_model.from_markdown(POEM_MD)
+    poem = [b for b in doc if b["type"] == "docblock" and b["block_type"] == "poem"][0]
+    _check("poem has 2 stanzas", len(poem["children"]) == 2,
+           "got %d" % len(poem["children"]))
+    _check("stanza 1 has 2 verse lines", len(poem["children"][0]["lines"]) == 2)
+    _check("poem title preserved", poem["attrs"].get("title") == "The Road Not Taken")
+    # a serialized poem re-parses to identical engine output (verse not collapsed)
+    md = doc_model.to_markdown(doc)
+    _check("verse lines not collapsed in serialization", md.count("\n") >= 6,
+           repr(md))
+
+    # model → md → model stability for a hand-built poem model (editor-authored)
+    built = [{"type": "docblock", "block_type": "poem", "attrs": {"title": "X"},
+              "children": [
+                  {"type": "stanza", "lines": [
+                      {"runs": [doc_model._run("line one")]},
+                      {"runs": [doc_model._run("line "), doc_model._run("two", italic=True)]}]},
+                  {"type": "stanza", "lines": [
+                      {"runs": [doc_model._run("second stanza")]}]},
+              ]}]
+    back = doc_model.from_markdown(doc_model.to_markdown(built))
+    _check("editor-built poem model round-trips", back == built, _diff(back, built))
+
+
 if __name__ == "__main__":
     test_roundtrips()
     test_adversarial()
     test_engine_escapes()
+    test_poems()
     print()
     if _failures:
         print(f"FAILED ({len(_failures)}): " + "; ".join(_failures))

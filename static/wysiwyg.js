@@ -39,6 +39,39 @@
     return parts.join('  ·  ');
   }
 
+  function makeVerse(runs) {
+    var v = document.createElement('div');
+    v.className = 'wb-verse';
+    appendInline(v, runs || []);            // appendInline adds a <br> when empty
+    return v;
+  }
+
+  function renderPoem(b) {
+    var el = document.createElement('div');
+    el.className = 'wb wb-poem'; el.dataset.block = 'poem';
+    // title is edited inline; any other attrs ride along on data-attrs
+    var other = {};
+    for (var k in (b.attrs || {}))
+      if (b.attrs.hasOwnProperty(k) && k !== 'title') other[k] = b.attrs[k];
+    el.dataset.attrs = JSON.stringify(other);
+
+    var title = document.createElement('div');
+    title.className = 'wb-poem-title'; title.dataset.poem = 'title';
+    title.textContent = (b.attrs && b.attrs.title) || '';
+    if (!title.textContent) title.appendChild(document.createElement('br'));
+    el.appendChild(title);
+
+    var body = document.createElement('div');
+    body.className = 'wb-poem-body'; body.dataset.poem = 'body';
+    (b.children || []).forEach(function (stanza, si) {
+      if (si > 0) body.appendChild(makeVerse(null));   // empty verse = stanza break
+      (stanza.lines || []).forEach(function (ln) { body.appendChild(makeVerse(ln.runs)); });
+    });
+    if (!body.firstChild) body.appendChild(makeVerse(null));
+    el.appendChild(body);
+    return el;
+  }
+
   function renderBlock(b) {
     var el;
     if (b.type === 'chapter') {
@@ -64,6 +97,8 @@
       el.className = 'wb wb-scene'; el.dataset.block = 'scene';
       el.setAttribute('contenteditable', 'false');
       el.textContent = '* * *';
+    } else if (b.type === 'docblock' && b.block_type === 'poem') {
+      el = renderPoem(b);
     } else if (b.type === 'docblock') {
       el = document.createElement('div');
       el.className = 'wb wb-doc'; el.dataset.block = 'docblock';
@@ -151,12 +186,38 @@
     return 'para';                                       // P, DIV, or anything else
   }
 
+  function readPoem(el) {
+    var attrs = {};
+    var titleEl = el.querySelector('.wb-poem-title');
+    var title = titleEl ? (titleEl.textContent || '').trim() : '';
+    if (title) attrs.title = title;                      // title first (attr order)
+    var other = {};
+    try { other = JSON.parse(el.dataset.attrs || '{}'); } catch (e) { other = {}; }
+    for (var k in other) if (other.hasOwnProperty(k) && k !== 'title') attrs[k] = other[k];
+
+    var body = el.querySelector('.wb-poem-body');
+    var stanzas = [], cur = [];
+    if (body) {
+      Array.prototype.forEach.call(body.querySelectorAll('.wb-verse'), function (v) {
+        var runs = readInline(v);
+        if (!runs.length) {                              // empty verse = stanza break
+          if (cur.length) { stanzas.push({ type: 'stanza', lines: cur }); cur = []; }
+        } else {
+          cur.push({ runs: runs });
+        }
+      });
+    }
+    if (cur.length) stanzas.push({ type: 'stanza', lines: cur });
+    return { type: 'docblock', block_type: 'poem', attrs: attrs, children: stanzas };
+  }
+
   function readBlockEl(el) {
     var type = blockTypeOf(el);
     if (type === 'chapter') return { type: 'chapter', title: titleOrNull(el) };
     if (type === 'part')    return { type: 'part', title: titleOrNull(el) };
     if (type === 'subhead') return { type: 'subhead', runs: readInline(el) };
     if (type === 'scene')   return { type: 'scene' };
+    if (type === 'poem')    return readPoem(el);
     if (type === 'docblock') {
       var attrs = {};
       try { attrs = JSON.parse(el.dataset.attrs || '{}'); } catch (e) { attrs = {}; }
