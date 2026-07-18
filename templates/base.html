@@ -111,6 +111,20 @@
   .spec b{color:var(--ink);font-weight:600}
   .spec .k{color:var(--faint)}
 
+  /* ---- site footer / support ---- */
+  .sitefoot{border-top:1px solid var(--rule);background:var(--surface)}
+  .sitefoot .inner{
+    max-width:1040px;margin:0 auto;padding:20px 22px;
+    display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  }
+  .sitefoot .foot-note{margin:0;color:var(--muted);font-size:13px;max-width:56ch}
+  .sitefoot .foot-note b{color:var(--ink);font-weight:600}
+  .sitefoot .foot-links{display:flex;gap:10px;flex-wrap:wrap}
+  .donate-pp{border-color:#0070ba;color:#0a7cc6}
+  .donate-pp:hover{background:#0070ba;border-color:#0070ba;color:#fff}
+  .donate-pt{border-color:#e0533f;color:#e0533f}
+  .donate-pt:hover{background:#e0533f;border-color:#e0533f;color:#fff}
+
   /* ---- dark-mode input/select focus override ---- */
   html[data-theme="dark"] input:focus,
   html[data-theme="dark"] select:focus,
@@ -149,6 +163,19 @@
   <main>
     {% block body %}{% endblock %}
   </main>
+
+  <footer class="sitefoot">
+    <div class="inner">
+      <p class="foot-note"><b>Typeset&nbsp;Studio is free.</b> If it saved you the cost of typesetting,
+        cover design, or formatting, a little support keeps it growing.</p>
+      <div class="foot-links">
+        <a class="btn btn-sm donate-pp" href="https://www.paypal.com/ncp/payment/KFGXTDRA7YPKW"
+           target="_blank" rel="noopener noreferrer">♥ Donate via PayPal</a>
+        <a class="btn btn-sm donate-pt" href="https://www.patreon.com/c/DungeonMasterDen"
+           target="_blank" rel="noopener noreferrer">Support on Patreon</a>
+      </div>
+    </div>
+  </footer>
 
   <script>
     function toggleTheme(){
