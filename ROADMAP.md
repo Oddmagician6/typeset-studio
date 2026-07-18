@@ -703,6 +703,42 @@ DONE; (3) Inno Setup installer script — DONE (compile on Windows); (4) polish:
 quiet frozen logging — DONE; (5) pywebview native window — DONE (window itself needs an
 interactive Windows check).*
 
+**Cross-platform targets (Linux / macOS / Android) — backlog, not committed.** The Windows
+packaging above is done; other OSes were assessed 2026-07-17. Key finding: the app is already
+mostly portable — the typesetting engine (ReportLab / python-docx / pyphen) is **pure Python**,
+`app.py:_user_data_root()` **already branches** for Windows / macOS (`~/Library/Application
+Support`) / Linux (`XDG_DATA_HOME`), and every `requirements.txt` dep has Mac/Linux wheels. So
+"porting" is about the *shell* (native window), *packaging*, and — for Android only — *native C
+deps*, not the app logic.
+
+- **Linux — LOW (~1 day).** Data dir already handled. `pywebview` needs a system WebKit backend
+  (webkit2gtk + PyGObject, or Qt/QtWebEngine); if absent, the existing **browser fallback** runs
+  anyway. Build with PyInstaller on Linux → tarball / AppImage / `.deb` (replaces the Windows-only
+  Inno Setup step). Mostly "pick a backend + package + test," no code rewrite.
+- **macOS — LOW–MEDIUM (~2–3 days).** Data dir already handled. `pywebview` uses native WKWebView
+  (no runtime to bundle). PyInstaller builds a `.app` → `.dmg`, but **must be built on a Mac** (no
+  cross-compile). Real friction = **codesigning + notarization** (Apple Developer $99/yr) to clear
+  Gatekeeper — the Mac analogue of the Windows SmartScreen/signing note. Code work ≈ zero.
+- **Android — HIGH (weeks); a re-shell, not a repackage.** The desktop model breaks: `pywebview`
+  has **no Android backend**, PyInstaller/Inno don't target Android (use BeeWare/Briefcase or
+  Kivy + python-for-android, with an Android WebView pointed at an in-process localhost Flask
+  server). Biggest risk is the **native C deps** — **PyMuPDF** (the live-preview rasterizer =
+  MuPDF) and Pillow need Android/ARM builds via p4a recipes; PyMuPDF may force dropping live
+  preview there. File I/O also moves from `%APPDATA%`/file dialogs to app-private storage + the
+  Storage Access Framework (share/save intents). The pure-Python engine carries over; everything
+  else is new.
+- **The mobile shortcut = host it (ties to the reach lever above).** Deploying the same Flask app
+  to a server runs it in the browser on **Android / iOS / Chromebook / any desktop** with **zero
+  native porting** and 100% code reuse — dramatically less work than a native Android build. Cost:
+  it becomes a **multi-user service** (auth, per-user data isolation, resource/timeout limits on
+  the CPU-heavy PDF builds, storage, hosting bill) — a real operational commitment, but far below
+  a native Android app.
+
+  *Recommended sequence if pursued: Linux + macOS desktop builds first (cheap — code already
+  anticipates them); for mobile, host rather than build native; reserve a native Android app only
+  if offline / app-store presence is specifically needed. A quick audit for lingering Windows-only
+  assumptions (paths, `.bat` launchers) would de-risk the Linux/Mac builds.*
+
 **Step 5 shipped** (`app.py`, `requirements.txt`, `.spec`): the packaged app opens in a native
 desktop window (pywebview / Edge WebView2) instead of a browser tab; closing it quits. Entry
 point serves Flask on a **free port** (`_free_port`, falls back off 5050 if busy) in a daemon
