@@ -19,7 +19,6 @@
     --red:#b12a1d;         /* proofreader's red */
     --red-deep:#8f2014;
     --shadow:0 1px 0 rgba(27,26,24,.04), 0 14px 30px -22px rgba(27,26,24,.5);
-    --stripe:rgba(27,26,24,.04);   /* ruled-line stripe in specimen areas */
     --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
     --sans:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
     --mono:"Consolas","SF Mono","Cascadia Mono",Menlo,"Liberation Mono",monospace;
@@ -37,7 +36,6 @@
     --red:#c9372a;
     --red-deep:#e04030;
     --shadow:0 1px 0 rgba(0,0,0,.3), 0 14px 30px -22px rgba(0,0,0,.7);
-    --stripe:rgba(255,255,255,.04);
   }
 
   *{box-sizing:border-box}
@@ -112,13 +110,6 @@
   .spec{font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.7}
   .spec b{color:var(--ink);font-weight:600}
   .spec .k{color:var(--faint)}
-
-  /* ---- ruled specimen stripe (index + editor preview cards) ---- */
-  .specimen{
-    background:
-      repeating-linear-gradient(transparent,transparent 27px,var(--stripe) 27px,var(--stripe) 28px)
-      !important;
-  }
 
   /* ---- dark-mode input/select focus override ---- */
   html[data-theme="dark"] input:focus,
