@@ -520,6 +520,36 @@ Two additions that extend the book model without a new paginator:
   follow-up. WYSIWYG byline editing is display-and-preserve (value edited in Markdown mode); the
   contenteditable feel needs the same interactive pass PR #24 flagged (no node/Chrome harness here).
 
+**32. Cover enrichment — layout archetypes + backgrounds + emblem slots** *(the "enrich the
+template, not a design studio" direction from the cover strategy note)*
+Three composable, backward-compatible additions to the parametric cover renderer. All are opt-in
+template keys; the six shipped covers (which set none of them) render byte-identically.
+- **Layout archetypes** — a template `layout` key (`centered` | `top` | `bottom` | `band`) selects
+  the title-cluster placement. `engine.py` `_COVER_LAYOUTS` supplies vertical fractions per
+  archetype; `centered` is an empty override so existing templates keep their own `y` values.
+- **Backgrounds** — `background: {image, vignette, overlay:{color,opacity}}`. `_paint_background`
+  draws cover-fit (fill-and-crop, clipped) art over the base gradient and under the border + text;
+  `_paint_vignette` is a soft edge-darkening built from non-overlapping translucent frame bands; a
+  flat colour overlay tints busy art so the title stays legible.
+- **Title panel** — `panel:{enabled,color,opacity,top,bottom}`, a translucent band behind the title
+  (implicit for the `band` archetype, opt-in elsewhere) for legibility over art.
+- **Emblem slots** — `emblems: [{image, slot, w}]` (≤2), fixed named slots (`top-center`,
+  `bottom-right`, …) for a logo / series badge / author mark — not freeform placement.
+Assets live in `covers/assets/` (new writable dir; gitignored) resolved by `engine._cover_asset_path`
+(→ `engine.COVER_ASSET_DIR`, set by `app.py`). `app.py`: `COVER_DEFAULTS` + `parse_cover_form`
+(+ `_parse_emblems`) carry the new schema; a `/cover/asset/upload` route stores an image (Pillow-
+validated) and returns its filename; `COVER_LAYOUTS`/`COVER_FILL_KEYS`/`EMBLEM_SLOTS` feed the
+editor. `templates/cover_editor.html`: Layout &amp; background, Title panel, and Emblems fieldsets,
+plus an `imgpick` control that uploads on file-select and writes the filename into a named text
+field (so it round-trips) — the live preview and print-wrap pick everything up unchanged. Both
+cover-draw paths (`_draw_designed_cover`, `build_cover_wrap`) call `_paint_background`. Verified:
+rendered proofs of every archetype + background/vignette/overlay + panel + emblems; a full Flask
+test-client pass (editor renders for new and all old templates; asset upload incl. non-image
+rejection; band+bg+panel+emblem preview; save→load schema round-trip). The interactive editor feel
+(imgpick + debounced preview) wasn't driven in a real browser this session — same class of pass as
+PR #24. Not done: cover-asset delete/library UI; emblem opacity (ReportLab `drawImage` ignores fill
+alpha); background/emblems on the EPUB cover (EPUB stays image-only).
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -732,13 +762,14 @@ constrained and opinionated (pick a genre house style, fill in text → a profes
 blank canvas hands non-designer authors the responsibility for good design and mostly produces
 worse covers — at enormous cost (building a vector editor; a bigger dependency/build-step
 reversal than the WYSIWYG one). The high-value, on-philosophy path is more *parametric* power:
-- layout archetypes beyond centred-classic (title-at-top, bottom band, split band, full-bleed
-  image with a title panel) — new `_paint_*` routines selected by a template `layout` key;
-- background options (background image/texture behind the frame, subtle vignette, pattern) —
-  partially exists for wraps;
-- a few positioned image/emblem "slots" (logo, series badge, author mark) as presets, not
-  freeform placement.
-These extend the existing `covers/*.json` renderer incrementally, keeping "good by default."
+- ~~layout archetypes beyond centred-classic~~ — **SHIPPED (feature #32):** a template `layout`
+  key (`centered`/`top`/`bottom`/`band`);
+- ~~background options~~ — **SHIPPED (feature #32):** `background` image (cover-fit) + vignette +
+  colour overlay, plus a translucent title `panel`;
+- ~~a few positioned image/emblem "slots"~~ — **SHIPPED (feature #32):** `emblems` (≤2 fixed slots).
+These extended the existing `covers/*.json` renderer incrementally, keeping "good by default."
+Cover-enrichment backlog clear. Possible follow-ups: a cover-asset library/delete UI, and carrying
+backgrounds/emblems onto the EPUB cover (still image-only).
 
 ---
 

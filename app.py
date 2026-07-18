@@ -74,12 +74,14 @@ SAMPLE       = resource_path('sample', 'sample.md')
 # read-only install location.
 PRESET_DIR    = os.path.join(DATA_DIR, 'presets')
 COVER_DIR     = os.path.join(DATA_DIR, 'covers')
+COVER_ASSET_DIR = os.path.join(COVER_DIR, 'assets')   # background art + emblems/logos
 FONT_DIR      = os.path.join(DATA_DIR, 'fonts')
 OUT_DIR       = os.path.join(DATA_DIR, 'out')
 UPLOAD_DIR    = os.path.join(DATA_DIR, 'uploads')
 PROJECT_DIR   = os.path.join(DATA_DIR, 'projects')
 PROJECT_MS_DIR = os.path.join(PROJECT_DIR, 'manuscripts')
-for d in (PRESET_DIR, COVER_DIR, FONT_DIR, OUT_DIR, UPLOAD_DIR, PROJECT_DIR, PROJECT_MS_DIR):
+for d in (PRESET_DIR, COVER_DIR, COVER_ASSET_DIR, FONT_DIR, OUT_DIR, UPLOAD_DIR,
+          PROJECT_DIR, PROJECT_MS_DIR):
     os.makedirs(d, exist_ok=True)
 
 
@@ -104,8 +106,9 @@ def _seed_defaults():
 _seed_defaults()
 
 # the engine resolves font (and scene-break ornament) filenames against the same
-# writable font library
+# writable font library, and cover-art assets against the cover asset dir
 engine.FONT_DIR = FONT_DIR
+engine.COVER_ASSET_DIR = COVER_ASSET_DIR
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 app.secret_key = 'typeset-studio-local'
@@ -276,7 +279,20 @@ COVER_DEFAULTS = {
     'epigraph': {'size': 10.5, 'leading': 15, 'tracking': 0.2, 'color': 'muted',
                  'width': 0.62, 'top': 0.375},
     'studio': {'size': 8.5, 'tracking': 2.4, 'color': 'muted', 'y': 0.088},
+    # --- enrichment (all optional, backward-compatible) ---
+    'layout': 'centered',                        # centered | top | bottom | band
+    'background': {'image': '', 'vignette': 0.0,
+                   'overlay': {'color': 'bg_bottom', 'opacity': 0.0}},
+    'panel': {'enabled': False, 'color': 'bg_bottom', 'opacity': 0.55,
+              'top': 0.66, 'bottom': 0.34},      # translucent title panel
+    'emblems': [],                               # positioned logo/badge slots
 }
+
+COVER_LAYOUTS = ['centered', 'top', 'bottom', 'band']
+# palette keys an image overlay / panel may tint with (in addition to the 4 accents)
+COVER_FILL_KEYS = ['bg_bottom', 'bg_top', 'ink', 'gold', 'teal', 'muted']
+EMBLEM_SLOTS = ['top-center', 'top-left', 'top-right',
+                'center', 'bottom-center', 'bottom-left', 'bottom-right']
 
 # palette keys an element's colour may reference (the editor offers these as a dropdown)
 COVER_PALETTE_KEYS = ['gold', 'teal', 'ink', 'muted']
@@ -590,7 +606,41 @@ def parse_cover_form(form):
             'color':    form.get('std_color', 'muted'),
             'y':        _f(form, 'std_y', d['studio']['y']),
         },
+        'layout': (form.get('layout', 'centered')
+                   if form.get('layout', 'centered') in COVER_LAYOUTS else 'centered'),
+        'background': {
+            'image':    form.get('bg_image', '').strip(),
+            'vignette': _f(form, 'bg_vignette', 0.0),
+            'overlay': {
+                'color':   form.get('bg_overlay_color', 'bg_bottom'),
+                'opacity': _f(form, 'bg_overlay_opacity', 0.0),
+            },
+        },
+        'panel': {
+            'enabled': 'panel_enabled' in form,
+            'color':   form.get('panel_color', 'bg_bottom'),
+            'opacity': _f(form, 'panel_opacity', 0.55),
+            'top':     _f(form, 'panel_top', 0.66),
+            'bottom':  _f(form, 'panel_bottom', 0.34),
+        },
+        'emblems': _parse_emblems(form),
     }
+
+
+def _parse_emblems(form):
+    """Up to two positioned emblem slots from the flat cover form."""
+    out = []
+    for i in (1, 2):
+        img = form.get(f'emblem{i}_image', '').strip()
+        if not img:
+            continue
+        slot = form.get(f'emblem{i}_slot', 'top-center')
+        out.append({
+            'image': img,
+            'slot':  slot if slot in EMBLEM_SLOTS else 'top-center',
+            'w':     _f(form, f'emblem{i}_w', 0.7),
+        })
+    return out
 
 
 # ----------------------------------------------------------------- routes
@@ -656,7 +706,8 @@ def covers():
 def cover_new():
     return render_template('cover_editor.html', cid=None, c=COVER_DEFAULTS,
                            is_new=True, fonts=list_fonts(),
-                           palette_keys=COVER_PALETTE_KEYS,
+                           palette_keys=COVER_PALETTE_KEYS, fill_keys=COVER_FILL_KEYS,
+                           layouts=COVER_LAYOUTS, emblem_slots=EMBLEM_SLOTS,
                            wrap_projects=_projects_for_wrap(),
                            wrap_retailers=WRAP_RETAILERS)
 
@@ -668,6 +719,8 @@ def cover_editor(cid):
         abort(404)
     return render_template('cover_editor.html', cid=cid, c=data, is_new=False,
                            fonts=list_fonts(), palette_keys=COVER_PALETTE_KEYS,
+                           fill_keys=COVER_FILL_KEYS, layouts=COVER_LAYOUTS,
+                           emblem_slots=EMBLEM_SLOTS,
                            wrap_projects=_projects_for_wrap(),
                            wrap_retailers=WRAP_RETAILERS)
 
@@ -751,6 +804,38 @@ def cover_preview():
     except Exception as exc:
         logging.error('cover preview failed: %s', traceback.format_exc())
         return jsonify({'ok': False, 'error': str(exc)})
+
+
+IMAGE_EXTS = ('.jpg', '.jpeg', '.png')
+
+
+@app.route('/cover/asset/upload', methods=['POST'])
+def cover_asset_upload():
+    """Store a cover-art asset (background image or emblem/logo) in the asset
+    library and return its filename for the template to reference."""
+    f = request.files.get('asset')
+    if not f or not f.filename:
+        return jsonify({'ok': False, 'error': 'No file provided.'})
+    ext = os.path.splitext(secure_filename(f.filename))[1].lower()
+    if ext not in IMAGE_EXTS:
+        return jsonify({'ok': False, 'error': 'Use a .jpg or .png image.'})
+    base = secure_filename(os.path.splitext(f.filename)[0]) or 'asset'
+    fn, dest, i = base + ext, os.path.join(COVER_ASSET_DIR, base + ext), 1
+    while os.path.exists(dest):
+        fn = f'{base}-{i}{ext}'
+        dest = os.path.join(COVER_ASSET_DIR, fn)
+        i += 1
+    f.save(dest)
+    try:                                             # reject anything Pillow can't read
+        from PIL import Image
+        Image.open(dest).verify()
+    except Exception:
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
+        return jsonify({'ok': False, 'error': 'That file is not a readable image.'})
+    return jsonify({'ok': True, 'filename': fn})
 
 
 def _save_back_image(f):

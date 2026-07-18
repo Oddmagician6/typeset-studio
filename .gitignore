@@ -7,6 +7,9 @@ out/
 # uploaded manuscripts (may contain client content)
 uploads/
 
+# uploaded cover-art assets (background images, emblems/logos)
+covers/assets/
+
 # Python bytecode
 __pycache__/
 *.pyc

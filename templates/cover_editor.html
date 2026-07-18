@@ -28,6 +28,12 @@
   .field textarea{resize:vertical;min-height:54px}
   .num{max-width:140px}
   .formbar{display:flex;gap:10px;align-items:center;padding:4px 0 0}
+  .img-pick-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .img-pick-row .img-name{flex:1 1 160px}
+  .img-pick-row .img-file{flex:1 1 180px;font-size:12px}
+  .img-status{min-height:1em;color:var(--muted)}
+  .check{display:flex;align-items:center;gap:8px;margin-top:20px;flex:1 1 140px}
+  .check label{font-size:13px;color:var(--ink);font-weight:600}
 
   .preview{position:sticky;top:22px}
   .preview .label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.2em;color:var(--faint);margin:0 0 8px}
@@ -66,6 +72,36 @@
     <select name="{{ name }}">
       {% for f in fonts %}<option value="{{ f }}" {{ 'selected' if value==f }}>{{ f }}</option>{% endfor %}
     </select></div>
+{%- endmacro %}
+
+{# colour dropdown over the fill keys (backgrounds/overlay/panel) #}
+{% macro fk(label, name, value) %}
+  <div class="field"><label>{{ label }}</label><span class="hint">palette colour</span>
+    <select name="{{ name }}">
+      {% for k in fill_keys %}<option value="{{ k }}" {{ 'selected' if value==k }}>{{ k }}</option>{% endfor %}
+    </select></div>
+{%- endmacro %}
+
+{# generic labelled select over a list of string options #}
+{% macro sel(label, name, value, opts, hint='') %}
+  <div class="field"><label>{{ label }}</label>{% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+    <select name="{{ name }}">
+      {% for o in opts %}<option value="{{ o }}" {{ 'selected' if value==o }}>{{ o }}</option>{% endfor %}
+    </select></div>
+{%- endmacro %}
+
+{# image-asset picker: a file input that uploads on select and writes the resulting
+   filename into a text field (the only one with a name, so it round-trips) #}
+{% macro imgpick(label, name, value, hint='') %}
+  <div class="field wide img-pick"><label>{{ label }}</label>
+    {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+    <div class="img-pick-row">
+      <input type="text" name="{{ name }}" value="{{ value or '' }}" placeholder="no image"
+             readonly class="img-name">
+      <input type="file" accept=".jpg,.jpeg,.png" class="img-file" data-target="{{ name }}">
+      <button type="button" class="btn btn-sm img-clear" data-target="{{ name }}">Clear</button>
+    </div>
+    <span class="hint img-status"></span></div>
 {%- endmacro %}
 
 {% block body %}
@@ -150,6 +186,75 @@
             {{ cp('Teal', 'pal_teal', c.palette.teal) }}
             {{ cp('Ink', 'pal_ink', c.palette.ink) }}
             {{ cp('Muted', 'pal_muted', c.palette.muted) }}
+          </div>
+        </div>
+      </fieldset>
+
+      {% set bg = c.get('background', {}) %}
+      {% set ov = bg.get('overlay', {}) %}
+      {% set pnl = c.get('panel', {}) %}
+      {% set ems = c.get('emblems', []) %}
+      {% set em1 = ems[0] if ems|length > 0 else {} %}
+      {% set em2 = ems[1] if ems|length > 1 else {} %}
+
+      <fieldset>
+        <legend>Layout &amp; background</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ sel('Layout', 'layout', c.get('layout', 'centered'), layouts,
+                   'title placement archetype') }}
+          </div>
+          <div class="row">
+            {{ imgpick('Background image', 'bg_image', bg.get('image', ''),
+                       'optional · full-bleed art behind the frame · .jpg / .png · cover-fit (cropped to fill)') }}
+          </div>
+          <div class="row">
+            {{ nf('Vignette', 'bg_vignette', bg.get('vignette', 0.0), '0–1 edge darkening') }}
+            {{ fk('Overlay colour', 'bg_overlay_color', ov.get('color', 'bg_bottom')) }}
+            {{ nf('Overlay opacity', 'bg_overlay_opacity', ov.get('opacity', 0.0), '0–1 tint over the art') }}
+          </div>
+          <p class="hint" style="margin-top:12px">Use a vignette or a low-opacity overlay to keep
+            the title readable over busy art. The <code>band</code> layout adds a title panel for you.</p>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Title panel</legend>
+        <div class="fs-body">
+          <p class="hint" style="margin:2px 0 0">A translucent panel behind the title, for legibility
+            over background art. Always on for the <code>band</code> layout; tick to add it to any layout.</p>
+          <div class="row">
+            <div class="check"><input type="checkbox" id="panel_enabled" name="panel_enabled" value="1"
+                 {{ 'checked' if pnl.get('enabled') }}>
+              <label for="panel_enabled">Enable panel</label></div>
+            {{ fk('Panel colour', 'panel_color', pnl.get('color', 'bg_bottom')) }}
+            {{ nf('Opacity', 'panel_opacity', pnl.get('opacity', 0.55), '0–1') }}
+          </div>
+          <div class="row">
+            {{ nf('Top', 'panel_top', pnl.get('top', 0.66), '0–1 up the page') }}
+            {{ nf('Bottom', 'panel_bottom', pnl.get('bottom', 0.34), '0–1 up the page') }}
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Emblems · logo / badge slots</legend>
+        <div class="fs-body">
+          <p class="hint" style="margin:2px 0 0">Up to two positioned images (publisher logo, series
+            badge, author mark). Transparent PNGs work best. Fixed slots, not freeform placement.</p>
+          <div class="row">
+            {{ imgpick('Emblem 1 image', 'emblem1_image', em1.get('image', '')) }}
+          </div>
+          <div class="row">
+            {{ sel('Slot', 'emblem1_slot', em1.get('slot', 'top-center'), emblem_slots) }}
+            {{ nf('Width', 'emblem1_w', em1.get('w', 0.7), 'inches') }}
+          </div>
+          <div class="row">
+            {{ imgpick('Emblem 2 image', 'emblem2_image', em2.get('image', '')) }}
+          </div>
+          <div class="row">
+            {{ sel('Slot', 'emblem2_slot', em2.get('slot', 'bottom-center'), emblem_slots) }}
+            {{ nf('Width', 'emblem2_w', em2.get('w', 0.6), 'inches') }}
           </div>
         </div>
       </fieldset>
@@ -474,6 +579,39 @@
           URL.revokeObjectURL(url);
           wstatus.textContent = 'Downloaded.';
         } catch (e) { wstatus.textContent = 'Wrap failed.'; }
+      });
+
+      // -- Image asset pickers: upload on select, write filename into the text field
+      Array.prototype.forEach.call(document.querySelectorAll('.img-file'), function (fileInput) {
+        var wrap = fileInput.closest('.img-pick');
+        var nameField = form.querySelector('[name="' + fileInput.dataset.target + '"]');
+        var st = wrap ? wrap.querySelector('.img-status') : null;
+        fileInput.addEventListener('change', async function () {
+          var f = fileInput.files && fileInput.files[0];
+          if (!f) return;
+          if (st) st.textContent = 'Uploading…';
+          var fd = new FormData(); fd.append('asset', f);
+          try {
+            var res = await fetch('/cover/asset/upload', { method: 'POST', body: fd });
+            var json = await res.json();
+            if (json.ok) {
+              if (nameField) nameField.value = json.filename;
+              if (st) st.textContent = 'Using ' + json.filename;
+              render();
+            } else if (st) { st.textContent = json.error || 'Upload failed.'; }
+          } catch (e) { if (st) st.textContent = 'Upload failed.'; }
+          fileInput.value = '';
+        });
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.img-clear'), function (btn) {
+        btn.addEventListener('click', function () {
+          var nameField = form.querySelector('[name="' + btn.dataset.target + '"]');
+          if (nameField) nameField.value = '';
+          var wrap = btn.closest('.img-pick');
+          var st = wrap && wrap.querySelector('.img-status');
+          if (st) st.textContent = '';
+          render();
+        });
       });
 
       form.addEventListener('input', schedule);

@@ -46,9 +46,33 @@ except Exception:
     _HAVE_PIL = False
 
 FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
+# Cover art assets (background images, emblems/logos). App points this at the
+# writable data dir; falls back to the repo folder in dev.
+COVER_ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'covers', 'assets')
 
 
 # ---------------------------------------------------------------- cover helpers
+def _num(v, default=0.0):
+    """Best-effort float, for optional numeric template fields."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _cover_asset_path(name):
+    """Resolve a cover-asset filename against the asset dir, font dir, or abs path."""
+    if not name:
+        return None
+    if os.path.isabs(name):
+        return name
+    for base in (COVER_ASSET_DIR, FONT_DIR):
+        p = os.path.join(base, name)
+        if os.path.exists(p):
+            return p
+    return os.path.join(COVER_ASSET_DIR, name)   # default (may not exist yet)
+
+
 def _hex(s):
     """'#rrggbb' / '#rgb' -> reportlab Color. Falls back to black."""
     s = str(s).lstrip('#')
@@ -158,6 +182,151 @@ def _paint_gradient(canv, pal, x, y, w, h):
     canv.restoreState()
 
 
+# Layout archetypes: each supplies vertical fractions for the title cluster and
+# the epigraph. 'centered' is empty so the template's own y-values (and the six
+# shipped covers) are used verbatim — fully backward-compatible.
+_COVER_LAYOUTS = {
+    'centered': {},
+    'top':    {'collection_top': 0.90, 'kicker': 0.865, 'title': 0.805, 'epigraph': 0.30},
+    'bottom': {'collection_top': 0.90, 'kicker': 0.475, 'title': 0.415, 'epigraph': 0.82},
+    'band':   {'collection_top': 0.90, 'kicker': 0.585, 'title': 0.525, 'epigraph': 0.30},
+}
+
+
+def _paint_background(canv, tpl, x0, y0, w, h):
+    """Optional full-bleed background inside (x0,y0,w,h): art image (cover-fit),
+    edge vignette, then a flat colour overlay. Drawn over the base gradient and
+    under the border + text, so the frame and type stay crisp on top of art."""
+    bg = tpl.get('background', {})
+    if not isinstance(bg, dict) or not bg:
+        return
+    img = bg.get('image', '')
+    if isinstance(img, str) and img.strip():
+        path = _cover_asset_path(img.strip())
+        if path and os.path.exists(path):
+            try:
+                from reportlab.lib.utils import ImageReader
+                ir = ImageReader(path)
+                iw, ih = ir.getSize()
+                scale = max(w / iw, h / ih) if iw and ih else 1.0
+                dw, dh = iw * scale, ih * scale          # cover-fit: fill then crop
+                canv.saveState()
+                p = canv.beginPath()
+                p.rect(x0, y0, w, h)
+                canv.clipPath(p, stroke=0, fill=0)
+                canv.drawImage(ir, x0 + (w - dw) / 2.0, y0 + (h - dh) / 2.0,
+                               width=dw, height=dh, mask='auto')
+                canv.restoreState()
+            except Exception:
+                pass
+    vig = _num(bg.get('vignette', 0))
+    if vig > 0:
+        _paint_vignette(canv, x0, y0, w, h, min(vig, 1.0))
+    ov = bg.get('overlay', {})
+    op = _num(ov.get('opacity', 0)) if isinstance(ov, dict) else 0.0
+    if op > 0:
+        canv.saveState()
+        canv.setFillColor(_pal_color(tpl, ov.get('color', '#000000')))
+        canv.setFillAlpha(min(op, 1.0))
+        canv.rect(x0, y0, w, h, stroke=0, fill=1)
+        canv.setFillAlpha(1.0)
+        canv.restoreState()
+
+
+def _paint_vignette(canv, x0, y0, w, h, strength):
+    """Soft edge-darkening: concentric translucent frame bands, darker at the edge.
+    Each band is four non-overlapping strips, so alpha never double-composites."""
+    rings = 10
+    canv.saveState()
+    canv.setFillColorRGB(0, 0, 0)
+    for i in range(rings):
+        ta = i / float(rings)                            # 0 outer .. ->1 centre
+        tb = (i + 1) / float(rings)
+        alpha = strength * 0.13 * (1.0 - ta)             # outer bands darker
+        if alpha <= 0.002:
+            continue
+        ax, ay = (w * 0.5) * ta, (h * 0.5) * ta
+        bx, by = (w * 0.5) * tb, (h * 0.5) * tb
+        canv.setFillAlpha(alpha)
+        canv.rect(x0 + ax, y0 + ay, bx - ax, h - 2 * ay, stroke=0, fill=1)          # left
+        canv.rect(x0 + w - bx, y0 + ay, bx - ax, h - 2 * ay, stroke=0, fill=1)      # right
+        canv.rect(x0 + bx, y0 + h - by, w - 2 * bx, by - ay, stroke=0, fill=1)      # top
+        canv.rect(x0 + bx, y0 + ay, w - 2 * bx, by - ay, stroke=0, fill=1)          # bottom
+    canv.setFillAlpha(1.0)
+    canv.restoreState()
+
+
+def _paint_title_panel(canv, tpl, x0, y0, w, h):
+    """Translucent panel behind the title cluster (layout 'band' / explicit 'panel').
+    Keeps the title legible over background art regardless of the art's tones."""
+    pn = tpl.get('panel', {})
+    pn = pn if isinstance(pn, dict) else {}
+    top = _num(pn.get('top', 0.66), 0.66)
+    bot = _num(pn.get('bottom', 0.34), 0.34)
+    opacity = _num(pn.get('opacity', 0.55), 0.55)
+    b = tpl.get('border', {})
+    inset = b.get('inset', 0.42) * inch
+    gap = b.get('gap', 0.055) * inch
+    px0 = x0 + inset + gap * 2
+    px1 = x0 + w - inset - gap * 2
+    py0 = y0 + h * min(top, bot)
+    py1 = y0 + h * max(top, bot)
+    canv.saveState()
+    canv.setFillColor(_pal_color(tpl, pn.get('color', 'bg_bottom')))
+    canv.setFillAlpha(min(max(opacity, 0.0), 1.0))
+    canv.rect(px0, py0, px1 - px0, py1 - py0, stroke=0, fill=1)
+    canv.setFillAlpha(1.0)
+    canv.restoreState()
+
+
+def _slot_xy(slot, x0, y0, w, h, tw, th, margin):
+    """Lower-left corner for an emblem of size (tw,th) at a named slot."""
+    slot = (slot or 'top-center').lower()
+    if 'left' in slot:
+        x = x0 + margin
+    elif 'right' in slot:
+        x = x0 + w - margin - tw
+    else:
+        x = x0 + (w - tw) / 2.0
+    if 'top' in slot:
+        y = y0 + h - margin - th
+    elif 'bottom' in slot:
+        y = y0 + margin
+    else:
+        y = y0 + (h - th) / 2.0
+    return x, y
+
+
+def _paint_emblems(canv, tpl, x0, y0, w, h):
+    """Positioned image slots (logo, series badge, author mark) — fixed slots, not
+    freeform placement. Drawn on top of the panel so a small mark reads clearly."""
+    ems = tpl.get('emblems', [])
+    if not isinstance(ems, list):
+        return
+    b = tpl.get('border', {})
+    margin = (b.get('inset', 0.42) + 0.14) * inch
+    from reportlab.lib.utils import ImageReader
+    for em in ems:
+        if not isinstance(em, dict):
+            continue
+        name = (em.get('image') or '').strip()
+        if not name:
+            continue
+        path = _cover_asset_path(name)
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            ir = ImageReader(path)
+            iw, ih = ir.getSize()
+            tw = max(_num(em.get('w', 0.7), 0.7), 0.1) * inch
+            th = tw * (ih / iw) if iw else tw
+            fx, fy = _slot_xy(em.get('slot'), x0, y0, w, h, tw, th, margin)
+            canv.drawImage(ir, fx, fy, width=tw, height=th,
+                           preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+
+
 def _paint_border(canv, tpl, x0, y0, w, h):
     """Double rule + outward corner brackets inset into (x0,y0,w,h). Returns inner box."""
     b = tpl.get('border', {})
@@ -190,6 +359,16 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h):
     bx0, by0, bx1, by1, gap = _paint_border(canv, tpl, x0, y0, w, h)
     inner_w = (bx1 - bx0) - 2 * gap
 
+    # layout archetype: supplies vertical fractions for the title cluster; an
+    # empty dict ('centered') defers to the template's own y-values.
+    layname = tpl.get('layout', 'centered')
+    lay = _COVER_LAYOUTS.get(layname, {})
+
+    # translucent title panel: implicit for the 'band' archetype, else opt-in
+    pn = tpl.get('panel')
+    if layname == 'band' or (isinstance(pn, dict) and pn.get('enabled')):
+        _paint_title_panel(canv, tpl, x0, y0, w, h)
+
     def yat(frac):
         return y0 + h * frac
 
@@ -198,7 +377,7 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h):
     coll = (meta.get('cover_collection') or '').upper()
     if coll:
         canv.setFillColor(_pal_color(tpl, cc.get('color', 'gold')))
-        _tracked_centre(canv, cx, yat(cc.get('top', 0.70)), coll,
+        _tracked_centre(canv, cx, yat(lay.get('collection_top', cc.get('top', 0.70))), coll,
                         cf['serif'], cc.get('size', 12.5), cc.get('tracking', 3.4))
 
     # kicker (italic)
@@ -206,13 +385,14 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h):
     kick = meta.get('cover_kicker', '')
     if kick:
         canv.setFillColor(_pal_color(tpl, kk.get('color', 'muted')))
-        _tracked_centre(canv, cx, yat(kk.get('y', 0.665)), kick,
+        _tracked_centre(canv, cx, yat(lay.get('kicker', kk.get('y', 0.665))), kick,
                         cf['italic'], kk.get('size', 11), kk.get('tracking', 0.4))
 
     # title — wrapped, letterspaced, shrink-to-fit
     tt = tpl.get('title', {})
+    title_y = lay.get('title', tt.get('y', 0.585))
     title = (meta.get('title') or '').upper()
-    last_y = yat(tt.get('y', 0.585))
+    last_y = yat(title_y)
     tsize = tt.get('size', 40)
     if title:
         maxw = inner_w - 0.4 * inch
@@ -225,7 +405,7 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h):
             lines = _wrap_tracked(title, cf['display'], tsize, maxw, trk)
         leading = tt.get('leading', 46) * (tsize / tt.get('size', 40))
         canv.setFillColor(_pal_color(tpl, tt.get('color', 'gold')))
-        yy = yat(tt.get('y', 0.585))
+        yy = yat(title_y)
         for ln in lines:
             _tracked_centre(canv, cx, yy, ln, cf['display'], tsize, trk)
             last_y = yy
@@ -267,7 +447,7 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h):
         lines = _wrap_tracked(epi, cf['italic'], ep.get('size', 10.5),
                               ew, ep.get('tracking', 0.2))
         canv.setFillColor(_pal_color(tpl, ep.get('color', 'muted')))
-        yy = yat(ep.get('top', 0.375))
+        yy = yat(lay.get('epigraph', ep.get('top', 0.375)))
         for ln in lines:
             _tracked_centre(canv, cx, yy, ln, cf['italic'],
                             ep.get('size', 10.5), ep.get('tracking', 0.2))
@@ -284,6 +464,9 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h):
         canv.setFillColor(_pal_color(tpl, st.get('color', 'muted')))
         _tracked_centre(canv, cx, yat(st.get('y', 0.088)), studio,
                         cf['serif'], st.get('size', 8.5), st.get('tracking', 2.4))
+
+    # positioned emblem/logo slots (on top of everything)
+    _paint_emblems(canv, tpl, x0, y0, w, h)
     canv.restoreState()
 
 
@@ -428,6 +611,7 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
     front_x = bl + tw + sp
     _paint_back_panel(c, tpl, cf, meta, back_x, bl, tw, th)
     _paint_spine(c, tpl, cf, meta, spine_x, bl, sp, th, draw_text=draw_spine)
+    _paint_background(c, tpl, front_x, bl, tw, th)
     _paint_cover_panel(c, tpl, cf, meta, front_x, bl, tw, th)
     if guides:
         _paint_wrap_guides(c, W, H, bl, tw, sp, th)
@@ -699,6 +883,7 @@ class BookDoc(BaseDocTemplate):
         cf  = cv.get('fonts', {'display': self.head_font,
                                'serif': self.head_font, 'italic': self.head_font})
         _paint_gradient(canv, tpl.get('palette', {}), 0, 0, self._pw, self._ph)
+        _paint_background(canv, tpl, 0, 0, self._pw, self._ph)
         _paint_cover_panel(canv, tpl, cf, self.meta, 0, 0, self._pw, self._ph)
 
     def handle_pageBegin(self):
