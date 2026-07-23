@@ -135,6 +135,19 @@
     @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
   }
   :focus-visible{outline:2px solid var(--red);outline-offset:2px}
+
+  /* ---- cover design-gallery picker (Generate + project edit) ---- */
+  .cover-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:12px;margin-top:8px}
+  .cover-tile{position:relative;display:flex;flex-direction:column;gap:6px;cursor:pointer;
+    border:1px solid var(--rule);border-radius:4px;padding:6px;background:var(--surface-2);
+    transition:border-color .12s,box-shadow .12s}
+  .cover-tile:hover{border-color:var(--rule-strong)}
+  .cover-tile input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+  .cover-tile img{width:100%;display:block;border-radius:2px;aspect-ratio:2/3;object-fit:cover;
+    background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+  .cover-tile .cap{font-size:12px;color:var(--ink);text-align:center;line-height:1.25}
+  .cover-tile:has(input:checked){border-color:var(--red);box-shadow:0 0 0 2px rgba(177,42,29,.18)}
+  .cover-tile:has(input:focus-visible){border-color:var(--red)}
   {% block style %}{% endblock %}
 </style>
 </head>

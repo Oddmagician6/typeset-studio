@@ -91,12 +91,20 @@
             <strong>author</strong> line come from this book's Title and Author automatically.
             The fields below add the smaller lines around them.</p>
           <div class="row">
-            <div class="field"><label>Template</label>
-              <select name="cover_template">
+            <div class="field wide"><label>Template</label>
+              <span class="hint">pick a house style below</span>
+              {% set ctpl = proj.get('cover_template','') %}
+              <div class="cover-gallery">
                 {% for c in cover_templates %}
-                  <option value="{{ c.id }}" {{ 'selected' if proj.get('cover_template')==c.id }}>{{ c.data.name }}</option>
+                  <label class="cover-tile" title="{{ c.data.description or c.data.name }}">
+                    <input type="radio" name="cover_template" value="{{ c.id }}"
+                           {{ 'checked' if ctpl==c.id }}>
+                    <img src="{{ url_for('cover_thumb', cid=c.id) }}"
+                         alt="{{ c.data.name }}" loading="lazy">
+                    <span class="cap">{{ c.data.name }}</span>
+                  </label>
                 {% endfor %}
-              </select></div>
+              </div></div>
           </div>
           <div class="row">
             <div class="field"><label>Series / imprint</label><span class="hint">small-caps line, top &amp; bottom</span>
