@@ -80,8 +80,9 @@ OUT_DIR       = os.path.join(DATA_DIR, 'out')
 UPLOAD_DIR    = os.path.join(DATA_DIR, 'uploads')
 PROJECT_DIR   = os.path.join(DATA_DIR, 'projects')
 PROJECT_MS_DIR = os.path.join(PROJECT_DIR, 'manuscripts')
+COVER_THUMB_DIR = os.path.join(OUT_DIR, '_cover_thumbs')   # cached gallery-picker tiles
 for d in (PRESET_DIR, COVER_DIR, COVER_ASSET_DIR, FONT_DIR, OUT_DIR, UPLOAD_DIR,
-          PROJECT_DIR, PROJECT_MS_DIR):
+          PROJECT_DIR, PROJECT_MS_DIR, COVER_THUMB_DIR):
     os.makedirs(d, exist_ok=True)
 
 
@@ -280,6 +281,7 @@ COVER_DEFAULTS = {
                  'width': 0.62, 'top': 0.375},
     'studio': {'size': 8.5, 'tracking': 2.4, 'color': 'muted', 'y': 0.088},
     # --- enrichment (all optional, backward-compatible) ---
+    'design': 'classic-frame',                   # classic-frame | photographic (design family)
     'layout': 'centered',                        # centered | top | bottom | band
     'background': {'image': '', 'vignette': 0.0,
                    'overlay': {'color': 'bg_bottom', 'opacity': 0.0}},
@@ -288,6 +290,8 @@ COVER_DEFAULTS = {
     'emblems': [],                               # positioned logo/badge slots
 }
 
+# cover design families (front-cover renderer selected by the template's `design` key)
+COVER_DESIGNS = ['classic-frame', 'photographic', 'typographic', 'geometric', 'vintage']
 COVER_LAYOUTS = ['centered', 'top', 'bottom', 'band']
 # palette keys an image overlay / panel may tint with (in addition to the 4 accents)
 COVER_FILL_KEYS = ['bg_bottom', 'bg_top', 'ink', 'gold', 'teal', 'muted']
@@ -531,6 +535,20 @@ def _hexf(form, key, default):
     return v if re.fullmatch(r'#[0-9a-fA-F]{6}', v) else default
 
 
+def _existing_photo(form):
+    """Preserve a template's advanced photographic `photo` block across a browser save.
+    The editor has no per-field photo controls yet, so it round-trips the whole block as
+    a hidden JSON field; absent/invalid -> {} (the renderer then uses its own defaults)."""
+    raw = (form.get('photo_json') or '').strip()
+    if not raw:
+        return {}
+    try:
+        val = json.loads(raw)
+        return val if isinstance(val, dict) else {}
+    except Exception:
+        return {}
+
+
 def parse_cover_form(form):
     """Flat cover-editor form fields -> the nested covers/*.json schema."""
     d = COVER_DEFAULTS
@@ -606,6 +624,11 @@ def parse_cover_form(form):
             'color':    form.get('std_color', 'muted'),
             'y':        _f(form, 'std_y', d['studio']['y']),
         },
+        'design': (form.get('design', 'classic-frame')
+                   if form.get('design', 'classic-frame') in COVER_DESIGNS else 'classic-frame'),
+        # advanced photographic fine-tuning (`photo` dict) is JSON-only for now; preserve
+        # it verbatim if a hand-authored template carries it so a browser save won't drop it.
+        'photo': _existing_photo(form),
         'layout': (form.get('layout', 'centered')
                    if form.get('layout', 'centered') in COVER_LAYOUTS else 'centered'),
         'background': {
@@ -707,7 +730,8 @@ def cover_new():
     return render_template('cover_editor.html', cid=None, c=COVER_DEFAULTS,
                            is_new=True, fonts=list_fonts(),
                            palette_keys=COVER_PALETTE_KEYS, fill_keys=COVER_FILL_KEYS,
-                           layouts=COVER_LAYOUTS, emblem_slots=EMBLEM_SLOTS,
+                           layouts=COVER_LAYOUTS, designs=COVER_DESIGNS,
+                           emblem_slots=EMBLEM_SLOTS,
                            wrap_projects=_projects_for_wrap(),
                            wrap_retailers=WRAP_RETAILERS)
 
@@ -720,7 +744,7 @@ def cover_editor(cid):
     return render_template('cover_editor.html', cid=cid, c=data, is_new=False,
                            fonts=list_fonts(), palette_keys=COVER_PALETTE_KEYS,
                            fill_keys=COVER_FILL_KEYS, layouts=COVER_LAYOUTS,
-                           emblem_slots=EMBLEM_SLOTS,
+                           designs=COVER_DESIGNS, emblem_slots=EMBLEM_SLOTS,
                            wrap_projects=_projects_for_wrap(),
                            wrap_retailers=WRAP_RETAILERS)
 
@@ -755,6 +779,77 @@ def cover_delete(cid):
         os.remove(path)
         flash('Cover template deleted.')
     return redirect(url_for('covers'))
+
+
+def _cover_thumb_bytes(cid):
+    """Front-cover PNG for a template, cached to disk and keyed by the JSON's mtime
+    (an edit/save bumps mtime → the tile regenerates). Returns None if the template
+    is missing or the rasterizer isn't available. Powers the gallery picker."""
+    cid = secure_filename(cid)
+    src = os.path.join(COVER_DIR, cid + '.json')
+    if not cid or not os.path.exists(src):
+        return None
+    cache = os.path.join(COVER_THUMB_DIR, cid + '.png')
+    if os.path.exists(cache) and os.path.getmtime(cache) >= os.path.getmtime(src):
+        try:
+            with open(cache, 'rb') as f:
+                return f.read()
+        except OSError:
+            pass
+    try:
+        import fitz
+    except ImportError:
+        return None
+    tpl = load_cover_template(cid)
+    if tpl is None:
+        return None
+    preset = dict(DEFAULTS)
+    preset['trim'] = {'w': 6.0, 'h': 9.0}
+    meta = {
+        'title': 'The Salt Road', 'author': 'Ellinor Vale',
+        'year': '2026', 'publisher': 'Studio',
+        'front_matter': 'none', 'right_hand_starts': False, 'smartquotes': True,
+        'cover_mode': 'designed', 'cover_template': cid, 'cover_template_data': tpl,
+        'cover_collection': 'Sample Series', 'cover_kicker': '',
+        'cover_accent': '', 'cover_epigraph': '', 'cover_studio': 'Studio',
+        'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
+        'dedication': '', 'epigraph': '', 'acknowledgments': '',
+        'about_author': '', 'also_by': '',
+    }
+    ms = manuscript.parse_markdown(PREVIEW_SAMPLE, smartquotes=True)
+    fd, tmp_path = tempfile.mkstemp(suffix='.pdf')
+    os.close(fd)
+    try:
+        engine.build_pdf(ms, preset, tmp_path, meta)
+        doc = fitz.open(tmp_path)
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(0.9, 0.9), alpha=False)
+        png = pix.tobytes('png')
+        doc.close()
+        try:
+            with open(cache, 'wb') as f:
+                f.write(png)
+        except OSError:
+            pass
+        return png
+    except Exception:
+        logging.exception('cover thumbnail build failed for %s', cid)
+        return None
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+@app.route('/cover/thumb/<cid>.png')
+def cover_thumb(cid):
+    """Cached front-cover thumbnail for the gallery picker."""
+    png = _cover_thumb_bytes(cid)
+    if png is None:
+        abort(404)
+    # revalidate each load (cheap on localhost) so an edited template shows fresh art
+    return Response(png, mimetype='image/png',
+                    headers={'Cache-Control': 'no-cache'})
 
 
 @app.route('/cover/preview', methods=['POST'])

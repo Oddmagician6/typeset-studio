@@ -133,6 +133,27 @@
       </fieldset>
 
       <fieldset>
+        <legend>Design</legend>
+        <div class="fs-body">
+          <div class="row">
+            {{ sel('Design family', 'design', c.design or 'classic-frame', designs,
+                   'the front-cover renderer') }}
+          </div>
+          <p class="hint" style="margin-top:12px;line-height:1.6">
+            <strong>classic-frame</strong> — ornamented border + centred title.
+            <strong>photographic</strong> — full-bleed cover art with a large lower title over a
+            foot scrim (set art under <em>Layout &amp; background → Background image</em>).
+            <strong>typographic</strong> — oversized left-aligned title, no frame.
+            <strong>geometric</strong> — flat colour blocks with the title reversed out of a band.
+            <strong>vintage</strong> — top title between double rules + a foot author band.
+            Colours come from the palette below; some families read extra fine-tuning from a
+            per-design JSON block (<code>photo</code>/<code>typo</code>/<code>blocks</code>/<code>vintage</code>).</p>
+        </div>
+        {# advanced photographic fine-tuning is JSON-only for now; round-trip it untouched #}
+        <input type="hidden" name="photo_json" value='{{ (c.photo or {})|tojson }}'>
+      </fieldset>
+
+      <fieldset>
         <legend>Preview text · not saved</legend>
         <div class="fs-body">
           <div class="row">

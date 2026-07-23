@@ -10,6 +10,9 @@
   }
   .card .swatchbar{display:flex;height:8px}
   .card .swatchbar span{flex:1}
+  .card .thumb{display:flex;justify-content:center;padding:18px 22px 4px;background:var(--surface-2)}
+  .card .thumb img{width:150px;aspect-ratio:2/3;object-fit:cover;border-radius:2px;
+    box-shadow:0 2px 8px rgba(0,0,0,.22)}
   .card .specimen{padding:20px 22px 16px;border-bottom:1px solid var(--rule)}
   .card .specimen .name{font-family:var(--serif);font-size:22px;font-weight:600;line-height:1.15;margin:0}
   .card .specimen .desc{color:var(--muted);font-size:13.5px;margin:4px 0 0}
@@ -48,6 +51,9 @@
           <span style="background:{{ pal.gold or '#c6a866' }}"></span>
           <span style="background:{{ pal.teal or '#5fb2b2' }}"></span>
           <span style="background:{{ pal.muted or '#8b93a3' }}"></span>
+        </div>
+        <div class="thumb">
+          <img src="{{ url_for('cover_thumb', cid=item.id) }}" alt="{{ c.name }} preview" loading="lazy">
         </div>
         <div class="specimen">
           <p class="name">{{ c.name or 'Untitled cover' }}</p>

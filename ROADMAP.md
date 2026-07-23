@@ -550,6 +550,71 @@ rejection; band+bg+panel+emblem preview; save→load schema round-trip). The int
 PR #24. Not done: cover-asset delete/library UI; emblem opacity (ReportLab `drawImage` ignores fill
 alpha); background/emblems on the EPUB cover (EPUB stays image-only).
 
+**33. Cover design families — dispatch + full-bleed photographic** *(the "genuinely different
+designs" ask; the biggest lever after enrichment #32)*
+Addresses the top cover feedback — users wanting visibly *different* covers, not more recolors.
+Root cause: every template ran through **one** hardcoded composition (`_paint_cover_panel` — border
+frame + centred title + diamond ornament), so the six covers were skins of a single design; even the
+#32 layout archetypes only slid the *same* cluster around. Fix: a template `design` key selects a
+whole front-cover **renderer**, dispatched through a new `engine._paint_cover_front` (registry
+`_COVER_DESIGNS`). Absent → `classic-frame` = the existing `_paint_cover_panel`, so the six shipped
+covers (which set no `design`) render **byte-identically** — verified by rendered proofs. Both draw
+paths (`_draw_designed_cover`, `build_cover_wrap`) dispatch through the one entry point.
+- **New family: `photographic`** (`engine._design_photographic` + `_paint_bottom_scrim`) — full-bleed
+  cover art (reuses the #32 `background.image` plumbing, painted before dispatch) with a large
+  lower-anchored title over a soft foot **scrim** (stacked non-overlapping strips, no alpha
+  double-composite), a top series line, an author line over a short rule, and a studio footer. **No
+  border, no ornament** — a deliberately distinct trade look. Fine-tuning lives in an optional `photo`
+  dict (scrim opacity/height/colour, title y/size/leading, author size, rule) with sensible defaults,
+  so `{"design":"photographic","background":{"image":"…"}}` looks right with nothing else set.
+- `app.py`: `COVER_DEFAULTS['design']`, `COVER_DESIGNS` list, `parse_cover_form` carries `design` (bad
+  value → `classic-frame`) and preserves the JSON-only `photo` block via `_existing_photo` (hidden
+  `photo_json` field) so a browser save never drops it; `designs` passed to both editor routes.
+- `templates/cover_editor.html`: a **Design** fieldset (family selector + note) and the hidden
+  `photo_json`. Live preview + wrap post the whole form, so both pick up `design` unchanged.
+- `covers/photo-dusk.json`: a shipped photographic template (dusk palette, full schema so it round-trips
+  in the editor and still reads if toggled back to `classic-frame`); appears in the gallery + Generate
+  dropdown automatically. Verified: front + wrap PDF renders (art and no-art), a Flask test-client pass
+  (editor renders for the new + all old templates; preview builds; save→load persists `design`+`photo`).
+
+  **Three more families added same session** (`engine._design_typographic` / `_design_geometric` /
+  `_design_vintage`, shared helpers `_tracked_left` + `_fit_title_lines`; registered in `_COVER_DESIGNS`;
+  `app.COVER_DESIGNS` now lists all five; shipped templates `typographic-bold.json`, `geometric-block.json`,
+  `vintage-pulp.json`; each reads optional per-design tuning `typo`/`blocks`/`vintage`):
+  - **typographic** — oversized *left-aligned* display title filling the upper page + heavy accent rule +
+    tagline; no frame/art. **geometric** — flat colour-blocked ground (overpaints the gradient) with the
+    title reversed out of a bold band; series above, author below. **vintage** — top title bracketed by
+    double rules + italic tagline + a filled author band across the foot. All eyeballed via rendered proofs
+    and covered by the five-family test-client pass (every template's thumbnail + preview builds; classic
+    covers still default to `classic-frame`, unchanged).
+
+  **v1 follow-ups:** per-field editor controls for the `photo`/`typo`/`blocks`/`vintage` tuning blocks
+  (JSON-only for now); photographic art doesn't extend into the wrap **bleed** yet (base gradient covers
+  it); EPUB cover stays image-only. **Next up: the design-gallery picker (#34).**
+
+**34. Design-gallery picker — thumbnail tiles for choosing a cover** *(the discoverability lever for
+#32/#33; visibility, no engine change)*
+The per-book cover chooser was a plain name `<select>`, so the enrichment (#32) and design families
+(#33) were invisible until after a build. Now it's a **visual gallery**: a rendered front-cover
+thumbnail per template.
+- `app.py`: `_cover_thumb_bytes(cid)` renders page 1 of a designed cover over `DEFAULTS` + a fixed
+  neutral sample (title *The Salt Road* / *Ellinor Vale* / series + studio, so every family shows its
+  furniture), rasterized via PyMuPDF; **disk-cached** in `COVER_THUMB_DIR` (`out/_cover_thumbs`) and
+  keyed by the template JSON's **mtime**, so a Cover-Studio edit/save auto-refreshes the tile. Route
+  `/cover/thumb/<cid>.png` serves it (`Cache-Control: no-cache` to revalidate; 404 if the template is
+  gone). Reuses the #10/#16 preview rasterizer pattern — **no engine change**.
+- `templates/generate.html` + `project_edit.html`: the `<select name="cover_template">` becomes a
+  `.cover-gallery` of `.cover-tile` **radio** cards (thumbnail + name; the radio keeps the exact same
+  field name/value so the compose + project flows are unchanged). Selection highlight is CSS-only via
+  `:has(input:checked)` (Chromium/Edge-WebView — the app's runtime).
+- `templates/covers.html`: each management card gains a centred 150px thumbnail above the specimen.
+- `templates/base.html`: shared `.cover-gallery`/`.cover-tile` styles (one place for both pickers).
+Verified via a Flask test-client pass: thumbnails build + PNG-cache, cache is reused on repeat and
+**invalidates when the template changes**, missing template → 404, and all three pages
+(Generate / `/covers` / `project_edit`) render the tiles. Rendered thumbnails eyeballed
+(classic-frame vs photographic clearly distinct). Follow-ups: a "clear stale thumbs on template
+delete" sweep (harmless orphans today); optional hover-to-enlarge.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -804,8 +869,25 @@ reversal than the WYSIWYG one). The high-value, on-philosophy path is more *para
   colour overlay, plus a translucent title `panel`;
 - ~~a few positioned image/emblem "slots"~~ — **SHIPPED (feature #32):** `emblems` (≤2 fixed slots).
 These extended the existing `covers/*.json` renderer incrementally, keeping "good by default."
-Cover-enrichment backlog clear. Possible follow-ups: a cover-asset library/delete UI, and carrying
-backgrounds/emblems onto the EPUB cover (still image-only).
+
+**Update (post-#32): the feedback was "different *designs*", not more recolors.** The enrichment
+knobs above still skinned **one** hardcoded composition, so covers read as variations of a single
+framed look. The on-philosophy answer is **design families** — a small, curated set of distinct
+front-cover *renderers* selected by a `design` key — not a freeform canvas. **SHIPPED as feature
+#33:** the dispatch mechanism (`_paint_cover_front` / `_COVER_DESIGNS`, `classic-frame` default =
+byte-identical) + a first contrasting family, **`photographic`** (full-bleed art, no frame, large
+lower title over a foot scrim). This is still constrained + opinionated (pick a family, fill in text
+→ a professional cover); it just widens the *vocabulary* of looks rather than handing over a blank
+canvas. Remaining directions, ranked:
+- **Design-gallery picker — SHIPPED (feature #34).** The per-book template `<select>` (Generate +
+  `project_edit`) is now a **thumbnail gallery** of radio tiles, plus real thumbnails on the `/covers`
+  management cards, so authors *see* the families × palettes before choosing.
+- **More design families — SHIPPED (feature #33):** `typographic`, `geometric` (color-block), and
+  `vintage` (pulp) joined `photographic`, so five families now ship. Each is one renderer in
+  `_COVER_DESIGNS`; JSON still tunes color/font within it. Further families are cheap to add the same way.
+- **Per-field editor controls** for the `photo`/`typo`/`blocks`/`vintage` tuning blocks, currently JSON-only.
+- Older follow-ups: a cover-asset library/delete UI; photographic art into the wrap **bleed**;
+  carrying backgrounds/emblems/designs onto the EPUB cover (still image-only).
 
 ---
 

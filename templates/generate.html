@@ -98,14 +98,22 @@
 
         <div id="cover-designed" class="cover-panel">
           <div class="row">
-            <div class="field"><label>Template</label>
-              <span class="hint">house style — clone a covers/*.json to add more</span>
-              <select name="cover_template">
-                {% set ctpl = form.get('cover_template','ashforge-house') %}
+            <div class="field wide"><label>Template</label>
+              <span class="hint">house style — pick one below · clone a covers/*.json to add more</span>
+              {% set ctpl = form.get('cover_template','ashforge-house') %}
+              {% set ctpl = ctpl if cover_templates|selectattr('id','equalto',ctpl)|list
+                             else (cover_templates[0].id if cover_templates else '') %}
+              <div class="cover-gallery">
                 {% for c in cover_templates %}
-                  <option value="{{ c.id }}" {{ 'selected' if ctpl==c.id }}>{{ c.data.name }}</option>
+                  <label class="cover-tile" title="{{ c.data.description or c.data.name }}">
+                    <input type="radio" name="cover_template" value="{{ c.id }}"
+                           {{ 'checked' if ctpl==c.id }}>
+                    <img src="{{ url_for('cover_thumb', cid=c.id) }}"
+                         alt="{{ c.data.name }}" loading="lazy">
+                    <span class="cap">{{ c.data.name }}</span>
+                  </label>
                 {% endfor %}
-              </select></div>
+              </div></div>
           </div>
           <p class="hint" style="margin:10px 0 2px">The big <strong>title</strong> and the coloured
             <strong>author</strong> line come from your book's Title and Author (in the Title page

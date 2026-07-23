@@ -1,0 +1,53 @@
+{
+  "name": "Vintage Pulp",
+  "description": "A vintage paperback: top title between double rules, an italic tagline, and a gold author band across the foot. For mystery, adventure, and genre throwbacks.",
+  "design": "vintage",
+  "fonts": {
+    "display": "Book-Bold.ttf",
+    "serif": "Book-Regular.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "palette": {
+    "bg_top": "#241812",
+    "bg_bottom": "#0d0906",
+    "gold": "#d99a3a",
+    "teal": "#b5502a",
+    "ink": "#efe3c9",
+    "muted": "#a89170"
+  },
+  "border": {
+    "color": "gold", "inset": 0.42, "gap": 0.055, "line": 1.0,
+    "corner": 0.5, "corner_line": 1.3
+  },
+  "collection": { "size": 12, "tracking": 3.6, "color": "gold", "top": 0.9, "bottom": 0.115 },
+  "kicker": { "size": 13, "tracking": 0.3, "color": "muted", "y": 0.665, "leading": 18 },
+  "title": { "size": 46, "leading": 46, "tracking": 0.6, "color": "ink", "y": 0.77 },
+  "accent": { "size": 17, "tracking": 2.2, "color": "bg_bottom", "gap": 0.008 },
+  "ornament": { "color": "gold", "size": 2.4, "spacing": 9, "rule": 0.9, "rule_len": 0.8, "gap": 0.05 },
+  "epigraph": { "size": 11, "leading": 16, "tracking": 0.2, "color": "muted", "width": 0.7, "top": 0.46 },
+  "studio": { "size": 8.5, "tracking": 2.4, "color": "muted", "y": 0.028 },
+  "layout": "centered",
+  "background": { "image": "", "vignette": 0.32, "overlay": { "color": "bg_bottom", "opacity": 0.0 } },
+  "panel": { "enabled": false, "color": "bg_bottom", "opacity": 0.55, "top": 0.66, "bottom": 0.34 },
+  "emblems": [],
+  "vintage": {
+    "series_color": "gold",
+    "series_y": 0.925,
+    "rule_color": "gold",
+    "rule_line": 2.2,
+    "rule_line2": 0.9,
+    "rule_len": 0.86,
+    "top_rule_y": 0.855,
+    "title_color": "ink",
+    "title_size": 46,
+    "title_y": 0.77,
+    "title_leading": 1.05,
+    "tagline_color": "muted",
+    "tagline_y": 0.46,
+    "band": "gold",
+    "band_y": 0.06,
+    "band_height": 0.12,
+    "author_color": "bg_bottom",
+    "author_size": 17
+  }
+}

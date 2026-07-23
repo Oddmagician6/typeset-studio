@@ -1,0 +1,109 @@
+{
+  "name": "Photographic Dusk",
+  "description": "Full-bleed photographic design: your cover art fills the page with a large lower-anchored title over a soft foot scrim. Add art under Layout & background. A modern trade look for literary, thriller, and non-fiction.",
+  "design": "photographic",
+  "fonts": {
+    "display": "Book-Bold.ttf",
+    "serif": "Book-Regular.ttf",
+    "italic": "Book-Italic.ttf"
+  },
+  "palette": {
+    "bg_top": "#2b3440",
+    "bg_bottom": "#0a0d12",
+    "gold": "#d9c6a2",
+    "teal": "#9fb3c8",
+    "ink": "#f4f0e8",
+    "muted": "#9aa4b0"
+  },
+  "border": {
+    "color": "ink",
+    "inset": 0.42,
+    "gap": 0.055,
+    "line": 1.0,
+    "corner": 0.5,
+    "corner_line": 1.3
+  },
+  "collection": {
+    "size": 11.5,
+    "tracking": 3.6,
+    "color": "ink",
+    "top": 0.9,
+    "bottom": 0.115
+  },
+  "kicker": {
+    "size": 11,
+    "tracking": 0.4,
+    "color": "muted",
+    "y": 0.665
+  },
+  "title": {
+    "size": 52,
+    "leading": 50,
+    "tracking": 1.0,
+    "color": "ink",
+    "y": 0.3
+  },
+  "accent": {
+    "size": 18,
+    "tracking": 2.4,
+    "color": "ink",
+    "gap": 0.008
+  },
+  "ornament": {
+    "color": "ink",
+    "size": 2.2,
+    "spacing": 9,
+    "rule": 0.8,
+    "rule_len": 0.7,
+    "gap": 0.05
+  },
+  "epigraph": {
+    "size": 10.5,
+    "leading": 15,
+    "tracking": 0.2,
+    "color": "muted",
+    "width": 0.62,
+    "top": 0.26
+  },
+  "studio": {
+    "size": 8.5,
+    "tracking": 2.6,
+    "color": "muted",
+    "y": 0.06
+  },
+  "layout": "centered",
+  "background": {
+    "image": "",
+    "vignette": 0.28,
+    "overlay": {
+      "color": "bg_bottom",
+      "opacity": 0.0
+    }
+  },
+  "panel": {
+    "enabled": false,
+    "color": "bg_bottom",
+    "opacity": 0.55,
+    "top": 0.66,
+    "bottom": 0.34
+  },
+  "emblems": [],
+  "photo": {
+    "scrim": "bg_bottom",
+    "scrim_opacity": 0.82,
+    "scrim_height": 0.58,
+    "ink": "ink",
+    "title_color": "ink",
+    "title_y": 0.3,
+    "title_size": 52,
+    "title_leading": 1.08,
+    "author_color": "ink",
+    "author_size": 18,
+    "collection_color": "ink",
+    "collection_y": 0.9,
+    "studio_color": "muted",
+    "rule": true,
+    "rule_len": 0.11,
+    "rule_line": 1.0
+  }
+}
