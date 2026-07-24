@@ -722,6 +722,63 @@ dot leaders and part headings; `_estimate_toc_pages()`; two-pass in `build_pdf()
 `epub.py` (`_toc_page_xhtml()` clickable chapter list) · `templates/generate.html` +
 `templates/project_edit.html` (Include table of contents checkbox, off by default).
 
+### ✓ Discoverability & UX pass — shipped
+
+Five changes from a walkthrough review aimed at first impressions and everyday flow
+(commits `321a2ed`, `5205418`, `696feb8`, `72b2413`, `a3382f6` on `master`; shipped in v1.1.0).
+
+**38. Favicon + share metadata + OG card** *(discoverability; base template + one route, no engine change)*
+`app.py` (`/favicon.ico` serves the bundled `app.ico`) · `typeset-studio.spec` (bundles `app.ico`
+into the frozen build's data files so the route works when installed, not just as the exe icon) ·
+`templates/base.html` (`<meta description>`, favicon links, `theme-color`, and Open Graph /
+Twitter `summary_large_image` tags — `og:title` inherits each page's `<title>` via Jinja block
+references, so a shared `/covers` link reads "Covers · Typeset Studio") · `static/og-typeset-studio.jpg`
+(1200×630 share card drawn with Pillow using the bundled Book fonts). Tabs/bookmarks now get an icon
+and shared links render a card. Verified live: `/favicon.ico` 200, OG image 200, per-page `og:title`
+on all five pages.
+
+**39. Book preview on "Set a book"** *(the compose page's flagship UX gap; new route + template, no engine change)*
+`app.py` (`POST /generate/preview`: mirrors `generate()`'s form reading + meta but **persists nothing** —
+uploads and the built PDF go to temp files cleaned up in `finally`. Typesets only the first
+`PREVIEW_MAX_CHAPTERS` (2) and rasterises the first `PREVIEW_MAX_PAGES` (8) via PyMuPDF, so a 400-page
+manuscript still previews in ~a second; returns how much of the book was shown) · `templates/generate.html`
+("Preview first pages" button + theme-aware overlay, dismissable via Close / backdrop / Escape). Unlike
+the #10 style preview (fixed sample), this renders the user's **actual** manuscript. Verified live:
+sample truncates 3→2 chapters, chapter opener renders with the real style; paste / upload / sample and
+the error paths all correct.
+
+**40. Section navigation on the compose form** *(the form was one long single scroll; template-only)*
+`templates/generate.html`: a sticky section rail (Style → Manuscript → Cover → Title page → Front matter
+→ Back matter → Output) beside the form on wide screens, collapsing to a sticky horizontal bar ≤860px.
+An IntersectionObserver **scroll-spy** highlights the current section; smooth scroll gated on
+`prefers-reduced-motion`; each fieldset gets an `id` + `scroll-margin-top` so jumps clear the sticky nav.
+Verified live: click-to-jump + scroll-spy on desktop.
+
+**41. Project thumbnails + filter** *(text-only cards were hard to tell apart — several "Untitled draft"s)*
+`app.py` (`/project/<pid>/thumb.png` rasterises **page 1 of a project's `last_pdf`** — its cover, or the
+first front-matter page — cached to `out/_project_thumbs`, keyed by the PDF's **mtime** so a regenerate
+refreshes it; `project_last_pdf_path()` helper; the `/projects` route flags `has_thumb` per project.
+Reuses the #33 cover-thumb caching pattern) · `templates/projects.html` (portrait thumbnail per card,
+with a serif-initial placeholder tile for never-built drafts; a client-side filter box narrows the grid
+by title / author / style with a live count + a "no matches" message). Verified live: real covers render,
+"kins" → 1 of 7 shown, no-match message shows.
+
+**42. First-run empty-state guidance** *(new users had no sense of the flow; shared component + three templates)*
+`templates/base.html` (shared `.firstrun` panel component) · `templates/projects.html` (the one page not
+seeded with defaults, so genuinely empty on first run: a "Set your first book" panel spelling out the
+draft / Set-a-book / Save-as-project flow with Set-a-book + Browse-styles CTAs) · `templates/index.html`
++ `templates/covers.html` (compact "Create your first …" panels shown only if a user deletes every seeded
+template). Verified: empty Projects seen live (project JSONs temporarily moved aside, then restored);
+all three empty branches render.
+
+**Build / version tooling.** Bumped to **1.1.0** in `typeset-studio.iss` — the single source of truth,
+driving `AppVersion` and the installer's `OutputBaseFilename`. `make-installer.bat` now parses that
+version from the `.iss` (via `findstr`) instead of hardcoding it in its status message, so the message
+never goes stale on a version bump.
+
+*Not done — website OG card:* the public site repo already had a stronger, on-brand card (gold accent +
+`ashforgestudio.com` domain), so it was left as-is; the new card above powers only the app's own local OG tags.
+
 ### ◻ Tier 4 — planned / backlog
 
 *(Cover Studio Tiers 1–3 all shipped: features #16 designed templates + editor, #17 font
