@@ -7,6 +7,9 @@ out/
 # uploaded manuscripts (may contain client content)
 uploads/
 
+# saved book projects (manuscripts + settings — user/client content)
+projects/
+
 # uploaded cover-art assets (background images, emblems/logos)
 covers/assets/
 
