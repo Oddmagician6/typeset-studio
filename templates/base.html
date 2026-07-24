@@ -148,6 +148,21 @@
   .cover-tile .cap{font-size:12px;color:var(--ink);text-align:center;line-height:1.25}
   .cover-tile:has(input:checked){border-color:var(--red);box-shadow:0 0 0 2px rgba(177,42,29,.18)}
   .cover-tile:has(input:focus-visible){border-color:var(--red)}
+  .cover-cat{margin-top:20px}
+  .cover-cat:first-child{margin-top:6px}
+  .cover-cat-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+    margin:0 0 9px;padding-bottom:5px;border-bottom:1px solid var(--rule)}
+  .cover-cat-name{font-family:var(--mono);font-size:11px;text-transform:uppercase;
+    letter-spacing:.16em;color:var(--ink);font-weight:600}
+  .cover-cat-blurb{font-size:12px;color:var(--muted)}
+  /* collapsible categories (<details>/<summary>) */
+  summary.cover-cat-head{list-style:none;cursor:pointer;user-select:none}
+  summary.cover-cat-head::-webkit-details-marker{display:none}
+  summary.cover-cat-head::before{content:"\25B8";color:var(--muted);font-size:11px;
+    display:inline-block;transition:transform .12s;align-self:center}
+  details.cover-cat[open] > summary.cover-cat-head::before{transform:rotate(90deg)}
+  summary.cover-cat-head:hover .cover-cat-name{color:var(--red)}
+  details.cover-cat[open]{margin-bottom:6px}
   {% block style %}{% endblock %}
 </style>
 </head>

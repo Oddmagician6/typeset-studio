@@ -615,6 +615,69 @@ Verified via a Flask test-client pass: thumbnails build + PNG-cache, cache is re
 (classic-frame vs photographic clearly distinct). Follow-ups: a "clear stale thumbs on template
 delete" sweep (harmless orphans today); optional hover-to-enlarge.
 
+**35. Gallery categories + colour variants** *(picker cleanup for #33/#34; data + presentation, no
+engine change)*
+The picker/gallery was a flat wall of tiles that only got busier as families grew. Now templates are
+**grouped by design family into labelled categories**, and each new family has real colour choices.
+- `app.py`: `COVER_CATEGORIES` (ordered `(key, label, blurb)` per family) + `group_cover_templates(items)`
+  → `[{key,label,blurb,tiles}]` (bucketed by each template's `design`, unknown → Classic Frame, empty
+  groups dropped, tiles sorted by name; key is `tiles` not `items` to dodge Jinja's `dict.items()`). The
+  context processor now also injects `cover_groups`.
+- `templates/generate.html` + `project_edit.html`: the flat `.cover-gallery` becomes one `.cover-cat`
+  section per category (heading + blurb + its own tile grid); the radio `name`/`value` are unchanged.
+  `templates/covers.html`: management cards grouped the same way, and the per-card spec shows **Design**
+  (family label) instead of the border line (meaningless for non-framed families). Shared `.cover-cat`
+  heading CSS in `base.html`.
+- **Eight colour variants** (data-only; each reuses its family's base template and only swaps
+  name/description/palette — the tuning blocks reference palette *keys*, so a recolour cascades):
+  `photo-sand`/`photo-forest`, `typographic-noir`/`typographic-slate`, `geometric-coral`/`geometric-mono`,
+  `vintage-rust`/`vintage-noir`. So each of the four new families now ships **3** options (Classic still 6);
+  18 templates total.
+Verified: contact-sheet proof of all eight variants (legible, distinct), a Flask test-client pass
+(grouping buckets every template in category order, all 18 thumbnails build, Generate + `/covers` +
+`project_edit` render all five category headings), and a live browser screenshot of `/covers` (clean
+category sections). Follow-up unchanged: per-field editor controls for the tuning blocks.
+
+**36. Cover editor — emblem placement + dimension guide** *(usability; template-only, no engine/backend
+change)*
+The Emblems section offered a slot dropdown (`top-left`/`center`/`bottom-right`/…) and a width in inches
+with no indication of *where* those land or *how big* they are, and the background image's coverage wasn't
+stated. Added a live **slot/dimension map** to the Emblems fieldset in `templates/cover_editor.html`: a
+mini-cover (`#slotmap`) sized to the **trim aspect** (`prev_w`×`prev_h`) with the seven fixed slots as
+faint dots. A JS `updateSlotMap()` draws each configured emblem as an accurately-scaled **footprint box**
+— width = the emblem's `w` as a fraction of the trim (square placeholder; a note says real height follows
+the image's proportions), edge-anchored per slot using `margin = bd_inset + 0.14` (mirrors
+`engine._slot_xy`), **solid** = has an image / **dashed** = an empty slot, numbered 1/2. A monospace
+readout prints the exact figures (`Cover 6 × 9 in · Emblem 1 0.7 in wide · Emblem 2 0.6 in wide`), and a
+legend notes the **background image fills the whole cover** (cropped to fit). Recomputed on every form
+`input` and after the imgpick upload/clear handlers (which set the image field programmatically). CSS in
+the editor's own style block. Verified: Flask test-client renders the map (slots + boxes + dims readout +
+background note) for new and existing templates; a live browser check confirmed the default state
+(Emblem 1 top-center, Emblem 2 bottom-center), that a box **moves** when the slot changes, and that it
+**resizes** when the width changes (0.7 → 2 in visibly grows to ~⅓ of the cover width).
+
+**37. Three more design families + collapsible categories** *(extends #33/#35; engine + data + UI)*
+Grew the cover system to **8 design families / categories** and made the gallery fold up for a cleaner
+picker as the list got long.
+- **New families** (`engine._design_minimal` / `_design_stripe` / `_design_postcard`, registered in
+  `_COVER_DESIGNS`; `app.COVER_DESIGNS` + `COVER_CATEGORIES` extended): **minimal** (quiet, tracked serif
+  title in whitespace + hairline rule), **stripe** (full-height side colour band + large left-aligned
+  title, editorial/asymmetric), **postcard** (cover art in an inset **mat + frame** above a title — a
+  framed alternative to full-bleed; empty → a tinted placeholder panel). Each reads an optional
+  `minimal`/`stripe`/`postcard` tuning dict. Small **refactor**: the cover-fit image draw was extracted
+  from `_paint_background` into a shared `engine._draw_image_cover(canv, path, x0,y0,w,h)` so postcard can
+  reuse it for the inset (existing full-bleed output unchanged). 6 shipped templates (2 per family):
+  `minimal-ivory`/`-noir`, `stripe-crimson`/`-indigo`, `postcard-classic`/`-slate`. **24 templates total.**
+- **Collapsible categories**: each `.cover-cat` is now a `<details>`/`<summary>` (native, no JS) across
+  `generate.html`, `project_edit.html`, `covers.html`; shared summary/chevron CSS in `base.html`. In the
+  pickers only the **selected** template's category is open by default (falls back to the first when the
+  project has no cover set); `/covers` opens all (browse) and shows a per-category **count**.
+Verified: proof sheet of all 6 new templates (both palettes, legible + distinct); a Flask test-client
+pass (8 families registered + categorized in order; all 24 templates carry a valid design and build a
+thumbnail; previews build for every new template; both pages render `<details>` with all 8 headings;
+classic covers unchanged); and a live browser check (collapse/expand works, the three new categories
+render with thumbnails). Follow-up unchanged: per-field editor controls for the tuning blocks.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**

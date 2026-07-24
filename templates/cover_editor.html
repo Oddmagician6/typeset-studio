@@ -35,6 +35,35 @@
   .check{display:flex;align-items:center;gap:8px;margin-top:20px;flex:1 1 140px}
   .check label{font-size:13px;color:var(--ink);font-weight:600}
 
+  /* emblem slot map — a schematic of where badge/logo images land on the cover */
+  .slotmap-wrap{display:flex;gap:18px;align-items:flex-start;margin-top:16px;flex-wrap:wrap}
+  .slotmap{position:relative;flex:0 0 auto;width:120px;aspect-ratio:2/3;
+    border:1px solid var(--rule-strong);border-radius:3px;background:var(--surface-2)}
+  .slotmap .slot{position:absolute;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;
+    border:1.5px solid var(--rule-strong);background:var(--surface);box-sizing:border-box;
+    display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;
+    line-height:1;color:transparent;white-space:nowrap}
+  .slotmap .slot.on{border-color:var(--red);color:#fff;width:18px;height:18px;margin:-9px 0 0 -9px}
+  .slotmap .slot.on.filled{background:var(--red)}
+  .slotmap .slot.on.planned{background:var(--surface);color:var(--red);border-style:dashed}
+  .slotmap .slot[data-slot=top-left]{left:17%;top:11%}
+  .slotmap .slot[data-slot=top-center]{left:50%;top:11%}
+  .slotmap .slot[data-slot=top-right]{left:83%;top:11%}
+  .slotmap .slot[data-slot=center]{left:50%;top:50%}
+  .slotmap .slot[data-slot=bottom-left]{left:17%;top:89%}
+  .slotmap .slot[data-slot=bottom-center]{left:50%;top:89%}
+  .slotmap .slot[data-slot=bottom-right]{left:83%;top:89%}
+  /* accurately-sized emblem footprint boxes (width scaled to the cover trim) */
+  .slotmap .emblem-box{position:absolute;box-sizing:border-box;border:1.5px solid var(--red);
+    border-radius:2px;background:rgba(177,42,29,.14);display:flex;align-items:center;justify-content:center;
+    font-size:9px;font-weight:700;color:var(--red);min-width:7px;min-height:7px;overflow:hidden}
+  .slotmap .emblem-box.filled{background:rgba(177,42,29,.34);color:#fff}
+  .slotmap .emblem-box.planned{border-style:dashed}
+  .slotmap-legend{flex:1 1 220px;font-size:12.5px;color:var(--muted);line-height:1.55}
+  .slotmap-legend p{margin:0 0 6px}
+  .slotmap-legend b{color:var(--ink)}
+  .slotmap-dims{font-family:var(--mono);font-size:10.5px;color:var(--ink);margin:2px 0 0}
+
   .preview{position:sticky;top:22px}
   .preview .label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.2em;color:var(--faint);margin:0 0 8px}
   .preview .frame{
@@ -263,6 +292,26 @@
         <div class="fs-body">
           <p class="hint" style="margin:2px 0 0">Up to two positioned images (publisher logo, series
             badge, author mark). Transparent PNGs work best. Fixed slots, not freeform placement.</p>
+          <div class="slotmap-wrap">
+            <div class="slotmap" id="slotmap" aria-hidden="true">
+              <span class="slot" data-slot="top-left"></span>
+              <span class="slot" data-slot="top-center"></span>
+              <span class="slot" data-slot="top-right"></span>
+              <span class="slot" data-slot="center"></span>
+              <span class="slot" data-slot="bottom-left"></span>
+              <span class="slot" data-slot="bottom-center"></span>
+              <span class="slot" data-slot="bottom-right"></span>
+            </div>
+            <div class="slotmap-legend">
+              <p>This mini-cover is drawn to the trim size. Each <b>box</b> is an emblem's footprint at
+                its set <b>width</b> (solid = has an image; dashed = an empty slot, add one to fill it).
+                Faint dots are the other available slots. Emblem <b>height</b> follows the image's own
+                proportions.</p>
+              <p><b>Background image</b> is separate — it fills the <b>whole cover</b> (cropped to fit),
+                behind the frame and text.</p>
+              <p class="slotmap-dims" id="slotmap-dims"></p>
+            </div>
+          </div>
           <div class="row">
             {{ imgpick('Emblem 1 image', 'emblem1_image', em1.get('image', '')) }}
           </div>
@@ -618,6 +667,7 @@
             if (json.ok) {
               if (nameField) nameField.value = json.filename;
               if (st) st.textContent = 'Using ' + json.filename;
+              updateSlotMap();
               render();
             } else if (st) { st.textContent = json.error || 'Upload failed.'; }
           } catch (e) { if (st) st.textContent = 'Upload failed.'; }
@@ -631,11 +681,66 @@
           var wrap = btn.closest('.img-pick');
           var st = wrap && wrap.querySelector('.img-status');
           if (st) st.textContent = '';
+          updateSlotMap();
           render();
         });
       });
 
+      // -- Emblem slot map: mark where badge/logo images land AND how big they are
+      var slotmap = document.getElementById('slotmap');
+      function fmtIn(x){ return (Math.round(x * 100) / 100).toString(); }
+      function numField(name, dflt){
+        var el = form.querySelector('[name=' + name + ']');
+        var v = el ? parseFloat(el.value) : NaN;
+        return isFinite(v) && v > 0 ? v : dflt;
+      }
+      function updateSlotMap(){
+        if (!slotmap) return;
+        var pw = numField('prev_w', 6), ph = numField('prev_h', 9);
+        var marginIn = numField('bd_inset', 0.42) + 0.14;   // mirrors engine _slot_xy
+        slotmap.style.aspectRatio = pw + ' / ' + ph;        // mini-cover = true trim shape
+
+        var dots = {};
+        Array.prototype.forEach.call(slotmap.querySelectorAll('.slot'), function (el) {
+          el.className = 'slot'; el.textContent = ''; el.style.display = '';
+          dots[el.dataset.slot] = el;
+        });
+        Array.prototype.forEach.call(slotmap.querySelectorAll('.emblem-box'),
+                                     function (el) { el.remove(); });
+
+        var dims = ['Cover ' + fmtIn(pw) + ' × ' + fmtIn(ph) + ' in'];
+        [1, 2].forEach(function (n) {
+          var slotEl = form.querySelector('[name=emblem' + n + '_slot]');
+          var imgEl  = form.querySelector('[name=emblem' + n + '_image]');
+          if (!slotEl) return;
+          var slot = slotEl.value;
+          var hasImg = imgEl && imgEl.value.trim();
+          var wIn = numField('emblem' + n + '_w', n === 1 ? 0.7 : 0.6);
+          dims.push('Emblem ' + n + ' ' + fmtIn(wIn) + ' in wide');
+
+          // footprint as a fraction of the trim; square placeholder (real height = image aspect)
+          var wf = Math.min(wIn / pw, 1), hf = Math.min(wIn / ph, 1);
+          var mx = marginIn / pw, my = marginIn / ph;
+          var left = slot.indexOf('left')  >= 0 ? mx
+                   : slot.indexOf('right') >= 0 ? (1 - mx - wf) : (1 - wf) / 2;
+          var yb   = slot.indexOf('top')    >= 0 ? (1 - my - hf)
+                   : slot.indexOf('bottom') >= 0 ? my : (1 - hf) / 2;
+          if (dots[slot]) dots[slot].style.display = 'none';   // the box replaces the dot
+          var box = document.createElement('span');
+          box.className = 'emblem-box ' + (hasImg ? 'filled' : 'planned');
+          box.style.cssText = 'left:' + (left * 100) + '%;top:' + ((1 - yb - hf) * 100) +
+                              '%;width:' + (wf * 100) + '%;height:' + (hf * 100) + '%;';
+          box.textContent = '' + n;
+          box.title = 'Emblem ' + n + ' — ' + fmtIn(wIn) + ' in wide at ' + slot;
+          slotmap.appendChild(box);
+        });
+        var cap = document.getElementById('slotmap-dims');
+        if (cap) cap.textContent = dims.join(' · ');
+      }
+
       form.addEventListener('input', schedule);
+      form.addEventListener('input', updateSlotMap);
+      updateSlotMap();
       render();   // first paint on load
     })();
   </script>

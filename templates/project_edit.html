@@ -92,19 +92,29 @@
             The fields below add the smaller lines around them.</p>
           <div class="row">
             <div class="field wide"><label>Template</label>
-              <span class="hint">pick a house style below</span>
+              <span class="hint">pick a house style below, grouped by design</span>
               {% set ctpl = proj.get('cover_template','') %}
-              <div class="cover-gallery">
-                {% for c in cover_templates %}
-                  <label class="cover-tile" title="{{ c.data.description or c.data.name }}">
-                    <input type="radio" name="cover_template" value="{{ c.id }}"
-                           {{ 'checked' if ctpl==c.id }}>
-                    <img src="{{ url_for('cover_thumb', cid=c.id) }}"
-                         alt="{{ c.data.name }}" loading="lazy">
-                    <span class="cap">{{ c.data.name }}</span>
-                  </label>
-                {% endfor %}
-              </div></div>
+              {% set has_sel = cover_templates|selectattr('id','equalto',ctpl)|list %}
+              {% for g in cover_groups %}
+                <details class="cover-cat"
+                  {{ 'open' if (g.tiles|selectattr('id','equalto',ctpl)|list) or (loop.first and not has_sel) }}>
+                  <summary class="cover-cat-head">
+                    <span class="cover-cat-name">{{ g.label }}</span>
+                    <span class="cover-cat-blurb">{{ g.blurb }}</span>
+                  </summary>
+                  <div class="cover-gallery">
+                    {% for c in g.tiles %}
+                      <label class="cover-tile" title="{{ c.data.description or c.data.name }}">
+                        <input type="radio" name="cover_template" value="{{ c.id }}"
+                               {{ 'checked' if ctpl==c.id }}>
+                        <img src="{{ url_for('cover_thumb', cid=c.id) }}"
+                             alt="{{ c.data.name }}" loading="lazy">
+                        <span class="cap">{{ c.data.name }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                </details>
+              {% endfor %}</div>
           </div>
           <div class="row">
             <div class="field"><label>Series / imprint</label><span class="hint">small-caps line, top &amp; bottom</span>

@@ -291,7 +291,22 @@ COVER_DEFAULTS = {
 }
 
 # cover design families (front-cover renderer selected by the template's `design` key)
-COVER_DESIGNS = ['classic-frame', 'photographic', 'typographic', 'geometric', 'vintage']
+COVER_DESIGNS = ['classic-frame', 'photographic', 'typographic', 'geometric', 'vintage',
+                 'minimal', 'stripe', 'postcard']
+
+# gallery categories: templates are grouped by their design family, in this order, each
+# with a display label + one-line blurb. Any template whose `design` isn't a known family
+# falls under Classic Frame. (key, label, blurb)
+COVER_CATEGORIES = [
+    ('classic-frame', 'Classic Frame', 'Ornamented border, centred title'),
+    ('photographic',  'Photographic',  'Full-bleed cover art'),
+    ('typographic',   'Typographic',   'Type-forward, no frame'),
+    ('geometric',     'Geometric',     'Flat colour blocks'),
+    ('vintage',       'Vintage',       'Retro paperback'),
+    ('minimal',       'Minimal',       'Quiet, lots of whitespace'),
+    ('stripe',        'Stripe',        'Side colour band, editorial'),
+    ('postcard',      'Postcard',      'Framed inset art'),
+]
 COVER_LAYOUTS = ['centered', 'top', 'bottom', 'band']
 # palette keys an image overlay / panel may tint with (in addition to the 4 accents)
 COVER_FILL_KEYS = ['bg_bottom', 'bg_top', 'ink', 'gold', 'teal', 'muted']
@@ -340,6 +355,25 @@ def list_cover_templates():
             except Exception:
                 pass
     return items
+
+
+def group_cover_templates(items):
+    """Group listed cover templates by design family for the gallery picker, in
+    COVER_CATEGORIES order. Returns [{key, label, blurb, tiles:[...]}]; empty groups
+    drop out; an unknown `design` lands under Classic Frame. `tiles` (not `items`) so
+    Jinja `g.tiles` never collides with dict.items()."""
+    known = {k for k, _, _ in COVER_CATEGORIES}
+    buckets = {k: [] for k, _, _ in COVER_CATEGORIES}
+    for item in items:
+        d = item.get('data', {}).get('design') or 'classic-frame'
+        buckets[d if d in known else 'classic-frame'].append(item)
+    groups = []
+    for key, label, blurb in COVER_CATEGORIES:
+        tiles = sorted(buckets[key],
+                       key=lambda it: (it['data'].get('name') or it['id']).lower())
+        if tiles:
+            groups.append({'key': key, 'label': label, 'blurb': blurb, 'tiles': tiles})
+    return groups
 
 
 def load_cover_template(cid):
@@ -669,7 +703,9 @@ def _parse_emblems(form):
 # ----------------------------------------------------------------- routes
 @app.context_processor
 def _inject_cover_templates():
-    return {'cover_templates': list_cover_templates()}
+    items = list_cover_templates()
+    return {'cover_templates': items,
+            'cover_groups': group_cover_templates(items)}
 
 
 @app.route('/')

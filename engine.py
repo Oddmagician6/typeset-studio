@@ -193,6 +193,26 @@ _COVER_LAYOUTS = {
 }
 
 
+def _draw_image_cover(canv, path, x0, y0, w, h):
+    """Draw an image cover-fit (fill then crop) into (x0,y0,w,h), clipped to the rect.
+    Shared by the full-bleed background and the postcard family's inset panel."""
+    try:
+        from reportlab.lib.utils import ImageReader
+        ir = ImageReader(path)
+        iw, ih = ir.getSize()
+        scale = max(w / iw, h / ih) if iw and ih else 1.0
+        dw, dh = iw * scale, ih * scale                  # cover-fit: fill then crop
+        canv.saveState()
+        p = canv.beginPath()
+        p.rect(x0, y0, w, h)
+        canv.clipPath(p, stroke=0, fill=0)
+        canv.drawImage(ir, x0 + (w - dw) / 2.0, y0 + (h - dh) / 2.0,
+                       width=dw, height=dh, mask='auto')
+        canv.restoreState()
+    except Exception:
+        pass
+
+
 def _paint_background(canv, tpl, x0, y0, w, h):
     """Optional full-bleed background inside (x0,y0,w,h): art image (cover-fit),
     edge vignette, then a flat colour overlay. Drawn over the base gradient and
@@ -204,21 +224,7 @@ def _paint_background(canv, tpl, x0, y0, w, h):
     if isinstance(img, str) and img.strip():
         path = _cover_asset_path(img.strip())
         if path and os.path.exists(path):
-            try:
-                from reportlab.lib.utils import ImageReader
-                ir = ImageReader(path)
-                iw, ih = ir.getSize()
-                scale = max(w / iw, h / ih) if iw and ih else 1.0
-                dw, dh = iw * scale, ih * scale          # cover-fit: fill then crop
-                canv.saveState()
-                p = canv.beginPath()
-                p.rect(x0, y0, w, h)
-                canv.clipPath(p, stroke=0, fill=0)
-                canv.drawImage(ir, x0 + (w - dw) / 2.0, y0 + (h - dh) / 2.0,
-                               width=dw, height=dh, mask='auto')
-                canv.restoreState()
-            except Exception:
-                pass
+            _draw_image_cover(canv, path, x0, y0, w, h)
     vig = _num(bg.get('vignette', 0))
     if vig > 0:
         _paint_vignette(canv, x0, y0, w, h, min(vig, 1.0))
@@ -810,6 +816,202 @@ def _design_vintage(canv, tpl, cf, meta, x0, y0, w, h):
     _paint_emblems(canv, tpl, x0, y0, w, h)
 
 
+def _design_minimal(canv, tpl, cf, meta, x0, y0, w, h):
+    """Quiet, upscale minimalism: a modest tracked serif title high-centre over lots of
+    whitespace, a short hairline rule, small-caps series + author. No frame, no ornament.
+    Uses whatever ground the palette gradient supplies. Tuned via an optional `minimal` dict."""
+    mn = tpl.get('minimal', {})
+    mn = mn if isinstance(mn, dict) else {}
+    cx = x0 + w / 2.0
+    inner_w = w - 1.6 * inch
+    ink = _pal_color(tpl, mn.get('ink', 'ink'))
+
+    cc = tpl.get('collection', {})
+    coll = (meta.get('cover_collection') or '').upper()
+    if coll:
+        canv.setFillColor(_pal_color(tpl, mn.get('series_color', 'muted')))
+        _tracked_centre(canv, cx, y0 + h * _num(mn.get('series_y', 0.82), 0.82), coll,
+                        cf['serif'], cc.get('size', 10.5), cc.get('tracking', 4.0))
+
+    title = (meta.get('title') or '').upper()
+    trk = _num(mn.get('title_tracking', 2.0), 2.0)
+    lines, tsize = _fit_title_lines(title, cf['serif'], _num(mn.get('title_size', 30), 30),
+                                    inner_w, trk, min_size=14)
+    leading = tsize * _num(mn.get('title_leading', 1.35), 1.35)
+    canv.setFillColor(_pal_color(tpl, mn.get('title_color', 'ink')))
+    yy = y0 + h * _num(mn.get('title_y', 0.60), 0.60)
+    last_y = yy
+    for ln in lines:
+        _tracked_centre(canv, cx, yy, ln, cf['serif'], tsize, trk)
+        last_y = yy
+        yy -= leading
+
+    ry = last_y - tsize * 0.95
+    canv.setStrokeColor(ink)
+    canv.setLineWidth(_num(mn.get('rule_line', 0.7), 0.7))
+    rl = w * _num(mn.get('rule_len', 0.09), 0.09)
+    canv.line(cx - rl, ry, cx + rl, ry)
+
+    accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
+    if accent:
+        ac = tpl.get('accent', {})
+        canv.setFillColor(_pal_color(tpl, mn.get('author_color', 'muted')))
+        _tracked_centre(canv, cx, ry - _num(mn.get('author_gap', 26), 26), accent,
+                        cf['serif'], _num(mn.get('author_size', 12), 12),
+                        _num(ac.get('tracking', 3.0), 3.0))
+
+    st = tpl.get('studio', {})
+    studio = (meta.get('cover_studio') or meta.get('publisher') or '').upper()
+    if studio:
+        canv.setFillColor(_pal_color(tpl, mn.get('studio_color', 'muted')))
+        _tracked_centre(canv, cx, y0 + h * _num(st.get('y', 0.06), 0.06), studio,
+                        cf['serif'], st.get('size', 8), st.get('tracking', 2.4))
+
+    _paint_emblems(canv, tpl, x0, y0, w, h)
+
+
+def _design_stripe(canv, tpl, cf, meta, x0, y0, w, h):
+    """Editorial asymmetry: a full-height colour band down one side, with a large
+    left-aligned title, series, and author set in the open field beside it. Flat colour
+    (overpaints the gradient). Tuned via an optional `stripe` dict."""
+    sp = tpl.get('stripe', {})
+    sp = sp if isinstance(sp, dict) else {}
+    canv.saveState()
+    canv.setFillColor(_pal_color(tpl, sp.get('ground', 'bg_bottom')))
+    canv.rect(x0, y0, w, h, stroke=0, fill=1)
+    canv.restoreState()
+
+    band_w = w * _num(sp.get('band_width', 0.34), 0.34)
+    side = sp.get('side', 'left')
+    bx = x0 if side == 'left' else x0 + w - band_w
+    canv.saveState()
+    canv.setFillColor(_pal_color(tpl, sp.get('band', 'gold')))
+    canv.rect(bx, y0, band_w, h, stroke=0, fill=1)
+    canv.restoreState()
+
+    tx0 = (x0 + band_w + 0.4 * inch) if side == 'left' else (x0 + 0.4 * inch)
+    tw = w - band_w - 0.8 * inch
+
+    cc = tpl.get('collection', {})
+    coll = (meta.get('cover_collection') or '').upper()
+    if coll:
+        canv.setFillColor(_pal_color(tpl, sp.get('series_color', 'muted')))
+        _tracked_left(canv, tx0, y0 + h * _num(sp.get('series_y', 0.88), 0.88), coll,
+                      cf['serif'], cc.get('size', 11), cc.get('tracking', 3.0))
+
+    title = (meta.get('title') or '').upper()
+    tt = tpl.get('title', {})
+    trk = _num(sp.get('title_tracking', tt.get('tracking', 0.5)), 0.5)
+    lines, tsize = _fit_title_lines(title, cf['display'], _num(sp.get('title_size', 44), 44),
+                                    tw, trk, min_size=18)
+    leading = tsize * _num(sp.get('title_leading', 1.04), 1.04)
+    canv.setFillColor(_pal_color(tpl, sp.get('title_color', 'ink')))
+    yy = y0 + h * _num(sp.get('title_y', 0.60), 0.60)
+    last_y = yy
+    for ln in lines:
+        _tracked_left(canv, tx0, yy, ln, cf['display'], tsize, trk)
+        last_y = yy
+        yy -= leading
+
+    accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
+    if accent:
+        ac = tpl.get('accent', {})
+        canv.setFillColor(_pal_color(tpl, sp.get('author_color', 'muted')))
+        _tracked_left(canv, tx0, last_y - _num(sp.get('author_gap', 34), 34), accent,
+                      cf['display'], _num(sp.get('author_size', 15), 15),
+                      _num(ac.get('tracking', 2.0), 2.0))
+
+    st = tpl.get('studio', {})
+    studio = (meta.get('cover_studio') or meta.get('publisher') or '').upper()
+    if studio:
+        canv.setFillColor(_pal_color(tpl, sp.get('studio_color', 'muted')))
+        _tracked_left(canv, tx0, y0 + h * _num(st.get('y', 0.06), 0.06), studio,
+                      cf['serif'], st.get('size', 8.5), st.get('tracking', 2.4))
+
+    _paint_emblems(canv, tpl, x0, y0, w, h)
+
+
+def _design_postcard(canv, tpl, cf, meta, x0, y0, w, h):
+    """A framed-photo look: cover art (from `background.image`) sits in an inset mat +
+    frame in the upper cover, with the title, series, and author on the flat ground below.
+    An alternative to full-bleed for uploaded art. Tuned via an optional `postcard` dict."""
+    pc = tpl.get('postcard', {})
+    pc = pc if isinstance(pc, dict) else {}
+    cx = x0 + w / 2.0
+
+    canv.saveState()                                     # flat ground over the full-bleed art
+    canv.setFillColor(_pal_color(tpl, pc.get('ground', 'bg_bottom')))
+    canv.rect(x0, y0, w, h, stroke=0, fill=1)
+    canv.restoreState()
+
+    margin = _num(pc.get('margin', 0.7), 0.7) * inch
+    px0, px1 = x0 + margin, x0 + w - margin
+    py0 = y0 + h * _num(pc.get('panel_bottom', 0.42), 0.42)
+    py1 = y0 + h * _num(pc.get('panel_top', 0.92), 0.92)
+    pw_, ph_ = px1 - px0, py1 - py0
+    canv.saveState()                                     # mat
+    canv.setFillColor(_pal_color(tpl, pc.get('mat', 'muted')))
+    canv.rect(px0, py0, pw_, ph_, stroke=0, fill=1)
+    canv.restoreState()
+
+    matb = _num(pc.get('mat_border', 0.12), 0.12) * inch
+    ix0, iy0, iw_, ih_ = px0 + matb, py0 + matb, pw_ - 2 * matb, ph_ - 2 * matb
+    bg = tpl.get('background', {})
+    img = (bg.get('image') or '').strip() if isinstance(bg, dict) else ''
+    path = _cover_asset_path(img) if img else None
+    if path and os.path.exists(path):
+        _draw_image_cover(canv, path, ix0, iy0, iw_, ih_)
+    else:                                                # placeholder art field
+        canv.saveState()
+        canv.setFillColor(_pal_color(tpl, pc.get('placeholder', 'bg_top')))
+        canv.rect(ix0, iy0, iw_, ih_, stroke=0, fill=1)
+        canv.restoreState()
+    canv.saveState()                                     # thin frame around the panel
+    canv.setStrokeColor(_pal_color(tpl, pc.get('frame', 'ink')))
+    canv.setLineWidth(_num(pc.get('frame_line', 1.0), 1.0))
+    canv.rect(px0, py0, pw_, ph_, stroke=1, fill=0)
+    canv.restoreState()
+
+    cc = tpl.get('collection', {})
+    coll = (meta.get('cover_collection') or '').upper()
+    if coll:
+        canv.setFillColor(_pal_color(tpl, pc.get('series_color', 'muted')))
+        _tracked_centre(canv, cx, y0 + h * _num(pc.get('series_y', 0.365), 0.365), coll,
+                        cf['serif'], cc.get('size', 11), cc.get('tracking', 3.4))
+
+    inner_w = w - 1.4 * inch
+    title = (meta.get('title') or '').upper()
+    tt = tpl.get('title', {})
+    trk = _num(pc.get('title_tracking', tt.get('tracking', 0.8)), 0.8)
+    lines, tsize = _fit_title_lines(title, cf['display'], _num(pc.get('title_size', 30), 30),
+                                    inner_w, trk, min_size=14)
+    leading = tsize * 1.08
+    canv.setFillColor(_pal_color(tpl, pc.get('title_color', 'ink')))
+    yy = y0 + h * _num(pc.get('title_y', 0.29), 0.29)
+    last_y = yy
+    for ln in lines:
+        _tracked_centre(canv, cx, yy, ln, cf['display'], tsize, trk)
+        last_y = yy
+        yy -= leading
+
+    accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
+    if accent:
+        ac = tpl.get('accent', {})
+        canv.setFillColor(_pal_color(tpl, pc.get('author_color', 'muted')))
+        _tracked_centre(canv, cx, last_y - _num(pc.get('author_gap', 28), 28), accent,
+                        cf['display'], _num(pc.get('author_size', 15), 15),
+                        _num(ac.get('tracking', 2.0), 2.0))
+
+    st = tpl.get('studio', {})
+    studio = (meta.get('cover_studio') or meta.get('publisher') or '').upper()
+    if studio:
+        canv.setFillColor(_pal_color(tpl, pc.get('studio_color', 'muted')))
+        _tracked_centre(canv, cx, y0 + h * _num(st.get('y', 0.06), 0.06), studio,
+                        cf['serif'], st.get('size', 8.5), st.get('tracking', 2.4))
+
+    _paint_emblems(canv, tpl, x0, y0, w, h)
+
+
 # design-family registry + dispatch (all renderers are defined above)
 _COVER_DESIGNS = {
     'classic-frame': _paint_cover_panel,
@@ -817,6 +1019,9 @@ _COVER_DESIGNS = {
     'typographic':   _design_typographic,
     'geometric':     _design_geometric,
     'vintage':       _design_vintage,
+    'minimal':       _design_minimal,
+    'stripe':        _design_stripe,
+    'postcard':      _design_postcard,
 }
 
 

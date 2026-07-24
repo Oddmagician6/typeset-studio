@@ -40,54 +40,64 @@
        tweak the colours, border, and type. Pick a cover on the <b>Set a book</b> page.</p>
   </div>
 
-  <div class="grid">
-    {% for item in covers %}
-      {% set c = item.data %}
-      {% set pal = c.palette or {} %}
-      <article class="card">
-        <div class="swatchbar">
-          <span style="background:{{ pal.bg_bottom or '#0a0f18' }}"></span>
-          <span style="background:{{ pal.bg_top or '#101a29' }}"></span>
-          <span style="background:{{ pal.gold or '#c6a866' }}"></span>
-          <span style="background:{{ pal.teal or '#5fb2b2' }}"></span>
-          <span style="background:{{ pal.muted or '#8b93a3' }}"></span>
-        </div>
-        <div class="thumb">
-          <img src="{{ url_for('cover_thumb', cid=item.id) }}" alt="{{ c.name }} preview" loading="lazy">
-        </div>
-        <div class="specimen">
-          <p class="name">{{ c.name or 'Untitled cover' }}</p>
-          <p class="desc">{{ c.description or '—' }}</p>
-        </div>
-        <div class="body">
-          <div class="spec">
-            <span class="k">Title</span><span><b>{{ '%g'|format(c.title.size) }}pt</b> {{ c.fonts.display }}</span>
-            <span class="k">Accent</span><span>{{ c.accent.color }} · {{ '%g'|format(c.accent.size) }}pt</span>
-            <span class="k">Border</span><span>{{ c.border.color }}, {{ '%g'|format(c.border.inset) }}" inset</span>
-          </div>
-          <div class="actions">
-            <a class="btn btn-primary btn-sm" href="{{ url_for('generate') }}">Set a book</a>
-            <a class="btn btn-sm" href="{{ url_for('cover_editor', cid=item.id) }}">Edit</a>
-            <form class="inline-form" method="post" action="{{ url_for('cover_clone', cid=item.id) }}">
-              <button class="btn btn-sm" type="submit">Duplicate</button>
-            </form>
-            <span class="sep"></span>
-            <form class="inline-form" method="post" action="{{ url_for('cover_delete', cid=item.id) }}"
-                  onsubmit="return confirm('Delete the “{{ c.name }}” cover template? This cannot be undone.');">
-              <button class="btn btn-ghost btn-sm" type="submit">Delete</button>
-            </form>
-          </div>
-        </div>
-      </article>
-    {% endfor %}
+  {% for g in cover_groups %}
+    <details class="cover-cat" open>
+      <summary class="cover-cat-head">
+        <span class="cover-cat-name">{{ g.label }}</span>
+        <span class="cover-cat-blurb">{{ g.blurb }} · {{ g.tiles|length }}</span>
+      </summary>
+      <div class="grid">
+        {% for item in g.tiles %}
+          {% set c = item.data %}
+          {% set pal = c.palette or {} %}
+          <article class="card">
+            <div class="swatchbar">
+              <span style="background:{{ pal.bg_bottom or '#0a0f18' }}"></span>
+              <span style="background:{{ pal.bg_top or '#101a29' }}"></span>
+              <span style="background:{{ pal.gold or '#c6a866' }}"></span>
+              <span style="background:{{ pal.teal or '#5fb2b2' }}"></span>
+              <span style="background:{{ pal.muted or '#8b93a3' }}"></span>
+            </div>
+            <div class="thumb">
+              <img src="{{ url_for('cover_thumb', cid=item.id) }}" alt="{{ c.name }} preview" loading="lazy">
+            </div>
+            <div class="specimen">
+              <p class="name">{{ c.name or 'Untitled cover' }}</p>
+              <p class="desc">{{ c.description or '—' }}</p>
+            </div>
+            <div class="body">
+              <div class="spec">
+                <span class="k">Design</span><span>{{ g.label }}</span>
+                <span class="k">Title</span><span><b>{{ '%g'|format(c.title.size) }}pt</b> {{ c.fonts.display }}</span>
+                <span class="k">Accent</span><span>{{ c.accent.color }} · {{ '%g'|format(c.accent.size) }}pt</span>
+              </div>
+              <div class="actions">
+                <a class="btn btn-primary btn-sm" href="{{ url_for('generate') }}">Set a book</a>
+                <a class="btn btn-sm" href="{{ url_for('cover_editor', cid=item.id) }}">Edit</a>
+                <form class="inline-form" method="post" action="{{ url_for('cover_clone', cid=item.id) }}">
+                  <button class="btn btn-sm" type="submit">Duplicate</button>
+                </form>
+                <span class="sep"></span>
+                <form class="inline-form" method="post" action="{{ url_for('cover_delete', cid=item.id) }}"
+                      onsubmit="return confirm('Delete the “{{ c.name }}” cover template? This cannot be undone.');">
+                  <button class="btn btn-ghost btn-sm" type="submit">Delete</button>
+                </form>
+              </div>
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    </details>
+  {% endfor %}
 
+  <div class="grid" style="margin-top:20px">
     <a class="newcard" href="{{ url_for('cover_new') }}">
       <span class="plus">+</span>
       <span>New cover</span>
     </a>
   </div>
 
-  {% if not covers %}
+  {% if not cover_templates %}
     <p class="empty">No cover templates yet. Start one with <b>New cover</b>.</p>
   {% endif %}
 {% endblock %}
