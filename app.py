@@ -81,8 +81,9 @@ UPLOAD_DIR    = os.path.join(DATA_DIR, 'uploads')
 PROJECT_DIR   = os.path.join(DATA_DIR, 'projects')
 PROJECT_MS_DIR = os.path.join(PROJECT_DIR, 'manuscripts')
 COVER_THUMB_DIR = os.path.join(OUT_DIR, '_cover_thumbs')   # cached gallery-picker tiles
+PROJECT_THUMB_DIR = os.path.join(OUT_DIR, '_project_thumbs')  # cached project cards (page 1 of last PDF)
 for d in (PRESET_DIR, COVER_DIR, COVER_ASSET_DIR, FONT_DIR, OUT_DIR, UPLOAD_DIR,
-          PROJECT_DIR, PROJECT_MS_DIR, COVER_THUMB_DIR):
+          PROJECT_DIR, PROJECT_MS_DIR, COVER_THUMB_DIR, PROJECT_THUMB_DIR):
     os.makedirs(d, exist_ok=True)
 
 
@@ -894,6 +895,68 @@ def cover_thumb(cid):
                     headers={'Cache-Control': 'no-cache'})
 
 
+def project_last_pdf_path(data):
+    """Absolute path to a project's most recent built PDF, or None if it has none."""
+    last_pdf = (data or {}).get('last_pdf', '')
+    if not last_pdf:
+        return None
+    path = os.path.join(OUT_DIR, os.path.basename(last_pdf))
+    return path if os.path.exists(path) else None
+
+
+def _project_thumb_bytes(pid):
+    """Page-1 thumbnail of a project's last built PDF (its cover, or the first
+    front-matter page), cached to disk and keyed by the PDF's mtime. Returns None
+    when the project has never been built or the rasteriser is unavailable."""
+    pid = secure_filename(pid)
+    src = os.path.join(PROJECT_DIR, pid + '.json')
+    if not pid or not os.path.exists(src):
+        return None
+    try:
+        with open(src, encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    pdf_path = project_last_pdf_path(data)
+    if not pdf_path:
+        return None
+    cache = os.path.join(PROJECT_THUMB_DIR, pid + '.png')
+    if os.path.exists(cache) and os.path.getmtime(cache) >= os.path.getmtime(pdf_path):
+        try:
+            with open(cache, 'rb') as f:
+                return f.read()
+        except OSError:
+            pass
+    try:
+        import fitz
+    except ImportError:
+        return None
+    try:
+        doc = fitz.open(pdf_path)
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(0.7, 0.7), alpha=False)
+        png = pix.tobytes('png')
+        doc.close()
+        try:
+            with open(cache, 'wb') as f:
+                f.write(png)
+        except OSError:
+            pass
+        return png
+    except Exception:
+        logging.exception('project thumbnail build failed for %s', pid)
+        return None
+
+
+@app.route('/project/<pid>/thumb.png')
+def project_thumb(pid):
+    """Cached page-1 thumbnail for a project card."""
+    png = _project_thumb_bytes(pid)
+    if png is None:
+        abort(404)
+    return Response(png, mimetype='image/png',
+                    headers={'Cache-Control': 'no-cache'})
+
+
 @app.route('/cover/preview', methods=['POST'])
 def cover_preview():
     try:
@@ -1455,7 +1518,10 @@ def generate_preview():
 @app.route('/projects')
 def projects():
     preset_map = {p['id']: p['data'] for p in list_presets()}
-    return render_template('projects.html', projects=list_projects(),
+    items = list_projects()
+    for it in items:
+        it['has_thumb'] = project_last_pdf_path(it['data']) is not None
+    return render_template('projects.html', projects=items,
                            preset_map=preset_map)
 
 

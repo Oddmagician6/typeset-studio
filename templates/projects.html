@@ -3,23 +3,45 @@
 {% block title %}Projects · Typeset Studio{% endblock %}
 
 {% block style %}
+  .toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 20px}
+  .toolbar .search{position:relative;flex:1 1 260px;max-width:340px}
+  .toolbar .search input{
+    font-family:var(--sans);font-size:14px;width:100%;padding:8px 10px 8px 30px;
+    border:1px solid var(--rule-strong);border-radius:2px;background:var(--surface-2);color:var(--ink);
+  }
+  .toolbar .search input:focus{border-color:var(--red);background:var(--surface-2)}
+  .toolbar .search::before{content:"⌕";position:absolute;left:9px;top:50%;transform:translateY(-50%);
+    color:var(--faint);font-size:16px;pointer-events:none}
+  .toolbar .count{font-family:var(--mono);font-size:11.5px;color:var(--faint);letter-spacing:.04em}
+
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:18px}
   .card{
     background:var(--surface);border:1px solid var(--rule);border-radius:3px;
     box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden;
   }
   .card .top{
-    padding:20px 22px 14px;border-bottom:1px solid var(--rule);
+    padding:18px 20px 13px;border-bottom:1px solid var(--rule);
+    display:flex;gap:14px;align-items:flex-start;
     background:repeating-linear-gradient(transparent,transparent 27px,rgba(27,26,24,.04) 27px,rgba(27,26,24,.04) 28px);
   }
-  .card .top .name{font-family:var(--serif);font-size:20px;font-weight:600;margin:0;line-height:1.2}
+  .card .thumb{
+    width:54px;flex:0 0 54px;aspect-ratio:2/3;border:1px solid var(--rule-strong);border-radius:2px;
+    object-fit:cover;background:var(--surface-2);box-shadow:0 1px 3px rgba(0,0,0,.2);display:block;
+  }
+  .card .thumb.ph{
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--serif);font-size:22px;color:var(--faint);
+  }
+  .card .titles{min-width:0;flex:1}
+  .card .top .name{font-family:var(--serif);font-size:19px;font-weight:600;margin:0;line-height:1.2}
   .card .top .byline{color:var(--muted);font-size:13px;margin:3px 0 0}
-  .card .body{padding:12px 22px 16px;display:flex;flex-direction:column;gap:12px;flex:1}
+  .card .body{padding:12px 20px 16px;display:flex;flex-direction:column;gap:12px;flex:1}
   .card .spec{font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.8}
   .card .spec b{color:var(--ink)}
   .card .actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:auto}
   .card .actions .sep{flex:1}
-  .empty{color:var(--muted);font-size:15px;margin-top:8px}
+  .empty,.noresults{color:var(--muted);font-size:15px;margin-top:8px}
+  .noresults{display:none}
 {% endblock %}
 
 {% block body %}
@@ -37,17 +59,36 @@
     </form>
   </div>
 
-  <div class="grid">
+  {% if projects %}
+  <div class="toolbar">
+    <div class="search">
+      <input type="search" id="proj-search" placeholder="Filter by title, author, or style…"
+             autocomplete="off" aria-label="Filter projects">
+    </div>
+    <span class="count" id="proj-count">{{ projects|length }} project{{ 's' if projects|length != 1 }}</span>
+  </div>
+  {% endif %}
+
+  <div class="grid" id="proj-grid">
     {% for item in projects %}
       {% set p = item.data %}
       {% set style_name = preset_map.get(p.preset, {}).get('name', p.preset) %}
-      <article class="card">
+      <article class="card"
+               data-search="{{ (p.name ~ ' ' ~ (p.title or '') ~ ' ' ~ (p.author or '') ~ ' ' ~ style_name)|lower }}">
         <div class="top">
-          <p class="name">{{ p.name or p.title or 'Untitled' }}</p>
-          <p class="byline">
-            {% if p.title and p.name != p.title %}<em>{{ p.title }}</em>{% endif %}
-            {% if p.author %} · {{ p.author }}{% endif %}
-          </p>
+          {% if item.has_thumb %}
+            <img class="thumb" src="{{ url_for('project_thumb', pid=item.id) }}"
+                 alt="Cover of {{ p.name or p.title or 'this book' }}" loading="lazy">
+          {% else %}
+            <div class="thumb ph" aria-hidden="true">{{ (p.name or p.title or '·')[:1]|upper }}</div>
+          {% endif %}
+          <div class="titles">
+            <p class="name">{{ p.name or p.title or 'Untitled' }}</p>
+            <p class="byline">
+              {% if p.title and p.name != p.title %}<em>{{ p.title }}</em>{% endif %}
+              {% if p.author %} · {{ p.author }}{% endif %}
+            </p>
+          </div>
         </div>
         <div class="body">
           <div class="spec">
@@ -78,7 +119,37 @@
     {% endfor %}
   </div>
 
-  {% if not projects %}
+  {% if projects %}
+    <p class="noresults" id="proj-noresults">No projects match that filter.</p>
+  {% else %}
     <p class="empty">No projects yet. After composing a book, use <b>Save as project</b> on the result page.</p>
   {% endif %}
+
+  <script>
+    (function () {
+      var input = document.getElementById('proj-search');
+      if (!input) return;
+      var cards   = Array.prototype.slice.call(document.querySelectorAll('#proj-grid .card'));
+      var count   = document.getElementById('proj-count');
+      var noresult = document.getElementById('proj-noresults');
+      var total   = cards.length;
+
+      function apply() {
+        var q = input.value.trim().toLowerCase();
+        var shown = 0;
+        cards.forEach(function (c) {
+          var match = !q || c.getAttribute('data-search').indexOf(q) !== -1;
+          c.style.display = match ? '' : 'none';
+          if (match) shown++;
+        });
+        noresult.style.display = shown === 0 ? 'block' : 'none';
+        if (q) {
+          count.textContent = shown + ' of ' + total + ' shown';
+        } else {
+          count.textContent = total + ' project' + (total !== 1 ? 's' : '');
+        }
+      }
+      input.addEventListener('input', apply);
+    })();
+  </script>
 {% endblock %}
