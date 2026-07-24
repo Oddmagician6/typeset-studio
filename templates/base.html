@@ -179,6 +179,21 @@
   details.cover-cat[open] > summary.cover-cat-head::before{transform:rotate(90deg)}
   summary.cover-cat-head:hover .cover-cat-name{color:var(--red)}
   details.cover-cat[open]{margin-bottom:6px}
+
+  /* ---- first-run / empty-state panel ---- */
+  .firstrun{
+    background:var(--surface);border:1px solid var(--rule);border-radius:4px;
+    box-shadow:var(--shadow);padding:26px 28px;max-width:640px;margin-top:8px;
+  }
+  .firstrun .eyebrow{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.2em;color:var(--red)}
+  .firstrun h2{font-family:var(--serif);font-weight:600;font-size:23px;line-height:1.15;margin:.3em 0 .4em}
+  .firstrun p{margin:0 0 14px;color:var(--muted)}
+  .firstrun .steps{margin:0 0 18px;padding-left:22px;display:flex;flex-direction:column;gap:9px}
+  .firstrun .steps li{padding-left:4px;color:var(--ink)}
+  .firstrun .steps b{font-weight:600}
+  .firstrun .cta{display:flex;gap:10px;flex-wrap:wrap}
+  .firstrun.compact{padding:20px 24px}
+  .firstrun.compact p:last-of-type{margin-bottom:16px}
   {% block style %}{% endblock %}
 </style>
 </head>

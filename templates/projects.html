@@ -122,7 +122,24 @@
   {% if projects %}
     <p class="noresults" id="proj-noresults">No projects match that filter.</p>
   {% else %}
-    <p class="empty">No projects yet. After composing a book, use <b>Save as project</b> on the result page.</p>
+    <div class="firstrun">
+      <div class="eyebrow">Getting started</div>
+      <h2>Set your first book</h2>
+      <p>A project remembers a book's manuscript, style, and title-page settings, so you can
+         rebuild the PDF any time without re-entering anything. Two ways in:</p>
+      <ol class="steps">
+        <li><b>Start a draft</b> — type a title in <b>New draft title</b> above and write in the
+          built-in editor.</li>
+        <li>Or <b>Set a book</b> — pick a style, drop in a manuscript you already have, and
+          compose a print-ready PDF.</li>
+        <li>On the result page, hit <b>Save as project</b> — it lands here, ready to regenerate
+          or hand off to KDP / IngramSpark.</li>
+      </ol>
+      <div class="cta">
+        <a class="btn btn-primary" href="{{ url_for('generate') }}">Set a book</a>
+        <a class="btn" href="{{ url_for('index') }}">Browse styles</a>
+      </div>
+    </div>
   {% endif %}
 
   <script>

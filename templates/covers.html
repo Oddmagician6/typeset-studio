@@ -98,6 +98,12 @@
   </div>
 
   {% if not cover_templates %}
-    <p class="empty">No cover templates yet. Start one with <b>New cover</b>.</p>
+    <div class="firstrun compact">
+      <div class="eyebrow">Getting started</div>
+      <h2>Create your first cover</h2>
+      <p>A cover template is a reusable house style, drawn onto page&nbsp;1 of a book from its
+         title and author. Build one and you can pick it on the <b>Set a book</b> page.</p>
+      <div class="cta"><a class="btn btn-primary" href="{{ url_for('cover_new') }}">New cover</a></div>
+    </div>
   {% endif %}
 {% endblock %}

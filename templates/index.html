@@ -84,6 +84,12 @@
   </div>
 
   {% if not presets %}
-    <p class="empty">No styles yet. Start one with <b>New style</b>.</p>
+    <div class="firstrun compact">
+      <div class="eyebrow">Getting started</div>
+      <h2>Create your first style</h2>
+      <p>A style is a complete recipe for a book's interior — trim size, type, margins, chapter
+         openings. Build one and it becomes available on the <b>Set a book</b> page.</p>
+      <div class="cta"><a class="btn btn-primary" href="{{ url_for('editor_new') }}">New style</a></div>
+    </div>
   {% endif %}
 {% endblock %}
