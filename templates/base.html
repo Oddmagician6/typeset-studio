@@ -4,6 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Typeset Studio{% endblock %}</title>
+<meta name="description" content="{% block meta_description %}Typeset Studio — a free composing room for print-ready books. Typeset interiors, design covers, and export PDF & EPUB with fonts embedded, ready for KDP and IngramSpark.{% endblock %}">
+<link rel="icon" href="{{ url_for('favicon') }}" sizes="any">
+<link rel="shortcut icon" href="{{ url_for('favicon') }}">
+<meta name="theme-color" content="#1c1b19">
+<!-- Open Graph / Twitter share card -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Typeset Studio">
+<meta property="og:title" content="{% block og_title %}{{ self.title() }}{% endblock %}">
+<meta property="og:description" content="{{ self.meta_description() }}">
+<meta property="og:image" content="{{ url_for('static', filename='og-typeset-studio.jpg', _external=True) }}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ self.og_title() }}">
+<meta name="twitter:description" content="{{ self.meta_description() }}">
+<meta name="twitter:image" content="{{ url_for('static', filename='og-typeset-studio.jpg', _external=True) }}">
 <!-- Apply saved theme before paint to prevent flash -->
 <script>(function(){var t=localStorage.getItem('ts-theme');if(!t)t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';if(t==='dark')document.documentElement.dataset.theme='dark';})()</script>
 <style>

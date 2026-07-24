@@ -708,6 +708,12 @@ def _inject_cover_templates():
             'cover_groups': group_cover_templates(items)}
 
 
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(resource_path(), 'app.ico',
+                               mimetype='image/vnd.microsoft.icon')
+
+
 @app.route('/')
 def index():
     return render_template('index.html', presets=list_presets())
@@ -1300,6 +1306,149 @@ def preview():
     except Exception as exc:
         logging.error('preview failed: %s', traceback.format_exc())
         return jsonify({'ok': False, 'error': str(exc)})
+
+
+# How much of the real book the "Set a book" preview renders. Only the first few
+# chapters are built (so a 400-page manuscript still previews in a second or two),
+# and only the first handful of rendered pages are rasterised and returned.
+PREVIEW_MAX_CHAPTERS = 2
+PREVIEW_MAX_PAGES    = 8
+
+
+@app.route('/generate/preview', methods=['POST'])
+def generate_preview():
+    """Render the user's *actual* manuscript + settings to page images.
+
+    Mirrors /generate's reading of the compose form, but persists nothing:
+    uploads and the built PDF go to temp files that are deleted before returning.
+    """
+    try:
+        import fitz
+    except ImportError:
+        return jsonify({'ok': False,
+                        'error': 'PDF preview needs pymupdf — run: pip install pymupdf'})
+
+    tmp_files = []
+    try:
+        form = request.form
+        pid  = form.get('preset')
+        if not pid:
+            return jsonify({'ok': False, 'error': 'Pick a style first.'})
+        preset = load_preset(pid)
+
+        # ---- manuscript source (upload / paste / sample), nothing persisted ----
+        raw = None
+        up = request.files.get('manuscript')
+        if up and up.filename:
+            fn = secure_filename(up.filename)
+            fd, tmp_ms = tempfile.mkstemp(suffix='_' + fn)
+            os.close(fd)
+            up.save(tmp_ms)
+            tmp_files.append(tmp_ms)
+            if fn.lower().endswith('.docx'):
+                try:
+                    raw = manuscript.import_docx(tmp_ms)
+                except ModuleNotFoundError:
+                    return jsonify({'ok': False,
+                                    'error': 'python-docx is not installed. Run: pip install python-docx'})
+                except Exception as exc:
+                    return jsonify({'ok': False, 'error': f'Could not read the Word file: {exc}'})
+            else:
+                raw = open(tmp_ms, encoding='utf-8', errors='replace').read()
+        elif form.get('pasted', '').strip():
+            raw = form['pasted']
+        elif form.get('use_sample'):
+            raw = open(SAMPLE, encoding='utf-8').read()
+
+        if not raw:
+            return jsonify({'ok': False,
+                            'error': 'Add a manuscript first — upload a file, paste text, or tick the sample.'})
+
+        # ---- cover (designed template or uploaded art), same as /generate ----
+        cover_mode = form.get('cover_mode', 'none')
+        cover_path = ''
+        cov = request.files.get('cover')
+        if cov and cov.filename:
+            cfn = secure_filename(cov.filename)
+            fd, tmp_cov = tempfile.mkstemp(suffix='_' + cfn)
+            os.close(fd)
+            cov.save(tmp_cov)
+            tmp_files.append(tmp_cov)
+            cover_path = tmp_cov
+        if cover_mode == 'none':
+            cover_path = ''
+        cover_template = form.get('cover_template', '') or 'ashforge-house'
+        cover_template_data = load_cover_template(cover_template) if cover_mode == 'designed' else None
+
+        meta = {
+            'title': form.get('title', '').strip(),
+            'subtitle': form.get('subtitle', '').strip(),
+            'author': form.get('author', '').strip(),
+            'year': form.get('year', '').strip() or str(datetime.now().year),
+            'publisher': form.get('publisher', '').strip(),
+            'front_matter': form.get('front_matter', 'full'),
+            'right_hand_starts': 'right_hand_starts' in form,
+            'cover_image': cover_path,
+            'cover_mode': cover_mode,
+            'cover_template': cover_template,
+            'cover_template_data': cover_template_data,
+            'cover_collection': form.get('cover_collection', '').strip(),
+            'cover_kicker': form.get('cover_kicker', '').strip(),
+            'cover_accent': form.get('cover_accent', '').strip(),
+            'cover_epigraph': form.get('cover_epigraph', '').strip(),
+            'cover_studio': form.get('cover_studio', '').strip(),
+            'cover_overlay': 'cover_overlay' in form,
+            'cover_color': form.get('cover_color', 'light'),
+            'include_toc':    'include_toc' in form,
+            'smartquotes':    'smartquotes' in form,
+            'dedication':     form.get('dedication', '').strip(),
+            'epigraph':       form.get('epigraph', '').strip(),
+            'acknowledgments': form.get('acknowledgments', '').strip(),
+            'contributors':   form.get('contributors', '').strip(),
+            'about_author':   form.get('about_author', '').strip(),
+            'also_by':        form.get('also_by', '').strip(),
+        }
+
+        ms = manuscript.parse_markdown(raw, smartquotes=meta['smartquotes'])
+        chapters_total = len(ms['chapters'])
+        truncated = chapters_total > PREVIEW_MAX_CHAPTERS
+        if truncated:
+            ms = {'chapters': ms['chapters'][:PREVIEW_MAX_CHAPTERS]}
+
+        fd, tmp_pdf = tempfile.mkstemp(suffix='.pdf')
+        os.close(fd)
+        tmp_files.append(tmp_pdf)
+        engine.build_pdf(ms, preset, tmp_pdf, meta)
+
+        doc = fitz.open(tmp_pdf)
+        built_pages = doc.page_count
+        images = []
+        for i, page in enumerate(doc):
+            if i >= PREVIEW_MAX_PAGES:
+                break
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)  # ~144 dpi
+            b64 = base64.b64encode(pix.tobytes('png')).decode()
+            images.append(f'data:image/png;base64,{b64}')
+        doc.close()
+
+        return jsonify({
+            'ok': True,
+            'images': images,
+            'shown': len(images),
+            'built_pages': built_pages,
+            'chapters_total': chapters_total,
+            'chapters_shown': len(ms['chapters']),
+            'truncated': truncated,
+        })
+    except Exception as exc:
+        logging.error('generate preview failed: %s', traceback.format_exc())
+        return jsonify({'ok': False, 'error': str(exc)})
+    finally:
+        for f in tmp_files:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
 
 
 # ----------------------------------------------------------------- project routes

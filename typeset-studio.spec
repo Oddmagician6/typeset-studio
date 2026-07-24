@@ -28,6 +28,7 @@ datas = [
     ('presets', 'presets'),
     ('covers', 'covers'),
     ('fonts', 'fonts'),
+    ('app.ico', '.'),
 ]
 datas += collect_data_files('pyphen')       # hyphenation dictionaries
 datas += collect_data_files('reportlab')    # bundled fonts / encodings
