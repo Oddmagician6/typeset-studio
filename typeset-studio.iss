@@ -20,7 +20,7 @@
 ;   uninstalling never deletes someone's books.
 
 #define AppName "Typeset Studio"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 #define AppPublisher "Ashforge Studio"
 #define AppExe "Typeset Studio.exe"
 

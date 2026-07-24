@@ -2,6 +2,10 @@
 setlocal
 cd /d "%~dp0"
 
+rem Read the version straight from the .iss so this script never goes stale.
+set "APPVERSION=unknown"
+for /f "tokens=3" %%V in ('findstr /b /c:"#define AppVersion" "typeset-studio.iss"') do set "APPVERSION=%%~V"
+
 if not exist "dist\Typeset Studio\Typeset Studio.exe" goto NOBUILD
 
 rem Find the Inno Setup compiler (ISCC.exe): versions 7 and 6, both roots.
@@ -19,7 +23,7 @@ echo.
 echo.
 echo ============================================================
 echo  Done. If the compile above succeeded, your installer is:
-echo    dist_installer\TypesetStudio-Setup-1.0.0.exe
+echo    dist_installer\TypesetStudio-Setup-%APPVERSION%.exe
 echo ============================================================
 goto END
 
