@@ -384,6 +384,14 @@ def _content_opf(uid, meta, manifest_items, spine_items, modified):
     manifest_xml = '\n'.join(_item(i) for i in manifest_items)
     spine_xml = '\n'.join(f'    <itemref idref="{s}"/>' for s in spine_items)
 
+    # Legacy cover pointer. EPUB 3 readers use the manifest's
+    # properties="cover-image", but Kindle tooling and older readers only look for
+    # this <meta>; emitting both is what every mainstream tool does.
+    cover_id = next((i['id'] for i in manifest_items
+                     if 'cover-image' in (i.get('props') or '')), '')
+    cover_meta_xml = (f'    <meta name="cover" content="{cover_id}"/>\n'
+                      if cover_id else '')
+
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"'
@@ -395,6 +403,7 @@ def _content_opf(uid, meta, manifest_items, spine_items, modified):
         '    <dc:language>en</dc:language>\n'
         f'    <dc:date>{year}</dc:date>\n'
         f'    <meta property="dcterms:modified">{modified}</meta>\n'
+        + cover_meta_xml +
         '  </metadata>\n'
         '  <manifest>\n'
         + manifest_xml + '\n'

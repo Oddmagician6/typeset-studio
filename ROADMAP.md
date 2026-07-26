@@ -202,9 +202,8 @@ created, updated    ISO 8601 datetime strings
     (prefix `Cover-`) so they can differ from the interior family; missing faces fall back
     to the interior fonts, then Times. Text is drawn with `_tracked_centre` (letterspacing
     via a text object's `setCharSpace` — the canvas has no `setCharSpace` in this ReportLab).
-  Designed covers are **PDF-only** (EPUB stays image-only) and are **not yet persisted in
-  saved projects** (the one-off generate flow carries them; the project build path falls
-  back safely to no/image cover).
+  Designed covers reach the EPUB as a rasterised page-1 JPEG (feature #43; `epub.py` itself is
+  still image-only) and are persisted in saved projects (feature #29).
 
 - **Scene-break glyphs must exist in the body font.** Libre Baskerville ("Book") lacks many
   ornaments. Presets ship with font-safe marks (`* * *`, em-dashes, middots). Use the image
@@ -315,7 +314,7 @@ processor exposing templates to all pages, and the `cover_*` meta keys) ·
 `templates/generate.html` (Cover fieldset: mode selector None/Designed/Upload + template
 dropdown + text fields, with a small toggle script). Fonts are swappable via the template
 JSON — the shipped file approximates the house display serif with the "Book" faces. Known
-gaps: EPUB doesn't carry designed covers yet. (Saved projects now do — see feature #29.)
+gaps closed since: saved projects carry designed covers (#29) and so does the EPUB (#43).
 
 **16. Cover Studio — browser editor for cover templates**
 `app.py` (`COVER_DEFAULTS`, `parse_cover_form()` mirroring `parse_preset_form`,
@@ -548,7 +547,7 @@ test-client pass (editor renders for new and all old templates; asset upload inc
 rejection; band+bg+panel+emblem preview; save→load schema round-trip). The interactive editor feel
 (imgpick + debounced preview) wasn't driven in a real browser this session — same class of pass as
 PR #24. Not done: cover-asset delete/library UI; emblem opacity (ReportLab `drawImage` ignores fill
-alpha); background/emblems on the EPUB cover (EPUB stays image-only).
+alpha); background/emblems reach the EPUB cover only as pixels in the #43 raster, not as assets.
 
 **33. Cover design families — dispatch + full-bleed photographic** *(the "genuinely different
 designs" ask; the biggest lever after enrichment #32)*
@@ -590,7 +589,7 @@ paths (`_draw_designed_cover`, `build_cover_wrap`) dispatch through the one entr
 
   **v1 follow-ups:** per-field editor controls for the `photo`/`typo`/`blocks`/`vintage` tuning blocks
   (JSON-only for now); photographic art doesn't extend into the wrap **bleed** yet (base gradient covers
-  it); EPUB cover stays image-only. **Next up: the design-gallery picker (#34).**
+  it); the EPUB cover is a flat raster of the design (#43). **Next up: the design-gallery picker (#34).**
 
 **34. Design-gallery picker — thumbnail tiles for choosing a cover** *(the discoverability lever for
 #32/#33; visibility, no engine change)*
@@ -677,6 +676,33 @@ pass (8 families registered + categorized in order; all 24 templates carry a val
 thumbnail; previews build for every new template; both pages render `<details>` with all 8 headings;
 classic covers unchanged); and a live browser check (collapse/expand works, the three new categories
 render with thumbnails). Follow-up unchanged: per-field editor controls for the tuning blocks.
+
+**43. Designed covers reach the EPUB** *(first Tier-5 item; closes the gap open since #15/#32/#33)*
+A book set with a **designed** cover kept it in the PDF but lost it entirely in the ebook — `epub.py`
+reads `meta['cover_image']` only, so `cover_mode == 'designed'` produced a coverless EPUB. The eight
+design families were print-only in practice.
+- `app.py`: `_epub_cover(preset, meta)` — a `contextlib.contextmanager` that rasterises page 1 of the
+  designed cover to a temp **JPEG** (quality 88, `EPUB_COVER_H = 2560` px on the long edge, KDP's ideal)
+  and yields a **meta copy** whose `cover_image` points at it, cleaning the temp files up on exit. Same
+  PyMuPDF path as `_cover_thumb_bytes` (#34), but run over a **stub manuscript** (`# Cover` + one line,
+  `front_matter='none'`, `include_toc=False`) so it typesets one cover page instead of rebuilding the
+  whole book — a 400-page book with a TOC would otherwise be built twice more. JPEG not PNG because a
+  photographic-family cover rasterises to multiple megabytes. Both EPUB call sites (`generate()` and
+  `project_generate()`) wrap the build in `with _epub_cover(...) as emeta:`.
+- **Fails soft by design:** no PyMuPDF/Pillow, no `cover_template_data`, or a render error → the
+  original meta is yielded untouched and the EPUB builds coverless, exactly as before. Note the
+  `yield` sits *outside* the `except` (a contextmanager that re-yields after an exception is thrown
+  into it raises `RuntimeError`) — keep it that way.
+- `epub.py`: `_content_opf` now also emits the legacy `<meta name="cover" content="…"/>` alongside the
+  EPUB 3 `properties="cover-image"` (derived from the manifest, so the signature is unchanged). Kindle
+  tooling and older readers only look at the legacy tag; this benefits **uploaded-image** covers too.
+Verified: three families (classic-frame / typographic / photographic) each produce a distinct
+1707×2560 JPEG carrying the real book's title, author and series line — eyeballed, not just asserted;
+`cover.jpg` + `cover.xhtml` + both OPF pointers present; temp files removed; **no-cover, missing-template
+and uploaded-image paths unchanged** (uploaded art is never deleted); and end-to-end through both routes
+(`POST /generate` with `format=epub`, and a project regenerate with `format=both`). Resulting EPUBs
+68–90 KB. Not done: the EPUB cover is a flat raster, so `background`/`emblems` (#32) come along as pixels
+rather than as separate assets — fine for an ebook cover.
 
 ### ✓ Tier 2 — shipped
 
@@ -955,10 +981,9 @@ page would be honest and cheap. Also still open from #30: no `.docx` **poem** im
   extend `app._preflight()` (which already reports fonts / embedding / page count on
   `result.html`) with an EPUB card — structural self-checks first (nav present, every spine item
   manifested, images have alt text), optional real `epubcheck` if a JRE is found.
-- **Designed covers in EPUB.** Known gap since #15/#32/#33 — EPUB stays image-only, so a book
-  built with a design family loses its cover in the ebook. Fix: rasterize page 1 of the designed
-  cover (the `_cover_thumb_bytes` rasterizer from #34 already does exactly this) and feed it to
-  `epub.py` as the cover image. **Cheapest item in Tier 5; do it first.**
+- ~~**Designed covers in EPUB.**~~ — **SHIPPED (feature #43)**, the first Tier-5 item: page 1 of
+  the designed cover is rasterised to a 2560px JPEG and handed to `epub.py` as the cover image, and
+  the OPF now also carries the legacy `<meta name="cover">` pointer that Kindle tooling wants.
 - **PDF/X-1a.** Vellum advertises press-standard PDF/X-1a; we emit stock RGB ReportLab PDF. KDP
   accepts ours, IngramSpark is fussier. Worth a spike on what ReportLab can actually assert
   (output intent, no transparency, embedded profile) before promising it.
@@ -1168,7 +1193,7 @@ canvas. Remaining directions, ranked:
   `_COVER_DESIGNS`; JSON still tunes color/font within it. Further families are cheap to add the same way.
 - **Per-field editor controls** for the `photo`/`typo`/`blocks`/`vintage` tuning blocks, currently JSON-only.
 - Older follow-ups: a cover-asset library/delete UI; photographic art into the wrap **bleed**;
-  carrying backgrounds/emblems/designs onto the EPUB cover (still image-only).
+  ~~carrying backgrounds/emblems/designs onto the EPUB cover~~ — **SHIPPED (#43)** as a page-1 raster.
 
 ---
 

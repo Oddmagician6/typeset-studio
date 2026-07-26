@@ -6,6 +6,7 @@ This is a single-user tool meant to run on your own machine. Presets live as
 plain JSON files in ./presets so you can clone one per customer and tweak it.
 """
 
+import io
 import os
 import re
 import sys
@@ -17,6 +18,7 @@ import tempfile
 import threading
 import traceback
 import webbrowser
+import contextlib
 from datetime import datetime
 
 # Verbose in development; quiet in a frozen/installed build (the packaged app
@@ -895,6 +897,74 @@ def cover_thumb(cid):
                     headers={'Cache-Control': 'no-cache'})
 
 
+EPUB_COVER_H = 2560   # px; the long edge KDP asks for on an ebook cover
+
+
+@contextlib.contextmanager
+def _epub_cover(preset, meta):
+    """Yield a meta whose ``cover_image`` an EPUB build can use for a designed cover.
+
+    ``epub.py`` is deliberately stdlib-only and image-only, so a book set with a
+    designed cover (``cover_mode == 'designed'``) used to lose its cover in the
+    ebook entirely. Here page 1 of that cover is rasterised to a temp JPEG and the
+    yielded meta points at it; the temp files are removed on exit. Same PyMuPDF
+    path as ``_cover_thumb_bytes`` (#34), run over a **stub** manuscript so we
+    typeset one cover page instead of rebuilding the whole book (which a TOC would
+    make a two-pass build on top).
+
+    Any failure — no PyMuPDF/Pillow, no template, a render error — yields the meta
+    unchanged, so the EPUB still builds, coverless, exactly as it did before.
+    """
+    if meta.get('cover_mode') != 'designed' or not meta.get('cover_template_data'):
+        yield meta
+        return
+    try:
+        import fitz
+        from PIL import Image
+    except ImportError:
+        yield meta
+        return
+
+    pdf_fd, pdf_path = tempfile.mkstemp(suffix='.pdf')
+    os.close(pdf_fd)
+    jpg_fd, jpg_path = tempfile.mkstemp(suffix='.jpg')
+    os.close(jpg_fd)
+    try:
+        try:
+            cover_meta = dict(meta)
+            cover_meta.update(front_matter='none', include_toc=False,
+                              right_hand_starts=False)
+            stub = manuscript.parse_markdown('# Cover\n\nCover.', smartquotes=False)
+            engine.build_pdf(stub, preset, pdf_path, cover_meta)
+
+            doc  = fitz.open(pdf_path)
+            page = doc[0]
+            scale = EPUB_COVER_H / page.rect.height if page.rect.height else 1.0
+            png = page.get_pixmap(matrix=fitz.Matrix(scale, scale),
+                                  alpha=False).tobytes('png')
+            doc.close()
+            # JPEG, else a photographic-family cover makes a multi-megabyte ebook.
+            Image.open(io.BytesIO(png)).convert('RGB').save(
+                jpg_path, 'JPEG', quality=88, optimize=True)
+            img_path = jpg_path
+        except Exception:
+            logging.exception('designed cover for EPUB failed; building without one')
+            img_path = ''
+
+        if img_path:
+            out = dict(meta)
+            out['cover_image'] = img_path
+            yield out
+        else:
+            yield meta
+    finally:
+        for p in (pdf_path, jpg_path):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
 def project_last_pdf_path(data):
     """Absolute path to a project's most recent built PDF, or None if it has none."""
     last_pdf = (data or {}).get('last_pdf', '')
@@ -1312,7 +1382,8 @@ def generate():
     if fmt in ('epub', 'both'):
         epub_name = f'{base}-{stamp}.epub'
         try:
-            epub.build_epub(ms, preset, os.path.join(OUT_DIR, epub_name), meta)
+            with _epub_cover(preset, meta) as emeta:
+                epub.build_epub(ms, preset, os.path.join(OUT_DIR, epub_name), emeta)
         except Exception as exc:
             logging.error('EPUB build failed: %s', traceback.format_exc())
             flash(f'EPUB build failed: {exc}')
@@ -1909,7 +1980,8 @@ def project_generate(pid):
     if fmt in ('epub', 'both'):
         epub_name = f'{base}-{stamp}.epub'
         try:
-            epub.build_epub(ms_parsed, preset, os.path.join(OUT_DIR, epub_name), meta)
+            with _epub_cover(preset, meta) as emeta:
+                epub.build_epub(ms_parsed, preset, os.path.join(OUT_DIR, epub_name), emeta)
         except Exception as exc:
             logging.error('EPUB build failed: %s', traceback.format_exc())
             flash(f'EPUB build failed: {exc}')
