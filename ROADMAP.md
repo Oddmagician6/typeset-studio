@@ -813,7 +813,9 @@ doc_model / WYSIWYG round-trip:
   **Footnotes** are hard — breakable notes anchored to their reference line, a bottom-of-page
   note area, and numbering that resets per chapter; that's real paginator work in `engine.py`.
   **Figures**: an image block with caption + placement. Broadens the book audience meaningfully
-  but sequence it after the two cheaper wins above.
+  but sequence it after the two cheaper wins above. *(Superseded in detail by **Tier 5A** below —
+  the paid-app scan reached the same conclusion from the other direction, and endnotes/footnotes/
+  figures are specced there alongside the other missing block types.)*
 
 These grow *what* the app does; per the strategy note below, **packaging still grows *who* uses
 it**, and remains the bigger lever for a free+donate app. Rank poetry ≈ anthologies (cheap,
@@ -870,6 +872,165 @@ Only commit to the heavy build if the spike round-trips cleanly.
 **New obligation once people author in-app:** autosave + backups + no data loss — a higher
 bar than a tool that only transforms files the user already has stored elsewhere. Keep
 `.docx` import as the on-ramp for existing manuscripts.
+
+### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
+
+Source: a feature scan of **Vellum** ($199/$249, macOS-only), **Atticus** ($147, web),
+**Reedsy Studio** (free), **Jutoh**, **Kindle Create**, checked against this codebase. Only
+gaps that are *real* (verified absent in the source, not just unmentioned in this doc) and
+*on-philosophy* (the preset still owns typography; no freeform canvas) are listed. Ranked
+A → D by value-per-effort; D is the explicit "don't build" list.
+
+Context on where we already lead, so it isn't re-litigated: the five typed epistolary blocks
+(#4) beat Vellum's two (Text Conversation, Written Note); the eight cover **design families**
++ print wrap (#33/#37/#18) have no equivalent in either — Vellum and Atticus do interiors only
+and expect a cover from elsewhere; the continuity checker (#13) is unique; and the whole thing
+is free, local, and offline.
+
+---
+
+**A. In-chapter content features — the biggest cluster, and the "is this a real formatter?" bar**
+
+Vellum ships 16 "text features"; our block model has six (`para`, `subhead`, `scene`,
+`doc_block` ×5 types, `poem`). Each item below is a new block type, so each costs the same
+seven-file round: `manuscript.py` (parse) · `engine.py` (render) · `epub.py` (XHTML + CSS) ·
+`doc_model.py` **and** `static/doc_model.js` (kept byte-identical) · `static/wysiwyg.js`
+(render/read) · `templates/manuscript_editor.html` (toolbar + cheatsheet) ·
+`test_doc_model.py` (fidelity + stability). Presets gain a section in `app.DEFAULTS` +
+`parse_preset_form` + `editor.html` where the look should vary per style.
+
+- **Images / figures — the single biggest hole.** There is **no image block at all** in the
+  manuscript model, and `manuscript.import_docx` silently **drops every image** in a Word file
+  (it iterates `doc.paragraphs`, so inline shapes and tables never appear). Vellum has both
+  Inline Image and a Full Page Image element (maps, plates); Atticus has images with captions,
+  sizing and alignment. Wants: a fenced `~~~ figure src="…" caption="…"` block (inline, scaled
+  to the text width) plus a full-page variant. `engine.py` already draws images in three places
+  (`SceneBreak`, `_paint_back_panel`, `_draw_image_cover`) so the ReportLab side is short; the
+  work is the block plumbing + a preset `figure` section (width, alignment, caption style, space
+  around) + storing the asset (reuse the `covers/assets/` + `/cover/asset/upload` pattern from
+  #32, but per project under `projects/manuscripts/`).
+- **Lists (bulleted / numbered).** No `ListFlowable` anywhere in `engine.py`. Markdown `- ` /
+  `1. ` parsing, a preset `list` section (bullet glyph, indent, spacing), `<ul>`/`<ol>` in EPUB.
+- **Block quotation.** Today the nearest thing is a plain `~~~` doc block, which is an
+  *epistolary* device, not a quotation. Wants its own type (inset both sides, smaller size,
+  optional attribution line — the epigraph attribution logic in `_matter_page` is a model).
+- **Alignment block** (force left / centre / right). Trivial next to the others; Vellum and
+  Atticus both have it and it's a common ask for dedications-in-body, song lyrics, sign text.
+- **Endnotes.** Do these **before** footnotes, as the Tier-4 note already argues: collect
+  `[^n]`-style references per chapter/book and render an **Endnotes** back-matter page — an
+  `_back` entry + a `_matter_page` branch, no paginator change. Vellum has both; Atticus has
+  both; we have neither.
+- **Footnotes.** Still the hard one (breakable notes anchored to the reference line, a
+  bottom-of-page note area, per-chapter renumbering = real `BookDoc` work). Unchanged
+  recommendation: last.
+- **Tables.** Nonfiction only, and `_render_doc_block`'s `box` frame already proves the
+  `Table`-flowable split behaviour. Low priority for the fiction audience; note that `.docx`
+  table text is currently dropped entirely.
+
+**B. Links — the biggest EPUB-specific gap**
+
+Nothing in `epub.py` emits an `<a>`. Vellum has Web Link, Internal Link, and **Store Link**
+(a "buy from your preferred retailer" page); Atticus has links throughout. An ebook whose
+*Also By* and *About the Author* pages aren't clickable is commercially weaker than a free
+competitor's output — Reedsy Studio does this. Wants: `[text](url)` inline in `manuscript.py`
+→ ReportLab `<a href>` in PDF (blue-free, print-safe: styled as normal text) and real anchors
+in EPUB, plus internal links to chapters (the TOC already computes the targets).
+
+**C. Import fidelity — the gap most likely to read as "the tool is broken"**
+
+`manuscript.import_docx` (`manuscript.py:287`) maps Heading 1/Title → chapter, other headings →
+subhead, scene breaks, and bold/italic runs. Dropped on the floor: **images, tables, footnotes,
+lists, block quotes, alignment, page breaks, hyperlinks**. Vellum's entire pitch is that a
+well-styled `.docx` arrives structurally intact. Each Tier-5A block type should land its
+`.docx` mapping in the same change (Word's `List Paragraph`, `Quote`/`Intense Quote`,
+`p.alignment`, `w:drawing`), and a first pass should at minimum **stop discarding content
+silently** — a post-import summary ("3 images and 1 table were not imported") on the compose
+page would be honest and cheap. Also still open from #30: no `.docx` **poem** import.
+
+**D. Output correctness / validation — paid tools quietly win here**
+
+- **EPUB validation + accessibility.** Vellum ships "EPUB 3 / EPUB 2 validated" and
+  **ACE-approved accessible output**; Jutoh flags formatting problems pre-export. We run no
+  epubcheck, emit no EPUB 2 fallback, and set no accessibility metadata. Cheapest useful move:
+  extend `app._preflight()` (which already reports fonts / embedding / page count on
+  `result.html`) with an EPUB card — structural self-checks first (nav present, every spine item
+  manifested, images have alt text), optional real `epubcheck` if a JRE is found.
+- **Designed covers in EPUB.** Known gap since #15/#32/#33 — EPUB stays image-only, so a book
+  built with a design family loses its cover in the ebook. Fix: rasterize page 1 of the designed
+  cover (the `_cover_thumb_bytes` rasterizer from #34 already does exactly this) and feed it to
+  `epub.py` as the cover image. **Cheapest item in Tier 5; do it first.**
+- **PDF/X-1a.** Vellum advertises press-standard PDF/X-1a; we emit stock RGB ReportLab PDF. KDP
+  accepts ours, IngramSpark is fussier. Worth a spike on what ReportLab can actually assert
+  (output intent, no transparency, embedded profile) before promising it.
+- **Ebook device preview.** Vellum previews on Kindle/iPad/iPhone, Atticus on **8** devices. Our
+  previews (#10 style, #39 book) rasterize the **PDF** only — there is no ebook preview at all. A
+  simple reflowable HTML preview at three device widths, reusing `epub.py`'s own CSS, would cover
+  most of the value without an EPUB reader.
+- **Spread balancing.** `engine.py:1526` sets `allowWidows=0, allowOrphans=0`, so widows/orphans
+  are handled; Vellum additionally balances **facing-page depth**. Genuinely hard in ReportLab —
+  note it, don't schedule it.
+
+**E. Type & design assets — best perceived-quality-per-hour in the whole list**
+
+- **One typeface for nine styles.** All nine `presets/*.json` set
+  `"regular": "Book-Regular.ttf"` — the nine genre styles differ in *layout* but every book comes
+  out in Libre Baskerville. Vellum's 8 styles each pair a distinct display + body face; Atticus
+  ships 17 themes and 1,500+ fonts. The font-library plumbing already exists (#17,
+  `register_fonts` + `_register_cover_fonts`); we simply ship one family. **Bundling 4–5 OFL
+  families** (EB Garamond, Crimson Pro, Alegreya, Spectral, Vollkorn) and repointing the presets
+  is roughly half a day of data work for the largest visible quality delta available. Check
+  bundle size against the ~97 MB PyInstaller build and the licence-embedding rule in README.
+- **Ornament / flourish library.** `SceneBreak` supports an image ornament (#9) but the repo
+  ships **zero artwork**, so every book gets `* * *` or an em dash. Vellum ships flourishes,
+  custom ornaments, custom backgrounds, full-bleed interior pages and chapter-heading images. A
+  dozen bundled public-domain/CC0 ornaments + a picker in `editor.html` is data-plus-template.
+- **Chapter-heading art / full-bleed interior pages.** The heavier half of the same idea; after
+  the figure block exists (A), a chapter-opener image is mostly a preset field.
+
+**F. Element vocabulary — cheap breadth, especially for nonfiction**
+
+We support half-title, title, copyright, TOC, dedication, epigraph, acknowledgments,
+about-author, also-by, contributors. Vellum adds **foreword, introduction, preface, prologue,
+epilogue, afterword, blurbs, bibliography, endnotes, full-page image, uncategorized matter**, and
+**uncounted chapters** (a chapter that takes no number — prologues/epilogues today have to be
+faked). Most are a titled page that doesn't take a chapter number, and `_matter_page` +
+`epub._matter_xhtml` already generalise over exactly that shape; the cost is mostly form surface
+in `generate.html` / `project_edit.html` / `result.html` (hidden fields) + `app.py` meta keys and
+project persistence. Add an **uncounted-chapter marker** to the heading syntax at the same time.
+
+**G. Editions & scale — real, but heavier and lower-frequency**
+
+- **Hardcover case-wrap / dust jacket.** `build_cover_wrap` is paperback-only; hardcover needs
+  hinge gaps, board overhang and wrap-around bleed. A natural extension of `WRAP_RETAILERS` (#24).
+- **Large-print edition** — Vellum ships it as a one-click variant. For us it is nearly free: a
+  derived preset (larger size/leading, wider margins, fewer words per line) generated from any
+  existing style. Possibly the cheapest item in G.
+- **Trim-size presets** — Vellum offers 24 named trims; our trim is free-entry. A datalist of
+  standard KDP/IngramSpark trims in `editor.html` is minutes of work and prevents typos that
+  fail upload.
+- **Box sets / omnibus** — combine several projects into one book with merged front matter and a
+  unified TOC (Vellum's "Volume" element, Atticus's bundles). Needs a multi-manuscript build path;
+  defer.
+- **Batch regenerate** — Vellum regenerates every edition with one command; we regenerate one
+  project at a time. A "rebuild all" on `/projects` is small if wanted.
+
+**H. Explicitly NOT doing** *(recorded so the scan doesn't get re-run into the same answers)*
+
+- **Index generation** (InDesign-class). Enormous, and the audience overlaps almost zero with
+  ours.
+- **Collaboration / beta-reader sharing / cloud sync** (Atticus). Requires becoming a hosted
+  multi-user service — see the hosting note in the strategy section; it is a different product.
+- **Writing goals / sprints / session analytics** (Atticus, Scrivener). Plausible in the editor
+  someday, but it competes with drafting tools rather than formatting ones, and the editor's own
+  open obligation (backups / no data loss) outranks it.
+- **Freeform cover canvas** — already ruled out in the cover strategy note below; restated here
+  because Book Brush-style tools show up in every comparison.
+
+**Suggested order.** Designed-cover-in-EPUB (D) → bundled typefaces (E) → figures/images incl.
+`.docx` (A + C) → lists / block quote / alignment (A) → links (B) → element vocabulary (F) →
+endnotes (A) → EPUB preflight + device preview (D) → large print + trim presets (G) → footnotes
+(A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
+grows who uses the app more than any of it**.
 
 ### ◻ Strategy notes (context for prioritising, not committed work)
 
