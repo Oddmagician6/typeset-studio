@@ -745,6 +745,29 @@ install gains the six new families in its font library, but its already-seeded p
 pointing at Book. Only new installs get the new pairings automatically; existing users can switch a
 style's faces in the editor. Deliberate — never overwrite a user's edited preset.
 
+**45. Raised-initial openings no longer collide with the next paragraph** *(pre-existing engine bug,
+found while proofing #44; present since the feature shipped and reproducible at HEAD with the old
+Book font, so not a font-swap regression)*
+`open_style: "raised_initial"` (Romance ships it; any preset can select it) set the initial as an
+oversized `<font size>` run inside the opening Paragraph. ReportLab drops the first baseline to clear
+a tall run but `wrap()` still reports `lines × leading`, so the paragraph drew about a line lower than
+the space reserved for it and **overprinted the following paragraph** — measured at HEAD: 7.0 pt
+between baselines where the preset's leading is 16.0. (`autoLeading='max'` was tried first and only
+narrows it — ReportLab's measure and its draw disagree there too.)
+- `engine.py`: new `RaisedInitial` flowable beside `DropCap`, owning its geometry — it wraps the body
+  as a Paragraph with `firstLineIndent` = the initial's width, reserves `ascent(initial) −
+  ascent(body)` above the first line, and draws the initial on that first baseline, so measured height
+  and drawn height agree. `_opening_para()` returns it instead of the marked-up Paragraph.
+- **It splits.** Unlike `DropCap` (which returns no split and *raises `LayoutError` on an opening
+  paragraph taller than the frame* — still true, untouched here), `RaisedInitial.split()` keeps the
+  initial with the first part and flows the remainder as an ordinary paragraph, matching what the
+  plain Paragraph it replaced could do. Verified with a page-length opening paragraph: 2 pages, clean
+  continuation, no stray indent.
+Verified: baseline spacing across all nine presets is now exactly the preset leading (worst −0.1 pt,
+rounding); the check **fails at HEAD** (−9.0 pt on Romance) and passes with the fix, so it tests the
+bug rather than the code; rendered proof eyeballed (initial sits on the first baseline, paragraphs
+evenly spaced) in Lora, Book and EB Garamond.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**

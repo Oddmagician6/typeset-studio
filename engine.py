@@ -1364,6 +1364,73 @@ class DropCap(Flowable):
             c2.drawOn(c, 0, top - leading * self.lines - c2.height)
 
 
+class RaisedInitial(Flowable):
+    """Opening paragraph whose first letter is set large on the first baseline.
+
+    Done as a flowable rather than an oversized ``<font size>`` run inside a
+    Paragraph because ReportLab drops the first baseline to clear a tall run but
+    still reports ``lines x leading`` from ``wrap()`` — so the paragraph draws
+    lower than the height it reserved and runs into the next one. (``autoLeading``
+    narrows that gap but does not close it: its measure and its draw disagree.)
+    Owning the geometry, as DropCap does, makes the two agree exactly.
+    """
+    SCALE = 1.9          # initial size as a multiple of the body size
+
+    def __init__(self, cap, rest, body_style, cap_font, _part=None):
+        super().__init__()
+        self.body, self.cap_font = body_style, cap_font
+        self._cap, self._rest = cap, rest
+        self._part = _part          # already-split paragraph, set by split()
+        self._para = None
+
+    def wrap(self, availWidth, availHeight):
+        b = self.body
+        self.cap_size = b.fontSize * self.SCALE
+        # the first line is indented past the initial; the rest sets normally
+        self.cap_w = stringWidth(self._cap, self.cap_font, self.cap_size)
+        if self._part is None:
+            st = ParagraphStyle('raised_body', parent=b,
+                                firstLineIndent=self.cap_w,
+                                spaceBefore=0, spaceAfter=0)
+            self._para = _P(self._rest.lstrip(), st)
+        else:
+            self._para = self._part
+        _, ph = self._para.wrap(availWidth, availHeight)
+        # room above the first line for the part of the initial that rises past
+        # the body's own ascent
+        self._extra = max(0.0, pdfmetrics.getAscent(self.cap_font, self.cap_size)
+                             - pdfmetrics.getAscent(b.fontName, b.fontSize))
+        self.width, self.height = availWidth, ph + self._extra
+        return (availWidth, self.height)
+
+    def split(self, availWidth, availHeight):
+        """Split like the plain Paragraph this replaced.
+
+        An opening paragraph can be longer than a page, so refusing to split
+        (as DropCap does) would raise LayoutError instead of just flowing on.
+        The initial stays with the first part; the remainder is an ordinary
+        paragraph.
+        """
+        if availHeight >= self.height:
+            return [self]
+        if self._para is None or availHeight <= self._extra + 2 * self.body.leading:
+            return []                    # too little room here; move it on whole
+        parts = self._para.split(availWidth, availHeight - self._extra)
+        if len(parts) != 2:
+            return []
+        head, tail = parts
+        return [RaisedInitial(self._cap, '', self.body, self.cap_font, _part=head),
+                tail]
+
+    def draw(self):
+        c = self.canv
+        self._para.drawOn(c, 0, 0)
+        # ReportLab puts the first baseline one font-size below the paragraph top
+        baseline = self._para.height - self.body.fontSize
+        c.setFont(self.cap_font, self.cap_size)
+        c.drawString(0, baseline, self._cap)
+
+
 # ---------------------------------------------------------------- doc template
 class BookDoc(BaseDocTemplate):
     def __init__(self, filename, preset, meta, head_font, cover=None, **kw):
@@ -1591,9 +1658,8 @@ def _opening_para(text, st, preset, fonts, hyph=None):
         return [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
                         lines=preset['chapter'].get('dropcap_lines', 3))]
     if style == 'raised_initial':
-        big  = int(st['first'].fontSize * 1.9)
         rest = _hyphenate_markup(plain[1:], hyph) if hyph else plain[1:]
-        return [Paragraph(f'<font size="{big}">{plain[:1]}</font>{rest}', st['first'])]
+        return [RaisedInitial(plain[:1], rest, st['first'], fonts['regular'])]
     if style == 'smallcaps_leadin':
         words = plain.split(' ')
         n     = preset['chapter'].get('leadin_words', 4)
