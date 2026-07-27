@@ -3,11 +3,11 @@
   "description": "Warm and flowing. Raised initial chapter opening, generous leading, prominent chapter titles. Suits romance, women’s fiction, and emotional literary fiction.",
   "trim": { "w": 5.5, "h": 8.5 },
   "margins": { "top": 0.75, "bottom": 0.8, "inside": 0.8, "outside": 0.55 },
-  "font_family": "Book",
+  "font_family": "Lora",
   "font_files": {
-    "regular": "Book-Regular.ttf",
-    "bold": "Book-Bold.ttf",
-    "italic": "Book-Italic.ttf"
+    "regular": "Lora-Regular.ttf",
+    "bold": "Lora-Bold.ttf",
+    "italic": "Lora-Italic.ttf"
   },
   "body": {
     "size": 11.0,

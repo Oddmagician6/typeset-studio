@@ -3,15 +3,15 @@
   "description": "Modern and uncluttered — large bare-numeral chapter openings, open leading, hyphenated justification, and a minimal single-rule scene break. Suits science fiction and near-future. Pairs with the Sci-Fi Cosmic cover.",
   "trim": { "w": 6.0, "h": 9.0 },
   "margins": { "top": 0.75, "bottom": 0.8, "inside": 0.85, "outside": 0.65 },
-  "font_family": "Book",
+  "font_family": "Spectral",
   "font_files": {
-    "regular": "Book-Regular.ttf",
-    "bold": "Book-Bold.ttf",
-    "italic": "Book-Italic.ttf"
+    "regular": "Spectral-Regular.ttf",
+    "bold": "Spectral-Bold.ttf",
+    "italic": "Spectral-Italic.ttf"
   },
   "body": {
-    "size": 10.5,
-    "leading": 15.5,
+    "size": 11.0,
+    "leading": 16.0,
     "indent": 0.28,
     "justify": true,
     "hyphenate": true

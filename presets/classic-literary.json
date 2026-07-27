@@ -3,15 +3,15 @@
   "description": "A warm, traditional novel interior. Good default for literary and general fiction.",
   "trim": { "w": 6.0, "h": 9.0 },
   "margins": { "top": 0.75, "bottom": 0.8, "inside": 0.85, "outside": 0.6 },
-  "font_family": "Book",
+  "font_family": "EB Garamond",
   "font_files": {
-    "regular": "Book-Regular.ttf",
-    "bold": "Book-Bold.ttf",
-    "italic": "Book-Italic.ttf"
+    "regular": "EBGaramond-Regular.ttf",
+    "bold": "EBGaramond-Bold.ttf",
+    "italic": "EBGaramond-Italic.ttf"
   },
   "body": {
-    "size": 11.0,
-    "leading": 15.5,
+    "size": 12.0,
+    "leading": 16.5,
     "indent": 0.3,
     "justify": true,
     "hyphenate": false

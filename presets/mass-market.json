@@ -3,15 +3,15 @@
   "description": "The standard retail paperback format. Compact trim, small type, tight margins. The workhorse format for commercial fiction — thrillers, romance, mystery, science fiction.",
   "trim": { "w": 4.25, "h": 6.87 },
   "margins": { "top": 0.5, "bottom": 0.55, "inside": 0.6, "outside": 0.38 },
-  "font_family": "Book",
+  "font_family": "Crimson Pro",
   "font_files": {
-    "regular": "Book-Regular.ttf",
-    "bold": "Book-Bold.ttf",
-    "italic": "Book-Italic.ttf"
+    "regular": "CrimsonPro-Regular.ttf",
+    "bold": "CrimsonPro-Bold.ttf",
+    "italic": "CrimsonPro-Italic.ttf"
   },
   "body": {
-    "size": 9.5,
-    "leading": 12.5,
+    "size": 10.0,
+    "leading": 13.0,
     "indent": 0.2,
     "justify": true,
     "hyphenate": true

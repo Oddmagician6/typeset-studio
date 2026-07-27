@@ -30,7 +30,9 @@ templates/        Jinja2 UI: base, index (styles), editor (preset form + live pr
 presets/*.json    One file per style. Cloneable per customer. Seven presets ship by default.
 covers/*.json     One file per designed cover template (text-driven page-1 layout). Cloneable per line.
                   Edited in the browser via the Cover Studio (no hand-editing needed).
-fonts/*.ttf       Embeddable TrueType faces (family "Book"). Also stores scene-break ornament images.
+fonts/*.ttf       Embeddable TrueType faces — seven bundled OFL book serifs (see #44) plus any
+                  the user uploads. Also stores scene-break ornament images. fonts/licenses/ holds
+                  the OFL texts for the bundled families.
 sample/sample.md  Demo manuscript (3 chapters; Chapter 3 exercises all 5 epistolary block types).
 out/              Composed PDFs / EPUBs land here (also served for download).
 uploads/          User-uploaded manuscripts / cover art (created at runtime).
@@ -205,9 +207,12 @@ created, updated    ISO 8601 datetime strings
   Designed covers reach the EPUB as a rasterised page-1 JPEG (feature #43; `epub.py` itself is
   still image-only) and are persisted in saved projects (feature #29).
 
-- **Scene-break glyphs must exist in the body font.** Libre Baskerville ("Book") lacks many
-  ornaments. Presets ship with font-safe marks (`* * *`, em-dashes, middots). Use the image
-  ornament type for custom artwork instead of exotic Unicode.
+- **Scene-break glyphs must exist in the body font.** The bundled book serifs lack most ornaments.
+  Presets ship with font-safe marks (`* * *`, em-dashes, middots, bullets) — all seven bundled
+  families were checked against the four the presets use plus curly quotes / ellipsis / en dash.
+  Use the image ornament type for custom artwork instead of exotic Unicode, and re-check coverage
+  when pointing a preset at a new face. (U+00AD is *not* required: two of the bundled families lack
+  it and hyphenation still renders a real hyphen — ReportLab breaks on the soft hyphen itself.)
 
 - **Fonts:** `register_fonts` resolves bare filenames against `fonts/`, accepts absolute
   paths, and falls back to Times if a file is missing — so a build never hard-fails, but
@@ -704,6 +709,42 @@ and uploaded-image paths unchanged** (uploaded art is never deleted); and end-to
 68–90 KB. Not done: the EPUB cover is a flat raster, so `background`/`emblems` (#32) come along as pixels
 rather than as separate assets — fine for an ebook cover.
 
+**44. Six more bundled book faces — one typeface per genre style** *(Tier-5E; the largest
+perceived-quality change per hour in the gap list. Data + one constant; no engine change)*
+All nine presets set `"regular": "Book-Regular.ttf"`, so the nine "genre styles" differed in
+*layout* but every book came out in Libre Baskerville — against Vellum's 8 styles (each a distinct
+display + body pairing) and Atticus's 1,500 fonts. The font-library plumbing (#17) already existed;
+we simply shipped one family.
+- `fonts/`: **EB Garamond, Vollkorn, Alegreya, Crimson Pro, Lora, Spectral** — Regular/Bold/Italic
+  each, 18 files, ~4.8 MB (fonts/ total 5.1 MB). All **SIL OFL**, so they may be embedded in a book
+  someone sells; licence texts in the new `fonts/licenses/`. Sourced from `google/fonts`; the five
+  families that upstream ships only as **variable** fonts were cut to static Regular (wght 400) and
+  Bold (wght 700) instances with `fontTools.varLib.instancer` — a variable TTF registered as "bold"
+  would render at its 400 default, so bold text would not be bold. Spectral ships static upstream and
+  was copied as-is. (fontTools was used in a throwaway venv; it is **not** a project dependency.)
+- Preset mapping — Classic Literary → EB Garamond · Gothic/Horror → Vollkorn · Fantasy (Epic) +
+  Science Fiction & Fantasy → Alegreya · Mass Market → Crimson Pro · Romance → Lora ·
+  Thriller/Crime + Science Fiction (Clean) → Spectral. **Modern Clean deliberately keeps Book**
+  (Libre Baskerville's large x-height and wide fit *is* the airy contemporary look that style is for).
+- Sizes were re-set, not carried over. Libre Baskerville is a screen face — x-height 0.530 em and
+  0.587 em average advance, against 0.400/0.437 for EB Garamond — so at a fixed point size the new
+  faces set narrower and look smaller. Sizes were chosen by **characters per line** (the measure that
+  matters for a book page): the presets ran 44–55 CPL, which is a short measure; they now land
+  **54–65**. Only five presets changed size at all (e.g. Classic Literary 11/15.5 → 12/16.5).
+- `app.py`: `BUILTIN_FAMILIES` now derives `BUILTIN_FONTS` (21 files), so every bundled face is
+  protected from deletion in the Fonts manager — deleting one would silently drop a preset to Times.
+- `README.md`: the Fonts section is now a family → registered-name → preset table plus the OFL note.
+Verified: all 21 faces register and embed via the app's own `_is_embeddable_font`; every family
+covers the glyphs the presets actually use (`*`, `•`, `—`, `·`, curly quotes, ellipsis, en/em dash);
+rendered page proofs of all nine presets eyeballed; a scripted pass over all nine (no font fallback,
+no line set tighter than the preset's own leading, incl. parts/subheads/scene breaks/doc blocks/TOC);
+the style editors show the right faces pre-selected; a full `POST /generate` compose (PDF+EPUB) with
+no fallback; all 24 cover thumbnails still build; `test_doc_model.py` ALL PASS.
+**Note for upgraders:** `_seed_defaults()` copies *missing* files into `%APPDATA%`, so an existing
+install gains the six new families in its font library, but its already-seeded preset JSONs keep
+pointing at Book. Only new installs get the new pairings automatically; existing users can switch a
+style's faces in the editor. Deliberate — never overwrite a user's edited preset.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -997,14 +1038,9 @@ page would be honest and cheap. Also still open from #30: no `.docx` **poem** im
 
 **E. Type & design assets — best perceived-quality-per-hour in the whole list**
 
-- **One typeface for nine styles.** All nine `presets/*.json` set
-  `"regular": "Book-Regular.ttf"` — the nine genre styles differ in *layout* but every book comes
-  out in Libre Baskerville. Vellum's 8 styles each pair a distinct display + body face; Atticus
-  ships 17 themes and 1,500+ fonts. The font-library plumbing already exists (#17,
-  `register_fonts` + `_register_cover_fonts`); we simply ship one family. **Bundling 4–5 OFL
-  families** (EB Garamond, Crimson Pro, Alegreya, Spectral, Vollkorn) and repointing the presets
-  is roughly half a day of data work for the largest visible quality delta available. Check
-  bundle size against the ~97 MB PyInstaller build and the licence-embedding rule in README.
+- ~~**One typeface for nine styles.**~~ — **SHIPPED (feature #44):** six OFL families (EB Garamond,
+  Vollkorn, Alegreya, Crimson Pro, Lora, Spectral) bundled and the presets repointed, one considered
+  face per genre style, with sizes re-set by characters-per-line. ~4.8 MB added.
 - **Ornament / flourish library.** `SceneBreak` supports an image ornament (#9) but the repo
   ships **zero artwork**, so every book gets `* * *` or an em dash. Vellum ships flourishes,
   custom ornaments, custom backgrounds, full-bleed interior pages and chapter-heading images. A

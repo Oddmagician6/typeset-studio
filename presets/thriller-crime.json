@@ -3,15 +3,15 @@
   "description": "Lean and urgent. Large bare chapter numeral, tight leading, no opening flourish — the chapter number does the work. Suits crime fiction, psychological thrillers, and domestic suspense.",
   "trim": { "w": 5.5, "h": 8.5 },
   "margins": { "top": 0.65, "bottom": 0.7, "inside": 0.75, "outside": 0.5 },
-  "font_family": "Book",
+  "font_family": "Spectral",
   "font_files": {
-    "regular": "Book-Regular.ttf",
-    "bold": "Book-Bold.ttf",
-    "italic": "Book-Italic.ttf"
+    "regular": "Spectral-Regular.ttf",
+    "bold": "Spectral-Bold.ttf",
+    "italic": "Spectral-Italic.ttf"
   },
   "body": {
-    "size": 10.5,
-    "leading": 14.0,
+    "size": 11.0,
+    "leading": 14.5,
     "indent": 0.25,
     "justify": true,
     "hyphenate": false

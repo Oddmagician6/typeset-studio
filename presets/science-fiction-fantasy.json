@@ -3,15 +3,15 @@
   "description": "Immersive and world-building-ready. Drop-cap chapter openings, generous page, deep chapter sink. Suits epic fantasy, science fiction, and speculative fiction.",
   "trim": { "w": 6.0, "h": 9.0 },
   "margins": { "top": 0.8, "bottom": 0.85, "inside": 0.9, "outside": 0.65 },
-  "font_family": "Book",
+  "font_family": "Alegreya",
   "font_files": {
-    "regular": "Book-Regular.ttf",
-    "bold": "Book-Bold.ttf",
-    "italic": "Book-Italic.ttf"
+    "regular": "Alegreya-Regular.ttf",
+    "bold": "Alegreya-Bold.ttf",
+    "italic": "Alegreya-Italic.ttf"
   },
   "body": {
-    "size": 11.0,
-    "leading": 15.5,
+    "size": 11.5,
+    "leading": 16.0,
     "indent": 0.3,
     "justify": true,
     "hyphenate": false

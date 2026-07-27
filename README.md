@@ -117,8 +117,20 @@ The three starting styles:
 
 ## Fonts
 
-The tool ships with an embeddable book serif registered as **"Book"**
-(`fonts/Book-Regular.ttf`, `-Bold`, `-Italic`).
+The tool ships with **seven book serifs**, each with a regular, bold and italic:
+
+| Family | Registered as | Used by |
+|--------|---------------|---------|
+| Libre Baskerville | `Book` | Modern Clean |
+| EB Garamond | `EB Garamond` | Classic Literary |
+| Vollkorn | `Vollkorn` | Gothic / Horror |
+| Alegreya | `Alegreya` | Fantasy (Epic), Science Fiction & Fantasy |
+| Crimson Pro | `Crimson Pro` | Mass Market Paperback |
+| Lora | `Lora` | Romance / Women's Fiction |
+| Spectral | `Spectral` | Thriller / Crime, Science Fiction (Clean) |
+
+All seven are under the SIL Open Font Licence — free to use and to embed in a book
+you sell. The licence texts are in `fonts/licenses/`.
 
 In a style's **Fonts** section you can point to your own typefaces two ways:
 

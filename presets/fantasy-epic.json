@@ -3,15 +3,15 @@
   "description": "Ornate and traditional — deep drop-cap chapter openings, airy leading, generous margins, and a decorative scene break. Suits epic and high fantasy. Pairs with the Fantasy Emerald cover.",
   "trim": { "w": 6.0, "h": 9.0 },
   "margins": { "top": 0.85, "bottom": 0.9, "inside": 0.95, "outside": 0.7 },
-  "font_family": "Book",
+  "font_family": "Alegreya",
   "font_files": {
-    "regular": "Book-Regular.ttf",
-    "bold": "Book-Bold.ttf",
-    "italic": "Book-Italic.ttf"
+    "regular": "Alegreya-Regular.ttf",
+    "bold": "Alegreya-Bold.ttf",
+    "italic": "Alegreya-Italic.ttf"
   },
   "body": {
-    "size": 11.5,
-    "leading": 16.5,
+    "size": 12.0,
+    "leading": 17.0,
     "indent": 0.3,
     "justify": true,
     "hyphenate": false

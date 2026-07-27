@@ -404,8 +404,16 @@ def unique_cover_id(base):
     return cid
 
 
-# fonts that ship with the app — protected from deletion/overwrite in the Fonts manager
-BUILTIN_FONTS = {'Book-Regular.ttf', 'Book-Bold.ttf', 'Book-Italic.ttf'}
+# Book faces that ship with the app, each with a Regular/Bold/Italic. The shipped
+# presets point at these; every one is OFL (licence texts in fonts/licenses/), so
+# they may be embedded in a book. Protected from deletion/overwrite in the Fonts
+# manager — deleting one would silently drop a preset back to Times.
+BUILTIN_FAMILIES = ('Book',          # Libre Baskerville
+                    'EBGaramond', 'Vollkorn', 'Alegreya',
+                    'CrimsonPro', 'Lora', 'Spectral')
+BUILTIN_FONTS = {f'{fam}-{role}.ttf'
+                 for fam in BUILTIN_FAMILIES
+                 for role in ('Regular', 'Bold', 'Italic')}
 FONT_EXTS = ('.ttf', '.otf')
 
 
