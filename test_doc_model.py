@@ -465,6 +465,65 @@ def test_links():
            manuscript.chapter_anchors({"title": None}, 3) == ["chapter-3"])
 
 
+NOTES_MD = """\
+# The Survey
+
+The plateau was surveyed twice.[^survey] The second disagreed.[^second]
+
+Later the office revised it again.[^survey]
+
+[^survey]: Ferrun Cartographic Office, *Survey of the Salt Road*, 1891.
+[^second]: The disagreement was never formally settled.
+[^orphan]: A note nobody referenced.
+
+# The Revision
+
+Numbering restarts here.[^a] And a reference with no text.[^gone]
+
+[^a]: Revised survey, 1904.
+"""
+
+
+def test_notes():
+    """Endnotes: per-chapter numbering, definitions lifted out of the body."""
+    print("\n[endnotes]")
+    for smart in (True, False):
+        doc1 = doc_model.from_markdown(NOTES_MD, smartquotes=smart)
+        md2 = doc_model.to_markdown(doc1)
+        doc2 = doc_model.from_markdown(md2, smartquotes=smart)
+        eng_a = manuscript.parse_markdown(NOTES_MD, smartquotes=smart)
+        eng_b = manuscript.parse_markdown(md2, smartquotes=smart)
+        _check(f"notes engine fidelity (smart={smart})", eng_a == eng_b, _diff(eng_a, eng_b))
+        _check(f"notes model stability (smart={smart})", doc1 == doc2, _diff(doc1, doc2))
+
+    ms = manuscript.parse_markdown(NOTES_MD)
+    ch1, ch2 = ms["chapters"]
+
+    _check("definitions are not body paragraphs",
+           all("[^" not in b[1] for b in ch1["blocks"] if b[0] == "para"),
+           [b[1] for b in ch1["blocks"]])
+    _check("reference became a numbered marker",
+           '<note n="1" id="survey"/>' in ch1["blocks"][0][1], ch1["blocks"][0][1])
+    _check("a repeated label keeps its number",
+           '<note n="1" id="survey"/>' in ch1["blocks"][1][1], ch1["blocks"][1][1])
+
+    n1 = {n["label"]: n for n in ch1["notes"]}
+    _check("chapter 1 has three notes", len(ch1["notes"]) == 3, len(ch1["notes"]))
+    _check("note text keeps emphasis", "<i>" in n1["survey"]["text"], n1["survey"]["text"])
+    _check("orphan definition kept, numbered last",
+           n1["orphan"]["n"] == 3, n1["orphan"])
+    _check("numbering restarts per chapter",
+           [n["n"] for n in ch2["notes"]] == [1, 2], ch2["notes"])
+    _check("reference with no definition still numbered",
+           any(n["label"] == "gone" and n["text"] == "" for n in ch2["notes"]),
+           ch2["notes"])
+    _check("scratch key removed", "note_defs" not in ch1)
+
+    # a manuscript with no notes must not grow the key
+    plain = manuscript.parse_markdown("# One\n\nNo notes here.\n")
+    _check("no notes -> no notes key", "notes" not in plain["chapters"][0])
+
+
 if __name__ == "__main__":
     test_roundtrips()
     test_adversarial()
@@ -474,6 +533,7 @@ if __name__ == "__main__":
     test_figures()
     test_blocks()
     test_links()
+    test_notes()
     print()
     if _failures:
         print(f"FAILED ({len(_failures)}): " + "; ".join(_failures))

@@ -25,7 +25,8 @@ try:
 except ImportError:
     _HAVE_PYPHEN = False
 
-from manuscript import _inline as _ms_inline, chapter_anchors as _ms_anchors
+from manuscript import (_inline as _ms_inline, chapter_anchors as _ms_anchors,
+                        map_block_texts as _ms_map_texts)
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
@@ -1627,6 +1628,15 @@ def _styles(preset, fonts):
 
 
 _TAG_RE = re.compile(r'<[^>]+>')
+_NOTE_MARK_RE = re.compile(r'<note n="(\d+)" id="[\w\-]+"/>')
+# the same number once _apply_note_markers has made it a linked <super>
+_NOTE_SUPER_RE = re.compile(r'<a href="#note-\d+-(\d+)"><super[^>]*>\d+</super></a>')
+
+
+def _esc_markup(text):
+    """Escape a raw string for ReportLab paragraph markup."""
+    return (text.replace('&', '&amp;').replace('<', '&lt;')
+                .replace('>', '&gt;'))
 
 
 def _plain(text):
@@ -1656,8 +1666,39 @@ def _hyphenate_markup(text, dic):
     return ''.join(result)
 
 
+_SUP_DIGITS = {'0': '⁰', '1': '¹', '2': '²', '3': '³',
+               '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷',
+               '8': '⁸', '9': '⁹'}
+
+
+def _unicode_super(n, font_name):
+    """'12' -> '¹²' if the face has those glyphs, else None.
+
+    The decorative openings re-set their first words as plain text, so a
+    `<super>` tag there is stripped and an endnote number would land mid-sentence
+    at full size, reading like a typo. A real superscript *character* survives
+    the stripping — where the font has one. Lora, for instance, only carries 1–4.
+    """
+    try:
+        cmap = pdfmetrics.getFont(font_name).face.charToGlyph
+    except Exception:
+        return None
+    out = []
+    for d in str(n):
+        c = _SUP_DIGITS.get(d)
+        if c is None or ord(c) not in cmap:
+            return None
+        out.append(c)
+    return ''.join(out)
+
+
 def _opening_para(text, st, preset, fonts, hyph=None):
     style = preset['chapter']['open_style']
+    if style != 'none':
+        # swap note markers for superscript characters before the tags are stripped
+        text = _NOTE_SUPER_RE.sub(
+            lambda m: _unicode_super(m.group(1), fonts['regular']) or m.group(1),
+            text)
     plain = _plain(text)
     if style == 'dropcap':
         plain_h = _hyphenate_markup(plain, hyph) if hyph else plain
@@ -2303,6 +2344,68 @@ def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_
     return out
 
 
+def _note_anchor(ch_idx, n):
+    return f'note-{ch_idx}-{n}'
+
+
+def _apply_note_markers(chapters, preset):
+    """Turn `<note n=… id=…/>` into a linked superscript, per chapter.
+
+    Must happen before anything reaches ReportLab: the neutral marker is not
+    valid paragraph markup, so leaving one behind is a build error rather than a
+    cosmetic slip. The size is set explicitly — ReportLab's default `<super>`
+    keeps the full body size, which next to a real superscript character (what
+    the decorative chapter openings fall back to) reads as two different things.
+    """
+    index = {id(ch): i for i, ch in enumerate(chapters, start=1)}
+    size = round(preset['body']['size'] * preset.get('endnotes', {})
+                 .get('marker_scale', 0.62), 2)
+
+    def render(text, ch):
+        i = index[id(ch)]
+        return _NOTE_MARK_RE.sub(
+            lambda m: (f'<a href="#{_note_anchor(i, m.group(1))}">'
+                       f'<super size="{size}">{m.group(1)}</super></a>'), text)
+
+    return _ms_map_texts(chapters, render)
+
+
+def _endnotes_page(chapters, fonts, st, preset):
+    """Flowables for the Notes back-matter page, grouped by chapter."""
+    em      = preset.get('endnotes', {})
+    heading = em.get('heading', 'Notes')
+    size    = em.get('font_size', 0) or (st['body'].fontSize - 1.0)
+    lead    = size * em.get('line_leading', 1.35)
+    indent  = em.get('indent', 0.3) * inch
+
+    head_style = ParagraphStyle(
+        'notegroup', parent=st['body'],
+        fontName=fonts.get('bold', fonts['regular']),
+        fontSize=size + 0.5, leading=(size + 0.5) * 1.3, firstLineIndent=0,
+        spaceBefore=em.get('group_gap', 12.0), spaceAfter=4.0)
+    entry_style = ParagraphStyle(
+        'noteentry', parent=st['body'], fontName=fonts['regular'],
+        fontSize=size, leading=lead,
+        leftIndent=indent, firstLineIndent=-indent,     # hanging number
+        spaceBefore=0, spaceAfter=em.get('entry_gap', 3.0))
+
+    out = [BlankMarker(), Paragraph(heading, st['chap_title']),
+           Spacer(1, 0.3 * inch)]
+    for i, ch in enumerate(chapters, start=1):
+        notes = ch.get('notes') or []
+        if not notes:
+            continue
+        if em.get('group_by_chapter', True):
+            label = ch.get('title') or f'Chapter {i}'
+            out.append(Paragraph(_esc_markup(label), head_style))
+        for note in notes:
+            body = note['text'] or '<i>[no note text]</i>'
+            out.append(Paragraph(
+                f'<a name="{_note_anchor(i, note["n"])}"/>{note["n"]}.&#160;&#160;{body}',
+                entry_style))
+    return out
+
+
 def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
     """Flowables for one front/back matter page. Caller handles page breaks."""
     # Split on blank lines into raw paragraph strings
@@ -2379,6 +2482,10 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                  has_cover=False, avail_w=0, hyph=None, toc_flowables=None):
     glyph = preset['scene_break']['glyph']
     story = []
+    # note markers are neutral in the parsed model; make them superscripts before
+    # any of this text reaches ReportLab
+    manuscript = dict(manuscript)
+    manuscript['chapters'] = _apply_note_markers(manuscript['chapters'], preset)
 
     # ---- cover page (full-bleed art drawn by the page template) ----
     if has_cover:
@@ -2552,6 +2659,14 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         ('also_by',         f'Also by {_author}'.strip() or 'Also By', 'also_by'),
     ]
     _bm_first = True   # only the first back-matter page gets recto-forced
+
+    # Notes come first in the back matter, right after the last chapter — they
+    # belong to the text in a way acknowledgments and author bios don't.
+    if any(ch.get('notes') for ch in manuscript['chapters']):
+        story.append(RectoBreak() if rhs else PageBreak())
+        _bm_first = False
+        story.extend(_endnotes_page(manuscript['chapters'], fonts, st, preset))
+
     for _key, _heading, _mstyle in _back:
         _txt = meta.get(_key, '').strip()
         if not _txt:

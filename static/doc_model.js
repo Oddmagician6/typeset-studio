@@ -28,6 +28,9 @@
   // A link target is restricted to unambiguous forms, so ordinary prose like
   // "[sic](ibid)" never becomes a link. Mirrors manuscript.LINK_RE.
   var LINK_RE = /\[([^\[\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+|#[A-Za-z0-9][\w\-]*)\)/g;
+  // `[^label]: …` — an endnote's text. Kept as a plain paragraph here, but it
+  // must start a new one. Mirrors manuscript.NOTE_DEF_RE.
+  var NOTE_DEF_RE = /^\s*\[\^([\w\-]+)\]:\s*(.*)$/;
   var SCENE_BREAK_RE = /^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$/;
   var CHAPTER_RE     = /^#\s+(.*)$/;
   var SUBHEAD_RE     = /^##\s+(.*)$/;
@@ -290,7 +293,11 @@
       if (SCENE_BREAK_RE.test(line)) { flushPara(); blocks.push({ type: 'scene' }); continue; }
       if (mSub) { flushPara(); blocks.push({ type: 'subhead', runs: parseInline(mSub[1].trim()) }); continue; }
       if (line.trim() === '') flushPara();
-      else paraBuf.push(line);
+      else {
+        // a note definition must not merge with the line above it
+        if (NOTE_DEF_RE.test(line)) flushPara();
+        paraBuf.push(line);
+      }
     }
     if (inBlock) closeBlock();
     flushPara();

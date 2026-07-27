@@ -366,6 +366,13 @@ def from_markdown(raw, smartquotes=True):
         if line.strip() == '':
             flush_para()
         else:
+            # `[^label]: …` starts an endnote's text. The model keeps it as an
+            # ordinary paragraph (it needs no special meaning here) but must not
+            # let it merge with the line above: a run of definitions would come
+            # back as one paragraph, and re-parsing would swallow all but the
+            # first into it.
+            if manuscript.NOTE_DEF_RE.match(line):
+                flush_para()
             para_buf.append(line)
 
     if in_block:

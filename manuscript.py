@@ -84,6 +84,14 @@ def _restore_escapes(text):
 LINK_TARGET = r'(?:https?://[^\s)]+|mailto:[^\s)]+|#[A-Za-z0-9][\w\-]*)'
 LINK_RE = re.compile(r'\[([^\[\]]+)\]\((' + LINK_TARGET + r')\)')
 
+# Endnotes. A reference `[^label]` sits in the sentence; its text is a paragraph
+# `[^label]: …` anywhere in the same chapter. The label is the author's handle for
+# the note — the *number* is assigned per chapter at parse time, so the PDF and the
+# EPUB can never disagree about it.
+NOTE_REF_RE = re.compile(r'\[\^([\w\-]+)\]')
+NOTE_DEF_RE = re.compile(r'^\s*\[\^([\w\-]+)\]:\s*(.*)$')
+_NOTE_TAG_RE = re.compile(r'<note n="(\d+)" id="([\w\-]+)"/>')
+
 
 def _is_block_line(line):
     """True if a line would be parsed as a structural block (not a paragraph)."""
@@ -139,6 +147,11 @@ def _inline(text, smartquotes=True):
 
     text = LINK_RE.sub(_stash, text)
 
+    # Endnote references become a neutral marker; the number is filled in by
+    # _number_notes once the whole chapter is known, and each builder decides
+    # how to draw it.
+    text = NOTE_REF_RE.sub(lambda m: f'<note id="{m.group(1)}"/>', text)
+
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<i>\1</i>', text)
     text = re.sub(r'_(?!\s)(.+?)(?<!\s)_', r'<i>\1</i>', text)
@@ -151,6 +164,82 @@ def _inline(text, smartquotes=True):
                       f'{m.group(2)}</a>',
             text, flags=re.S)
     return _restore_escapes(text)
+
+
+def _walk_block_texts(blocks):
+    """Yield (setter, text) for every markup-bearing string in a chapter's blocks.
+
+    Blocks are tuples, so a rewrite has to rebuild the list — the setter hides
+    that from callers.
+    """
+    for i, block in enumerate(blocks):
+        kind = block[0]
+        if kind in ('para', 'subhead'):
+            def _set(new, i=i, block=block):
+                blocks[i] = (block[0], new)
+            yield _set, block[1]
+        elif kind == 'doc_block':
+            for j, (_k, _t) in enumerate(block[1]):
+                def _set(new, i=i, j=j, block=block):
+                    inner = list(block[1])
+                    inner[j] = (inner[j][0], new)
+                    blocks[i] = (block[0], inner) + tuple(block[2:])
+                yield _set, _t
+
+
+def map_block_texts(chapters, fn):
+    """Return a copy of `chapters` with every markup string passed through `fn`.
+
+    Used by both builders to turn the neutral `<note …/>` marker into their own
+    superscript. Returns a copy rather than editing in place: app.py parses once
+    and hands the same structure to the PDF *and* the EPUB build.
+    """
+    out = []
+    for ch in chapters:
+        new = dict(ch)
+        new['blocks'] = list(ch.get('blocks', []))
+        for setter, text in _walk_block_texts(new['blocks']):
+            new_text = fn(text, ch)
+            if new_text != text:
+                setter(new_text)
+        out.append(new)
+    return out
+
+
+def _number_notes(chapter):
+    """Assign endnote numbers in reading order and attach `chapter['notes']`.
+
+    Numbers restart per chapter — the book convention, and what the Endnotes page
+    groups by. Both builders read the number straight out of the marker, so they
+    cannot drift apart. A reference with no `[^label]: …` still gets a number and
+    a visible placeholder: a silently vanishing note is worse than an obvious one.
+    """
+    defs = chapter.pop('note_defs', {}) or {}
+    seen, notes = {}, []
+
+    def renumber(text):
+        def sub(m):
+            label = m.group(1)
+            if label not in seen:
+                seen[label] = len(seen) + 1
+                notes.append({'n': seen[label], 'label': label,
+                              'text': defs.get(label, '')})
+            return f'<note n="{seen[label]}" id="{label}"/>'
+        return re.sub(r'<note id="([\w\-]+)"/>', sub, text)
+
+    for setter, text in _walk_block_texts(chapter.get('blocks', [])):
+        if '<note id=' in text:
+            setter(renumber(text))
+
+    # a definition nobody referenced is still the author's writing — keep it,
+    # numbered after the referenced ones, rather than dropping it
+    for label, text in defs.items():
+        if label not in seen:
+            seen[label] = len(seen) + 1
+            notes.append({'n': seen[label], 'label': label, 'text': text})
+
+    if notes:
+        chapter['notes'] = notes
 
 
 def _split_byline(title_line):
@@ -199,6 +288,10 @@ def parse_markdown(raw, smartquotes=True):
     current_part = None
     part_number  = 0
 
+    # endnote-definition state (`[^label]: …`, continued on following lines)
+    note_label     = None
+    note_buf       = []
+
     # doc-block state
     in_block       = False
     block_buf      = []
@@ -206,8 +299,16 @@ def parse_markdown(raw, smartquotes=True):
     block_type     = ''
     block_attrs    = {}
 
+    def flush_note():
+        nonlocal note_label, note_buf
+        if note_label is not None:
+            body = ' '.join(s.strip() for s in note_buf).strip()
+            cur['note_defs'][note_label] = _inline(body, smartquotes)
+            note_label, note_buf = None, []
+
     def flush_para():
         nonlocal para_buf
+        flush_note()                            # a note ends where a paragraph does
         if para_buf:
             joined = ' '.join(s.strip() for s in para_buf).strip()
             if joined:
@@ -242,7 +343,8 @@ def parse_markdown(raw, smartquotes=True):
     def new_chapter(title, byline=None):
         nonlocal cur
         flush_para() if cur else None
-        cur = {'title': title, 'byline': byline, 'part': current_part, 'blocks': []}
+        cur = {'title': title, 'byline': byline, 'part': current_part, 'blocks': [],
+               'note_defs': {}}
         chapters.append(cur)
 
     for line in lines:
@@ -252,6 +354,24 @@ def parse_markdown(raw, smartquotes=True):
                 new_chapter(None)
             para_buf.append(line[1:])
             continue
+
+        # `[^label]: …` — an endnote's text. Matched per line, not per paragraph:
+        # notes are usually written as a consecutive run, and joining them first
+        # would swallow every definition after the first into the one above it.
+        if not in_block:
+            m_ndef = NOTE_DEF_RE.match(line)
+            if m_ndef:
+                flush_para()
+                if cur is None:
+                    new_chapter(None)
+                note_label, note_buf = m_ndef.group(1), [m_ndef.group(2)]
+                continue
+            if note_label is not None:
+                if line.strip():                # a wrapped continuation line
+                    note_buf.append(line)
+                else:
+                    flush_note()
+                continue
 
         # === Part marker (only outside doc blocks)
         if not in_block:
@@ -328,6 +448,8 @@ def parse_markdown(raw, smartquotes=True):
     flush_para()
 
     chapters = [c for c in chapters if c['blocks'] or c['title']]
+    for c in chapters:
+        _number_notes(c)
     return {'chapters': chapters}
 
 

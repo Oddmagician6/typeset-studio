@@ -81,6 +81,8 @@ quote:         {indent, right_indent, first_indent, font_size, line_leading,
 align:         {space_around, indent, para_gap}     alignment blocks only
 link:          {underline, color, epub_underline}
                underline is the PRINT setting; color/epub_underline are ebook-only
+endnotes:      {heading, group_by_chapter, font_size, line_leading, indent,
+               entry_gap, group_gap, marker_scale}
 figure:        {width, align, max_height, space_around,
                caption_size, caption_style, caption_align, caption_gap}
                width/max_height are fractions (of the text width / text height)
@@ -126,6 +128,7 @@ also_by              plain text, one title per line ('' = no page)
   "chapters": [
     {
       "title":  str | None,
+      "notes":  [{"n": int, "label": str, "text": html}]  # only when the chapter has endnotes
       "part":   {"title": str | None, "number": int} | None,
       "blocks": [ block, ... ]
     },
@@ -155,6 +158,7 @@ punctuation applied first. Markup conventions:
 | `~~~ quote source="…"` | an inset quotation (prose; lines wrap) |
 | `~~~ center` / `right` / `left` | an aligned block — **one line per line** |
 | `[text](https://…)` | a link: web, `mailto:`, or an in-book `#anchor` |
+| `[^label]` / `[^label]: text` | an endnote reference and its text (numbered per chapter) |
 | `*italic*`         | *italic*                       |
 | `**bold**`         | **bold**                       |
 | blank line         | new paragraph                  |
@@ -885,9 +889,9 @@ through the real compose flow: the flash reads *"Imported from Word: 1 chapter, 
 1 table, 1 quotation, 3 list items"*, and the built PDF contains the linked phrase, both table rows,
 the bullets, the numbered item and the quotation — every one of which the old importer dropped —
 with both images in the PDF **and** the EPUB.
-**Still not imported:** footnotes/endnotes (no note block yet), tables as real tables (no table
-block), and link addresses (no link type). Each is blocked on a Tier-5A block type, not on the
-importer.
+**Still not imported:** footnotes/endnotes, tables as real tables, and link addresses. *(Since #49
+and #50 the block types exist — Word footnotes could now be imported as endnotes, and link addresses
+kept. That is a follow-up on this importer, no longer a missing feature.)*
 
 **48. Lists, block quotations and alignment blocks** *(Tier-5A; the three remaining cheap block
 types. Also upgrades what #47 can do with a Word file)*
@@ -967,6 +971,47 @@ as one link, with no console errors.
 the drop-cap / raised-initial / small-caps-lead-in opening styles, because `_opening_para` re-sets
 those first words as plain text via `_plain()`. The words survive; the link doesn't. Opening style
 *None* keeps it.
+
+**50. Endnotes — `[^label]` references and a Notes page** *(Tier-5A; the last text feature Vellum
+and Atticus had that we didn't, bar footnotes)*
+A reference `[^label]` sits in the sentence; its text is a paragraph `[^label]: …` anywhere in the
+same chapter. Labels are the author's handle — **numbers are assigned at parse time**, in reading
+order, restarting each chapter (the book convention), so the PDF and the EPUB can never disagree
+about them. A **Notes** page is added after the last chapter automatically; there is nothing to
+switch on.
+- `manuscript.py`: `NOTE_REF_RE` / `NOTE_DEF_RE`; `_inline` turns a reference into a **neutral**
+  `<note n=… id=…/>` marker; definitions are lifted out of the body by a *line-level* check (a run of
+  definitions would otherwise be joined into one paragraph and swallow each other — the same trap as
+  #48's lists, hit again here). `_number_notes` assigns numbers and attaches `chapter['notes']`;
+  `_walk_block_texts` / `map_block_texts` are the new shared way to rewrite every markup string in a
+  chapter, returning a **copy** because app.py parses once and builds both outputs from it.
+- Each builder renders the marker its own way: `engine._apply_note_markers` → a linked
+  `<super size=…>` (size set explicitly; ReportLab's default `<super>` keeps the body size);
+  `epub._apply_note_markers` → `<sup>` linking to the Notes page, with an `id` so the note can link
+  **back** to the sentence — the thing an ebook does that paper can't. A repeated citation gets the
+  id only once, or the XHTML would carry a duplicate `id`.
+- `engine._endnotes_page` / `epub._endnotes_xhtml`: entries grouped under chapter headings, hanging
+  numbers, and manifest/spine/nav entries in the EPUB. Notes lead the back matter — they belong to
+  the text in a way acknowledgments and author bios don't.
+- **Superscripts survive the decorative chapter openings.** Drop-cap / raised-initial / small-caps
+  openings re-set their first words as plain text (`_plain()`), which strips a `<super>` tag and
+  would drop an endnote number to full size mid-sentence, reading as a typo. `_opening_para` now
+  swaps the marker for a real superscript **character** first — with a per-face check, because Lora
+  only carries ¹–⁴; a face without the glyph falls back to the plain digit rather than printing a
+  .notdef box.
+- **Round-trip needed no new model field**: a reference is literal text to `doc_model`, so it rides
+  through as-is. But both ports needed the same line-level fix as the parser, or a run of
+  definitions came back merged — caught by the engine-fidelity test, not by inspection.
+Verified: 14 new `test_doc_model.py::test_notes` checks (fidelity + stability, definitions leaving
+the body, repeated labels keeping one number, per-chapter restart, orphan definitions kept, a
+reference with no text still numbered, and no `notes` key on a manuscript without any); a JS↔Python
+parity run over a notes corpus plus links, blocks, figures and poems; a rendered PDF proof looked at
+(superscripts in body *and* opening paragraphs, Notes page grouped by chapter with italics intact);
+an EPUB with forward and back links, unique ids, and every XHTML document checked to be well-formed;
+the new preset fieldset round-tripping a real editor save. All prior suites still pass.
+**Not footnotes.** Bottom-of-page notes remain the hard, deferred case — breakable note areas
+anchored to a reference line is real `BookDoc` work, and the Tier-4 note's sequencing (endnotes
+first, footnotes last) still holds.
 
 ### ✓ Tier 2 — shipped
 
@@ -1097,9 +1142,8 @@ doc_model / WYSIWYG round-trip:
   **Deferred:** per-piece epigraph/attribution (the third original bullet) — a rarer need that
   adds heading-parse surface; left for a follow-up.
 
-- **Nonfiction structure — footnotes/endnotes + simple figures** *(the remaining "new document
-  type"; biggest lift, do last)*. **Endnotes** are tractable (collect per chapter/book, render a
-  notes section).
+- **Nonfiction structure — footnotes + simple figures** *(the remaining "new document type")*.
+  **Endnotes — SHIPPED (feature #50)**; **figures — SHIPPED (feature #46)**.
   **Footnotes** are hard — breakable notes anchored to their reference line, a bottom-of-page
   note area, and numbering that resets per chapter; that's real paginator work in `engine.py`.
   **Figures**: an image block with caption + placement. Broadens the book audience meaningfully
@@ -1200,10 +1244,8 @@ seven-file round: `manuscript.py` (parse) · `engine.py` (render) · `epub.py` (
 - ~~**Block quotation.**~~ — **SHIPPED (feature #48)** as `~~~ quote source="…"`, inset both sides,
   smaller, with an optional source line.
 - ~~**Alignment block**~~ — **SHIPPED (feature #48)** as `~~~ center` / `~~~ right` / `~~~ left`.
-- **Endnotes.** Do these **before** footnotes, as the Tier-4 note already argues: collect
-  `[^n]`-style references per chapter/book and render an **Endnotes** back-matter page — an
-  `_back` entry + a `_matter_page` branch, no paginator change. Vellum has both; Atticus has
-  both; we have neither.
+- ~~**Endnotes.**~~ — **SHIPPED (feature #50)** as `[^label]` + `[^label]: text`, numbered per
+  chapter, with a Notes back-matter page and, in the ebook, a link each way.
 - **Footnotes.** Still the hard one (breakable notes anchored to the reference line, a
   bottom-of-page note area, per-chapter renumbering = real `BookDoc` work). Unchanged
   recommendation: last.
@@ -1227,8 +1269,9 @@ section D, not link syntax.
 blocks, and an import summary reports both what came across and what didn't. **#48 then upgraded
 it further:** Word lists, Quote styles and centred paragraphs now import as real `list` / `quote` /
 `center` blocks rather than approximations. **Remaining**, each blocked on a Tier-5A block type
-rather than on the importer: **footnotes/endnotes** (counted and reported, not imported), **tables
-as real tables**, and **link addresses**. Also still open from #30: no `.docx` **poem** import.
+rather than on the importer: **tables as real tables**. **Word footnotes and link addresses are no
+longer blocked** — #49 and #50 built the targets, so importing them is now just importer work. Also
+still open from #30: no `.docx` **poem** import.
 
 **D. Output correctness / validation — paid tools quietly win here**
 
@@ -1305,7 +1348,7 @@ project persistence. Add an **uncounted-chapter marker** to the heading syntax a
 
 **Suggested order.** ~~Designed-cover-in-EPUB (D)~~ #43 → ~~bundled typefaces (E)~~ #44 →
 ~~figures/images incl. `.docx` (A + C)~~ #46/#47 → ~~lists / block quote / alignment (A)~~ #48 →
-~~links (B)~~ #49 → **element vocabulary (F)** ← next → endnotes (A) → EPUB preflight + device preview (D) →
+~~links (B)~~ #49 → ~~endnotes (A)~~ #50 → **element vocabulary (F)** ← next → endnotes (A) → EPUB preflight + device preview (D) →
 large print + trim presets (G) → footnotes (A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 

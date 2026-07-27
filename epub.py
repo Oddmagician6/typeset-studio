@@ -14,7 +14,59 @@ from datetime import datetime, timezone
 # The only project import: the shared link-anchor rule, so the EPUB resolves
 # `[see](#slug)` to the same chapter the PDF does. manuscript.py is stdlib-only,
 # so this keeps epub.py dependency-free as well.
-from manuscript import chapter_anchors as _ms_anchors, LINK_RE as _LINK_RE
+from manuscript import (chapter_anchors as _ms_anchors, LINK_RE as _LINK_RE,
+                        map_block_texts as _ms_map_texts)
+
+_NOTE_MARK_RE = re.compile(r'<note n="(\d+)" id="[\w\-]+"/>')
+
+
+def _apply_note_markers(chapters):
+    """Neutral `<note …/>` -> a superscript that links to the Notes page.
+
+    The reference also carries an id, so the note can link *back* to the exact
+    sentence it belongs to — the thing an ebook can do that a printed page can't.
+    """
+    index = {id(ch): i for i, ch in enumerate(chapters, start=1)}
+    seen = set()          # a label may be cited twice; ids must stay unique
+
+    def render(text, ch):
+        i = index[id(ch)]
+
+        def one(m):
+            n = m.group(1)
+            key = (i, n)
+            anchor = '' if key in seen else f' id="noteref-{i}-{n}"'
+            seen.add(key)
+            return (f'<sup class="noteref"{anchor}>'
+                    f'<a href="endnotes.xhtml#note-{i}-{n}">{n}</a></sup>')
+
+        return _NOTE_MARK_RE.sub(one, text)
+
+    return _ms_map_texts(chapters, render)
+
+
+def _endnotes_xhtml(chapters, preset):
+    """The Notes page: entries grouped by chapter, each linking back."""
+    em = preset.get('endnotes', {})
+    heading = em.get('heading', 'Notes')
+    body = ['<div class="matter-body endnotes">',
+            f'  <h1 class="matter-head">{html.escape(heading)}</h1>']
+    for i, ch in enumerate(chapters, start=1):
+        notes = ch.get('notes') or []
+        if not notes:
+            continue
+        if em.get('group_by_chapter', True):
+            label = ch.get('title') or f'Chapter {i}'
+            body.append(f'  <h2 class="note-group">{_markup_to_html(label)}</h2>')
+        for note in notes:
+            text = _markup_to_html(note['text']) if note['text'] \
+                else '<em>[no note text]</em>'
+            body.append(
+                f'  <p class="note" id="note-{i}-{note["n"]}">'
+                f'<a class="note-back" href="chapter{i:03d}.xhtml#noteref-{i}-{note["n"]}">'
+                f'{note["n"]}.</a> {text}</p>')
+    body.append('</div>')
+    return _xhtml(heading, '\n'.join(body))
 
 
 # In-book links (`[see](#the-salt-road)`) carry a bare fragment, which in a
@@ -169,6 +221,11 @@ figure.figure-full { page-break-before: always; page-break-after: always; margin
 figure.figure-full img { max-height: 92vh; }
 figure.figure figcaption { font-size: 0.85em; font-style: italic; color: #555; text-indent: 0; margin-top: 0.5em; }
 p.figure-missing { text-indent: 0; color: #777; font-size: 0.85em; }
+sup.noteref { font-size: 0.7em; line-height: 0; vertical-align: super; }
+sup.noteref a { text-decoration: none; }
+.endnotes h2.note-group { font-size: 1em; font-weight: bold; text-align: left; margin: 1.4em 0 0.5em; }
+.endnotes p.note { text-indent: -1.2em; padding-left: 1.2em; margin: 0 0 0.4em; font-size: 0.9em; }
+.endnotes a.note-back { text-decoration: none; font-weight: bold; }
 .part-page { margin: 0 5%; text-align: center; padding-top: 30%; }
 .part-page .part-num { font-size: 0.9em; color: #666; margin: 0 0 0.5em; letter-spacing: 0.06em; }
 .part-page .part-title { font-size: 1.6em; font-weight: bold; margin: 0; }
@@ -538,7 +595,7 @@ def _content_opf(uid, meta, manifest_items, spine_items, modified):
     )
 
 
-def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None):
+def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=False):
     c        = preset.get('chapter', {})
     show_num = c.get('show_number', True)
     num_fmt  = c.get('number_format', 'Chapter {n}')
@@ -567,6 +624,9 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None):
             current_part_num = ch_part_num
         label = ch.get('title') or (num_fmt.format(n=idx) if show_num else f'Chapter {idx}')
         toc.append((f'chapter{idx:03d}.xhtml', label))
+
+    if has_notes:
+        toc.append(('endnotes.xhtml', preset.get('endnotes', {}).get('heading', 'Notes')))
 
     author = meta.get('author', '')
     _back_nav = [
@@ -647,7 +707,8 @@ def build_epub(manuscript, preset, out_path, meta):
     """Write an EPUB 3 file to out_path. Returns out_path."""
     uid      = 'urn:uuid:' + str(uuid.uuid4())
     modified = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    chapters = manuscript['chapters']
+    chapters = _apply_note_markers(manuscript['chapters'])
+    has_notes = any(ch.get('notes') for ch in chapters)
     figures  = _collect_figures(chapters)
     fig_href = {src: f['href'] for src, f in figures.items()}
 
@@ -716,6 +777,11 @@ def build_epub(manuscript, preset, out_path, meta):
         spine_items.append(f'ch{idx:03d}')
 
     _author = meta.get('author', '')
+    if has_notes:
+        manifest_items.append({'id': 'endnotes', 'href': 'endnotes.xhtml',
+                                'type': 'application/xhtml+xml'})
+        spine_items.append('endnotes')
+
     _back_items = [
         ('acknowledgments', 'ack',   'acknowledgments.xhtml', 'Acknowledgments'),
         ('contributors',    'contrib', 'contributors.xhtml',  'Contributors'),
@@ -736,7 +802,8 @@ def build_epub(manuscript, preset, out_path, meta):
         zf.writestr('OEBPS/content.opf',
                     _content_opf(uid, meta, manifest_items, spine_items, modified))
         zf.writestr('OEBPS/nav.xhtml',
-                    _nav_xhtml(chapters, has_cover, has_front, preset, meta=meta))
+                    _nav_xhtml(chapters, has_cover, has_front, preset, meta=meta,
+                               has_notes=has_notes))
         zf.writestr('OEBPS/style.css', _style_css(preset))
 
         if has_cover:
@@ -769,6 +836,9 @@ def build_epub(manuscript, preset, out_path, meta):
                 current_part_num = ch_part_num
             zf.writestr(f'OEBPS/chapter{idx:03d}.xhtml',
                         _chapter_xhtml(idx, ch, preset, figures=fig_href))
+
+        if has_notes:
+            zf.writestr('OEBPS/endnotes.xhtml', _endnotes_xhtml(chapters, preset))
 
         for _bkey, _bid, _bhref, _bhead in _back_items:
             _btxt = meta.get(_bkey, '').strip()

@@ -89,6 +89,7 @@ The tool reads a light, plain-text convention:
 | `~~~ quote` … `~~~` | an inset quotation |
 | `~~~ center` … `~~~` | a centred block (also `right`, `left`) |
 | `[text](https://…)` | a link (also `mailto:` and `#in-book` targets) |
+| `[^label]` … `[^label]: text` | an endnote reference and its text |
 | `*italic*`         | *italic*                      |
 | `**bold**`         | **bold**                      |
 | blank line         | new paragraph                 |
@@ -114,6 +115,30 @@ After importing, the app tells you exactly what came across and what didn't — 
 is dropped silently. Footnotes and endnotes are **not** imported yet; you'll be told how
 many were found. Images land in your Figures library, named after the Word file, so
 re-importing the same document doesn't pile up copies.
+
+### Endnotes
+
+```
+The plateau was surveyed twice.[^survey] The second disagreed.[^second]
+
+[^survey]: Ferrun Cartographic Office, *Survey of the Salt Road*, 1891.
+[^second]: The disagreement was never formally settled.
+```
+
+Put `[^label]` where the reference belongs and `[^label]: …` as its own paragraph
+anywhere in the same chapter — usually at the end. The label is just your handle for
+the note; **numbers are assigned automatically** in reading order and **restart each
+chapter**, and a **Notes** page is added after the last chapter. There is nothing to
+switch on: write a note and the page appears.
+
+- Cite the same note twice and it keeps one number.
+- A reference with no matching text still gets a number, and the Notes page says
+  `[no note text]` rather than quietly dropping it.
+- A note you wrote but never referenced is kept too, numbered last.
+- In the ebook the number links to the note, and the note links back to the sentence.
+
+Heading, grouping and sizing live in the style, under *Endnotes* in the style editor.
+Footnotes at the bottom of the page are a different job and aren't supported yet.
 
 ### Links
 

@@ -351,6 +351,42 @@
       </fieldset>
 
       <fieldset>
+        <legend>Endnotes</legend>
+        <div class="fs-body">
+          {% set en = p.get('endnotes', {}) %}
+          <div class="row">
+            <div class="field"><label>Page heading</label>
+              <input type="text" name="en_heading" value="{{ en.get('heading', 'Notes') }}"></div>
+            <div class="check"><input type="checkbox" id="f-en-g" name="en_group_by_chapter"
+                   {{ 'checked' if en.get('group_by_chapter', True) }}>
+              <label for="f-en-g">Group the notes under chapter headings</label></div>
+          </div>
+          <div class="row">
+            <div class="field num"><label>Note size</label><span class="hint">points · 0 = body − 1</span>
+              <input type="number" step="0.25" name="en_font_size" value="{{ en.get('font_size', 0) }}"></div>
+            <div class="field num"><label>Note leading</label><span class="hint">× size</span>
+              <input type="number" step="0.01" name="en_line_leading" value="{{ en.get('line_leading', 1.35) }}"></div>
+            <div class="field num"><label>Number indent</label><span class="hint">inches · hanging</span>
+              <input type="number" step="0.05" name="en_indent" value="{{ en.get('indent', 0.3) }}"></div>
+          </div>
+          <div class="row">
+            <div class="field num"><label>Between notes</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="en_entry_gap" value="{{ en.get('entry_gap', 3.0) }}"></div>
+            <div class="field num"><label>Before each chapter group</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="en_group_gap" value="{{ en.get('group_gap', 12.0) }}"></div>
+            <div class="field num"><label>Reference marker size</label><span class="hint">× body size</span>
+              <input type="number" step="0.01" name="en_marker_scale" value="{{ en.get('marker_scale', 0.62) }}"></div>
+          </div>
+          <p class="hint" style="margin-top:6px;line-height:1.6">
+            Write <code>a claim.[^src]</code> in the text and <code>[^src]: the note</code>
+            as its own paragraph anywhere in the same chapter. Numbers restart each chapter,
+            and a <b>Notes</b> page is added after the last chapter automatically — there's
+            nothing to switch on.
+          </p>
+        </div>
+      </fieldset>
+
+      <fieldset>
         <legend>Figures</legend>
         <div class="fs-body">
           {% set fg = p.get('figure', {}) %}

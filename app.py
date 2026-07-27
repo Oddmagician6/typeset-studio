@@ -276,6 +276,9 @@ DEFAULTS = {
     # Links are clickable in both outputs. `underline` is the print setting;
     # `color`/`epub_underline` style them in the ebook only.
     'link': {'underline': False, 'color': '', 'epub_underline': True},
+    'endnotes': {'heading': 'Notes', 'group_by_chapter': True, 'font_size': 0,
+                 'line_leading': 1.35, 'indent': 0.3, 'entry_gap': 3.0,
+                 'group_gap': 12.0, 'marker_scale': 0.62},
     'scene_break': {'type': 'glyph', 'glyph': '* * *', 'size': 11.0, 'gap': 9.0, 'image': ''},
     'running_head': {'show': True, 'caps': True, 'size': 8.5, 'gap': 0.28},
     'folio': {'show': True, 'position': 'outer', 'size': 9.5, 'gap': 0.42,
@@ -619,6 +622,16 @@ def parse_preset_form(form):
             'underline':      'lk_underline' in form,
             'color':          (form.get('lk_color', '') or '').strip(),
             'epub_underline': 'lk_epub_underline' in form,
+        },
+        'endnotes': {
+            'heading':          form.get('en_heading', 'Notes') or 'Notes',
+            'group_by_chapter': 'en_group_by_chapter' in form,
+            'font_size':        _f(form, 'en_font_size', 0),
+            'line_leading':     _f(form, 'en_line_leading', 1.35),
+            'indent':           _f(form, 'en_indent', 0.3),
+            'entry_gap':        _f(form, 'en_entry_gap', 3.0),
+            'group_gap':        _f(form, 'en_group_gap', 12.0),
+            'marker_scale':     _f(form, 'en_marker_scale', 0.62),
         },
         'scene_break': {
             'type':  form.get('sb_type', 'glyph'),
