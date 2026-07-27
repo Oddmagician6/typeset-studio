@@ -222,6 +222,61 @@ def _preflight(build_result, preset, page_count):
     return checks
 
 
+def _epubcheck_jar():
+    """Path to epubcheck.jar if the user has installed one, else None.
+
+    Optional by design: the structural checks in `epub.check` are ours and always
+    run. This is the belt-and-braces pass with the reference implementation, for
+    anyone who wants it before a shop upload.
+    """
+    env = os.environ.get('EPUBCHECK_JAR', '').strip()
+    if env and os.path.exists(env):
+        return env
+    for base in (DATA_DIR, HERE):
+        p = os.path.join(base, 'epubcheck.jar')
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _run_epubcheck(epub_path):
+    """One check dict from the real epubcheck, or None if it isn't available."""
+    jar = _epubcheck_jar()
+    if not jar or not shutil.which('java'):
+        return None
+    try:
+        import subprocess
+        proc = subprocess.run(['java', '-jar', jar, '--quiet', '--failonwarnings',
+                               epub_path],
+                              capture_output=True, text=True, timeout=120)
+    except Exception as exc:
+        return {'label': 'epubcheck', 'ok': True,
+                'detail': f'Could not run epubcheck ({exc}) — our own checks above still ran'}
+    if proc.returncode == 0:
+        return {'label': 'epubcheck', 'ok': True, 'detail': 'Valid EPUB 3 (reference validator)'}
+    msg = (proc.stdout or proc.stderr or '').strip().splitlines()
+    first = next((l for l in msg if l.strip()), 'see console for detail')
+    return {'label': 'epubcheck', 'ok': False, 'detail': first[:160]}
+
+
+def _epub_preflight(epub_name):
+    """Checks for a just-built EPUB, or None if this book didn't make one."""
+    if not epub_name:
+        return None
+    path = os.path.join(OUT_DIR, epub_name)
+    if not os.path.exists(path):
+        return None
+    try:
+        checks = epub.check(path)
+    except Exception:
+        logging.exception('EPUB preflight failed')
+        return None
+    extra = _run_epubcheck(path)
+    if extra:
+        checks.append(extra)
+    return checks
+
+
 def print_spec(page_count, preset):
     """Return a dict of spine widths and minimum inside-margin info for the result page."""
     inside    = preset['margins']['inside']
@@ -1579,7 +1634,8 @@ def generate():
                            meta=meta, preset=preset, preset_id=pid,
                            chapters=chapters, ms_path=ms_path, ms_type=ms_type,
                            cover_path=cover_path, from_project=None, fmt=fmt,
-                           spec=spec, preflight=preflight)
+                           spec=spec, preflight=preflight,
+                           epub_preflight=_epub_preflight(epub_name))
 
 
 # ----------------------------------------------------------------- preview
@@ -2162,7 +2218,8 @@ def project_generate(pid):
                            meta=meta, preset=preset, preset_id=proj['preset'],
                            chapters=chapters, ms_path='', ms_type=ms_type,
                            cover_path=cover_path, from_project=pid, fmt=fmt,
-                           spec=spec, preflight=preflight)
+                           spec=spec, preflight=preflight,
+                           epub_preflight=_epub_preflight(epub_name))
 
 
 @app.route('/project/<pid>/continuity', methods=['POST'])

@@ -25,6 +25,7 @@ engine.py         The typesetting engine (ReportLab). Builds the PDF. Two-pass w
 manuscript.py     Parses Markdown / imports .docx → a chapters/blocks structure.
 epub.py           EPUB 3 builder — consumes the same parsed structure as engine.py.
 matter.py         The front/back-matter vocabulary — one table, read by app + engine + epub.
+test_epub.py      EPUB self-check tests: builds one good file, then breaks it eleven ways.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -1044,6 +1045,37 @@ parity run over a vocabulary corpus plus notes, links, blocks, figures and poems
 where the PDF shows Foreword → Prologue → **Chapter 1** → Afterword → Bibliography → Praise in order
 with the prologue taking no number, and the EPUB carries a document per section. All prior suites pass.
 
+**52. EPUB preflight — check the file we just wrote** *(Tier-5D; the gap where paid tools quietly won)*
+Vellum ships "EPUB 3 validated" and ACE-approved accessible output. We shipped an EPUB nobody had
+ever checked, with no accessibility metadata at all.
+- `epub.check(path)` opens the **built file** and reports eleven things a reader or a shop would
+  object to: the container layout (mimetype first and stored), the package document, manifest↔zip
+  agreement **in both directions** (missing files *and* undeclared strays), the spine, a declared
+  navigation document, every content document parsing as XHTML, alt text on every image, every
+  in-book link resolving (file *and* fragment), the cover being declared both the modern and the
+  legacy way, and accessibility metadata. Stdlib-only, like the rest of `epub.py`.
+- **It checks the artefact, not the intent.** A self-check that reads back the builder's own data
+  structures can only confirm the builder agrees with itself; opening the zip is what catches a
+  builder mistake. That distinction is the whole value of the feature.
+- `epub._a11y_meta`: `schema:accessMode`, `accessModeSufficient`, `accessibilityFeature`
+  (structural navigation, table of contents, reading order, plus alternative text when the book has
+  images), `accessibilityHazard: none`, and a summary. A reflowable book generated from a semantic
+  model genuinely *is* accessible — the claim just has to be stated, and an EPUB with no such
+  metadata reads to a checker as an unknown quantity rather than a good one. Now required in
+  practice by the European Accessibility Act.
+- `app.py`: `_epub_preflight()` + an optional `_run_epubcheck()` that uses the reference validator
+  when `EPUBCHECK_JAR` (or an `epubcheck.jar` beside the app) and a JRE are present, and is silently
+  skipped otherwise. `templates/result.html`: a second preflight card, same markup as the print one.
+- New `test_epub.py`: builds one good EPUB, asserts it passes everything, then **breaks it eleven
+  ways** — removes the mimetype, deletes a manifested file, adds an undeclared one, corrupts an
+  XHTML document, empties an alt attribute, points a link at a missing file, points one at a missing
+  fragment, strips the nav property, breaks a spine idref, strips the accessibility metadata — and
+  asserts the matching check fails each time. A validator that cannot fail is worthless, so the
+  negative cases are the point of the file.
+Verified: the eleven negative cases above, a real compose showing the card reading **All clear**
+across eight applicable checks, and the optional epubcheck path degrading to nothing on a machine
+with no Java. All prior suites still pass.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1306,12 +1338,11 @@ still open from #30: no `.docx` **poem** import.
 
 **D. Output correctness / validation — paid tools quietly win here**
 
-- **EPUB validation + accessibility.** Vellum ships "EPUB 3 / EPUB 2 validated" and
-  **ACE-approved accessible output**; Jutoh flags formatting problems pre-export. We run no
-  epubcheck, emit no EPUB 2 fallback, and set no accessibility metadata. Cheapest useful move:
-  extend `app._preflight()` (which already reports fonts / embedding / page count on
-  `result.html`) with an EPUB card — structural self-checks first (nav present, every spine item
-  manifested, images have alt text), optional real `epubcheck` if a JRE is found.
+- ~~**EPUB validation + accessibility.**~~ — **SHIPPED (feature #52):** an EPUB preflight card
+  beside the print one, eleven structural checks run against the built file, accessibility metadata
+  in the OPF, and optional real `epubcheck` when a jar and a JRE are present. **Remaining:** no
+  **EPUB 2 fallback** — worth its own look only if a retailer actually refuses EPUB 3, which in 2026
+  is rare.
 - ~~**Designed covers in EPUB.**~~ — **SHIPPED (feature #43)**, the first Tier-5 item: page 1 of
   the designed cover is rasterised to a 2560px JPEG and handed to `epub.py` as the cover image, and
   the OPF now also carries the legacy `<meta name="cover">` pointer that Kindle tooling wants.
@@ -1379,7 +1410,7 @@ someone asks for it.
 **Suggested order.** ~~Designed-cover-in-EPUB (D)~~ #43 → ~~bundled typefaces (E)~~ #44 →
 ~~figures/images incl. `.docx` (A + C)~~ #46/#47 → ~~lists / block quote / alignment (A)~~ #48 →
 ~~links (B)~~ #49 → ~~endnotes (A)~~ #50 → ~~element vocabulary (F)~~ #51 →
-**EPUB preflight + device preview (D)** ← next → endnotes (A) → EPUB preflight + device preview (D) →
+~~EPUB preflight (D)~~ #52 → **device preview (D)** ← next → endnotes (A) → EPUB preflight + device preview (D) →
 large print + trim presets (G) → footnotes (A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 

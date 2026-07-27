@@ -300,6 +300,26 @@ looks wrong.
 
 ---
 
+## Checking the ebook
+
+Every EPUB you build is opened again and checked before you see the result page, and
+the findings appear as an **EPUB preflight** card next to the print one. It looks for
+the things that actually break in readers or get a file rejected by a shop:
+
+- the container is laid out the way the spec requires
+- every file is declared, and everything declared is present
+- the reading order is intact and a navigation document exists
+- every page is well-formed XHTML
+- every illustration carries alt text
+- every in-book link lands somewhere real
+- the cover is declared for both modern and older readers
+- accessibility metadata is present — shops increasingly require it
+
+**Optional:** if you want the reference validator too, put `epubcheck.jar` beside the
+app (or set `EPUBCHECK_JAR` to its path) and have Java installed. It runs after the
+checks above and adds its own line. Without it nothing is lost — the checks above are
+ours and always run.
+
 ## Handing off to print
 
 The interior PDF embeds and subsets its fonts, which is what KDP and IngramSpark

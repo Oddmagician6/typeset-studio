@@ -141,6 +141,29 @@
     </div>
     {% endif %}
 
+    {% if epub_preflight %}
+    {% set eissues = epub_preflight | selectattr('ok', 'equalto', false) | list %}
+    <div class="preflight">
+      <div class="head">
+        <span class="head-label">EPUB preflight</span>
+        {% if eissues %}
+          <span class="badge badge-warn">{{ eissues | length }} issue{{ 's' if eissues | length != 1 }}</span>
+        {% else %}
+          <span class="badge badge-ok">All clear</span>
+        {% endif %}
+      </div>
+      <ul>
+        {% for c in epub_preflight %}
+        <li>
+          <span class="icon {{ 'ok' if c.ok else 'warn' }}">{{ '✓' if c.ok else '✗' }}</span>
+          <span class="chk-label {{ 'ok' if c.ok else 'warn' }}">{{ c.label }}</span>
+          <span class="chk-detail">{{ c.detail }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
     {% if from_project %}
       <p class="more"><a href="{{ url_for('projects') }}">Back to projects</a> &nbsp;·&nbsp;
          <a href="{{ url_for('generate') }}">Set a new book</a></p>

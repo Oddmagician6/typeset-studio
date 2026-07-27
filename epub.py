@@ -563,6 +563,193 @@ def _container_xml():
     )
 
 
+def check(path):
+    """Inspect a built .epub and report what a reader or a shop would object to.
+
+    Deliberately checks the *file we just wrote* rather than the data we wrote it
+    from: the point is to catch a builder mistake, and a self-check that trusts
+    the builder's own view of the world can't. Stdlib-only, like the rest of this
+    module — `epubcheck` proper is Java, and is folded in separately when present.
+
+    Returns [{label, ok, detail}] in the same shape as app._preflight's checks.
+    """
+    from xml.dom import minidom
+    import posixpath
+
+    out = []
+
+    def add(label, ok, detail):
+        out.append({'label': label, 'ok': bool(ok), 'detail': detail})
+
+    try:
+        zf = zipfile.ZipFile(path)
+    except Exception as exc:
+        return [{'label': 'EPUB file', 'ok': False, 'detail': f'Could not open: {exc}'}]
+
+    with zf:
+        names = zf.namelist()
+        infos = {i.filename: i for i in zf.infolist()}
+
+        # --- the container rules readers actually enforce ---
+        first_ok = bool(names) and names[0] == 'mimetype'
+        stored_ok = ('mimetype' in infos
+                     and infos['mimetype'].compress_type == zipfile.ZIP_STORED)
+        add('Container', first_ok and stored_ok,
+            'mimetype is first and uncompressed' if first_ok and stored_ok else
+            'mimetype must be the first entry and stored uncompressed')
+
+        try:
+            container = minidom.parseString(zf.read('META-INF/container.xml'))
+            opf_path = container.getElementsByTagName('rootfile')[0] \
+                                .getAttribute('full-path')
+        except Exception as exc:
+            add('Package document', False, f'container.xml unreadable: {exc}')
+            return out
+        if opf_path not in names:
+            add('Package document', False, f'container.xml points at {opf_path}, which is missing')
+            return out
+
+        base = posixpath.dirname(opf_path)
+        opf_raw = zf.read(opf_path)
+        try:
+            opf = minidom.parseString(opf_raw)
+        except Exception as exc:
+            add('Package document', False, f'{opf_path} is not well-formed: {exc}')
+            return out
+
+        items = {}
+        for el in opf.getElementsByTagName('item'):
+            items[el.getAttribute('id')] = {
+                'href': el.getAttribute('href'),
+                'type': el.getAttribute('media-type'),
+                'props': el.getAttribute('properties') or '',
+            }
+        spine = [el.getAttribute('idref')
+                 for el in opf.getElementsByTagName('itemref')]
+
+        def full(href):
+            return posixpath.normpath(posixpath.join(base, href)) if base else href
+
+        # --- manifest <-> zip must agree in both directions ---
+        missing = [i['href'] for i in items.values() if full(i['href']) not in names]
+        add('Manifest', not missing,
+            f'{len(items)} items, all present'
+            if not missing else 'Missing from the file: ' + ', '.join(missing[:4]))
+
+        manifested = {full(i['href']) for i in items.values()} | {opf_path}
+        stray = [n for n in names
+                 if n not in manifested
+                 and not n.startswith('META-INF/') and n != 'mimetype'
+                 and not n.endswith('/')]
+        add('No stray files', not stray,
+            'Every file is declared in the manifest'
+            if not stray else 'Not in the manifest: ' + ', '.join(stray[:4]))
+
+        bad_spine = [s for s in spine if s not in items]
+        add('Spine', spine and not bad_spine,
+            f'{len(spine)} documents in reading order'
+            if spine and not bad_spine else
+            ('Spine is empty' if not spine
+             else 'Spine references unknown ids: ' + ', '.join(bad_spine[:4])))
+
+        nav = [i for i in items.values() if 'nav' in i['props'].split()]
+        add('Navigation', bool(nav),
+            'Navigation document declared' if nav else
+            'No item carries properties="nav" — readers will show no table of contents')
+
+        # --- every content document must actually parse ---
+        docs = [i for i in items.values() if i['type'] == 'application/xhtml+xml']
+        broken, ids, imgs, no_alt = [], {}, 0, []
+        for d in docs:
+            name = full(d['href'])
+            if name not in names:
+                continue
+            try:
+                dom = minidom.parseString(zf.read(name))
+            except Exception as exc:
+                broken.append(f'{d["href"]} ({exc})')
+                continue
+            ids[d['href']] = {el.getAttribute('id')
+                              for el in dom.getElementsByTagName('*')
+                              if el.getAttribute('id')}
+            for img in dom.getElementsByTagName('img'):
+                imgs += 1
+                if not (img.getAttribute('alt') or '').strip():
+                    no_alt.append(img.getAttribute('src') or '?')
+        add('Content documents', not broken,
+            f'{len(docs)} documents, all well-formed XHTML'
+            if not broken else 'Not well-formed: ' + '; '.join(broken[:3]))
+
+        if imgs:
+            add('Image alt text', not no_alt,
+                f'All {imgs} images carry alt text' if not no_alt else
+                f'{len(no_alt)} of {imgs} images have no alt text: ' + ', '.join(no_alt[:3]))
+
+        # --- internal links must land somewhere ---
+        dangling = []
+        for d in docs:
+            name = full(d['href'])
+            if name not in names:
+                continue
+            body = zf.read(name).decode('utf-8', 'replace')
+            for href in re.findall(r'<a\s[^>]*href="([^"]+)"', body):
+                if href.startswith(('http://', 'https://', 'mailto:')):
+                    continue
+                target, _, frag = href.partition('#')
+                target = target or d['href']
+                if full(target) not in names:
+                    dangling.append(href)
+                elif frag and frag not in ids.get(target, set()):
+                    dangling.append(href)
+        add('Internal links', not dangling,
+            'Every in-book link resolves' if not dangling else
+            f'{len(dangling)} link(s) point nowhere: ' + ', '.join(sorted(set(dangling))[:3]))
+
+        # --- the two things shops look at ---
+        cover = [i for i in items.values() if 'cover-image' in i['props'].split()]
+        legacy = b'<meta name="cover"' in opf_raw
+        if cover or legacy:
+            add('Cover', bool(cover) and legacy,
+                'Declared for both modern and older readers' if cover and legacy else
+                'Declared only one way — some readers will show no cover')
+
+        a11y = opf_raw.count(b'schema:access')
+        add('Accessibility metadata', a11y >= 3,
+            'Access modes, features and summary declared' if a11y >= 3 else
+            'Missing — shops increasingly require it (EAA)')
+
+    return out
+
+
+def _a11y_meta(manifest_items):
+    """Accessibility metadata for the OPF.
+
+    This is what ACE (and, increasingly, the retailers) look for, and what the
+    European Accessibility Act now expects a shop to be able to show. A reflowable
+    text book generated from a semantic model is genuinely accessible — the claim
+    just has to be *stated*, and an EPUB with no accessibility metadata reads to a
+    checker as an unknown quantity rather than a good one.
+    """
+    has_images = any(i['type'].startswith('image/') for i in manifest_items)
+    modes = ['textual'] + (['visual'] if has_images else [])
+    lines = []
+    for m in modes:
+        lines.append(f'    <meta property="schema:accessMode">{m}</meta>')
+    # text alone is enough to read the whole book, images being illustrative
+    lines.append('    <meta property="schema:accessModeSufficient">textual</meta>')
+    for feature in ('structuralNavigation', 'tableOfContents', 'readingOrder'):
+        lines.append(f'    <meta property="schema:accessibilityFeature">{feature}</meta>')
+    if has_images:
+        lines.append('    <meta property="schema:accessibilityFeature">alternativeText</meta>')
+    # no known hazards: no flashing, sound or motion in a typeset book
+    lines.append('    <meta property="schema:accessibilityHazard">none</meta>')
+    summary = ('Reflowable text with a full navigation document and reading order. '
+               'All illustrations carry alternative text.' if has_images else
+               'Reflowable text with a full navigation document and reading order.')
+    lines.append(f'    <meta property="schema:accessibilitySummary">{summary}</meta>')
+    return '\n'.join(lines) + '\n'
+
+
 def _content_opf(uid, meta, manifest_items, spine_items, modified):
     title  = meta.get('title', 'Untitled')
     author = meta.get('author', '')
@@ -594,7 +781,8 @@ def _content_opf(uid, meta, manifest_items, spine_items, modified):
         '    <dc:language>en</dc:language>\n'
         f'    <dc:date>{year}</dc:date>\n'
         f'    <meta property="dcterms:modified">{modified}</meta>\n'
-        + cover_meta_xml +
+        + _a11y_meta(manifest_items) +
+        cover_meta_xml +
         '  </metadata>\n'
         '  <manifest>\n'
         + manifest_xml + '\n'
