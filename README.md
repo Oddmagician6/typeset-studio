@@ -300,6 +300,20 @@ looks wrong.
 
 ---
 
+## Seeing the book before you build it
+
+The *Set a book* page has two preview buttons, one per output:
+
+- **Preview first pages** shows the printed interior as page images — the type,
+  the margins, the chapter opening.
+- **Preview the ebook** shows the *same book reflowed*, at phone, e-reader and
+  tablet widths. Text has no fixed page in an ebook, so this is the only honest
+  way to see it: switch device and watch the lines rewrap.
+
+The ebook preview is built from the real EPUB and its own stylesheet, so what you
+see is what a reader gets rather than a re-rendering of it. Both previews show the
+first two chapters and persist nothing.
+
 ## Checking the ebook
 
 Every EPUB you build is opened again and checked before you see the result page, and

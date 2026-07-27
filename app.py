@@ -1687,6 +1687,103 @@ PREVIEW_MAX_CHAPTERS = 2
 PREVIEW_MAX_PAGES    = 8
 
 
+class _PreviewError(Exception):
+    """A message meant for the user, not a stack trace."""
+
+
+def _book_from_compose_form(tmp_files):
+    """Read the compose form into (preset, manuscript, meta, total, truncated).
+
+    Shared by the page-image preview and the ebook preview: both need exactly the
+    same reading of the form as /generate does, and neither persists anything —
+    uploads land in `tmp_files` for the caller to delete.
+    """
+    form = request.form
+    pid  = form.get('preset')
+    if not pid:
+        raise _PreviewError('Pick a style first.')
+    preset = load_preset(pid)
+
+    # ---- manuscript source (upload / paste / sample), nothing persisted ----
+    raw = None
+    up = request.files.get('manuscript')
+    if up and up.filename:
+        fn = secure_filename(up.filename)
+        fd, tmp_ms = tempfile.mkstemp(suffix='_' + fn)
+        os.close(fd)
+        up.save(tmp_ms)
+        tmp_files.append(tmp_ms)
+        if fn.lower().endswith('.docx'):
+            try:
+                raw = manuscript.import_docx(tmp_ms)
+            except ModuleNotFoundError:
+                raise _PreviewError('python-docx is not installed. Run: pip install python-docx')
+            except Exception as exc:
+                raise _PreviewError(f'Could not read the Word file: {exc}')
+        else:
+            raw = open(tmp_ms, encoding='utf-8', errors='replace').read()
+    elif form.get('pasted', '').strip():
+        raw = form['pasted']
+    elif form.get('use_sample'):
+        raw = open(SAMPLE, encoding='utf-8').read()
+
+    if not raw:
+        raise _PreviewError('Add a manuscript first — upload a file, paste text, or tick the sample.')
+
+    # ---- cover (designed template or uploaded art), same as /generate ----
+    cover_mode = form.get('cover_mode', 'none')
+    cover_path = ''
+    cov = request.files.get('cover')
+    if cov and cov.filename:
+        cfn = secure_filename(cov.filename)
+        fd, tmp_cov = tempfile.mkstemp(suffix='_' + cfn)
+        os.close(fd)
+        cov.save(tmp_cov)
+        tmp_files.append(tmp_cov)
+        cover_path = tmp_cov
+    if cover_mode == 'none':
+        cover_path = ''
+    cover_template = form.get('cover_template', '') or 'ashforge-house'
+    cover_template_data = load_cover_template(cover_template) if cover_mode == 'designed' else None
+
+    meta = {
+        'title': form.get('title', '').strip(),
+        'subtitle': form.get('subtitle', '').strip(),
+        'author': form.get('author', '').strip(),
+        'year': form.get('year', '').strip() or str(datetime.now().year),
+        'publisher': form.get('publisher', '').strip(),
+        'front_matter': form.get('front_matter', 'full'),
+        'right_hand_starts': 'right_hand_starts' in form,
+        'cover_image': cover_path,
+        'cover_mode': cover_mode,
+        'cover_template': cover_template,
+        'cover_template_data': cover_template_data,
+        'cover_collection': form.get('cover_collection', '').strip(),
+        'cover_kicker': form.get('cover_kicker', '').strip(),
+        'cover_accent': form.get('cover_accent', '').strip(),
+        'cover_epigraph': form.get('cover_epigraph', '').strip(),
+        'cover_studio': form.get('cover_studio', '').strip(),
+        'cover_overlay': 'cover_overlay' in form,
+        'cover_color': form.get('cover_color', 'light'),
+        'include_toc':    'include_toc' in form,
+        'smartquotes':    'smartquotes' in form,
+        **{k: form.get(k, '').strip() for k in matter.KEYS},
+    }
+
+    ms = manuscript.parse_markdown(raw, smartquotes=meta['smartquotes'])
+    chapters_total = len(ms['chapters'])
+    truncated = chapters_total > PREVIEW_MAX_CHAPTERS
+    if truncated:
+        ms = {'chapters': ms['chapters'][:PREVIEW_MAX_CHAPTERS]}
+
+    ms = manuscript.parse_markdown(raw, smartquotes=meta['smartquotes'])
+    chapters_total = len(ms['chapters'])
+    truncated = chapters_total > PREVIEW_MAX_CHAPTERS
+    if truncated:
+        ms = {'chapters': ms['chapters'][:PREVIEW_MAX_CHAPTERS]}
+    return preset, ms, meta, chapters_total, truncated
+
+
 @app.route('/generate/preview', methods=['POST'])
 def generate_preview():
     """Render the user's *actual* manuscript + settings to page images.
@@ -1702,85 +1799,8 @@ def generate_preview():
 
     tmp_files = []
     try:
-        form = request.form
-        pid  = form.get('preset')
-        if not pid:
-            return jsonify({'ok': False, 'error': 'Pick a style first.'})
-        preset = load_preset(pid)
-
-        # ---- manuscript source (upload / paste / sample), nothing persisted ----
-        raw = None
-        up = request.files.get('manuscript')
-        if up and up.filename:
-            fn = secure_filename(up.filename)
-            fd, tmp_ms = tempfile.mkstemp(suffix='_' + fn)
-            os.close(fd)
-            up.save(tmp_ms)
-            tmp_files.append(tmp_ms)
-            if fn.lower().endswith('.docx'):
-                try:
-                    raw = manuscript.import_docx(tmp_ms)
-                except ModuleNotFoundError:
-                    return jsonify({'ok': False,
-                                    'error': 'python-docx is not installed. Run: pip install python-docx'})
-                except Exception as exc:
-                    return jsonify({'ok': False, 'error': f'Could not read the Word file: {exc}'})
-            else:
-                raw = open(tmp_ms, encoding='utf-8', errors='replace').read()
-        elif form.get('pasted', '').strip():
-            raw = form['pasted']
-        elif form.get('use_sample'):
-            raw = open(SAMPLE, encoding='utf-8').read()
-
-        if not raw:
-            return jsonify({'ok': False,
-                            'error': 'Add a manuscript first — upload a file, paste text, or tick the sample.'})
-
-        # ---- cover (designed template or uploaded art), same as /generate ----
-        cover_mode = form.get('cover_mode', 'none')
-        cover_path = ''
-        cov = request.files.get('cover')
-        if cov and cov.filename:
-            cfn = secure_filename(cov.filename)
-            fd, tmp_cov = tempfile.mkstemp(suffix='_' + cfn)
-            os.close(fd)
-            cov.save(tmp_cov)
-            tmp_files.append(tmp_cov)
-            cover_path = tmp_cov
-        if cover_mode == 'none':
-            cover_path = ''
-        cover_template = form.get('cover_template', '') or 'ashforge-house'
-        cover_template_data = load_cover_template(cover_template) if cover_mode == 'designed' else None
-
-        meta = {
-            'title': form.get('title', '').strip(),
-            'subtitle': form.get('subtitle', '').strip(),
-            'author': form.get('author', '').strip(),
-            'year': form.get('year', '').strip() or str(datetime.now().year),
-            'publisher': form.get('publisher', '').strip(),
-            'front_matter': form.get('front_matter', 'full'),
-            'right_hand_starts': 'right_hand_starts' in form,
-            'cover_image': cover_path,
-            'cover_mode': cover_mode,
-            'cover_template': cover_template,
-            'cover_template_data': cover_template_data,
-            'cover_collection': form.get('cover_collection', '').strip(),
-            'cover_kicker': form.get('cover_kicker', '').strip(),
-            'cover_accent': form.get('cover_accent', '').strip(),
-            'cover_epigraph': form.get('cover_epigraph', '').strip(),
-            'cover_studio': form.get('cover_studio', '').strip(),
-            'cover_overlay': 'cover_overlay' in form,
-            'cover_color': form.get('cover_color', 'light'),
-            'include_toc':    'include_toc' in form,
-            'smartquotes':    'smartquotes' in form,
-            **{k: form.get(k, '').strip() for k in matter.KEYS},
-        }
-
-        ms = manuscript.parse_markdown(raw, smartquotes=meta['smartquotes'])
-        chapters_total = len(ms['chapters'])
-        truncated = chapters_total > PREVIEW_MAX_CHAPTERS
-        if truncated:
-            ms = {'chapters': ms['chapters'][:PREVIEW_MAX_CHAPTERS]}
+        preset, ms, meta, chapters_total, truncated = \
+            _book_from_compose_form(tmp_files)
 
         fd, tmp_pdf = tempfile.mkstemp(suffix='.pdf')
         os.close(fd)
@@ -1807,8 +1827,106 @@ def generate_preview():
             'chapters_shown': len(ms['chapters']),
             'truncated': truncated,
         })
+    except _PreviewError as exc:
+        return jsonify({'ok': False, 'error': str(exc)})
     except Exception as exc:
         logging.error('generate preview failed: %s', traceback.format_exc())
+        return jsonify({'ok': False, 'error': str(exc)})
+    finally:
+        for f in tmp_files:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+
+# Reading-device viewports, in CSS pixels — the shapes a reflowable book has to
+# survive. A phone is the cramped case, a tablet the roomy one, and the e-reader
+# the one authors actually worry about.
+PREVIEW_DEVICES = [
+    {'id': 'phone',  'label': 'Phone',    'w': 375, 'h': 667, 'note': '6" phone'},
+    {'id': 'reader', 'label': 'E-reader', 'w': 500, 'h': 690, 'note': '6" e-ink'},
+    {'id': 'tablet', 'label': 'Tablet',   'w': 768, 'h': 1024, 'note': '10" tablet'},
+]
+
+_IMG_SRC_RE = re.compile(r'src="((?:images/|cover)[^"]+)"')
+
+
+@app.route('/generate/epub-preview', methods=['POST'])
+def generate_epub_preview():
+    """Show the *ebook*, not the page images — the other half of a book build.
+
+    Builds the real EPUB to a temp file and reads the documents back out of it,
+    rather than re-rendering the chapters here. The zip is the artefact readers
+    get, so previewing anything else would be previewing a guess: this way note
+    markers, figures, links and matter pages are exactly what shipped.
+    """
+    tmp_files = []
+    try:
+        preset, ms, meta, chapters_total, truncated = \
+            _book_from_compose_form(tmp_files)
+
+        fd, tmp_epub = tempfile.mkstemp(suffix='.epub')
+        os.close(fd)
+        tmp_files.append(tmp_epub)
+        epub.build_epub(ms, preset, tmp_epub, meta)
+
+        import zipfile as _zip
+        from xml.dom import minidom
+        import posixpath
+
+        docs = []
+        with _zip.ZipFile(tmp_epub) as zf:
+            opf_path = (minidom.parseString(zf.read('META-INF/container.xml'))
+                        .getElementsByTagName('rootfile')[0].getAttribute('full-path'))
+            base = posixpath.dirname(opf_path)
+            opf = minidom.parseString(zf.read(opf_path))
+            items = {el.getAttribute('id'): el.getAttribute('href')
+                     for el in opf.getElementsByTagName('item')}
+            order = [el.getAttribute('idref')
+                     for el in opf.getElementsByTagName('itemref')]
+
+            def full(href):
+                return posixpath.normpath(posixpath.join(base, href)) if base else href
+
+            css = zf.read(full('style.css')).decode('utf-8', 'replace') \
+                if full('style.css') in zf.namelist() else ''
+
+            # inline the art: an iframe built from a string can't fetch from a zip
+            def inline_images(html, doc_href):
+                def sub(m):
+                    target = posixpath.normpath(
+                        posixpath.join(posixpath.dirname(doc_href), m.group(1)))
+                    name = full(target)
+                    if name not in zf.namelist():
+                        return m.group(0)
+                    ext = os.path.splitext(name)[1].lower().lstrip('.')
+                    mime = 'image/jpeg' if ext in ('jpg', 'jpeg') else f'image/{ext}'
+                    b64 = base64.b64encode(zf.read(name)).decode()
+                    return f'src="data:{mime};base64,{b64}"'
+                return _IMG_SRC_RE.sub(sub, html)
+
+            for idref in order:
+                href = items.get(idref)
+                if not href or full(href) not in zf.namelist():
+                    continue
+                raw = zf.read(full(href)).decode('utf-8', 'replace')
+                body = raw.split('<body>', 1)[-1].rsplit('</body>', 1)[0]
+                docs.append({'href': href, 'html': inline_images(body, href)})
+
+        return jsonify({
+            'ok': True,
+            'css': css,
+            'docs': docs,
+            'devices': PREVIEW_DEVICES,
+            'chapters_total': chapters_total,
+            'chapters_shown': len(ms['chapters']),
+            'truncated': truncated,
+        })
+    except _PreviewError as exc:
+        return jsonify({'ok': False, 'error': str(exc)})
+    except Exception as exc:
+        logging.error('epub preview failed: %s', traceback.format_exc())
         return jsonify({'ok': False, 'error': str(exc)})
     finally:
         for f in tmp_files:

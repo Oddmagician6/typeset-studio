@@ -1076,6 +1076,33 @@ Verified: the eleven negative cases above, a real compose showing the card readi
 across eight applicable checks, and the optional epubcheck path degrading to nothing on a machine
 with no Java. All prior suites still pass.
 
+**53. Ebook device preview — the same book, reflowed** *(Tier-5D; closes the preview half of the gap)*
+Both existing previews (#10 style, #39 book) rasterise the **PDF**. An ebook has no fixed page, so a
+page image is the one thing that *can't* show you what a reader sees — and we shipped an EPUB nobody
+could look at before building it. Vellum previews on Kindle/iPad/iPhone, Atticus on eight devices.
+- `app.py`: `/generate/epub-preview` **builds the real EPUB to a temp file and reads the documents
+  back out of it**, in spine order, rather than re-rendering chapters for the preview. The zip is the
+  artefact readers get, so previewing anything else previews a guess — the same reasoning as #52's
+  "check the artefact, not the intent". Note markers, figures, links and matter pages are therefore
+  exactly what shipped. Images are inlined as data URIs, since an iframe built from a string can't
+  fetch out of a zip.
+- **Refactor first:** the 80-line form-reading half of `/generate/preview` became
+  `_book_from_compose_form()`, shared by both previews, with a `_PreviewError` for messages meant
+  for the user rather than the log. Neither route persists anything.
+- `templates/generate.html`: a **Preview the ebook** button and an overlay with Phone / E-reader /
+  Tablet tabs (375×667, 500×690, 768×1024 CSS px), rendering into a **sandboxed** iframe — no
+  scripts, no navigation — with the EPUB's own stylesheet, so the preview inherits the real design.
+  Switching device rewraps the text, which is the whole point.
+Verified live in a browser: the overlay opens, all three tabs render, switching to Phone visibly
+reflows the prose to the narrower measure, the dimensions readout tracks the device, and the console
+is clean. Also verified the route returns the documents, stylesheet and truncation counts for a book
+with lists, endnotes and back matter, and that the refactored page-image preview still behaves
+(including both of its error paths). All prior suites pass.
+**Note for the next person:** the JS lives inside a Jinja template, so a `\n` escape in a JS string
+literal does not survive — it arrives as a real line break and the script dies with a
+`SyntaxError` that only shows in the browser console. This script therefore contains no backslash
+escapes at all. Worth remembering before adding any.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1349,10 +1376,8 @@ still open from #30: no `.docx` **poem** import.
 - **PDF/X-1a.** Vellum advertises press-standard PDF/X-1a; we emit stock RGB ReportLab PDF. KDP
   accepts ours, IngramSpark is fussier. Worth a spike on what ReportLab can actually assert
   (output intent, no transparency, embedded profile) before promising it.
-- **Ebook device preview.** Vellum previews on Kindle/iPad/iPhone, Atticus on **8** devices. Our
-  previews (#10 style, #39 book) rasterize the **PDF** only — there is no ebook preview at all. A
-  simple reflowable HTML preview at three device widths, reusing `epub.py`'s own CSS, would cover
-  most of the value without an EPUB reader.
+- ~~**Ebook device preview.**~~ — **SHIPPED (feature #53):** the built EPUB's own documents and
+  stylesheet, reflowed in a sandboxed iframe at phone / e-reader / tablet widths.
 - **Spread balancing.** `engine.py:1526` sets `allowWidows=0, allowOrphans=0`, so widows/orphans
   are handled; Vellum additionally balances **facing-page depth**. Genuinely hard in ReportLab —
   note it, don't schedule it.
@@ -1410,7 +1435,8 @@ someone asks for it.
 **Suggested order.** ~~Designed-cover-in-EPUB (D)~~ #43 → ~~bundled typefaces (E)~~ #44 →
 ~~figures/images incl. `.docx` (A + C)~~ #46/#47 → ~~lists / block quote / alignment (A)~~ #48 →
 ~~links (B)~~ #49 → ~~endnotes (A)~~ #50 → ~~element vocabulary (F)~~ #51 →
-~~EPUB preflight (D)~~ #52 → **device preview (D)** ← next → endnotes (A) → EPUB preflight + device preview (D) →
+~~EPUB preflight (D)~~ #52 → ~~device preview (D)~~ #53 →
+**large print + trim presets (G)** ← next → endnotes (A) → EPUB preflight + device preview (D) →
 large print + trim presets (G) → footnotes (A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 

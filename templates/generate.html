@@ -44,6 +44,16 @@
     box-shadow:0 8px 22px -12px rgba(0,0,0,.5)}
   .pv-msg{color:var(--muted);font-size:14px;text-align:center;max-width:44ch;line-height:1.6;padding:30px 10px}
   .pv-msg.err{color:var(--red)}
+  .ev-tabs{display:flex;gap:6px;margin-left:auto;margin-right:10px}
+  .ev-tabs button{font-family:var(--sans);font-size:12.5px;padding:5px 11px;cursor:pointer;
+    border:1px solid var(--rule-strong);background:var(--surface-2);color:var(--muted);border-radius:2px}
+  .ev-tabs button[aria-pressed="true"]{color:var(--ink);border-color:var(--muted);font-weight:600}
+  .ev-body{display:flex;justify-content:center;align-items:flex-start}
+  .ev-device{background:#fff;border:1px solid var(--rule-strong);border-radius:10px;
+    box-shadow:0 10px 34px -18px rgba(0,0,0,.6);overflow:hidden;max-width:100%}
+  .ev-device iframe{display:block;border:0;background:#fff}
+  .ev-dims{font-family:var(--mono);font-size:10.5px;color:var(--faint);text-align:center;
+    letter-spacing:.08em;margin-top:8px}
 
   /* ---- form section navigation ---- */
   .compose-layout{display:grid;grid-template-columns:180px minmax(0,760px);gap:34px;align-items:start}
@@ -305,9 +315,24 @@
     <div class="formbar">
       <button class="btn btn-primary" type="submit">Compose the book</button>
       <button class="btn" type="button" id="pv-btn">Preview first pages</button>
+      <button class="btn" type="button" id="ev-btn">Preview the ebook</button>
       <a class="btn" href="{{ url_for('index') }}">Back to styles</a>
     </div>
   </form>
+  </div>
+
+  <div class="pv-overlay" id="ev-overlay" hidden>
+    <div class="pv-modal" role="dialog" aria-modal="true" aria-label="Ebook preview">
+      <div class="pv-head">
+        <div>
+          <div class="pv-stamp">Ebook proof</div>
+          <div class="pv-cap" id="ev-cap">Building the ebook…</div>
+        </div>
+        <div class="ev-tabs" id="ev-tabs"></div>
+        <button type="button" class="btn btn-sm" id="ev-close">Close</button>
+      </div>
+      <div class="pv-body ev-body" id="ev-body"></div>
+    </div>
   </div>
 
   <div class="pv-overlay" id="pv-overlay" hidden>
@@ -421,6 +446,103 @@
           cap.textContent = line;
         } catch (e) {
           cap.textContent = 'Preview';
+          msg('Preview failed: ' + e, true);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      close.addEventListener('click', hide);
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) hide(); });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !overlay.hidden) hide();
+      });
+    })();
+  </script>
+  <script>
+    // Ebook preview: the same book, reflowed at three reading-device widths.
+    // The documents and stylesheet come straight out of the built EPUB, so what
+    // shows here is what a reader gets, not a re-rendering of it.
+    (function () {
+      var btn     = document.getElementById('ev-btn');
+      var overlay = document.getElementById('ev-overlay');
+      if (!btn || !overlay) return;
+      var form  = document.querySelector('form.compose');
+      var body  = document.getElementById('ev-body');
+      var cap   = document.getElementById('ev-cap');
+      var tabs  = document.getElementById('ev-tabs');
+      var close = document.getElementById('ev-close');
+      var book  = null;                 // last successful payload
+      var pick  = 'reader';
+
+      function hide() { overlay.hidden = true; body.innerHTML = ''; tabs.innerHTML = ''; }
+      function msg(text, isErr) {
+        body.innerHTML = '';
+        var p = document.createElement('p');
+        p.className = 'pv-msg' + (isErr ? ' err' : '');
+        p.textContent = text;
+        body.appendChild(p);
+      }
+
+      function draw() {
+        if (!book) return;
+        var dev = book.devices.filter(function (d) { return d.id === pick; })[0]
+                  || book.devices[0];
+        var sep = '<hr style="border:0;border-top:1px solid #ddd;margin:2em 0">';
+        var html = '<!doctype html><html><head><meta charset="utf-8"><style>'
+                 + book.css + 'html,body{margin:0}body{padding:18px 16px}</style></head><body>'
+                 + book.docs.map(function (d) { return d.html; }).join(sep)
+                 + '</body></html>';
+        body.innerHTML = '';
+        var wrap  = document.createElement('div');
+        var frame = document.createElement('div');
+        frame.className = 'ev-device';
+        var f = document.createElement('iframe');
+        f.width = dev.w; f.height = dev.h;
+        f.setAttribute('sandbox', '');   // no scripts, no navigation out
+        f.srcdoc = html;
+        frame.appendChild(f);
+        wrap.appendChild(frame);
+        var dims = document.createElement('div');
+        dims.className = 'ev-dims';
+        dims.textContent = dev.note + '  ·  ' + dev.w + ' × ' + dev.h + ' px';
+        wrap.appendChild(dims);
+        body.appendChild(wrap);
+      }
+
+      function drawTabs() {
+        tabs.innerHTML = '';
+        book.devices.forEach(function (d) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = d.label;
+          b.setAttribute('aria-pressed', d.id === pick ? 'true' : 'false');
+          b.addEventListener('click', function () { pick = d.id; drawTabs(); draw(); });
+          tabs.appendChild(b);
+        });
+      }
+
+      btn.addEventListener('click', async function () {
+        overlay.hidden = false;
+        cap.textContent = 'Building the ebook…';
+        tabs.innerHTML = '';
+        msg('Building the ebook…');
+        btn.disabled = true;
+        try {
+          var res  = await fetch('{{ url_for("generate_epub_preview") }}',
+                                 { method: 'POST', body: new FormData(form) });
+          var data = await res.json();
+          if (!data.ok) { cap.textContent = 'Ebook preview'; msg(data.error || 'Could not build the ebook.', true); return; }
+          if (!data.docs.length) { cap.textContent = 'Ebook preview'; msg('Nothing to show yet.', true); return; }
+          book = data;
+          drawTabs();
+          draw();
+          cap.textContent = data.truncated
+            ? ('Chapters 1–' + data.chapters_shown + ' of ' + data.chapters_total +
+               '  ·  text reflows to fit each screen')
+            : ('The whole book  ·  ' + data.docs.length + ' sections  ·  text reflows to fit each screen');
+        } catch (e) {
+          cap.textContent = 'Ebook preview';
           msg('Preview failed: ' + e, true);
         } finally {
           btn.disabled = false;
