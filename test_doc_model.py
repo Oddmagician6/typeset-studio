@@ -264,12 +264,68 @@ def test_bylines():
     _check("editor-built byline model round-trips", back == built, _diff(back, built))
 
 
+FIGURE_MD = """\
+# Illustrated
+
+Text before the plate.
+
+~~~ figure src="map.png" alt="Map of the plateau" width="0.5" align="left"
+The plateau, as *surveyed* in the third year.
+~~~
+
+~~~ figure src="plate.png" full="yes"
+~~~
+
+Text after.
+"""
+
+
+def test_figures():
+    """Figure blocks keep their attrs and caption through the round trip."""
+    print("\n[figures]")
+    for smart in (True, False):
+        doc1 = doc_model.from_markdown(FIGURE_MD, smartquotes=smart)
+        md2 = doc_model.to_markdown(doc1)
+        doc2 = doc_model.from_markdown(md2, smartquotes=smart)
+        eng_a = manuscript.parse_markdown(FIGURE_MD, smartquotes=smart)
+        eng_b = manuscript.parse_markdown(md2, smartquotes=smart)
+        _check(f"figure engine fidelity (smart={smart})", eng_a == eng_b, _diff(eng_a, eng_b))
+        _check(f"figure model stability (smart={smart})", doc1 == doc2, _diff(doc1, doc2))
+
+    doc = doc_model.from_markdown(FIGURE_MD)
+    figs = [b for b in doc if b["type"] == "docblock" and b["block_type"] == "figure"]
+    _check("both figures parsed", len(figs) == 2, "got %d" % len(figs))
+    _check("attrs kept in authored order",
+           list(figs[0]["attrs"]) == ["src", "alt", "width", "align"],
+           repr(figs[0]["attrs"]))
+    _check("caption is the block content", len(figs[0]["children"]) == 1)
+    _check("caption emphasis survives",
+           any(r["italic"] for r in figs[0]["children"][0]["runs"]))
+
+    # A caption-less figure must survive the *engine* parse too — it would
+    # otherwise be an illustration silently dropped from the book.
+    eng = manuscript.parse_markdown(FIGURE_MD)
+    eng_figs = [b for b in eng["chapters"][0]["blocks"]
+                if b[0] == "doc_block" and len(b) > 2 and b[2].get("_type") == "figure"]
+    _check("engine keeps the caption-less figure", len(eng_figs) == 2,
+           "got %d" % len(eng_figs))
+    _check("caption-less figure has no paragraphs", eng_figs[1][1] == [])
+    _check("full attr preserved", eng_figs[1][2].get("full") == "yes")
+
+    # hand-built model (what the editor's Figure button produces)
+    built = [{"type": "docblock", "block_type": "figure",
+              "attrs": {"src": "x.png", "alt": ""}, "children": []}]
+    back = doc_model.from_markdown(doc_model.to_markdown(built))
+    _check("editor-built figure model round-trips", back == built, _diff(back, built))
+
+
 if __name__ == "__main__":
     test_roundtrips()
     test_adversarial()
     test_engine_escapes()
     test_poems()
     test_bylines()
+    test_figures()
     print()
     if _failures:
         print(f"FAILED ({len(_failures)}): " + "; ".join(_failures))

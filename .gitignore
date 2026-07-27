@@ -13,6 +13,9 @@ projects/
 # uploaded cover-art assets (background images, emblems/logos)
 covers/assets/
 
+# uploaded interior illustrations (~~~ figure src="…")
+figures/
+
 # Python bytecode
 __pycache__/
 *.pyc

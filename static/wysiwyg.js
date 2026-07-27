@@ -72,6 +72,73 @@
     return el;
   }
 
+  // A figure shows its actual image with an editable caption under it. Placement
+  // attrs (src / alt / width / align / full) ride on data-attrs and are edited in
+  // Markdown mode, like other doc-block metadata.
+  function renderFigure(b) {
+    var attrs = b.attrs || {};
+    var el = document.createElement('div');
+    el.className = 'wb wb-figure'; el.dataset.block = 'figure';
+    el.dataset.attrs = JSON.stringify(attrs);
+
+    var frame = document.createElement('div');
+    frame.className = 'wb-figure-img';
+    frame.setAttribute('contenteditable', 'false');
+    var src = (attrs.src || '').trim();
+    // only library images can be previewed; an absolute path isn't servable
+    if (src && !/^([a-zA-Z]:[\\/]|[\\/])/.test(src)) {
+      var img = document.createElement('img');
+      img.src = '/figures/file/' + encodeURIComponent(src);
+      img.alt = attrs.alt || src;
+      img.onerror = function () {
+        frame.textContent = 'missing image: ' + src;
+        frame.className = 'wb-figure-img wb-figure-gone';
+      };
+      frame.appendChild(img);
+    } else {
+      frame.textContent = src ? src : 'no image chosen';
+      frame.className = 'wb-figure-img wb-figure-gone';
+    }
+    el.appendChild(frame);
+
+    var note = document.createElement('div');
+    note.className = 'wb-figure-note';
+    note.setAttribute('contenteditable', 'false');
+    note.textContent = docHeadLabel('figure', attrs);
+    el.appendChild(note);
+
+    var cap = document.createElement('div');
+    cap.className = 'wb-figure-cap'; cap.dataset.figure = 'caption';
+    (b.children || []).forEach(function (kid) {
+      var p = document.createElement('p');
+      p.className = 'wb-figure-para'; p.dataset.block = 'para';
+      appendInline(p, kid.runs);
+      cap.appendChild(p);
+    });
+    if (!cap.firstChild) {
+      var empty = document.createElement('p');
+      empty.className = 'wb-figure-para'; empty.dataset.block = 'para';
+      appendInline(empty, []);
+      cap.appendChild(empty);
+    }
+    el.appendChild(cap);
+    return el;
+  }
+
+  function readFigure(el) {
+    var attrs = {};
+    try { attrs = JSON.parse(el.dataset.attrs || '{}'); } catch (e) { attrs = {}; }
+    var kids = [];
+    var cap = el.querySelector('.wb-figure-cap');
+    if (cap) {
+      Array.prototype.forEach.call(cap.children, function (p) {
+        var runs = readInline(p);
+        if (runs.length) kids.push({ type: 'para', runs: runs });
+      });
+    }
+    return { type: 'docblock', block_type: 'figure', attrs: attrs, children: kids };
+  }
+
   function renderBlock(b) {
     var el;
     if (b.type === 'chapter') {
@@ -103,6 +170,8 @@
       el.textContent = '* * *';
     } else if (b.type === 'docblock' && b.block_type === 'poem') {
       el = renderPoem(b);
+    } else if (b.type === 'docblock' && b.block_type === 'figure') {
+      el = renderFigure(b);
     } else if (b.type === 'docblock') {
       el = document.createElement('div');
       el.className = 'wb wb-doc'; el.dataset.block = 'docblock';
@@ -223,6 +292,7 @@
     if (type === 'subhead') return { type: 'subhead', runs: readInline(el) };
     if (type === 'scene')   return { type: 'scene' };
     if (type === 'poem')    return readPoem(el);
+    if (type === 'figure')  return readFigure(el);
     if (type === 'docblock') {
       var attrs = {};
       try { attrs = JSON.parse(el.dataset.attrs || '{}'); } catch (e) { attrs = {}; }

@@ -30,6 +30,7 @@ templates/        Jinja2 UI: base, index (styles), editor (preset form + live pr
 presets/*.json    One file per style. Cloneable per customer. Seven presets ship by default.
 covers/*.json     One file per designed cover template (text-driven page-1 layout). Cloneable per line.
                   Edited in the browser via the Cover Studio (no hand-editing needed).
+figures/          Interior illustrations placed with ~~~ figure src="…" (uploaded in-app; gitignored).
 fonts/*.ttf       Embeddable TrueType faces — seven bundled OFL book serifs (see #44) plus any
                   the user uploads. Also stores scene-break ornament images. fonts/licenses/ holds
                   the OFL texts for the bundled families.
@@ -71,6 +72,11 @@ document_block:{frame, indent, font_size, first_indent, space_around,
                header_size, dateline_style}
                frame: "none" | "ruled" | "box"
                dateline_style: "italic" | "bold" | "smallcaps"
+figure:        {width, align, max_height, space_around,
+               caption_size, caption_style, caption_align, caption_gap}
+               width/max_height are fractions (of the text width / text height)
+               align, caption_align: "left" | "center" | "right"
+               caption_style: "italic" | "regular" | "bold"
 running_head:  {show, caps, size, gap}       gap in inches
 folio:         {show, position, size, gap, hide_on_opener}   position: "outer" | "center"
 ```
@@ -135,6 +141,7 @@ punctuation applied first. Markup conventions:
 | `* * *` (own line) | a scene break                  |
 | `~~~` … `~~~`      | plain document block (indented / ruled / boxed per preset) |
 | `~~~ letter from="X" to="Y" date="Z"` | typed epistolary block (see below) |
+| `~~~ figure src="map.png"` … `~~~` | an illustration; the block content is its caption |
 | `*italic*`         | *italic*                       |
 | `**bold**`         | **bold**                       |
 | blank line         | new paragraph                  |
@@ -213,6 +220,14 @@ created, updated    ISO 8601 datetime strings
   Use the image ornament type for custom artwork instead of exotic Unicode, and re-check coverage
   when pointing a preset at a new face. (U+00AD is *not* required: two of the bundled families lack
   it and hyphenation still renders a real hyphen — ReportLab breaks on the soft hyphen itself.)
+
+- **Figures never overflow the page, and never vanish.** `_render_figure_block` clamps the image
+  to the page's text height *minus the measured caption* before wrapping the pair in
+  `KeepTogether`, so the group always fits in a frame — `KeepTogether` on something taller than the
+  page would loop. A missing `src` renders a labelled placeholder box (PDF) or a
+  `[missing image: …]` note (EPUB) with the caption intact; it is never silently dropped. Note a
+  *typed* empty fence is deliberately kept by `parse_markdown` (a caption-less figure is the common
+  case) while a plain empty `~~~` is still discarded.
 
 - **Fonts:** `register_fonts` resolves bare filenames against `fonts/`, accepts absolute
   paths, and falls back to Times if a file is missing — so a build never hard-fails, but
@@ -768,6 +783,52 @@ rounding); the check **fails at HEAD** (−9.0 pt on Romance) and passes with th
 bug rather than the code; rendered proof eyeballed (initial sits on the first baseline, paragraphs
 evenly spaced) in Lora, Book and EB Garamond.
 
+**46. Figures — illustrations with captions** *(Tier-5A's biggest hole: there was **no image block
+at all**, so maps, plates, diagrams and chapter art simply could not go in a book)*
+A figure is a typed doc block — `~~~ figure src="map.png" alt="…"` — whose content is its **caption**
+(a figure may have none). Reusing the doc-block shape means the round-trip layer, the WYSIWYG, the
+outline and the escape rules all came along for free: **`doc_model.py` and `doc_model.js` needed no
+change at all**, verified by the new tests rather than assumed.
+- `manuscript.py`: one behavioural fix — a *typed* fence with no content is no longer discarded
+  (`if block_buf or block_type`). Without it a caption-less figure was silently dropped, which is the
+  common case. A plain empty `~~~` is still discarded.
+- `engine.py`: `FIGURE_DIR` + `_figure_asset_path` (mirrors the cover-asset resolver, but returns
+  **None** when the file is missing so the renderer can say so), `_figure_size` (aspect-preserving fit
+  via `ImageReader`), the `FigureImage` flowable (scales into the column, honours `align`, and draws a
+  labelled **placeholder box** for a missing `src` — a dropped illustration is worse than an obvious
+  gap), and `_render_figure_block`, dispatched from `_render_doc_block` beside `poem`. Image + caption
+  are wrapped in `KeepTogether`, and the height is clamped to the page's text area (minus the caption),
+  so the group always fits and can never loop. `full="yes"` emits `PageBreak, image, caption, PageBreak`.
+- `epub.py`: `_collect_figures()` walks the chapters, **de-duplicates by src** (the same plate used
+  twice is stored once) and skips missing files; each becomes an `images/figNNN.ext` manifest item and
+  a zip entry. `_figure_html()` emits `<figure><img><figcaption>`, with the width as a percentage and
+  a `[missing image: …]` note when the file is gone — the caption survives either way. New `figure*`
+  CSS. `_chapter_xhtml` takes the src→href map (default `None`, so the signature stays back-compatible).
+- `app.py`: `FIGURE_DIR` data dir, wired into `engine` **and** `epub`; `list_figures`/`_save_figure`
+  (Pillow-verified, so a renamed non-image is rejected and deleted); routes `/figures`,
+  `/figures/upload` (returns JSON to `X-Requested-With: fetch`), `/figures/delete/<name>`,
+  `/figures/file/<name>`; `DEFAULTS['figure']` + `parse_preset_form` (the ROADMAP's three-place rule).
+- `templates/`: a new `figures.html` manager (grid of thumbnails, dimensions, first-run panel), a
+  **Figures** nav link, a Figures fieldset in `editor.html` (width / align / max height / spacing /
+  caption size, style, alignment, gap + the syntax hint), and in `manuscript_editor.html` a **Figure**
+  toolbar button that uploads the chosen file and inserts the block in one step (both Markdown and rich
+  mode) plus a cheatsheet row.
+- `static/wysiwyg.js`: `renderFigure`/`readFigure` show the **actual image** with an editable caption
+  under it; placement attrs ride on `data-attrs` and are edited in Markdown mode, as with other
+  doc-block metadata. Absolute paths aren't previewable (not servable) and fall back to a label.
+- `.gitignore`: `figures/` (user content, like `covers/assets/`).
+Verified: `test_doc_model.py::test_figures` (engine fidelity + model stability at both smartquote
+settings, attr order, caption emphasis, the caption-less case surviving the engine parse, and an
+editor-built model); rendered PDF proofs **looked at** — inline centred figure with caption, a 45%
+left-aligned one, a full-page plate, and the missing-image placeholder; EPUB checked for the zip
+entries, the de-duplication, the manifest, and the `<figure>` markup; the Figures fieldset round-trips
+through a real editor save with nothing else in the preset disturbed; upload validation (non-image and
+wrong extension both rejected, nothing left on disk); a full `POST /generate` compose (PDF+EPUB) and
+the book-preview route; all nine presets still pass the #45 regression with figures in the manuscript;
+and the #43 designed-cover EPUB test still passes.
+**Not done — `.docx` images.** Word still drops images (and tables) on import; that is Tier-5C's
+import-fidelity item, and the natural next step now that a figure block exists to import *into*.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -989,16 +1050,12 @@ seven-file round: `manuscript.py` (parse) · `engine.py` (render) · `epub.py` (
 `test_doc_model.py` (fidelity + stability). Presets gain a section in `app.DEFAULTS` +
 `parse_preset_form` + `editor.html` where the look should vary per style.
 
-- **Images / figures — the single biggest hole.** There is **no image block at all** in the
-  manuscript model, and `manuscript.import_docx` silently **drops every image** in a Word file
-  (it iterates `doc.paragraphs`, so inline shapes and tables never appear). Vellum has both
-  Inline Image and a Full Page Image element (maps, plates); Atticus has images with captions,
-  sizing and alignment. Wants: a fenced `~~~ figure src="…" caption="…"` block (inline, scaled
-  to the text width) plus a full-page variant. `engine.py` already draws images in three places
-  (`SceneBreak`, `_paint_back_panel`, `_draw_image_cover`) so the ReportLab side is short; the
-  work is the block plumbing + a preset `figure` section (width, alignment, caption style, space
-  around) + storing the asset (reuse the `covers/assets/` + `/cover/asset/upload` pattern from
-  #32, but per project under `projects/manuscripts/`).
+- ~~**Images / figures — the single biggest hole.**~~ — **SHIPPED (feature #46):** a
+  `~~~ figure src="…"` block (caption = the block's content), inline or `full="yes"` for its own
+  page, a shared library + Figures manager, a preset `figure` section, and `<figure>` output in the
+  EPUB. **Still open:** `manuscript.import_docx` continues to **drop every image** in a Word file
+  (it iterates `doc.paragraphs`, so inline shapes and tables never appear) — see the import-fidelity
+  item below, which is now the obvious next step since there is finally a block to import *into*.
 - **Lists (bulleted / numbered).** No `ListFlowable` anywhere in `engine.py`. Markdown `- ` /
   `1. ` parsing, a preset `list` section (bullet glyph, indent, spacing), `<ul>`/`<ol>` in EPUB.
 - **Block quotation.** Today the nearest thing is a plain `~~~` doc block, which is an

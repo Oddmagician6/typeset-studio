@@ -133,6 +133,16 @@
   .ms-rich .wb-poem-title:empty::before{content:"Poem title…";color:var(--faint);font-style:italic}
   .ms-rich .wb-verse{padding-left:16px;text-indent:-16px;min-height:1.2em}
   .ms-rich .wb-verse:empty{min-height:.9em}
+  .ms-rich .wb-figure{margin:20px 0;text-align:center}
+  .ms-rich .wb-figure-img img{max-width:100%;max-height:260px;display:inline-block}
+  .ms-rich .wb-figure-gone{border:1px dashed var(--rule-strong);border-radius:2px;
+    padding:22px 10px;color:var(--faint);font-family:var(--mono);font-size:12px}
+  .ms-rich .wb-figure-note{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;
+    letter-spacing:.1em;color:var(--faint);margin:6px 0 2px}
+  .ms-rich .wb-figure-cap{font-style:italic;color:var(--muted)}
+  .ms-rich .wb-figure-para{margin:0;min-height:1.2em}
+  .ms-rich .wb-figure-cap > .wb-figure-para:only-child:empty::before{
+    content:"Caption (optional)…";color:var(--faint)}
   .ms-rich strong{font-weight:700}
   .ms-rich em{font-style:italic}
   @media (max-width:880px){.work{grid-template-columns:1fr}.side{position:static}}
@@ -170,8 +180,10 @@
         <span class="div"></span>
         <button type="button" data-act="letter">Letter block</button>
         <button type="button" data-act="poem">Poem</button>
+        <button type="button" data-act="figure">Figure</button>
         <button type="button" data-act="find">Find</button>
       </div>
+      <input type="file" id="fig-file" accept=".jpg,.jpeg,.png,.gif" hidden>
 
       <div class="findbar" id="findbar" hidden>
         <input type="text" id="f-find" placeholder="Find" spellcheck="false">
@@ -202,6 +214,7 @@
           <tr><td><code>*italic*</code> · <code>**bold**</code></td><td>inline emphasis</td></tr>
           <tr><td><code>~~~ letter from="…" to="…"</code> … <code>~~~</code></td><td>a letter/journal/telegram block</td></tr>
           <tr><td><code>~~~ poem title="…"</code> … <code>~~~</code></td><td>a poem (line breaks kept; blank line = new stanza)</td></tr>
+          <tr><td><code>~~~ figure src="map.png"</code> … <code>~~~</code></td><td>an illustration; the block's text is the caption. Add <code>width="0.5"</code>, <code>align="left"</code> or <code>full="yes"</code></td></tr>
           <tr><td>blank line</td><td>new paragraph</td></tr>
         </table>
       </details>
@@ -370,6 +383,27 @@
         ta.selectionStart = ta.selectionEnd = pos;
         ta.focus(); changed();
       }
+      // Figure: pick an image, upload it to the shared figure library, then hand
+      // the stored filename to the caller to insert. One step instead of
+      // "go to Figures, upload, come back, type the filename".
+      function pickFigure(then){
+        var input = document.getElementById('fig-file');
+        input.value = '';
+        input.onchange = function(){
+          var f = input.files && input.files[0];
+          if (!f) return;
+          var fd = new FormData();
+          fd.append('figures', f);
+          fetch('{{ url_for("figures_upload") }}', {
+            method: 'POST', body: fd, headers: {'X-Requested-With': 'fetch'}
+          }).then(function(r){ return r.json(); }).then(function(j){
+            if (j.ok && j.saved.length) then(j.saved[0]);
+            else alert('Could not add that image.\n' + (j.skipped || []).join('\n'));
+          }).catch(function(){ alert('Upload failed.'); });
+        };
+        input.click();
+      }
+
       var ACTS = {
         chapter: function(){ linePrefix('# '); },
         subhead: function(){ linePrefix('## '); },
@@ -379,6 +413,11 @@
         italic:  function(){ surround('*','*'); },
         letter:  function(){ insertBlock('\n~~~ letter from="" to="" date=""\n\n~~~\n\n'); },
         poem:    function(){ insertBlock('\n~~~ poem title=""\n\n~~~\n\n'); },
+        figure:  function(){
+          pickFigure(function(name){
+            insertBlock('\n~~~ figure src="' + name + '"\n\n~~~\n\n');
+          });
+        },
         find:    function(){ openFind(); },
       };
       document.querySelectorAll('.toolbar button').forEach(function(b){
@@ -673,6 +712,17 @@
           var el = currentRichBlock();
           if (el){ el.after(pm); pm.after(p); } else { rich.appendChild(pm); rich.appendChild(p); }
           placeCaret(pm.querySelector('.wb-poem-body > .wb-verse') || p); syncFromRich();
+        },
+        figure:  function(){
+          pickFigure(function(name){
+            var fg = WYS.renderBlock({type:'docblock', block_type:'figure',
+                       attrs:{src:name, alt:''}, children:[]});
+            var p = WYS.renderBlock({type:'para', runs:[]});
+            var el = currentRichBlock();
+            if (el){ el.after(fg); fg.after(p); } else { rich.appendChild(fg); rich.appendChild(p); }
+            placeCaret(fg.querySelector('.wb-figure-cap > .wb-figure-para') || p);
+            syncFromRich();
+          });
         },
         find:    function(){ exitRich(); openFind(); },
       };

@@ -34,7 +34,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import (
     BaseDocTemplate, PageTemplate, Frame, Paragraph, Spacer,
-    PageBreak, Flowable, NextPageTemplate, Table, TableStyle,
+    PageBreak, Flowable, NextPageTemplate, Table, TableStyle, KeepTogether,
 )
 from reportlab.platypus.paragraph import Paragraph as _P
 from reportlab.lib import colors as _colors
@@ -49,6 +49,8 @@ FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
 # Cover art assets (background images, emblems/logos). App points this at the
 # writable data dir; falls back to the repo folder in dev.
 COVER_ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'covers', 'assets')
+# Interior figures (~~~ figure src="…"). Same arrangement as the cover assets.
+FIGURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
 
 
 # ---------------------------------------------------------------- cover helpers
@@ -1979,6 +1981,132 @@ def _render_poem_block(block_paras, attrs, preset, fonts, st, avail_w):
     return out
 
 
+def _figure_asset_path(name):
+    """Resolve a figure filename against the figure dir, or an absolute path.
+
+    Returns None when the file is missing, so the renderer can draw a visible
+    placeholder — a silently dropped illustration is worse than an obvious gap.
+    """
+    if not name:
+        return None
+    p = name if os.path.isabs(name) else os.path.join(FIGURE_DIR, name)
+    return p if os.path.exists(p) else None
+
+
+def _figure_size(path, box_w, max_h):
+    """Fit an image inside (box_w, max_h), preserving its aspect ratio."""
+    ratio = 0.75                                  # 4:3 fallback if unreadable
+    try:
+        from reportlab.lib.utils import ImageReader
+        iw, ih = ImageReader(path).getSize()
+        if iw > 0 and ih > 0:
+            ratio = float(ih) / float(iw)
+    except Exception:
+        pass
+    w, h = box_w, box_w * ratio
+    if max_h and h > max_h:                       # too tall: fit by height instead
+        h, w = max_h, max_h / ratio
+    return w, h
+
+
+class FigureImage(Flowable):
+    """An illustration scaled into a box, aspect preserved, aligned in the column.
+
+    Draws a labelled placeholder instead when the file is missing, so a broken
+    src shows up in the proof rather than vanishing from the page.
+    """
+    def __init__(self, path, width, height, avail_w, align='center', label=''):
+        super().__init__()
+        self.path, self.align, self.label = path, align, label
+        self._w, self._h, self._avail = width, height, avail_w
+
+    def wrap(self, availWidth, availHeight):
+        self._avail = availWidth
+        self.width, self.height = availWidth, self._h
+        return (availWidth, self._h)
+
+    def _x(self):
+        if self.align == 'left':
+            return 0
+        if self.align == 'right':
+            return self._avail - self._w
+        return (self._avail - self._w) / 2.0
+
+    def draw(self):
+        c, x = self.canv, self._x()
+        if self.path:
+            try:
+                c.drawImage(self.path, x, 0, width=self._w, height=self._h,
+                            mask='auto')
+                return
+            except Exception:
+                pass                              # fall through to the placeholder
+        c.setStrokeColor(_colors.Color(.6, .6, .6))
+        c.setFillColor(_colors.Color(.94, .94, .94))
+        c.rect(x, 0, self._w, self._h, stroke=1, fill=1)
+        c.setFillColor(_colors.Color(.35, .35, .35))
+        c.setFont('Helvetica', 8)
+        c.drawCentredString(x + self._w / 2.0, self._h / 2.0 - 3,
+                            f'missing image: {self.label}'[:90])
+
+
+def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
+    """Flowables for a ~~~ figure src="…" … ~~~ block: the image + its caption.
+
+    The block's paragraphs are the caption (a figure may have none). Placement
+    comes from the attrs — ``width`` (fraction of the text width), ``align``,
+    and ``full`` (its own page) — falling back to preset['figure'], so a figure
+    renders sensibly for presets that predate this block.
+    """
+    fg      = preset.get('figure', {})
+    src     = (attrs.get('src', '') or '').strip()
+    path    = _figure_asset_path(src)
+    align   = (attrs.get('align', '') or fg.get('align', 'center')).lower()
+    full    = str(attrs.get('full', '')).strip().lower() in ('1', 'yes', 'true', 'page')
+    space   = fg.get('space_around', 12.0)
+
+    # the text area, so a figure can never be taller than the page it sits on
+    trim, mar = preset['trim'], preset['margins']
+    text_h = (trim['h'] - mar['top'] - mar['bottom']) * inch
+
+    csize   = fg.get('caption_size', 0) or (st['body'].fontSize - 1.0)
+    cstyle_name = fg.get('caption_style', 'italic')
+    cfont   = (fonts.get('italic', fonts['regular']) if cstyle_name == 'italic'
+               else fonts.get('bold', fonts['regular']) if cstyle_name == 'bold'
+               else fonts['regular'])
+    calign  = {'left': TA_LEFT, 'right': TA_RIGHT}.get(
+        fg.get('caption_align', 'center'), TA_CENTER)
+    cap_style = ParagraphStyle(
+        'figcaption', parent=st['body'], fontName=cfont, fontSize=csize,
+        leading=csize * 1.3, alignment=calign, firstLineIndent=0,
+        spaceBefore=fg.get('caption_gap', 5.0), spaceAfter=0,
+    )
+    caption = [Paragraph(text, cap_style) for _, text in block_paras if text]
+    # a caption on a full-page plate needs room reserved under the image
+    cap_h = sum(p.wrap(avail_w, text_h)[1] + cap_style.spaceBefore
+                for p in caption) if caption else 0.0
+
+    if full:
+        box_w = avail_w
+        max_h = text_h - cap_h
+    else:
+        try:
+            frac = float(attrs.get('width', '') or fg.get('width', 0.8))
+        except (TypeError, ValueError):
+            frac = fg.get('width', 0.8)
+        box_w = avail_w * max(0.05, min(1.0, frac))
+        max_h = (text_h - cap_h) * fg.get('max_height', 0.8)
+
+    w, h = _figure_size(path, box_w, max_h) if path else (box_w, box_w * 0.62)
+    img = FigureImage(path, w, h, avail_w, align=align, label=src or '(no src)')
+
+    if full:
+        # its own page: break, plate, caption, break
+        return [PageBreak(), img] + caption + [PageBreak()]
+    # image and caption must not be separated by a page break
+    return [Spacer(1, space), KeepTogether([img] + caption), Spacer(1, space)]
+
+
 def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_meta=None):
     """Return flowables for one ~~~ … ~~~ document block."""
     meta  = block_meta or {}
@@ -1987,6 +2115,8 @@ def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_
         attrs          = {k: v for k, v in meta.items() if k != '_type'}
         if btype == 'poem':
             return _render_poem_block(block_paras, attrs, preset, fonts, st, avail_w)
+        if btype == 'figure':
+            return _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w)
         db             = preset.get('document_block', {})
         header_size    = db.get('header_size', 9.5)
         dateline_style = db.get('dateline_style', 'italic')

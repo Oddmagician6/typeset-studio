@@ -78,13 +78,14 @@ PRESET_DIR    = os.path.join(DATA_DIR, 'presets')
 COVER_DIR     = os.path.join(DATA_DIR, 'covers')
 COVER_ASSET_DIR = os.path.join(COVER_DIR, 'assets')   # background art + emblems/logos
 FONT_DIR      = os.path.join(DATA_DIR, 'fonts')
+FIGURE_DIR    = os.path.join(DATA_DIR, 'figures')     # interior illustrations
 OUT_DIR       = os.path.join(DATA_DIR, 'out')
 UPLOAD_DIR    = os.path.join(DATA_DIR, 'uploads')
 PROJECT_DIR   = os.path.join(DATA_DIR, 'projects')
 PROJECT_MS_DIR = os.path.join(PROJECT_DIR, 'manuscripts')
 COVER_THUMB_DIR = os.path.join(OUT_DIR, '_cover_thumbs')   # cached gallery-picker tiles
 PROJECT_THUMB_DIR = os.path.join(OUT_DIR, '_project_thumbs')  # cached project cards (page 1 of last PDF)
-for d in (PRESET_DIR, COVER_DIR, COVER_ASSET_DIR, FONT_DIR, OUT_DIR, UPLOAD_DIR,
+for d in (PRESET_DIR, COVER_DIR, COVER_ASSET_DIR, FONT_DIR, FIGURE_DIR, OUT_DIR, UPLOAD_DIR,
           PROJECT_DIR, PROJECT_MS_DIR, COVER_THUMB_DIR, PROJECT_THUMB_DIR):
     os.makedirs(d, exist_ok=True)
 
@@ -113,6 +114,8 @@ _seed_defaults()
 # writable font library, and cover-art assets against the cover asset dir
 engine.FONT_DIR = FONT_DIR
 engine.COVER_ASSET_DIR = COVER_ASSET_DIR
+engine.FIGURE_DIR = FIGURE_DIR
+epub.FIGURE_DIR = FIGURE_DIR
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 app.secret_key = 'typeset-studio-local'
@@ -258,6 +261,9 @@ DEFAULTS = {
              'runover_indent': 0.28, 'stanza_spacing': 9.0, 'space_around': 14.0,
              'align': 'left', 'title_size': 0, 'title_style': 'italic',
              'title_space': 8.0},
+    'figure': {'width': 0.8, 'align': 'center', 'max_height': 0.8,
+               'space_around': 12.0, 'caption_size': 0, 'caption_style': 'italic',
+               'caption_align': 'center', 'caption_gap': 5.0},
     'scene_break': {'type': 'glyph', 'glyph': '* * *', 'size': 11.0, 'gap': 9.0, 'image': ''},
     'running_head': {'show': True, 'caps': True, 'size': 8.5, 'gap': 0.28},
     'folio': {'show': True, 'position': 'outer', 'size': 9.5, 'gap': 0.42,
@@ -558,6 +564,16 @@ def parse_preset_form(form):
             'space_around':   _f(form, 'db_space_around', 12.0),
             'header_size':    _f(form, 'db_header_size', 9.5),
             'dateline_style': form.get('db_dateline_style', 'italic'),
+        },
+        'figure': {
+            'width':          _f(form, 'fig_width', 0.8),
+            'align':          form.get('fig_align', 'center'),
+            'max_height':     _f(form, 'fig_max_height', 0.8),
+            'space_around':   _f(form, 'fig_space_around', 12.0),
+            'caption_size':   _f(form, 'fig_caption_size', 0),
+            'caption_style':  form.get('fig_caption_style', 'italic'),
+            'caption_align':  form.get('fig_caption_align', 'center'),
+            'caption_gap':    _f(form, 'fig_caption_gap', 5.0),
         },
         'scene_break': {
             'type':  form.get('sb_type', 'glyph'),
@@ -1271,6 +1287,94 @@ def fonts_delete(name):
         os.remove(path)
         flash(f'Removed {fn}. Styles or covers that referenced it fall back to Times.')
     return redirect(url_for('fonts_page'))
+
+
+FIGURE_EXTS = ('.jpg', '.jpeg', '.png', '.gif')
+
+
+def list_figures():
+    """Illustrations available to `~~~ figure src="…"`, newest first."""
+    try:
+        names = [f for f in os.listdir(FIGURE_DIR)
+                 if f.lower().endswith(FIGURE_EXTS)]
+    except OSError:
+        return []
+    names.sort(key=lambda f: os.path.getmtime(os.path.join(FIGURE_DIR, f)),
+               reverse=True)
+    return names
+
+
+def _save_figure(up):
+    """Validate and store one uploaded illustration. Returns (filename, error)."""
+    fn = secure_filename(up.filename or '')
+    if not fn.lower().endswith(FIGURE_EXTS):
+        return None, f'{up.filename} (not a .jpg/.png/.gif)'
+    dest = os.path.join(FIGURE_DIR, fn)
+    up.save(dest)
+    try:                                   # must actually be an image
+        from PIL import Image
+        with Image.open(dest) as im:
+            im.verify()
+    except Exception:
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
+        return None, f'{fn} (not a readable image)'
+    return fn, None
+
+
+@app.route('/figures')
+def figures():
+    items = []
+    for f in list_figures():
+        path = os.path.join(FIGURE_DIR, f)
+        w = h = 0
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                w, h = im.size
+        except Exception:
+            pass
+        items.append({'name': f, 'w': w, 'h': h,
+                      'kb': os.path.getsize(path) / 1024.0})
+    return render_template('figures.html', figures=items)
+
+
+@app.route('/figures/upload', methods=['POST'])
+def figures_upload():
+    saved, skipped = [], []
+    for up in request.files.getlist('figures'):
+        if not up or not up.filename:
+            continue
+        fn, err = _save_figure(up)
+        (saved if fn else skipped).append(fn or err)
+    # XHR (the manuscript editor's Figure button) wants the filename back
+    if request.headers.get('X-Requested-With') == 'fetch':
+        return jsonify({'ok': bool(saved), 'saved': saved, 'skipped': skipped})
+    if saved:
+        flash('Added ' + ', '.join(saved) + '.')
+    if skipped:
+        flash('Skipped ' + '; '.join(skipped) + '.')
+    if not saved and not skipped:
+        flash('Choose one or more images to upload.')
+    return redirect(url_for('figures'))
+
+
+@app.route('/figures/delete/<name>', methods=['POST'])
+def figures_delete(name):
+    fn = secure_filename(name)
+    path = os.path.join(FIGURE_DIR, fn)
+    if os.path.exists(path) and fn.lower().endswith(FIGURE_EXTS):
+        os.remove(path)
+        flash(f'Removed {fn}. Figures referencing it will show a "missing image" box.')
+    return redirect(url_for('figures'))
+
+
+@app.route('/figures/file/<name>')
+def figure_file(name):
+    """Serve an illustration, for the manager page and the editor's rich view."""
+    return send_from_directory(FIGURE_DIR, secure_filename(name))
 
 
 @app.route('/generate', methods=['GET', 'POST'])

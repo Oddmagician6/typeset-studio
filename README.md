@@ -84,12 +84,35 @@ The tool reads a light, plain-text convention:
 | `## Subhead`       | a section subhead             |
 | `* * *` (own line) | a scene break                 |
 | `~~~` … `~~~`      | an epistolary / document block|
+| `~~~ figure src="map.png"` … `~~~` | an illustration; the block's text is its caption |
 | `*italic*`         | *italic*                      |
 | `**bold**`         | **bold**                      |
 | blank line         | new paragraph                 |
 
 For Word files, a **Heading 1** paragraph becomes a chapter; everything else flows
-as body text.
+as body text. (Images inside a `.docx` are not imported yet — add them as figures.)
+
+### Illustrations
+
+Upload images on the **Figures** page (or with the **Figure** button in the manuscript
+editor, which uploads and inserts in one step), then place one anywhere in the text:
+
+```
+~~~ figure src="map.png" alt="Map of the plateau"
+The plateau, as surveyed in the third year.
+~~~
+```
+
+The block's text is the caption — leave it empty for no caption. Per-figure options on
+the opening line:
+
+- `width="0.5"` — fraction of the text width (default comes from the style)
+- `align="left"` / `"center"` / `"right"`
+- `full="yes"` — give the figure its own page
+
+Caption size, style and spacing belong to the **style**, under *Figures* in the style
+editor, so every illustration in a book matches. If a `src` can't be found, the page
+shows a labelled placeholder box rather than silently dropping the picture.
 
 ---
 
@@ -166,6 +189,7 @@ typeset_studio/
   requirements.txt   what to install
   presets/           one .json per style  <- your per-customer styles live here
   fonts/             .ttf files used by styles
+  figures/           illustrations placed with ~~~ figure src="…"
   sample/            a sample manuscript for trying styles
   out/               composed PDFs land here
   uploads/           manuscripts you upload (created on first use)

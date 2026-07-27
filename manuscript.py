@@ -224,7 +224,10 @@ def parse_markdown(raw, smartquotes=True):
         if m_doc:
             if in_block:
                 flush_block_para()
-                if block_buf:
+                # A *typed* block is kept even when it has no content: a figure
+                # usually has no caption, and dropping it would lose the
+                # illustration. A plain empty ~~~ fence is still discarded.
+                if block_buf or block_type:
                     blk = ('doc_block', list(block_buf))
                     if block_type:
                         blk = blk + ({'_type': block_type, **block_attrs},)
@@ -273,7 +276,7 @@ def parse_markdown(raw, smartquotes=True):
     # close any unclosed block
     if in_block:
         flush_block_para()
-        if block_buf:
+        if block_buf or block_type:
             blk = ('doc_block', list(block_buf))
             if block_type:
                 blk = blk + ({'_type': block_type, **block_attrs},)

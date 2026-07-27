@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% set active = 'figures' %}
+{% block title %}Figures · Typeset Studio{% endblock %}
+
+{% block style %}
+  .panel{
+    background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+    box-shadow:var(--shadow);padding:0;margin:0 0 22px;
+  }
+  .panel .hd{padding:16px 22px;border-bottom:1px solid var(--rule)}
+  .panel .hd h2{font-family:var(--serif);font-size:19px;margin:0}
+  .panel .hd p{color:var(--muted);font-size:13.5px;margin:4px 0 0}
+  .panel .bd{padding:16px 22px 20px}
+
+  .figgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:18px}
+  .figcard{border:1px solid var(--rule);border-radius:3px;overflow:hidden;background:var(--surface-2)}
+  .figcard .thumb{
+    height:150px;display:flex;align-items:center;justify-content:center;
+    background:repeating-conic-gradient(var(--surface) 0% 25%, var(--surface-2) 0% 50%) 50%/16px 16px;
+  }
+  .figcard .thumb img{max-width:100%;max-height:150px;display:block}
+  .figcard .meta{padding:9px 11px;border-top:1px solid var(--rule)}
+  .figcard .fn{
+    font-family:var(--mono);font-size:12px;color:var(--ink);
+    word-break:break-all;line-height:1.4;
+  }
+  .figcard .dims{color:var(--faint);font-family:var(--mono);font-size:10.5px;margin-top:3px}
+  .figcard .act{display:flex;gap:8px;align-items:center;margin-top:8px}
+  .figcard .act .sep{flex:1}
+
+  .uprow{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .uprow input[type=file]{
+    font-family:var(--sans);font-size:14px;color:var(--ink);background:var(--surface-2);
+    border:1px solid var(--rule-strong);border-radius:2px;padding:8px 10px;flex:1 1 260px;
+  }
+  .note{color:var(--muted);font-size:13px;margin:14px 0 0;line-height:1.5}
+  .note code{font-family:var(--mono);font-size:12.5px}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">Illustration library</div>
+    <h1>Figures</h1>
+    <p>Images here can be placed in any manuscript with a figure block. Use the filename
+       as the <code>src</code>: <code>~~~ figure src="map.png"</code> — the block's text
+       becomes the caption.</p>
+  </div>
+
+  <div class="panel">
+    <div class="hd">
+      <h2>Add an image</h2>
+      <p>JPEG, PNG or GIF. Use the largest version you have — the engine scales it down to
+         fit the page, and print wants roughly 300 pixels per inch of printed width.</p>
+    </div>
+    <div class="bd">
+      <form class="uprow" method="post" action="{{ url_for('figures_upload') }}"
+            enctype="multipart/form-data">
+        <input type="file" name="figures" accept=".jpg,.jpeg,.png,.gif" multiple>
+        <button class="btn btn-primary" type="submit">Upload</button>
+      </form>
+      <p class="note">Per-figure placement lives on the block:
+        <code>width="0.5"</code> (fraction of the text width), <code>align="left"</code>,
+        <code>full="yes"</code> for its own page. Everything else — caption size, style,
+        spacing — belongs to the <b>style</b>, under Figures in the style editor.</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="hd">
+      <h2>Your images</h2>
+      <p>{{ figures|length }} image{{ '' if figures|length == 1 else 's' }} available.</p>
+    </div>
+    <div class="bd">
+      {% if figures %}
+        <div class="figgrid">
+          {% for f in figures %}
+            <div class="figcard">
+              <div class="thumb">
+                <img src="{{ url_for('figure_file', name=f.name) }}" alt="{{ f.name }}">
+              </div>
+              <div class="meta">
+                <div class="fn">{{ f.name }}</div>
+                <div class="dims">
+                  {% if f.w %}{{ f.w }} × {{ f.h }} px · {% endif %}{{ '%.0f'|format(f.kb) }} KB
+                </div>
+                <div class="act">
+                  <span class="sep"></span>
+                  <form class="inline-form" method="post"
+                        action="{{ url_for('figures_delete', name=f.name) }}"
+                        onsubmit="return confirm('Remove {{ f.name }}? Figures using it will show a missing-image box.');">
+                    <button class="btn btn-ghost btn-sm" type="submit">Remove</button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="firstrun">
+          <h3>Add your first illustration</h3>
+          <p>A map, a chapter ornament, a diagram, a photograph — upload it above, then drop
+             it into a manuscript with <code>~~~ figure src="yourfile.png"</code>, or use the
+             <b>Figure</b> button in the manuscript editor, which uploads and inserts in one step.</p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

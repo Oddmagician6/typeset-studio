@@ -107,6 +107,12 @@ p.scene-break {
 .doc-block-poem { border: 0; padding: 0; margin: 1.4em 6%; font-size: 1em; }
 .doc-block-poem header.poem-title { font-style: italic; font-weight: bold; text-align: left; color: #222; border-bottom: 0; margin-bottom: 0.6em; font-size: 1.05em; }
 .doc-block-poem p { text-align: left; margin: 0 0 0.8em; padding-left: 1.4em; text-indent: -1.4em; }
+figure.figure { margin: 1.4em 0; padding: 0; text-align: center; page-break-inside: avoid; }
+figure.figure img { max-width: 100%; height: auto; }
+figure.figure-full { page-break-before: always; page-break-after: always; margin: 0; }
+figure.figure-full img { max-height: 92vh; }
+figure.figure figcaption { font-size: 0.85em; font-style: italic; color: #555; text-indent: 0; margin-top: 0.5em; }
+p.figure-missing { text-indent: 0; color: #777; font-size: 0.85em; }
 .part-page { margin: 0 5%; text-align: center; padding-top: 30%; }
 .part-page .part-num { font-size: 0.9em; color: #666; margin: 0 0 0.5em; letter-spacing: 0.06em; }
 .part-page .part-title { font-size: 1.6em; font-weight: bold; margin: 0; }
@@ -265,7 +271,34 @@ def _matter_xhtml(heading, text, css_class):
     return _xhtml(heading or 'Front Matter', body)
 
 
-def _chapter_xhtml(idx, chapter, preset):
+def _figure_html(caption_paras, attrs, figures):
+    """<figure> for a ~~~ figure block. `figures` maps src -> in-zip href."""
+    src   = (attrs.get('src', '') or '').strip()
+    href  = (figures or {}).get(src)
+    alt   = html.escape(attrs.get('alt', '') or src, quote=True)
+    width = (attrs.get('width', '') or '').strip()
+    style = ''
+    if width:
+        try:                                     # fraction of the column, as a %
+            style = f' style="width:{min(100.0, max(5.0, float(width) * 100)):.0f}%"'
+        except (TypeError, ValueError):
+            style = ''
+    cls = 'figure figure-full' if str(attrs.get('full', '')).strip().lower() \
+        in ('1', 'yes', 'true', 'page') else 'figure'
+    out = [f'  <figure class="{cls}">']
+    if href:
+        out.append(f'    <img src="{href}" alt="{alt}"{style}/>')
+    else:
+        # keep the caption and say what is missing, rather than dropping it
+        out.append(f'    <p class="figure-missing">[missing image: {html.escape(src)}]</p>')
+    caption = ' '.join(_markup_to_html(t) for _, t in caption_paras if t)
+    if caption:
+        out.append(f'    <figcaption>{caption}</figcaption>')
+    out.append('  </figure>')
+    return out
+
+
+def _chapter_xhtml(idx, chapter, preset, figures=None):
     c          = preset.get('chapter', {})
     show_num   = c.get('show_number', True)
     num_fmt    = c.get('number_format', 'Chapter {n}')
@@ -298,6 +331,10 @@ def _chapter_xhtml(idx, chapter, preset):
             meta   = block[2] if len(block) > 2 else {}
             btype  = meta.get('_type', '')
             attrs  = {k: v for k, v in meta.items() if k != '_type'}
+            if btype == 'figure':
+                lines.extend(_figure_html(val, attrs, figures))
+                no_indent_next = True
+                continue
             cls    = f'doc-block doc-block-{btype}' if btype else 'doc-block'
             lines.append(f'  <div class="{cls}">')
             # Per-type header element
@@ -483,12 +520,50 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None):
     )
 
 
+# Interior figures live here; app.py points this at the writable data dir. Kept
+# as a module global (like engine.FIGURE_DIR) so this stays import-free of app.
+FIGURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
+
+_FIG_MIME = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+             '.gif': 'image/gif', '.svg': 'image/svg+xml'}
+
+
+def _collect_figures(chapters):
+    """Find every ~~~ figure src="…" that resolves to a real file.
+
+    Returns {src: {'href', 'path', 'id', 'mime'}} — one entry per distinct src,
+    so the same illustration used twice is stored once.
+    """
+    found = {}
+    for ch in chapters:
+        for block in ch.get('blocks', []):
+            if block[0] != 'doc_block' or len(block) < 3:
+                continue
+            m = block[2]
+            if m.get('_type') != 'figure':
+                continue
+            src = (m.get('src', '') or '').strip()
+            if not src or src in found:
+                continue
+            path = src if os.path.isabs(src) else os.path.join(FIGURE_DIR, src)
+            if not os.path.exists(path):
+                continue                          # _figure_html writes a note
+            ext = os.path.splitext(path)[1].lower()
+            n = len(found) + 1
+            found[src] = {'path': path, 'href': f'images/fig{n:03d}{ext}',
+                          'id': f'fig{n:03d}',
+                          'mime': _FIG_MIME.get(ext, 'image/png')}
+    return found
+
+
 # ---------------------------------------------------------------- public API
 def build_epub(manuscript, preset, out_path, meta):
     """Write an EPUB 3 file to out_path. Returns out_path."""
     uid      = 'urn:uuid:' + str(uuid.uuid4())
     modified = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     chapters = manuscript['chapters']
+    figures  = _collect_figures(chapters)
+    fig_href = {src: f['href'] for src, f in figures.items()}
 
     level = meta.get('front_matter', 'full')
     if level is True:  level = 'full'
@@ -513,6 +588,9 @@ def build_epub(manuscript, preset, out_path, meta):
         manifest_items.append({'id': 'cover-page', 'href': 'cover.xhtml',
                                 'type': 'application/xhtml+xml'})
         spine_items.append('cover-page')
+
+    for f in figures.values():
+        manifest_items.append({'id': f['id'], 'href': f['href'], 'type': f['mime']})
 
     if has_front:
         manifest_items.append({'id': 'front', 'href': 'front.xhtml',
@@ -573,6 +651,9 @@ def build_epub(manuscript, preset, out_path, meta):
             zf.write(cover_src, f'OEBPS/{cover_img_fn}')
             zf.writestr('OEBPS/cover.xhtml', _cover_xhtml(cover_img_fn))
 
+        for f in figures.values():
+            zf.write(f['path'], f'OEBPS/{f["href"]}')
+
         if has_front:
             zf.writestr('OEBPS/front.xhtml', _front_xhtml(meta))
 
@@ -594,7 +675,8 @@ def build_epub(manuscript, preset, out_path, meta):
                 zf.writestr(f'OEBPS/part{ch_part_num:03d}.xhtml',
                             _part_xhtml(ch_part_num, ch_part.get('title') or '', preset))
                 current_part_num = ch_part_num
-            zf.writestr(f'OEBPS/chapter{idx:03d}.xhtml', _chapter_xhtml(idx, ch, preset))
+            zf.writestr(f'OEBPS/chapter{idx:03d}.xhtml',
+                        _chapter_xhtml(idx, ch, preset, figures=fig_href))
 
         for _bkey, _bid, _bhref, _bhead in _back_items:
             _btxt = meta.get(_bkey, '').strip()
