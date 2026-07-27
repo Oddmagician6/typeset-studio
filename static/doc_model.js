@@ -33,6 +33,8 @@
   var NOTE_DEF_RE = /^\s*\[\^([\w\-]+)\]:\s*(.*)$/;
   var SCENE_BREAK_RE = /^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$/;
   var CHAPTER_RE     = /^#\s+(.*)$/;
+  // `#* Prologue` — a chapter that takes no number. Mirrors manuscript.UNNUMBERED_RE.
+  var UNNUMBERED_RE  = /^#\*\s+(.*)$/;
   var SUBHEAD_RE     = /^##\s+(.*)$/;
   var DOCBLOCK_RE    = /^\s*~~~(.*)/;
   var PART_RE        = /^\s*===\s*(.*)/;
@@ -195,7 +197,7 @@
   }
 
   function isBlockLine(line) {
-    return SCENE_BREAK_RE.test(line) || CHAPTER_RE.test(line)
+    return SCENE_BREAK_RE.test(line) || CHAPTER_RE.test(line) || UNNUMBERED_RE.test(line)
         || SUBHEAD_RE.test(line) || DOCBLOCK_RE.test(line) || PART_RE.test(line);
   }
 
@@ -283,11 +285,14 @@
         else blockParaBuf.push(line);
         continue;
       }
-      var mCh = CHAPTER_RE.exec(line), mSub = SUBHEAD_RE.exec(line);
+      var mUn = UNNUMBERED_RE.exec(line);
+      var mCh = mUn || CHAPTER_RE.exec(line), mSub = SUBHEAD_RE.exec(line);
       if (mCh) {
         flushPara();
         var sb = splitByline(mCh[1]);
-        blocks.push({ type: 'chapter', title: sb.title, byline: sb.byline });
+        var chBlock = { type: 'chapter', title: sb.title, byline: sb.byline };
+        if (mUn) chBlock.unnumbered = true;   // only carried when set
+        blocks.push(chBlock);
         continue;
       }
       if (SCENE_BREAK_RE.test(line)) { flushPara(); blocks.push({ type: 'scene' }); continue; }
@@ -313,8 +318,9 @@
     blocks.forEach(function (b) {
       if (b.type === 'chapter') {
         var title = b.title || '';
-        if (title && b.byline) out.push('# ' + title + BYLINE_SEP + b.byline);
-        else out.push('# ' + title);
+        var mark = b.unnumbered ? '#* ' : '# ';
+        if (title && b.byline) out.push(mark + title + BYLINE_SEP + b.byline);
+        else out.push(mark + title);
       } else if (b.type === 'part') {
         out.push('=== ' + (b.title || ''));
       } else if (b.type === 'subhead') {

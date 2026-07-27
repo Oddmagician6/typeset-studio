@@ -524,6 +524,76 @@ def test_notes():
     _check("no notes -> no notes key", "notes" not in plain["chapters"][0])
 
 
+VOCAB_MD = """\
+#* Prologue
+
+Before it all began.
+
+# The First Chapter
+
+The story proper.
+
+# The Second Chapter
+
+More of it.
+
+#* Epilogue | A Note
+
+After.
+"""
+
+
+def test_vocabulary():
+    """Unnumbered chapters, and the front/back matter table."""
+    print("\n[element vocabulary]")
+    import matter
+
+    for smart in (True, False):
+        doc1 = doc_model.from_markdown(VOCAB_MD, smartquotes=smart)
+        md2 = doc_model.to_markdown(doc1)
+        doc2 = doc_model.from_markdown(md2, smartquotes=smart)
+        eng_a = manuscript.parse_markdown(VOCAB_MD, smartquotes=smart)
+        eng_b = manuscript.parse_markdown(md2, smartquotes=smart)
+        _check(f"vocab engine fidelity (smart={smart})", eng_a == eng_b, _diff(eng_a, eng_b))
+        _check(f"vocab model stability (smart={smart})", doc1 == doc2, _diff(doc1, doc2))
+
+    ms = manuscript.parse_markdown(VOCAB_MD)
+    flags = [bool(c.get("unnumbered")) for c in ms["chapters"]]
+    _check("prologue and epilogue are unnumbered", flags == [True, False, False, True], flags)
+    _check("an unnumbered chapter can still carry a byline",
+           ms["chapters"][3]["byline"] == "A Note", ms["chapters"][3])
+
+    # the number a reader sees skips them; position does not
+    nums = manuscript.chapter_numbers(ms["chapters"])
+    _check("numbering skips unnumbered chapters", nums == [None, 1, 2, None], nums)
+    _check("position still identifies every chapter",
+           manuscript.chapter_anchors(ms["chapters"][0], 1) == ["chapter-1", "prologue"],
+           manuscript.chapter_anchors(ms["chapters"][0], 1))
+
+    # a plain chapter model is untouched by the new flag
+    built = [{"type": "chapter", "title": "A Tale", "byline": None}]
+    _check("plain chapter model unchanged",
+           doc_model.from_markdown(doc_model.to_markdown(built)) == built)
+
+    # the matter table itself
+    _check("every section key is unique", len(matter.KEYS) == len(set(matter.KEYS)))
+    _check("front and back partition the table",
+           len(matter.FRONT) + len(matter.BACK) == len(matter.SECTIONS))
+    _check("blank() covers every key", set(matter.blank()) == set(matter.KEYS))
+    _check("present() honours order and emptiness",
+           [s["key"] for s in matter.present({"also_by": "x", "afterword": "y",
+                                              "foreword": " "})] == ["afterword", "also_by"],
+           [s["key"] for s in matter.present({"also_by": "x", "afterword": "y"})])
+    _check("author fills into the heading",
+           matter.heading([s for s in matter.SECTIONS if s["key"] == "also_by"][0],
+                          "Ellinor Vale") == "Also by Ellinor Vale")
+    _check("a section with no label has no heading",
+           matter.heading([s for s in matter.SECTIONS if s["key"] == "dedication"][0]) == "")
+    _check("EPUB ids and hrefs are unique",
+           len({s["eid"] for s in matter.SECTIONS}) == len(matter.SECTIONS)
+           and len({s["href"] for s in matter.SECTIONS}) == len(matter.SECTIONS))
+
+
 if __name__ == "__main__":
     test_roundtrips()
     test_adversarial()
@@ -534,6 +604,7 @@ if __name__ == "__main__":
     test_blocks()
     test_links()
     test_notes()
+    test_vocabulary()
     print()
     if _failures:
         print(f"FAILED ({len(_failures)}): " + "; ".join(_failures))

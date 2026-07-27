@@ -25,7 +25,9 @@ try:
 except ImportError:
     _HAVE_PYPHEN = False
 
+import matter as _matter
 from manuscript import (_inline as _ms_inline, chapter_anchors as _ms_anchors,
+                        chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts)
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER, TA_RIGHT
@@ -2429,11 +2431,22 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
                               leftIndent=1.2*inch, rightIndent=0.5*inch, firstLineIndent=0)
         s_a = ParagraphStyle('epia', parent=s_q, leftIndent=0.5*inch, alignment=TA_RIGHT,
                               fontSize=st['body'].fontSize - 1.5, textColor=(0.4, 0.4, 0.4))
-        out.append(Spacer(1, 2.2 * inch))
+        # A heading turns the same setting into a Praise page: quoted blocks,
+        # each with an optional source line. An epigraph passes none.
+        if heading:
+            out.append(Spacer(1, 0.6 * inch))
+            out.append(Paragraph(heading, st['chap_title']))
+            out.append(Spacer(1, 0.35 * inch))
+        else:
+            out.append(Spacer(1, 2.2 * inch))
         _attr = ('—', '–', '--', '-')
         for i, b in enumerate(blocks):
-            is_attr = i == len(blocks) - 1 and any(b.startswith(m) for m in _attr)
+            nxt = blocks[i + 1] if i + 1 < len(blocks) else ''
+            # last block, or the one before another block's source line
+            is_attr = any(b.startswith(m) for m in _attr)
             out.append(Paragraph(_ms_inline(b, smartquotes), s_a if is_attr else s_q))
+            if heading and is_attr and nxt:
+                out.append(Spacer(1, 8))          # breathing room between quotes
 
     elif style == 'also_by':
         s = ParagraphStyle('aby', fontName=fonts['regular'],
@@ -2544,19 +2557,18 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         story.append(RectoBreak() if rhs else PageBreak())
         story.extend(toc_flowables)
 
-    # ---- front matter extras (dedication, epigraph) ----
+    # ---- front matter extras (order comes from matter.SECTIONS) ----
     sq = meta.get('smartquotes', True)
     _fm_need_break = len(story) > 0
     _fm_first = True   # only the first extra page gets recto-forced
-    for _key, _mstyle in [('dedication', 'dedication'), ('epigraph', 'epigraph')]:
-        _txt = meta.get(_key, '').strip()
-        if not _txt:
-            continue
+    for _sec in _matter.present(meta, 'front'):
         if _fm_need_break:
             story.append((RectoBreak() if rhs else PageBreak()) if _fm_first else PageBreak())
         _fm_need_break = True
         _fm_first = False
-        story.extend(_matter_page(None, _txt, fonts, st, sq, _mstyle))
+        story.extend(_matter_page(_matter.heading(_sec, meta.get('author', '')),
+                                  meta[_sec['key']].strip(),
+                                  fonts, st, sq, _sec['style']))
 
     # ---- body ----
     c  = preset['chapter']
@@ -2567,6 +2579,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     need_break      = False   # True after the first body element is placed
     current_part_num = None
 
+    _numbers = _ms_numbers(manuscript['chapters'])
     for idx, ch in enumerate(manuscript['chapters'], start=1):
         ch_part     = ch.get('part')
         ch_part_num = ch_part['number'] if ch_part else None
@@ -2600,8 +2613,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         story.append(Spacer(1, c['sink'] * inch))
         # Destinations for in-book links: `[see](#chapter-2)` or the title's slug.
         anchors = ''.join(f'<a name="{a}"/>' for a in _ms_anchors(ch, idx))
-        if c.get('show_number', True):
-            label = c.get('number_format', 'Chapter {n}').format(n=idx)
+        if c.get('show_number', True) and _numbers[idx - 1] is not None:
+            label = c.get('number_format', 'Chapter {n}').format(n=_numbers[idx - 1])
             story.append(Paragraph(anchors + label, st['chap_num']))
             anchors = ''
             story.append(Spacer(1, 0.12 * inch))
@@ -2650,14 +2663,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                     story.append(Paragraph(val_h, st['body']))
                 flush_next = False
 
-    # ---- back matter (acknowledgments, about author, also by) ----
+    # ---- back matter (order comes from matter.SECTIONS) ----
     _author = meta.get('author', '')
-    _back = [
-        ('acknowledgments', 'Acknowledgments',                    'body'),
-        ('contributors',    'Contributors',                       'contributors'),
-        ('about_author',    'About the Author',                   'body'),
-        ('also_by',         f'Also by {_author}'.strip() or 'Also By', 'also_by'),
-    ]
     _bm_first = True   # only the first back-matter page gets recto-forced
 
     # Notes come first in the back matter, right after the last chapter — they
@@ -2667,13 +2674,12 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         _bm_first = False
         story.extend(_endnotes_page(manuscript['chapters'], fonts, st, preset))
 
-    for _key, _heading, _mstyle in _back:
-        _txt = meta.get(_key, '').strip()
-        if not _txt:
-            continue
+    for _sec in _matter.present(meta, 'back'):
         story.append((RectoBreak() if rhs else PageBreak()) if _bm_first else PageBreak())
         _bm_first = False
-        story.extend(_matter_page(_heading, _txt, fonts, st, sq, _mstyle))
+        story.extend(_matter_page(_matter.heading(_sec, _author),
+                                  meta[_sec['key']].strip(),
+                                  fonts, st, sq, _sec['style']))
 
     return story
 

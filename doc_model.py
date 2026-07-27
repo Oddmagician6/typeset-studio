@@ -21,7 +21,8 @@ Document model
 A document is a list of blocks. Each block is a plain JSON-able dict:
 
     {"type": "chapter",  "title": str | None,          # "# ..."   title stored raw
-                         "byline": str | None}          # "# Title | Author" anthology byline
+                         "byline": str | None,          # "# Title | Author" anthology byline
+                         "unnumbered": True}            # only on "#* ..." — no chapter number
     {"type": "part",     "title": str | None}          # "=== ..." title stored raw
     {"type": "subhead",  "runs": [run, ...]}           # "## ..."
     {"type": "para",     "runs": [run, ...]}           # a paragraph
@@ -251,6 +252,7 @@ def _block_collision(line):
     """True if a paragraph line would be mistaken for a structural block."""
     return bool(
         manuscript.CHAPTER_RE.match(line)
+        or manuscript.UNNUMBERED_RE.match(line)
         or manuscript.SUBHEAD_RE.match(line)
         or manuscript.PART_RE.match(line)
         or manuscript.DOCBLOCK_RE.match(line)
@@ -347,12 +349,16 @@ def from_markdown(raw, smartquotes=True):
                 block_para_buf.append(line)
             continue
 
-        m_ch = manuscript.CHAPTER_RE.match(line)
+        m_un = manuscript.UNNUMBERED_RE.match(line)
+        m_ch = m_un or manuscript.CHAPTER_RE.match(line)
         m_sub = manuscript.SUBHEAD_RE.match(line)
         if m_ch:
             flush_para()
             title, byline = manuscript._split_byline(m_ch.group(1))
-            blocks.append({"type": "chapter", "title": title, "byline": byline})
+            block = {"type": "chapter", "title": title, "byline": byline}
+            if m_un:                       # only carried when set, so a plain
+                block["unnumbered"] = True  # chapter model stays as it was
+            blocks.append(block)
             continue
         if manuscript.SCENE_BREAK_RE.match(line):
             flush_para()
@@ -393,10 +399,11 @@ def to_markdown(blocks):
         if t == "chapter":
             title = b["title"] or ""
             byline = b.get("byline")
+            mark = "#* " if b.get("unnumbered") else "# "
             if title and byline:                         # byline needs a title to round-trip
-                out.append("# " + title + manuscript.BYLINE_SEP + byline)
+                out.append(mark + title + manuscript.BYLINE_SEP + byline)
             else:
-                out.append("# " + title)
+                out.append(mark + title)
         elif t == "part":
             out.append("=== " + (b["title"] or ""))
         elif t == "subhead":

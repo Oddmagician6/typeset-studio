@@ -81,6 +81,7 @@ The tool reads a light, plain-text convention:
 |--------------------|-------------------------------|
 | `=== Part title`   | a part divider page           |
 | `# Chapter title`  | starts a new chapter          |
+| `#* Prologue`      | a chapter with no number      |
 | `## Subhead`       | a section subhead             |
 | `* * *` (own line) | a scene break                 |
 | `~~~` … `~~~`      | an epistolary / document block|
@@ -115,6 +116,28 @@ After importing, the app tells you exactly what came across and what didn't — 
 is dropped silently. Footnotes and endnotes are **not** imported yet; you'll be told how
 many were found. Images land in your Figures library, named after the Word file, so
 re-importing the same document doesn't pile up copies.
+
+### Prologues, epilogues and other unnumbered chapters
+
+A prologue isn't a separate kind of page — it's a chapter that takes no number:
+
+```
+#* Prologue
+```
+
+Write `#*` instead of `#` and the chapter gets no number, **and doesn't use one up**
+— the chapter after a prologue is still Chapter One. Same for an epilogue, an
+interlude or a coda. Everything else works normally: it appears in the contents,
+can take a byline, and can hold notes and figures.
+
+### The pages around your book
+
+Each of these is a box on the *Set a book* page. Fill one in and it becomes its own
+page, in the right place, automatically:
+
+- **Front:** Dedication · Epigraph · Foreword · Preface · Introduction
+- **Back:** Notes (automatic — see below) · Afterword · Bibliography ·
+  Acknowledgments · Contributors · About the Author · Also by … · Praise
 
 ### Endnotes
 

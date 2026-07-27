@@ -263,16 +263,13 @@
       <legend>Front matter extras</legend>
       <div class="fs-body">
         <p class="or" style="margin-top:0">optional — each filled field adds its own page after the copyright</p>
+        {% for s in matter_front %}
         <div class="row">
-          <div class="field wide"><label>Dedication</label>
-            <span class="hint">Short, personal — "For Sarah, who believed."</span>
-            <textarea name="dedication" rows="3">{{ form.get('dedication','') }}</textarea></div>
+          <div class="field wide"><label>{{ s.label or s.key|replace('_',' ')|title }}</label>
+            <span class="hint">{{ s.hint }}</span>
+            <textarea name="{{ s.key }}" rows="{{ 3 if s.key == 'dedication' else 4 }}">{{ form.get(s.key,'') }}</textarea></div>
         </div>
-        <div class="row">
-          <div class="field wide"><label>Epigraph</label>
-            <span class="hint">A quoted passage. Put the attribution on the last line, starting with —</span>
-            <textarea name="epigraph" rows="4">{{ form.get('epigraph','') }}</textarea></div>
-        </div>
+        {% endfor %}
       </div>
     </fieldset>
 
@@ -280,24 +277,13 @@
       <legend>Back matter</legend>
       <div class="fs-body">
         <p class="or" style="margin-top:0">optional — each filled field adds its own page after the last chapter</p>
+        {% for s in matter_back %}
         <div class="row">
-          <div class="field wide"><label>Acknowledgments</label>
-            <textarea name="acknowledgments" rows="4">{{ form.get('acknowledgments','') }}</textarea></div>
+          <div class="field wide"><label>{{ s.label.format(author=form.get('author','') or 'the author')|trim }}</label>
+            <span class="hint">{{ s.hint }}</span>
+            <textarea name="{{ s.key }}" rows="4">{{ form.get(s.key,'') }}</textarea></div>
         </div>
-        <div class="row">
-          <div class="field wide"><label>Contributors</label>
-            <span class="hint">For anthologies — one contributor per blank-line-separated block. Start with the name; add a bio after an em dash, e.g. <code>Jane Doe — author of …</code></span>
-            <textarea name="contributors" rows="4">{{ form.get('contributors','') }}</textarea></div>
-        </div>
-        <div class="row">
-          <div class="field wide"><label>About the Author</label>
-            <textarea name="about_author" rows="4">{{ form.get('about_author','') }}</textarea></div>
-        </div>
-        <div class="row">
-          <div class="field wide"><label>Also By</label>
-            <span class="hint">One title per line</span>
-            <textarea name="also_by" rows="4">{{ form.get('also_by','') }}</textarea></div>
-        </div>
+        {% endfor %}
       </div>
     </fieldset>
 

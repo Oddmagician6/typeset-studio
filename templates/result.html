@@ -174,12 +174,9 @@
           <input type="hidden" name="fmt"               value="{{ fmt }}">
           <input type="hidden" name="include_toc"      value="{{ '1' if meta.get('include_toc') else '' }}">
           <input type="hidden" name="smartquotes"      value="{{ '1' if meta.smartquotes else '' }}">
-          <input type="hidden" name="dedication"      value="{{ meta.get('dedication','') }}">
-          <input type="hidden" name="epigraph"        value="{{ meta.get('epigraph','') }}">
-          <input type="hidden" name="acknowledgments" value="{{ meta.get('acknowledgments','') }}">
-          <input type="hidden" name="contributors"    value="{{ meta.get('contributors','') }}">
-          <input type="hidden" name="about_author"    value="{{ meta.get('about_author','') }}">
-          <input type="hidden" name="also_by"         value="{{ meta.get('also_by','') }}">
+          {% for k in matter_keys %}
+          <input type="hidden" name="{{ k }}" value="{{ meta.get(k,'') }}">
+          {% endfor %}
           <input type="hidden" name="last_epub"         value="{{ epub_name }}">
           <input type="hidden" name="page_count"        value="{{ spec.page_count if spec else '' }}">
           <div class="row">

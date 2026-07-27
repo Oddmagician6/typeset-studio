@@ -24,6 +24,7 @@ app.py            Flask routes + preset/project CRUD + form parsing. Entry point
 engine.py         The typesetting engine (ReportLab). Builds the PDF. Two-pass when TOC enabled.
 manuscript.py     Parses Markdown / imports .docx → a chapters/blocks structure.
 epub.py           EPUB 3 builder — consumes the same parsed structure as engine.py.
+matter.py         The front/back-matter vocabulary — one table, read by app + engine + epub.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -1013,6 +1014,36 @@ the new preset fieldset round-tripping a real editor save. All prior suites stil
 anchored to a reference line is real `BookDoc` work, and the Tier-4 note's sequencing (endnotes
 first, footnotes last) still holds.
 
+**51. Element vocabulary — six more matter sections, and unnumbered chapters** *(Tier-5F)*
+Two things, one of which is a refactor that had to come first.
+- **`matter.py` — one table instead of a dozen wiring sites.** Every named section was hand-wired in
+  ~19 places (the compose form, the project form, `result.html`'s hidden fields, five meta dicts in
+  `app.py`, project load/save, the engine's page list, the EPUB's manifest / spine / nav / writer).
+  Adding six sections that way is ~114 edits with a silent failure mode for each one missed. The new
+  `matter.SECTIONS` table (key, label, front/back, page style, EPUB id + href, form hint) is now the
+  single definition: `app.py` builds forms and meta from it, `engine.py` lays the pages out from it,
+  `epub.py` manifests them from it. **Adding a section is one row.** Stdlib-only and importing nothing
+  from the project, so both builders can use it without dragging anything in. The compose and project
+  forms are Jinja loops over the table; `result.html`'s hidden fields likewise.
+- **Six new sections:** *foreword*, *preface*, *introduction* (front); *afterword*, *bibliography*,
+  *blurbs* (back). Blurbs reuse the epigraph setting — quotes with an em-dash source line — which
+  needed only a heading branch there, no new page style.
+- **`#* Prologue` — an unnumbered chapter.** A prologue isn't a matter page, it's a chapter that takes
+  no number *and doesn't consume one*: the chapter after it is still Chapter One. `#` requires a space
+  after it, so `#*` was previously an ordinary paragraph — nothing existing changes meaning. New
+  `manuscript.chapter_numbers()` returns the displayed number (or `None`) per chapter, and **both**
+  builders read it, because position and number are now different things: position still identifies a
+  chapter (its file, its anchors, its notes) while the number is what the reader sees.
+- Round-trip: the chapter block gained an `unnumbered` flag in `doc_model.py` and `static/doc_model.js`,
+  carried **only when set** so an existing chapter model compares equal as before.
+Verified: 14 new `test_doc_model.py::test_vocabulary` checks (fidelity + stability, the numbering
+skipping unnumbered chapters while anchors stay positional, an unnumbered chapter still taking a
+byline, a plain chapter model unchanged, and the table's own invariants — unique keys, unique EPUB
+ids and hrefs, `present()` ordering and emptiness, `{author}` filling into a heading); a JS↔Python
+parity run over a vocabulary corpus plus notes, links, blocks, figures and poems; and a full compose
+where the PDF shows Foreword → Prologue → **Chapter 1** → Afterword → Bibliography → Praise in order
+with the prologue taking no number, and the EPUB carries a document per section. All prior suites pass.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1309,14 +1340,13 @@ still open from #30: no `.docx` **poem** import.
 
 **F. Element vocabulary — cheap breadth, especially for nonfiction**
 
-We support half-title, title, copyright, TOC, dedication, epigraph, acknowledgments,
-about-author, also-by, contributors. Vellum adds **foreword, introduction, preface, prologue,
-epilogue, afterword, blurbs, bibliography, endnotes, full-page image, uncategorized matter**, and
-**uncounted chapters** (a chapter that takes no number — prologues/epilogues today have to be
-faked). Most are a titled page that doesn't take a chapter number, and `_matter_page` +
-`epub._matter_xhtml` already generalise over exactly that shape; the cost is mostly form surface
-in `generate.html` / `project_edit.html` / `result.html` (hidden fields) + `app.py` meta keys and
-project persistence. Add an **uncounted-chapter marker** to the heading syntax at the same time.
+~~We support ten named sections; Vellum adds foreword, preface, introduction, afterword,
+bibliography, blurbs — plus uncounted chapters, which prologues and epilogues have to fake.~~ —
+**SHIPPED (feature #51):** six new sections (foreword, preface, introduction, afterword,
+bibliography, blurbs) and `#*` unnumbered chapters, which is what a prologue or epilogue actually
+is. **Remaining:** *full-page image* is already covered by `~~~ figure full="yes"` (#46), and
+*uncategorized matter* — a free-form titled page — is the only real gap left, worth adding only if
+someone asks for it.
 
 **G. Editions & scale — real, but heavier and lower-frequency**
 
@@ -1348,7 +1378,8 @@ project persistence. Add an **uncounted-chapter marker** to the heading syntax a
 
 **Suggested order.** ~~Designed-cover-in-EPUB (D)~~ #43 → ~~bundled typefaces (E)~~ #44 →
 ~~figures/images incl. `.docx` (A + C)~~ #46/#47 → ~~lists / block quote / alignment (A)~~ #48 →
-~~links (B)~~ #49 → ~~endnotes (A)~~ #50 → **element vocabulary (F)** ← next → endnotes (A) → EPUB preflight + device preview (D) →
+~~links (B)~~ #49 → ~~endnotes (A)~~ #50 → ~~element vocabulary (F)~~ #51 →
+**EPUB preflight + device preview (D)** ← next → endnotes (A) → EPUB preflight + device preview (D) →
 large print + trim presets (G) → footnotes (A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 

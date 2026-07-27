@@ -11,13 +11,21 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 
-# The only project import: the shared link-anchor rule, so the EPUB resolves
-# `[see](#slug)` to the same chapter the PDF does. manuscript.py is stdlib-only,
-# so this keeps epub.py dependency-free as well.
+# Both project imports are stdlib-only modules, so epub.py stays dependency-free:
+# `matter` is the shared front/back-matter vocabulary (same order and headings as
+# the PDF), and `manuscript` supplies the link-anchor rule so `[see](#slug)`
+# resolves to the same chapter in both outputs.
+import matter as _matter
 from manuscript import (chapter_anchors as _ms_anchors, LINK_RE as _LINK_RE,
+                        chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts)
 
 _NOTE_MARK_RE = re.compile(r'<note n="(\d+)" id="[\w\-]+"/>')
+
+# matter.SECTIONS' `style` -> the CSS class the page body carries
+_MATTER_CSS = {'dedication': 'matter-dedication', 'epigraph': 'matter-epigraph',
+               'also_by': 'matter-alsoby', 'contributors': 'matter-contributors',
+               'body': 'matter-body'}
 
 
 def _apply_note_markers(chapters):
@@ -288,6 +296,7 @@ def _toc_page_xhtml(chapters, preset):
     pd_fmt   = pd.get('number_format', 'Part {n}')
 
     body = '<div class="matter-body">\n  <h1 class="matter-head">Contents</h1>\n  <ul class="toc-list">\n'
+    _nums = _ms_numbers(chapters)
     current_part_num = None
     for idx, ch in enumerate(chapters, start=1):
         ch_part     = ch.get('part')
@@ -296,7 +305,8 @@ def _toc_page_xhtml(chapters, preset):
             part_label = ch_part.get('title') or pd_fmt.format(n=ch_part_num)
             body += f'    <li class="toc-part"><a href="part{ch_part_num:03d}.xhtml">{part_label}</a></li>\n'
             current_part_num = ch_part_num
-        label = ch.get('title') or (num_fmt.format(n=idx) if show_num else f'Chapter {idx}')
+        label = ch.get('title') or (num_fmt.format(n=_nums[idx - 1])
+                                   if show_num and _nums[idx - 1] else f'Section {idx}')
         indent = ' class="toc-indent"' if ch_part_num is not None else ''
         body += f'    <li{indent}><a href="chapter{idx:03d}.xhtml">{label}</a></li>\n'
     body += '  </ul>\n</div>\n'
@@ -411,7 +421,7 @@ def _figure_html(caption_paras, attrs, figures):
     return out
 
 
-def _chapter_xhtml(idx, chapter, preset, figures=None):
+def _chapter_xhtml(idx, chapter, preset, figures=None, number=None):
     c          = preset.get('chapter', {})
     show_num   = c.get('show_number', True)
     num_fmt    = c.get('number_format', 'Chapter {n}')
@@ -419,8 +429,8 @@ def _chapter_xhtml(idx, chapter, preset, figures=None):
 
     lines = ['<div class="chapter">']
 
-    if show_num:
-        lines.append(f'  <h1 class="chapter-num">{num_fmt.format(n=idx)}</h1>')
+    if show_num and number is not None:
+        lines.append(f'  <h1 class="chapter-num">{num_fmt.format(n=number)}</h1>')
 
     if chapter.get('title'):
         lines.append(f'  <h1 class="chapter-title">{_markup_to_html(chapter["title"])}</h1>')
@@ -535,7 +545,8 @@ def _chapter_xhtml(idx, chapter, preset, figures=None):
             no_indent_next = False
 
     lines.append('</div>\n')
-    ch_title = chapter.get('title') or (num_fmt.format(n=idx) if show_num else f'Chapter {idx}')
+    ch_title = chapter.get('title') or (num_fmt.format(n=number)
+                                        if show_num and number else f'Section {idx}')
     return _xhtml(ch_title, '\n'.join(lines))
 
 
@@ -610,10 +621,11 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
         toc.append(('front.xhtml', 'Front Matter'))
     if meta.get('include_toc'):
         toc.append(('toc.xhtml', 'Contents'))
-    if meta.get('dedication', '').strip():
-        toc.append(('dedication.xhtml', 'Dedication'))
-    if meta.get('epigraph', '').strip():
-        toc.append(('epigraph.xhtml', 'Epigraph'))
+    for _sec in _matter.present(meta, 'front'):
+        toc.append((_sec['href'],
+                    _matter.heading(_sec, (meta or {}).get('author', ''))
+                    or _sec['key'].replace('_', ' ').title()))
+    _nums = _ms_numbers(chapters)
     current_part_num = None
     for idx, ch in enumerate(chapters, start=1):
         ch_part     = ch.get('part')
@@ -622,22 +634,17 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
             part_label = ch_part.get('title') or pd_fmt.format(n=ch_part_num)
             toc.append((f'part{ch_part_num:03d}.xhtml', part_label))
             current_part_num = ch_part_num
-        label = ch.get('title') or (num_fmt.format(n=idx) if show_num else f'Chapter {idx}')
+        label = ch.get('title') or (num_fmt.format(n=_nums[idx - 1])
+                                   if show_num and _nums[idx - 1] else f'Section {idx}')
         toc.append((f'chapter{idx:03d}.xhtml', label))
 
     if has_notes:
         toc.append(('endnotes.xhtml', preset.get('endnotes', {}).get('heading', 'Notes')))
 
     author = meta.get('author', '')
-    _back_nav = [
-        ('acknowledgments', 'acknowledgments.xhtml', 'Acknowledgments'),
-        ('contributors',    'contributors.xhtml',    'Contributors'),
-        ('about_author',    'about.xhtml',           'About the Author'),
-        ('also_by',         'alsoby.xhtml',          f'Also by {author}'.strip() or 'Also By'),
-    ]
-    for _key, _href, _label in _back_nav:
-        if meta.get(_key, '').strip():
-            toc.append((_href, _label))
+    for _sec in _matter.present(meta, 'back'):
+        toc.append((_sec['href'],
+                    _matter.heading(_sec, author) or _sec['key'].title()))
 
     items = '\n'.join(
         f'      <li><a href="{href}">{label}</a></li>' for href, label in toc
@@ -755,13 +762,12 @@ def build_epub(manuscript, preset, out_path, meta):
                                 'type': 'application/xhtml+xml'})
         spine_items.append('toc-page')
 
-    _front_extras = [('dedication', 'ded'), ('epigraph', 'epi')]
-    for _fkey, _fid in _front_extras:
-        if meta.get(_fkey, '').strip():
-            manifest_items.append({'id': _fid, 'href': f'{_fkey}.xhtml',
-                                    'type': 'application/xhtml+xml'})
-            spine_items.append(_fid)
+    for _sec in _matter.present(meta, 'front'):
+        manifest_items.append({'id': _sec['eid'], 'href': _sec['href'],
+                                'type': 'application/xhtml+xml'})
+        spine_items.append(_sec['eid'])
 
+    _nums = _ms_numbers(chapters)
     current_part_num = None
     for idx, ch in enumerate(chapters, start=1):
         ch_part     = ch.get('part')
@@ -782,17 +788,10 @@ def build_epub(manuscript, preset, out_path, meta):
                                 'type': 'application/xhtml+xml'})
         spine_items.append('endnotes')
 
-    _back_items = [
-        ('acknowledgments', 'ack',   'acknowledgments.xhtml', 'Acknowledgments'),
-        ('contributors',    'contrib', 'contributors.xhtml',  'Contributors'),
-        ('about_author',    'about', 'about.xhtml',           'About the Author'),
-        ('also_by',         'aby',   'alsoby.xhtml',          f'Also by {_author}'.strip() or 'Also By'),
-    ]
-    for _bkey, _bid, _bhref, _bhead in _back_items:
-        if meta.get(_bkey, '').strip():
-            manifest_items.append({'id': _bid, 'href': _bhref,
-                                    'type': 'application/xhtml+xml'})
-            spine_items.append(_bid)
+    for _sec in _matter.present(meta, 'back'):
+        manifest_items.append({'id': _sec['eid'], 'href': _sec['href'],
+                                'type': 'application/xhtml+xml'})
+        spine_items.append(_sec['eid'])
 
     with zipfile.ZipFile(out_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
         # mimetype must be first and stored uncompressed
@@ -819,14 +818,14 @@ def build_epub(manuscript, preset, out_path, meta):
         if meta.get('include_toc'):
             zf.writestr('OEBPS/toc.xhtml', _toc_page_xhtml(chapters, preset))
 
-        if meta.get('dedication', '').strip():
-            zf.writestr('OEBPS/dedication.xhtml',
-                        _matter_xhtml(None, meta['dedication'], 'matter-dedication'))
-        if meta.get('epigraph', '').strip():
-            zf.writestr('OEBPS/epigraph.xhtml',
-                        _matter_xhtml(None, meta['epigraph'], 'matter-epigraph'))
+        for _sec in _matter.present(meta, 'front'):
+            zf.writestr(f'OEBPS/{_sec["href"]}',
+                        _matter_xhtml(_matter.heading(_sec, _author) or None,
+                                      meta[_sec['key']].strip(),
+                                      _MATTER_CSS.get(_sec['style'], 'matter-body')))
 
         current_part_num = None
+        _numbers = _ms_numbers(chapters)
         for idx, ch in enumerate(chapters, start=1):
             ch_part     = ch.get('part')
             ch_part_num = ch_part['number'] if ch_part else None
@@ -835,17 +834,16 @@ def build_epub(manuscript, preset, out_path, meta):
                             _part_xhtml(ch_part_num, ch_part.get('title') or '', preset))
                 current_part_num = ch_part_num
             zf.writestr(f'OEBPS/chapter{idx:03d}.xhtml',
-                        _chapter_xhtml(idx, ch, preset, figures=fig_href))
+                        _chapter_xhtml(idx, ch, preset, figures=fig_href,
+                                       number=_numbers[idx - 1]))
 
         if has_notes:
             zf.writestr('OEBPS/endnotes.xhtml', _endnotes_xhtml(chapters, preset))
 
-        for _bkey, _bid, _bhref, _bhead in _back_items:
-            _btxt = meta.get(_bkey, '').strip()
-            if not _btxt:
-                continue
-            _css = {'also_by': 'matter-alsoby',
-                    'contributors': 'matter-contributors'}.get(_bkey, 'matter-body')
-            zf.writestr(f'OEBPS/{_bhref}', _matter_xhtml(_bhead, _btxt, _css))
+        for _sec in _matter.present(meta, 'back'):
+            zf.writestr(f'OEBPS/{_sec["href"]}',
+                        _matter_xhtml(_matter.heading(_sec, _author),
+                                      meta[_sec['key']].strip(),
+                                      _MATTER_CSS.get(_sec['style'], 'matter-body')))
 
     return out_path

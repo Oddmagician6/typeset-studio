@@ -208,39 +208,26 @@
     <fieldset>
       <legend>Front matter extras</legend>
       <div class="fs-body">
+        {% for s in matter_front %}
         <div class="row">
-          <div class="field wide"><label>Dedication</label>
-            <textarea name="dedication" rows="3">{{ proj.get('dedication','') }}</textarea></div>
+          <div class="field wide"><label>{{ s.label or s.key|replace('_',' ')|title }}</label>
+            <span class="hint">{{ s.hint }}</span>
+            <textarea name="{{ s.key }}" rows="{{ 3 if s.key == 'dedication' else 4 }}">{{ proj.get(s.key,'') }}</textarea></div>
         </div>
-        <div class="row">
-          <div class="field wide"><label>Epigraph</label>
-            <span class="hint">Attribution on last line, starting with —</span>
-            <textarea name="epigraph" rows="4">{{ proj.get('epigraph','') }}</textarea></div>
-        </div>
+        {% endfor %}
       </div>
     </fieldset>
 
     <fieldset>
       <legend>Back matter</legend>
       <div class="fs-body">
+        {% for s in matter_back %}
         <div class="row">
-          <div class="field wide"><label>Acknowledgments</label>
-            <textarea name="acknowledgments" rows="4">{{ proj.get('acknowledgments','') }}</textarea></div>
+          <div class="field wide"><label>{{ s.label.format(author=proj.get('author','') or 'the author')|trim }}</label>
+            <span class="hint">{{ s.hint }}</span>
+            <textarea name="{{ s.key }}" rows="4">{{ proj.get(s.key,'') }}</textarea></div>
         </div>
-        <div class="row">
-          <div class="field wide"><label>Contributors</label>
-            <span class="hint">For anthologies — one per blank-line block; name first, bio after an em dash</span>
-            <textarea name="contributors" rows="4">{{ proj.get('contributors','') }}</textarea></div>
-        </div>
-        <div class="row">
-          <div class="field wide"><label>About the Author</label>
-            <textarea name="about_author" rows="4">{{ proj.get('about_author','') }}</textarea></div>
-        </div>
-        <div class="row">
-          <div class="field wide"><label>Also By</label>
-            <span class="hint">One title per line</span>
-            <textarea name="also_by" rows="4">{{ proj.get('also_by','') }}</textarea></div>
-        </div>
+        {% endfor %}
       </div>
     </fieldset>
 

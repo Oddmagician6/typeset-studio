@@ -35,6 +35,7 @@ import engine
 import epub
 import manuscript
 import checker
+import matter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IS_FROZEN = getattr(sys, 'frozen', False)
@@ -790,7 +791,11 @@ def _parse_emblems(form):
 def _inject_cover_templates():
     items = list_cover_templates()
     return {'cover_templates': items,
-            'cover_groups': group_cover_templates(items)}
+            'cover_groups': group_cover_templates(items),
+            # the front/back matter vocabulary, so the forms build themselves
+            'matter_front': matter.FRONT,
+            'matter_back': matter.BACK,
+            'matter_keys': matter.KEYS}
 
 
 @app.route('/favicon.ico')
@@ -940,8 +945,7 @@ def _cover_thumb_bytes(cid):
         'cover_collection': 'Sample Series', 'cover_kicker': '',
         'cover_accent': '', 'cover_epigraph': '', 'cover_studio': 'Studio',
         'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
-        'dedication': '', 'epigraph': '', 'acknowledgments': '',
-        'about_author': '', 'also_by': '',
+        **matter.blank(),
     }
     ms = manuscript.parse_markdown(PREVIEW_SAMPLE, smartquotes=True)
     fd, tmp_path = tempfile.mkstemp(suffix='.pdf')
@@ -1135,8 +1139,7 @@ def cover_preview():
             'cover_epigraph': form.get('prev_epigraph', ''),
             'cover_studio': form.get('prev_studio', 'Ashforge Studio'),
             'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
-            'dedication': '', 'epigraph': '', 'acknowledgments': '',
-            'about_author': '', 'also_by': '',
+            **matter.blank(),
         }
         ms = manuscript.parse_markdown(PREVIEW_SAMPLE, smartquotes=True)
         fd, tmp_path = tempfile.mkstemp(suffix='.pdf')
@@ -1537,12 +1540,7 @@ def generate():
         'cover_color': form.get('cover_color', 'light'),
         'include_toc':    'include_toc' in form,
         'smartquotes':    'smartquotes' in form,
-        'dedication':     form.get('dedication', '').strip(),
-        'epigraph':       form.get('epigraph', '').strip(),
-        'acknowledgments': form.get('acknowledgments', '').strip(),
-        'contributors':   form.get('contributors', '').strip(),
-        'about_author':   form.get('about_author', '').strip(),
-        'also_by':        form.get('also_by', '').strip(),
+        **{k: form.get(k, '').strip() for k in matter.KEYS},
     }
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     base  = slugify(meta['title'] or 'book')
@@ -1601,8 +1599,7 @@ def preview():
             'front_matter': 'none', 'right_hand_starts': False,
             'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
             'smartquotes': True,
-            'dedication': '', 'epigraph': '', 'acknowledgments': '',
-            'about_author': '', 'also_by': '',
+            **matter.blank(),
         }
         fd, tmp_path = tempfile.mkstemp(suffix='.pdf')
         os.close(fd)
@@ -1720,12 +1717,7 @@ def generate_preview():
             'cover_color': form.get('cover_color', 'light'),
             'include_toc':    'include_toc' in form,
             'smartquotes':    'smartquotes' in form,
-            'dedication':     form.get('dedication', '').strip(),
-            'epigraph':       form.get('epigraph', '').strip(),
-            'acknowledgments': form.get('acknowledgments', '').strip(),
-            'contributors':   form.get('contributors', '').strip(),
-            'about_author':   form.get('about_author', '').strip(),
-            'also_by':        form.get('also_by', '').strip(),
+            **{k: form.get(k, '').strip() for k in matter.KEYS},
         }
 
         ms = manuscript.parse_markdown(raw, smartquotes=meta['smartquotes'])
@@ -1825,12 +1817,7 @@ def project_create():
         'format':      form.get('fmt', 'pdf'),
         'include_toc': form.get('include_toc') == '1',
         'smartquotes': form.get('smartquotes') == '1',
-        'dedication':     form.get('dedication', '').strip(),
-        'epigraph':       form.get('epigraph', '').strip(),
-        'acknowledgments': form.get('acknowledgments', '').strip(),
-        'contributors':   form.get('contributors', '').strip(),
-        'about_author':   form.get('about_author', '').strip(),
-        'also_by':        form.get('also_by', '').strip(),
+        **{k: form.get(k, '').strip() for k in matter.KEYS},
         'manuscript_file': ms_file,
         'manuscript_type': ms_type,
         'cover_file': cover_file,
@@ -1889,12 +1876,7 @@ def project_edit(pid):
             'format':      form.get('format', proj.get('format', 'pdf')),
             'include_toc': 'include_toc' in form,
             'smartquotes': 'smartquotes' in form,
-            'dedication':     form.get('dedication', '').strip(),
-            'epigraph':       form.get('epigraph', '').strip(),
-            'acknowledgments': form.get('acknowledgments', '').strip(),
-            'contributors':   form.get('contributors', '').strip(),
-            'about_author':   form.get('about_author', '').strip(),
-            'also_by':        form.get('also_by', '').strip(),
+            **{k: form.get(k, '').strip() for k in matter.KEYS},
             'title':            form.get('title', '').strip(),
             'subtitle':         form.get('subtitle', '').strip(),
             'author':           form.get('author', '').strip(),
@@ -1984,8 +1966,7 @@ def project_new_draft():
         'front_matter': 'full', 'right_hand_starts': True,
         'cover_overlay': False, 'cover_color': 'light',
         'format': 'pdf', 'include_toc': False, 'smartquotes': True,
-        'dedication': '', 'epigraph': '', 'acknowledgments': '',
-        'about_author': '', 'also_by': '',
+        **matter.blank(),
         'manuscript_file': ms_file, 'manuscript_type': 'markdown',
         'cover_file': '', 'last_pdf': '', 'last_epub': '',
         'created': now, 'updated': now,
@@ -2046,10 +2027,7 @@ def project_write_preview(pid):
         'right_hand_starts': proj.get('right_hand_starts', True),
         'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
         'include_toc': False, 'smartquotes': proj.get('smartquotes', True),
-        'dedication': proj.get('dedication', ''), 'epigraph': proj.get('epigraph', ''),
-        'acknowledgments': proj.get('acknowledgments', ''),
-        'contributors': proj.get('contributors', ''),
-        'about_author': proj.get('about_author', ''), 'also_by': proj.get('also_by', ''),
+        **{k: proj.get(k, '') for k in matter.KEYS},
     }
     ms = manuscript.parse_markdown(text, smartquotes=meta['smartquotes'])
     fd, tmp = tempfile.mkstemp(suffix='.pdf')
@@ -2138,12 +2116,7 @@ def project_generate(pid):
         'cover_studio':     proj.get('cover_studio', ''),
         'include_toc':   proj.get('include_toc', False),
         'smartquotes':   proj.get('smartquotes', True),
-        'dedication':     proj.get('dedication', ''),
-        'epigraph':       proj.get('epigraph', ''),
-        'acknowledgments': proj.get('acknowledgments', ''),
-        'contributors':   proj.get('contributors', ''),
-        'about_author':   proj.get('about_author', ''),
-        'also_by':        proj.get('also_by', ''),
+        **{k: proj.get(k, '') for k in matter.KEYS},
     }
     ms_parsed = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')

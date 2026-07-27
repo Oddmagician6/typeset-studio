@@ -37,6 +37,13 @@ LINE_BLOCKS = ('list', 'center', 'centre', 'right', 'left')
 SCENE_BREAK_RE = re.compile(r'^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$')
 CHAPTER_RE     = re.compile(r'^#\s+(.*)$')
 
+# `#* Prologue` — a chapter that takes no number and doesn't advance the count,
+# so the chapter after it is still Chapter One. That's what a prologue, epilogue
+# or interlude actually is: body text, not a matter page. `#` requires a space
+# after it, so `#*` was previously an ordinary paragraph — nothing existing
+# changes meaning.
+UNNUMBERED_RE  = re.compile(r'^#\*\s+(.*)$')
+
 # Anthology byline: "# Piece Title | Author Name" attaches a per-chapter byline
 # (rendered under the title). The " | " separator is the KDP "Title | Subtitle"
 # idiom; a title that genuinely contains " | " is vanishingly rare. Only the
@@ -97,6 +104,7 @@ def _is_block_line(line):
     """True if a line would be parsed as a structural block (not a paragraph)."""
     return bool(
         SCENE_BREAK_RE.match(line) or CHAPTER_RE.match(line)
+        or UNNUMBERED_RE.match(line)
         or SUBHEAD_RE.match(line) or DOCBLOCK_RE.match(line)
         or PART_RE.match(line)
     )
@@ -340,11 +348,13 @@ def parse_markdown(raw, smartquotes=True):
                     block_buf.append(('para', _inline(joined, smartquotes)))
             block_para_buf = []
 
-    def new_chapter(title, byline=None):
+    def new_chapter(title, byline=None, unnumbered=False):
         nonlocal cur
         flush_para() if cur else None
         cur = {'title': title, 'byline': byline, 'part': current_part, 'blocks': [],
                'note_defs': {}}
+        if unnumbered:
+            cur['unnumbered'] = True
         chapters.append(cur)
 
     for line in lines:
@@ -416,11 +426,12 @@ def parse_markdown(raw, smartquotes=True):
                 block_para_buf.append(line)
             continue
 
-        m_ch  = CHAPTER_RE.match(line)
+        m_un  = UNNUMBERED_RE.match(line)
+        m_ch  = m_un or CHAPTER_RE.match(line)
         m_sub = SUBHEAD_RE.match(line)
         if m_ch:
             _t, _by = _split_byline(m_ch.group(1))
-            new_chapter(_t, _by)
+            new_chapter(_t, _by, unnumbered=bool(m_un))
             continue
         if cur is None:
             new_chapter(None)
@@ -466,6 +477,24 @@ _SLUG_RE = re.compile(r'[^a-z0-9]+')
 def slugify(name):
     """'The Salt Road' -> 'the-salt-road'. Also the id used by `#anchor` links."""
     return _SLUG_RE.sub('-', (name or '').lower()).strip('-')
+
+
+def chapter_numbers(chapters):
+    """Displayed chapter numbers, `None` for an unnumbered one.
+
+    Position (`idx`) and number are different things once `#*` exists: position
+    still identifies the chapter — its file, its anchors, its notes — while the
+    number is what the reader sees, and a prologue doesn't consume one. Both
+    builders read from here so they can't drift.
+    """
+    out, n = [], 0
+    for ch in chapters:
+        if ch.get('unnumbered'):
+            out.append(None)
+        else:
+            n += 1
+            out.append(n)
+    return out
 
 
 def chapter_anchors(chapter, idx):
