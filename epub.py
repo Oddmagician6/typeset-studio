@@ -107,6 +107,15 @@ p.scene-break {
 .doc-block-poem { border: 0; padding: 0; margin: 1.4em 6%; font-size: 1em; }
 .doc-block-poem header.poem-title { font-style: italic; font-weight: bold; text-align: left; color: #222; border-bottom: 0; margin-bottom: 0.6em; font-size: 1.05em; }
 .doc-block-poem p { text-align: left; margin: 0 0 0.8em; padding-left: 1.4em; text-indent: -1.4em; }
+ul.block-list, ol.block-list { margin: 1em 0 1em 1.4em; padding-left: 1em; }
+ul.block-list li, ol.block-list li { margin: 0.25em 0; text-indent: 0; }
+blockquote.block-quote { margin: 1.1em 6%; font-size: 0.95em; }
+blockquote.block-quote p { text-indent: 0; margin: 0 0 0.4em; }
+blockquote.block-quote p.quote-source { text-align: right; font-style: italic; font-size: 0.9em; color: #555; margin-top: 0.3em; }
+.align p { text-indent: 0; margin: 0.2em 0; }
+.align-center { text-align: center; }
+.align-right { text-align: right; }
+.align-left { text-align: left; }
 figure.figure { margin: 1.4em 0; padding: 0; text-align: center; page-break-inside: avoid; }
 figure.figure img { max-width: 100%; height: auto; }
 figure.figure-full { page-break-before: always; page-break-after: always; margin: 0; }
@@ -333,6 +342,36 @@ def _chapter_xhtml(idx, chapter, preset, figures=None):
             attrs  = {k: v for k, v in meta.items() if k != '_type'}
             if btype == 'figure':
                 lines.extend(_figure_html(val, attrs, figures))
+                no_indent_next = True
+                continue
+            if btype == 'list':
+                numbered = (attrs.get('type', '') or '').lower().startswith('num')
+                tag = 'ol' if numbered else 'ul'
+                start = ''
+                if numbered and attrs.get('start', '').strip().isdigit():
+                    start = f' start="{attrs["start"].strip()}"'
+                lines.append(f'  <{tag} class="block-list"{start}>')
+                for _, text in val:
+                    lines.append(f'    <li>{_markup_to_html(text)}</li>')
+                lines.append(f'  </{tag}>')
+                no_indent_next = True
+                continue
+            if btype == 'quote':
+                lines.append('  <blockquote class="block-quote">')
+                for _, text in val:
+                    lines.append(f'    <p>{_markup_to_html(text)}</p>')
+                source = (attrs.get('source', '') or '').strip()
+                if source:
+                    lines.append(f'    <p class="quote-source">{_md_emph_to_html(source)}</p>')
+                lines.append('  </blockquote>')
+                no_indent_next = True
+                continue
+            if btype in ('center', 'centre', 'right', 'left'):
+                how = 'center' if btype in ('center', 'centre') else btype
+                lines.append(f'  <div class="align align-{how}">')
+                for _, text in val:
+                    lines.append(f'    <p>{_markup_to_html(text)}</p>')
+                lines.append('  </div>')
                 no_indent_next = True
                 continue
             cls    = f'doc-block doc-block-{btype}' if btype else 'doc-block'

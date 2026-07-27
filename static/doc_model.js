@@ -22,6 +22,9 @@
   'use strict';
 
   // ---- block-level patterns (mirror manuscript.py) -------------------------
+  // Fenced blocks whose content is line-oriented — one source line per item /
+  // per line, not wrapped into a paragraph. Mirrors manuscript.LINE_BLOCKS.
+  var LINE_BLOCKS = ['list', 'center', 'centre', 'right', 'left'];
   var SCENE_BREAK_RE = /^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$/;
   var CHAPTER_RE     = /^#\s+(.*)$/;
   var SUBHEAD_RE     = /^##\s+(.*)$/;
@@ -194,6 +197,11 @@
             if (s.trim()) lines.push({ runs: parseInline(s.trim()) });
           });
           if (lines.length) blockChildren.push({ type: 'stanza', lines: lines });
+        } else if (LINE_BLOCKS.indexOf(blockType) !== -1) {
+          // One line = one child (a list item, or a line of an aligned block)
+          blockParaBuf.forEach(function (s) {
+            if (s.trim()) blockChildren.push({ type: 'para', runs: parseInline(s.trim()) });
+          });
         } else {
           var joined = blockParaBuf.map(function (s) { return s.trim(); }).join(' ').trim();
           if (joined) blockChildren.push({ type: 'para', runs: parseInline(joined) });
@@ -289,6 +297,8 @@
             if (si > 0) out.push('');                    // blank line between stanzas
             kids[si].lines.forEach(function (ln) { out.push(runsToMd(ln.runs)); });
           }
+        } else if (LINE_BLOCKS.indexOf(b.block_type) !== -1) {
+          for (var li = 0; li < kids.length; li++) out.push(runsToMd(kids[li].runs));
         } else {
           for (var i = 0; i < kids.length; i++) {
             out.push(runsToMd(kids[i].runs));

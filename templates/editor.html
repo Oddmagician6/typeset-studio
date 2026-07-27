@@ -249,6 +249,91 @@
       </fieldset>
 
       <fieldset>
+        <legend>Lists, quotations &amp; alignment</legend>
+        <div class="fs-body">
+          {% set li = p.get('list', {}) %}
+          {% set q  = p.get('quote', {}) %}
+          {% set al = p.get('align', {}) %}
+          <div class="row">
+            <div class="field"><label>Bullet</label><span class="hint">must exist in the body font</span>
+              <input type="text" name="li_bullet" value="{{ li.get('bullet', '•') }}"></div>
+            <div class="field"><label>Number format</label><span class="hint">uses {n}</span>
+              <input type="text" name="li_number_format" value="{{ li.get('number_format', '{n}.') }}"></div>
+            <div class="field num"><label>List indent</label><span class="hint">inches</span>
+              <input type="number" step="0.05" name="li_indent" value="{{ li.get('indent', 0.25) }}"></div>
+            <div class="field num"><label>Marker gap</label><span class="hint">inches · hanging indent</span>
+              <input type="number" step="0.02" name="li_marker_gap" value="{{ li.get('marker_gap', 0.22) }}"></div>
+          </div>
+          <div class="row">
+            <div class="field num"><label>Between items</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="li_item_gap" value="{{ li.get('item_gap', 3.0) }}"></div>
+            <div class="field num"><label>Space around list</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="li_space_around" value="{{ li.get('space_around', 10.0) }}"></div>
+            <div class="field num"><label>List size</label><span class="hint">points · 0 = body size</span>
+              <input type="number" step="0.25" name="li_font_size" value="{{ li.get('font_size', 0) }}"></div>
+            <div class="field num"><label>List leading</label><span class="hint">× size</span>
+              <input type="number" step="0.01" name="li_line_leading" value="{{ li.get('line_leading', 1.35) }}"></div>
+          </div>
+          <div class="row">
+            <div class="field num"><label>Quote indent</label><span class="hint">inches · left</span>
+              <input type="number" step="0.05" name="q_indent" value="{{ q.get('indent', 0.35) }}"></div>
+            <div class="field num"><label>Quote right indent</label><span class="hint">inches</span>
+              <input type="number" step="0.05" name="q_right_indent" value="{{ q.get('right_indent', 0.35) }}"></div>
+            <div class="field num"><label>Quote size</label><span class="hint">points · 0 = body − 0.5</span>
+              <input type="number" step="0.25" name="q_font_size" value="{{ q.get('font_size', 0) }}"></div>
+            <div class="field num"><label>Quote leading</label><span class="hint">× size</span>
+              <input type="number" step="0.01" name="q_line_leading" value="{{ q.get('line_leading', 1.35) }}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Quote style</label>
+              <select name="q_style">
+                {% set qs = q.get('style','regular') %}
+                <option value="regular" {{ 'selected' if qs=='regular' }}>Regular</option>
+                <option value="italic"  {{ 'selected' if qs=='italic'  }}>Italic</option>
+              </select></div>
+            <div class="field num"><label>Quote first-line indent</label><span class="hint">inches</span>
+              <input type="number" step="0.05" name="q_first_indent" value="{{ q.get('first_indent', 0.0) }}"></div>
+            <div class="field num"><label>Between quote paragraphs</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="q_para_gap" value="{{ q.get('para_gap', 4.0) }}"></div>
+            <div class="field num"><label>Space around quote</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="q_space_around" value="{{ q.get('space_around', 11.0) }}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Source line</label><span class="hint">from source="…"</span>
+              <select name="q_source_style">
+                {% set qss = q.get('source_style','italic') %}
+                <option value="italic"  {{ 'selected' if qss=='italic'  }}>Italic</option>
+                <option value="regular" {{ 'selected' if qss=='regular' }}>Regular</option>
+              </select></div>
+            <div class="field"><label>Source alignment</label>
+              <select name="q_source_align">
+                {% set qsa = q.get('source_align','right') %}
+                <option value="right"  {{ 'selected' if qsa=='right'  }}>Right</option>
+                <option value="left"   {{ 'selected' if qsa=='left'   }}>Left</option>
+                <option value="center" {{ 'selected' if qsa=='center' }}>Centred</option>
+              </select></div>
+            <div class="field num"><label>Source gap</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="q_source_gap" value="{{ q.get('source_gap', 3.0) }}"></div>
+          </div>
+          <div class="row">
+            <div class="field num"><label>Space around aligned block</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="al_space_around" value="{{ al.get('space_around', 9.0) }}"></div>
+            <div class="field num"><label>Aligned block indent</label><span class="hint">inches each side</span>
+              <input type="number" step="0.05" name="al_indent" value="{{ al.get('indent', 0.0) }}"></div>
+            <div class="field num"><label>Between aligned lines</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="al_para_gap" value="{{ al.get('para_gap', 3.0) }}"></div>
+          </div>
+          <p class="hint" style="margin-top:6px;line-height:1.6">
+            <code>~~~ list</code> — one item per paragraph; <code>~~~ list type="number"</code> numbers them
+            (<code>start="3"</code> to continue).<br>
+            <code>~~~ quote source="Marcus Aurelius"</code> — an inset quotation; the source line is optional.<br>
+            <code>~~~ center</code>, <code>~~~ right</code>, <code>~~~ left</code> — alignment only; the
+            style still owns size and face.
+          </p>
+        </div>
+      </fieldset>
+
+      <fieldset>
         <legend>Figures</legend>
         <div class="fs-body">
           {% set fg = p.get('figure', {}) %}

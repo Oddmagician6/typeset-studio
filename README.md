@@ -85,6 +85,9 @@ The tool reads a light, plain-text convention:
 | `* * *` (own line) | a scene break                 |
 | `~~~` … `~~~`      | an epistolary / document block|
 | `~~~ figure src="map.png"` … `~~~` | an illustration; the block's text is its caption |
+| `~~~ list` … `~~~` | a bulleted list — one item per line |
+| `~~~ quote` … `~~~` | an inset quotation |
+| `~~~ center` … `~~~` | a centred block (also `right`, `left`) |
 | `*italic*`         | *italic*                      |
 | `**bold**`         | **bold**                      |
 | blank line         | new paragraph                 |
@@ -101,14 +104,45 @@ A `.docx` is converted to the same convention on import:
 | a centred `* * *` line | a scene break |
 | an image | a figure, with a following *Caption* paragraph as its caption |
 | a table | a set-apart block, one row per line (there is no table layout yet) |
-| Quote / Intense Quote | a set-apart block |
-| a bulleted or numbered list | paragraphs keeping their bullet or number as text |
+| Quote / Intense Quote | a quotation block |
+| a bulleted or numbered list | a list block |
+| a centred paragraph | a centred block |
 | a hyperlink | its words (the web address is dropped) |
 
 After importing, the app tells you exactly what came across and what didn't — nothing
 is dropped silently. Footnotes and endnotes are **not** imported yet; you'll be told how
 many were found. Images land in your Figures library, named after the Word file, so
 re-importing the same document doesn't pile up copies.
+
+### Lists, quotations and aligned passages
+
+```
+~~~ list
+Salt, four measures a head
+Rope, tarred, two coils
+~~~
+
+~~~ list type="number" start="3"
+Load the mules before dawn
+~~~
+
+~~~ quote source="Berrin of Ferrun"
+The plateau does not kill travellers. It simply
+declines to help them.
+~~~
+
+~~~ center
+NO WATER BEYOND THIS POINT
+~~~
+```
+
+A **list** and an **aligned block** are line-oriented: one item, or one line, per line
+of the source. A **quotation** is prose — lines wrap together and a blank line starts a
+new paragraph, exactly like body text. `~~~ right` and `~~~ left` work like `~~~ center`.
+
+Alignment blocks change *alignment only*; the style still owns size, face and leading.
+Everything else about how these look — bullet character, indents, quote size, the source
+line — lives in the style, under *Lists, quotations & alignment* in the style editor.
 
 ### Illustrations
 

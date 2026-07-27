@@ -28,6 +28,12 @@ import re
 import html
 
 
+# Fenced blocks whose content is line-oriented: every source line is its own item
+# (a list) or its own line (an alignment block), instead of being wrapped into a
+# paragraph. Poems are line-oriented too but keep stanzas, so they're handled
+# separately. doc_model.py and static/doc_model.js mirror this set.
+LINE_BLOCKS = ('list', 'center', 'centre', 'right', 'left')
+
 SCENE_BREAK_RE = re.compile(r'^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$')
 CHAPTER_RE     = re.compile(r'^#\s+(.*)$')
 
@@ -190,6 +196,13 @@ def parse_markdown(raw, smartquotes=True):
                          if s.strip()]
                 if verse:
                     block_buf.append(('para', '<br/>'.join(verse)))
+            elif block_type in LINE_BLOCKS:
+                # One line = one item / one line of the block. Wrapping prose into
+                # a paragraph is wrong here: a list's items and a sign's lines are
+                # authored one per line, exactly as they read.
+                for s in block_para_buf:
+                    if s.strip():
+                        block_buf.append(('para', _inline(s.strip(), smartquotes)))
             else:
                 joined = ' '.join(s.strip() for s in block_para_buf).strip()
                 if joined:
@@ -412,7 +425,7 @@ def _table_md(tbl, report):
 
 def _new_report():
     return {'chapters': 0, 'subheads': 0, 'figures': 0, 'tables': 0,
-            'quotes': 0, 'lists': 0, 'links': 0, 'footnotes': 0,
+            'quotes': 0, 'lists': 0, 'aligned': 0, 'links': 0, 'footnotes': 0,
             'images_failed': 0}
 
 
@@ -447,20 +460,37 @@ def import_docx(path, report=None):
 
     out = []
     quote_buf = []          # consecutive Quote-styled paragraphs -> one block
-    list_n = 0              # running number for a numbered list
+    list_buf = []           # consecutive list paragraphs -> one ~~~ list block
+    list_numbered = False
     fig_caption_at = None   # index in `out` where a Caption paragraph can land
 
     def flush_quotes():
         nonlocal quote_buf
         if quote_buf:
             rep['quotes'] += 1
-            out.extend(['', '~~~'])
+            out.extend(['', '~~~ quote'])
             for i, q in enumerate(quote_buf):
                 if i:
                     out.append('')
                 out.append(q)
             out.extend(['~~~', ''])
             quote_buf = []
+
+    def flush_list():
+        nonlocal list_buf
+        if list_buf:
+            header = '~~~ list type="number"' if list_numbered else '~~~ list'
+            out.extend(['', header])
+            for i, item in enumerate(list_buf):
+                if i:
+                    out.append('')
+                out.append(item)
+            out.extend(['~~~', ''])
+            list_buf = []
+
+    def flush_all():
+        flush_quotes()
+        flush_list()
 
     try:
         body = list(doc.iter_inner_content())
@@ -480,8 +510,7 @@ def import_docx(path, report=None):
 
         images = _para_images(p, stem, rep)
         if images:
-            flush_quotes()
-            list_n = 0
+            flush_all()
             for fn, alt in images:
                 rep['figures'] += 1
                 alt_attr = f' alt="{alt}"' if alt and '"' not in alt else ''
@@ -499,46 +528,54 @@ def import_docx(path, report=None):
             fig_caption_at = None
 
         if style.startswith('heading 1') or style == 'title':
-            flush_quotes()
-            list_n = 0
+            flush_all()
             rep['chapters'] += 1
             out.extend(['', '# ' + text, ''])
             continue
         if style.startswith('heading'):
-            flush_quotes()
-            list_n = 0
+            flush_all()
             rep['subheads'] += 1
             out.extend(['', '## ' + text, ''])
             continue
         if not text:
             continue
         if SCENE_BREAK_RE.match(text):
-            flush_quotes()
-            list_n = 0
+            flush_all()
             out.extend(['', '* * *', ''])
             continue
         if 'quote' in style:
+            flush_list()
             quote_buf.append(text)
             continue
-        flush_quotes()
 
-        numbered = 'number' in style
+        # a run of list paragraphs becomes one ~~~ list block
         is_list = ('list' in style
                    or (p._p.pPr is not None and p._p.pPr.numPr is not None))
         if is_list:
+            numbered = 'number' in style
+            if list_buf and numbered != list_numbered:
+                flush_list()                  # bullets and numbers are separate lists
+            flush_quotes()
+            list_numbered = numbered
             rep['lists'] += 1
-            if numbered:
-                list_n += 1
-                text = f'{list_n}. {text}'
-            else:
-                list_n = 0
-                text = '• ' + text
-        else:
-            list_n = 0
+            list_buf.append(text)
+            continue
+
+        flush_all()
+
+        # a centred paragraph that isn't a scene break becomes an alignment block
+        try:
+            centred = p.alignment is not None and 'CENTER' in str(p.alignment)
+        except Exception:
+            centred = False
+        if centred:
+            rep['aligned'] += 1
+            out.extend(['', '~~~ center', text, '~~~', ''])
+            continue
 
         out.extend([text, ''])
 
-    flush_quotes()
+    flush_all()
     return '\n'.join(out)
 
 
@@ -559,12 +596,13 @@ def import_summary(rep):
         got.append(f"{rep['quotes']} quotation" + ('s' if rep['quotes'] != 1 else ''))
     if rep.get('lists'):
         got.append(f"{rep['lists']} list item" + ('s' if rep['lists'] != 1 else ''))
+    if rep.get('aligned'):
+        got.append(f"{rep['aligned']} centred passage"
+                   + ('s' if rep['aligned'] != 1 else ''))
 
     lost = []
     if rep.get('tables'):
         lost.append('tables were kept as set-apart blocks, not laid out as tables')
-    if rep.get('lists'):
-        lost.append('list items keep their bullet or number as plain text')
     if rep.get('links'):
         n = rep['links']
         lost.append(f"{n} link kept its text but not the web address" if n == 1

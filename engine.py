@@ -2107,6 +2107,116 @@ def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
     return [Spacer(1, space), KeepTogether([img] + caption), Spacer(1, space)]
 
 
+_ALIGN_MAP = {'left': TA_LEFT, 'center': TA_CENTER, 'centre': TA_CENTER,
+              'right': TA_RIGHT}
+
+
+def _render_list_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=None):
+    """Flowables for `~~~ list` — one item per paragraph in the block.
+
+    Items hang: the marker sits in the first line's negative indent, so wrapped
+    lines align under the item text rather than back at the margin.
+    """
+    lm      = preset.get('list', {})
+    size    = lm.get('font_size', 0) or st['body'].fontSize
+    lead    = size * lm.get('line_leading', 1.35)
+    indent  = lm.get('indent', 0.25) * inch
+    hang    = lm.get('marker_gap', 0.22) * inch
+    gap     = lm.get('item_gap', 3.0)
+    space   = lm.get('space_around', 10.0)
+    bullet  = lm.get('bullet', '•')
+
+    numbered = (attrs.get('type', '') or '').lower().startswith('num')
+    try:
+        n = int(attrs.get('start', 1))
+    except (TypeError, ValueError):
+        n = 1
+
+    item_style = ParagraphStyle(
+        'listitem', parent=st['body'], fontName=fonts['regular'],
+        fontSize=size, leading=lead, alignment=TA_LEFT,
+        leftIndent=indent + hang, firstLineIndent=-hang,
+        spaceBefore=0, spaceAfter=gap,
+    )
+    out = [Spacer(1, space)]
+    for i, (_, text) in enumerate(block_paras):
+        marker = (lm.get('number_format', '{n}.').format(n=n + i) if numbered
+                  else bullet)
+        body = _hyphenate_markup(text, hyph) if hyph else text
+        # a real tab would need tabstops; a fixed-width space keeps it simple
+        out.append(Paragraph(f'{marker}<font size="{size}">&#160;&#160;</font>{body}',
+                             item_style))
+    out.append(Spacer(1, space - gap if space > gap else 0))
+    return out
+
+
+def _render_quote_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=None):
+    """Flowables for `~~~ quote` — an inset block quotation, optional source."""
+    qm     = preset.get('quote', {})
+    size   = qm.get('font_size', 0) or (st['body'].fontSize - 0.5)
+    lead   = size * qm.get('line_leading', 1.35)
+    indent = qm.get('indent', 0.35) * inch
+    right  = qm.get('right_indent', qm.get('indent', 0.35)) * inch
+    space  = qm.get('space_around', 11.0)
+    style_name = qm.get('style', 'regular')
+    font = (fonts.get('italic', fonts['regular']) if style_name == 'italic'
+            else fonts['regular'])
+
+    body_style = ParagraphStyle(
+        'quotepara', parent=st['body'], fontName=font,
+        fontSize=size, leading=lead,
+        leftIndent=indent, rightIndent=right,
+        firstLineIndent=qm.get('first_indent', 0.0) * inch,
+        spaceBefore=0, spaceAfter=qm.get('para_gap', 4.0),
+    )
+    first_style = ParagraphStyle('quotefirst', parent=body_style,
+                                 firstLineIndent=0)
+
+    out = [Spacer(1, space)]
+    for i, (_, text) in enumerate(block_paras):
+        body = _hyphenate_markup(text, hyph) if hyph else text
+        out.append(Paragraph(body, first_style if i == 0 else body_style))
+
+    source = (attrs.get('source', '') or '').strip()
+    if source:
+        attr_style = ParagraphStyle(
+            'quotesource', parent=body_style,
+            fontName=(fonts.get('italic', fonts['regular'])
+                      if qm.get('source_style', 'italic') == 'italic'
+                      else fonts['regular']),
+            fontSize=size - 0.5,
+            alignment=_ALIGN_MAP.get(qm.get('source_align', 'right'), TA_RIGHT),
+            spaceBefore=qm.get('source_gap', 3.0), spaceAfter=0,
+        )
+        out.append(Paragraph(_ms_inline(source, False), attr_style))
+    out.append(Spacer(1, space))
+    return out
+
+
+def _render_align_block(block_paras, how, preset, fonts, st, avail_w, hyph=None):
+    """Flowables for `~~~ center` / `~~~ right` / `~~~ left`.
+
+    Deliberately only changes alignment (and drops the paragraph indent) — the
+    style still owns size, face and leading, so an alignment block can't be used
+    to smuggle in ad-hoc formatting.
+    """
+    am    = preset.get('align', {})
+    space = am.get('space_around', 9.0)
+    style = ParagraphStyle(
+        'alignpara', parent=st['body'], fontName=fonts['regular'],
+        alignment=_ALIGN_MAP.get(how, TA_CENTER),
+        firstLineIndent=0, leftIndent=am.get('indent', 0.0) * inch,
+        rightIndent=am.get('indent', 0.0) * inch,
+        spaceBefore=0, spaceAfter=am.get('para_gap', 3.0),
+    )
+    out = [Spacer(1, space)]
+    for _, text in block_paras:
+        body = _hyphenate_markup(text, hyph) if hyph else text
+        out.append(Paragraph(body, style))
+    out.append(Spacer(1, space))
+    return out
+
+
 def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_meta=None):
     """Return flowables for one ~~~ … ~~~ document block."""
     meta  = block_meta or {}
@@ -2117,6 +2227,12 @@ def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_
             return _render_poem_block(block_paras, attrs, preset, fonts, st, avail_w)
         if btype == 'figure':
             return _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w)
+        if btype == 'list':
+            return _render_list_block(block_paras, attrs, preset, fonts, st, avail_w, hyph)
+        if btype == 'quote':
+            return _render_quote_block(block_paras, attrs, preset, fonts, st, avail_w, hyph)
+        if btype in ('center', 'centre', 'right', 'left'):
+            return _render_align_block(block_paras, btype, preset, fonts, st, avail_w, hyph)
         db             = preset.get('document_block', {})
         header_size    = db.get('header_size', 9.5)
         dateline_style = db.get('dateline_style', 'italic')

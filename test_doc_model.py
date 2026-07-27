@@ -319,6 +319,94 @@ def test_figures():
     _check("editor-built figure model round-trips", back == built, _diff(back, built))
 
 
+BLOCKS_MD = """\
+# Provisions
+
+Everything below was copied from her book.
+
+~~~ list
+Salt, four measures a head
+Rope, tarred, two coils
+Water, which runs out sooner
+~~~
+
+She had opinions about the order.
+
+~~~ list type="number" start="3"
+Load the mules before dawn
+Walk the first hour in silence
+~~~
+
+~~~ quote source="Berrin of Ferrun"
+The plateau does not kill travellers. It simply
+declines to help them.
+
+Those who go up expecting hostility are disappointed.
+~~~
+
+~~~ center
+NO WATER BEYOND THIS POINT
+TURN BACK OR CARRY IT
+~~~
+
+~~~ right
+— they never carry enough
+~~~
+"""
+
+
+def test_blocks():
+    """Lists and alignment blocks are line-oriented; quotes stay prose."""
+    print("\n[lists / quotes / alignment]")
+    for smart in (True, False):
+        doc1 = doc_model.from_markdown(BLOCKS_MD, smartquotes=smart)
+        md2 = doc_model.to_markdown(doc1)
+        doc2 = doc_model.from_markdown(md2, smartquotes=smart)
+        eng_a = manuscript.parse_markdown(BLOCKS_MD, smartquotes=smart)
+        eng_b = manuscript.parse_markdown(md2, smartquotes=smart)
+        _check(f"blocks engine fidelity (smart={smart})", eng_a == eng_b, _diff(eng_a, eng_b))
+        _check(f"blocks model stability (smart={smart})", doc1 == doc2, _diff(doc1, doc2))
+
+    doc = doc_model.from_markdown(BLOCKS_MD)
+    by = {}
+    for b in doc:
+        if b["type"] == "docblock":
+            by.setdefault(b["block_type"], []).append(b)
+
+    # one line = one item, NOT one wrapped paragraph
+    _check("bulleted list has 3 items", len(by["list"][0]["children"]) == 3,
+           len(by["list"][0]["children"]))
+    _check("numbered list keeps type + start",
+           by["list"][1]["attrs"] == {"type": "number", "start": "3"},
+           by["list"][1]["attrs"])
+    _check("aligned block keeps its 2 lines separate",
+           len(by["center"][0]["children"]) == 2, len(by["center"][0]["children"]))
+    _check("right block parsed", len(by["right"][0]["children"]) == 1)
+
+    # a quote is prose: hard-wrapped lines join, a blank line starts a paragraph
+    q = by["quote"][0]
+    _check("quote has 2 paragraphs, not 3 lines", len(q["children"]) == 2,
+           len(q["children"]))
+    _check("quote wrapped lines are joined",
+           "simply declines" in "".join(r["text"] for r in q["children"][0]["runs"]),
+           q["children"][0]["runs"])
+    _check("quote source preserved", q["attrs"].get("source") == "Berrin of Ferrun")
+
+    # the engine sees the same shape
+    eng = manuscript.parse_markdown(BLOCKS_MD)
+    blocks = [b for ch in eng["chapters"] for b in ch["blocks"] if b[0] == "doc_block"]
+    kinds = [b[2].get("_type") for b in blocks]
+    _check("engine block order", kinds == ["list", "list", "quote", "center", "right"], kinds)
+    _check("engine list items stay separate", len(blocks[0][1]) == 3, len(blocks[0][1]))
+
+    # hand-built model (what the List / Quote buttons produce)
+    built = [{"type": "docblock", "block_type": "list", "attrs": {},
+              "children": [{"type": "para", "runs": [doc_model._run("one")]},
+                           {"type": "para", "runs": [doc_model._run("two")]}]}]
+    back = doc_model.from_markdown(doc_model.to_markdown(built))
+    _check("editor-built list round-trips", back == built, _diff(back, built))
+
+
 if __name__ == "__main__":
     test_roundtrips()
     test_adversarial()
@@ -326,6 +414,7 @@ if __name__ == "__main__":
     test_poems()
     test_bylines()
     test_figures()
+    test_blocks()
     print()
     if _failures:
         print(f"FAILED ({len(_failures)}): " + "; ".join(_failures))

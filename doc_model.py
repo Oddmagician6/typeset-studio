@@ -244,6 +244,13 @@ def from_markdown(raw, smartquotes=True):
                          for s in block_para_buf if s.strip()]
                 if lines:
                     block_children.append({"type": "stanza", "lines": lines})
+            elif block_type in manuscript.LINE_BLOCKS:
+                # One line = one child (a list item, or a line of an aligned block)
+                for s in block_para_buf:
+                    if s.strip():
+                        block_children.append(
+                            {"type": "para",
+                             "runs": _parse_inline(s.strip(), smartquotes)})
             else:
                 joined = ' '.join(s.strip() for s in block_para_buf).strip()
                 if joined:
@@ -360,6 +367,9 @@ def to_markdown(blocks):
                         out.append("")                   # blank line between stanzas
                     for ln in stanza["lines"]:
                         out.append(_runs_to_md(ln["runs"]))
+            elif b["block_type"] in manuscript.LINE_BLOCKS:
+                for kid in kids:                         # one item/line per line
+                    out.append(_runs_to_md(kid["runs"]))
             else:
                 for i, kid in enumerate(kids):
                     out.append(_runs_to_md(kid["runs"]))

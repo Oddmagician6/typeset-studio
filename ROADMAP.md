@@ -72,6 +72,13 @@ document_block:{frame, indent, font_size, first_indent, space_around,
                header_size, dateline_style}
                frame: "none" | "ruled" | "box"
                dateline_style: "italic" | "bold" | "smallcaps"
+list:          {bullet, number_format, indent, marker_gap, item_gap,
+               space_around, font_size, line_leading}   number_format uses "{n}"
+quote:         {indent, right_indent, first_indent, font_size, line_leading,
+               style, space_around, para_gap,
+               source_style, source_align, source_gap}
+               style / source_style: "regular" | "italic"
+align:         {space_around, indent, para_gap}     alignment blocks only
 figure:        {width, align, max_height, space_around,
                caption_size, caption_style, caption_align, caption_gap}
                width/max_height are fractions (of the text width / text height)
@@ -142,6 +149,9 @@ punctuation applied first. Markup conventions:
 | `~~~` … `~~~`      | plain document block (indented / ruled / boxed per preset) |
 | `~~~ letter from="X" to="Y" date="Z"` | typed epistolary block (see below) |
 | `~~~ figure src="map.png"` … `~~~` | an illustration; the block content is its caption |
+| `~~~ list` / `~~~ list type="number"` | a list — **one item per line** |
+| `~~~ quote source="…"` | an inset quotation (prose; lines wrap) |
+| `~~~ center` / `right` / `left` | an aligned block — **one line per line** |
 | `*italic*`         | *italic*                       |
 | `**bold**`         | **bold**                       |
 | blank line         | new paragraph                  |
@@ -872,6 +882,45 @@ with both images in the PDF **and** the EPUB.
 block), and link addresses (no link type). Each is blocked on a Tier-5A block type, not on the
 importer.
 
+**48. Lists, block quotations and alignment blocks** *(Tier-5A; the three remaining cheap block
+types. Also upgrades what #47 can do with a Word file)*
+Three typed doc blocks on the plumbing #46 proved out:
+`~~~ list` (`type="number"`, `start="3"`), `~~~ quote` (`source="…"`), and
+`~~~ center` / `~~~ right` / `~~~ left`.
+- **A parser change was needed, and it is the interesting part.** Inside a fence, lines are joined
+  into a paragraph — right for prose, wrong for a list, where the first proof came out as *one*
+  bullet containing every item. Lists and alignment blocks are **line-oriented**: one source line =
+  one item / one line. New `manuscript.LINE_BLOCKS` drives that, mirrored in `doc_model.py` **and**
+  `static/doc_model.js` (both parse *and* serialize) — the poem precedent, minus stanzas. Quotations
+  stay prose: hard-wrapped lines join and a blank line starts a paragraph.
+- `engine.py`: `_render_list_block` (hanging indent, so wrapped lines align under the item text, not
+  back at the margin; bullet or running number), `_render_quote_block` (inset both sides, smaller,
+  optional right-aligned italic source line), `_render_align_block` (alignment **only** — the style
+  still owns size, face and leading, so an alignment block can't smuggle in ad-hoc formatting), plus
+  `_ALIGN_MAP`; all dispatched from `_render_doc_block`.
+- `epub.py`: real `<ul>`/`<ol>` (with `start`), `<blockquote>` + a `.quote-source` line, and
+  `.align-center/-right/-left` divs, with CSS for each.
+- `app.py` + `templates/editor.html`: `list` / `quote` / `align` preset sections through `DEFAULTS`,
+  `parse_preset_form` and a new **Lists, quotations & alignment** fieldset (bullet, number format,
+  indents, gaps, quote size/style, source style + alignment).
+- `templates/manuscript_editor.html`: **List** and **Quote** toolbar buttons (via a shared
+  `insertDocBlock`), three cheatsheet rows, and rich-mode CSS keyed off `data-btype` — including
+  numbered lists via a `[data-attrs*='"type":"number"']` counter, so **no JS change was needed** for
+  the WYSIWYG.
+- **`manuscript.import_docx` now emits these blocks** instead of approximating: Word lists become
+  `~~~ list` (bullets and numbers kept as separate runs), Quote styles become `~~~ quote`, and a
+  centred paragraph that isn't a scene break becomes `~~~ center`. Two lines of the import summary's
+  "not imported" half went away as a result.
+Verified: 15 new `test_doc_model.py::test_blocks` checks (fidelity + stability at both smartquote
+settings, one-item-per-line, `type`/`start` preserved, quotes staying prose, engine block order);
+a **JS↔Python port-parity run** over the new corpus plus figures and poems (model *and*
+serialization byte-identical); a rendered PDF proof looked at — hanging bullets, aligned numbers, an
+inset quote with its italic source, centred sign lines; EPUB checked for `<ul>`/`<ol>`/`<blockquote>`
+/`.quote-source`/align divs; the new preset fieldset round-tripping a real editor save; a `.docx`
+end-to-end where the imported bullets, numbers and quotation all render; and a **live browser pass** —
+rich mode shows bullets, counters, the quote rule and centred text, and pressing Enter in a list makes
+a new item that serializes as its own line. All prior suites still pass.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1097,13 +1146,13 @@ seven-file round: `manuscript.py` (parse) · `engine.py` (render) · `epub.py` (
   `~~~ figure src="…"` block (caption = the block's content), inline or `full="yes"` for its own
   page, a shared library + Figures manager, a preset `figure` section, and `<figure>` output in the
   EPUB. Word images now import into it too — **SHIPPED (feature #47)**.
-- **Lists (bulleted / numbered).** No `ListFlowable` anywhere in `engine.py`. Markdown `- ` /
-  `1. ` parsing, a preset `list` section (bullet glyph, indent, spacing), `<ul>`/`<ol>` in EPUB.
-- **Block quotation.** Today the nearest thing is a plain `~~~` doc block, which is an
-  *epistolary* device, not a quotation. Wants its own type (inset both sides, smaller size,
-  optional attribution line — the epigraph attribution logic in `_matter_page` is a model).
-- **Alignment block** (force left / centre / right). Trivial next to the others; Vellum and
-  Atticus both have it and it's a common ask for dedications-in-body, song lyrics, sign text.
+- ~~**Lists (bulleted / numbered).**~~ — **SHIPPED (feature #48)** as `~~~ list`, line-oriented
+  (one item per line), with a preset `list` section and real `<ul>`/`<ol>` in the EPUB. Note the
+  fenced form was chosen over Markdown `- ` / `1. ` on purpose: line-start parsing would silently
+  reinterpret existing manuscripts whose paragraphs begin with a dash.
+- ~~**Block quotation.**~~ — **SHIPPED (feature #48)** as `~~~ quote source="…"`, inset both sides,
+  smaller, with an optional source line.
+- ~~**Alignment block**~~ — **SHIPPED (feature #48)** as `~~~ center` / `~~~ right` / `~~~ left`.
 - **Endnotes.** Do these **before** footnotes, as the Tier-4 note already argues: collect
   `[^n]`-style references per chapter/book and render an **Endnotes** back-matter page — an
   `_back` entry + a `_matter_page` branch, no paginator change. Vellum has both; Atticus has
@@ -1127,11 +1176,12 @@ in EPUB, plus internal links to chapters (the TOC already computes the targets).
 **C. Import fidelity — the gap most likely to read as "the tool is broken"**
 
 ~~The importer dropped images, tables, hyperlink text, lists and quotes on the floor.~~ —
-**SHIPPED (feature #47):** images become figures, tables and Quote styles become set-apart blocks,
-hyperlink text survives, list markers are kept as text, and an import summary reports both what
-came across and what didn't. **Remaining**, each blocked on a Tier-5A block type rather than on the
-importer: **footnotes/endnotes** (counted and reported, not imported), **tables as real tables**,
-and **link addresses**. Also still open from #30: no `.docx` **poem** import.
+**SHIPPED (feature #47):** images become figures, hyperlink text survives, tables become set-apart
+blocks, and an import summary reports both what came across and what didn't. **#48 then upgraded
+it further:** Word lists, Quote styles and centred paragraphs now import as real `list` / `quote` /
+`center` blocks rather than approximations. **Remaining**, each blocked on a Tier-5A block type
+rather than on the importer: **footnotes/endnotes** (counted and reported, not imported), **tables
+as real tables**, and **link addresses**. Also still open from #30: no `.docx` **poem** import.
 
 **D. Output correctness / validation — paid tools quietly win here**
 
@@ -1207,8 +1257,8 @@ project persistence. Add an **uncounted-chapter marker** to the heading syntax a
   because Book Brush-style tools show up in every comparison.
 
 **Suggested order.** ~~Designed-cover-in-EPUB (D)~~ #43 → ~~bundled typefaces (E)~~ #44 →
-~~figures/images incl. `.docx` (A + C)~~ #46/#47 → **lists / block quote / alignment (A)** ← next
-→ links (B) → element vocabulary (F) → endnotes (A) → EPUB preflight + device preview (D) →
+~~figures/images incl. `.docx` (A + C)~~ #46/#47 → ~~lists / block quote / alignment (A)~~ #48 →
+**links (B)** ← next → element vocabulary (F) → endnotes (A) → EPUB preflight + device preview (D) →
 large print + trim presets (G) → footnotes (A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 
