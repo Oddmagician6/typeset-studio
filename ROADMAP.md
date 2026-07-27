@@ -26,6 +26,7 @@ manuscript.py     Parses Markdown / imports .docx → a chapters/blocks structur
 epub.py           EPUB 3 builder — consumes the same parsed structure as engine.py.
 matter.py         The front/back-matter vocabulary — one table, read by app + engine + epub.
 test_epub.py      EPUB self-check tests: builds one good file, then breaks it eleven ways.
+test_footnotes.py Footnote placement: builds books and measures where the notes landed.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -83,8 +84,10 @@ quote:         {indent, right_indent, first_indent, font_size, line_leading,
 align:         {space_around, indent, para_gap}     alignment blocks only
 link:          {underline, color, epub_underline}
                underline is the PRINT setting; color/epub_underline are ebook-only
-endnotes:      {heading, group_by_chapter, font_size, line_leading, indent,
-               entry_gap, group_gap, marker_scale}
+endnotes:      {placement, heading, group_by_chapter, font_size, line_leading,
+               indent, entry_gap, group_gap, marker_scale,
+               foot_gap, foot_rule, foot_rule_width, foot_max_height}
+               placement: "end" (a Notes page) | "foot" (bottom of the page)
 figure:        {width, align, max_height, space_around,
                caption_size, caption_style, caption_align, caption_gap}
                width/max_height are fractions (of the text width / text height)
@@ -1125,6 +1128,42 @@ a real preset that then **builds a book** — a 504×720 pt page at 16pt measure
 rendered side-by-side proof of the standard and large-print settings looked at; and the picker
 rendering all thirteen options with the current trim preselected.
 
+**55. Footnotes — notes at the foot of their own page** *(Tier-5A's last and hardest item; the
+final text feature Vellum had that we didn't)*
+The authoring side needed **nothing**: `[^label]` references, `[^label]: …` definitions and
+per-chapter numbering all arrived with #50. Footnotes are a *placement* choice —
+`endnotes.placement: "end" | "foot"` — so the same manuscript produces either book, and no parser,
+round-trip, WYSIWYG or EPUB change was required.
+- **Two spikes before any code**, because both unknowns could have killed the design: (1) can a
+  frame's usable height vary per page? Yes — mutate `frame._y1/_height` in `handle_pageBegin` and
+  re-`_geom()`. (2) can we learn which page a reference landed on? Yes — give each marker a
+  throwaway `tsfn://` URI in a measuring pass; the page holding its **link annotation** is the
+  answer, and no destination has to exist.
+- `engine.py`: `_footnote_flowables` / `_footnote_pages` / `_plan_footnotes` / `_resolve_footnotes`,
+  a `handle_pageBegin` that shrinks the frame, and `_draw_footnotes` drawing rule + notes into the
+  space kept free. Reserving room moves text, which can move a reference, so the resolver **iterates**
+  (max 3), reservations only ever **grow** to damp oscillation, and it re-plans even when the page map
+  is unchanged — because the reservation may have grown the book, and the new pages are where
+  overflow goes.
+- **`FnProbe`**, a zero-size marker, covers the one place a link cannot survive: `_opening_para`
+  re-sets a chapter's first words as plain text for the drop-cap / raised-initial / small-caps
+  treatments and strips the link with everything else.
+- **Nothing is lost silently.** What was actually *drawn* is recorded, and `build_pdf` returns
+  `notes_unplaced` for the difference; `app._preflight` surfaces it. A page whose references carry
+  more note text than the page can hold is a real physical limit, not a bug — the build says so and
+  suggests shortening them or switching to endnotes.
+**Two bugs found on the way, both worth noting:**
+- The new `handle_pageBegin` **silently shadowed an existing one** that resets the per-page
+  opener/blank markers. That suppressed running heads, folios *and* footnotes on every page after
+  the first matter page — i.e. it would have removed page numbers from every book with front
+  matter, not just footnoted ones. Merged.
+- The TOC's flowables were being **reused across builds**; platypus flowables carry layout state, so
+  the contents page came out blank the second time. Each pass now builds its own.
+Verified by the new `test_footnotes.py`: a note on a chapter's opening line, a page's worth of
+overflow, footnotes together with a TOC (which shifts every page number), per-chapter renumbering,
+endnote mode untouched, and a book with no notes paginating identically either way — plus rendered
+proofs eyeballed, and every note confirmed to sit on its reference's page. All prior suites pass.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1256,8 +1295,8 @@ doc_model / WYSIWYG round-trip:
 
 - **Nonfiction structure — footnotes + simple figures** *(the remaining "new document type")*.
   **Endnotes — SHIPPED (feature #50)**; **figures — SHIPPED (feature #46)**.
-  **Footnotes** are hard — breakable notes anchored to their reference line, a bottom-of-page
-  note area, and numbering that resets per chapter; that's real paginator work in `engine.py`.
+  **Footnotes — SHIPPED (feature #55)**; the paginator work turned out to be tractable via a
+  measuring pass plus a per-page frame reservation.
   **Figures**: an image block with caption + placement. Broadens the book audience meaningfully
   but sequence it after the two cheaper wins above. *(Superseded in detail by **Tier 5A** below —
   the paid-app scan reached the same conclusion from the other direction, and endnotes/footnotes/
@@ -1358,9 +1397,9 @@ seven-file round: `manuscript.py` (parse) · `engine.py` (render) · `epub.py` (
 - ~~**Alignment block**~~ — **SHIPPED (feature #48)** as `~~~ center` / `~~~ right` / `~~~ left`.
 - ~~**Endnotes.**~~ — **SHIPPED (feature #50)** as `[^label]` + `[^label]: text`, numbered per
   chapter, with a Notes back-matter page and, in the ebook, a link each way.
-- **Footnotes.** Still the hard one (breakable notes anchored to the reference line, a
-  bottom-of-page note area, per-chapter renumbering = real `BookDoc` work). Unchanged
-  recommendation: last.
+- ~~**Footnotes.**~~ — **SHIPPED (feature #55)** as an `endnotes.placement` choice, reusing #50's
+  syntax and numbering wholesale. **Not done:** a note longer than its page cannot be split across
+  two note areas ("continued footnotes"); the surplus is reported rather than dropped.
 - **Tables.** Nonfiction only, and `_render_doc_block`'s `box` frame already proves the
   `Table`-flowable split behaviour. Low priority for the fiction audience; note that `.docx`
   table text is currently dropped entirely.
@@ -1456,8 +1495,8 @@ someone asks for it.
 ~~figures/images incl. `.docx` (A + C)~~ #46/#47 → ~~lists / block quote / alignment (A)~~ #48 →
 ~~links (B)~~ #49 → ~~endnotes (A)~~ #50 → ~~element vocabulary (F)~~ #51 →
 ~~EPUB preflight (D)~~ #52 → ~~device preview (D)~~ #53 →
-~~large print + trim presets (G)~~ #54 → **what's left**: footnotes (A), hardcover wrap and
-box sets (G), PDF/X-1a and spread balancing (D), an ornament library (E) → endnotes (A) → EPUB preflight + device preview (D) →
+~~large print + trim presets (G)~~ #54 → **what's left**: hardcover wrap and box sets (G),
+PDF/X-1a and spread balancing (D), an ornament library (E) → endnotes (A) → EPUB preflight + device preview (D) →
 large print + trim presets (G) → footnotes (A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 

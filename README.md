@@ -171,8 +171,21 @@ switch on: write a note and the page appears.
 - A note you wrote but never referenced is kept too, numbered last.
 - In the ebook the number links to the note, and the note links back to the sentence.
 
-Heading, grouping and sizing live in the style, under *Endnotes* in the style editor.
-Footnotes at the bottom of the page are a different job and aren't supported yet.
+### Footnotes or endnotes — same writing, two placements
+
+Under *Notes* in the style editor, choose where they go:
+
+- **Endnotes** — a *Notes* page at the back, grouped by chapter (the default).
+- **Footnotes** — at the foot of the page the reference is on, under a short rule.
+
+You write them the same way either way, so you can try both and keep whichever suits
+the book. Heading, grouping, sizing and the footnote rule all live in the style.
+
+One limit worth knowing: a footnote has to fit on the page its reference is on. If a
+page's notes are longer than the page can hold, the surplus can't be placed — the
+build tells you how many, so you can shorten them or switch to endnotes. Nothing is
+ever dropped silently. In the **ebook** notes are always endnotes, linked both ways;
+an ebook has no pages to put a footnote at the bottom of.
 
 ### Links
 

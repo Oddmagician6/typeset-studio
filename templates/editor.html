@@ -360,9 +360,30 @@
       </fieldset>
 
       <fieldset>
-        <legend>Endnotes</legend>
+        <legend>Notes</legend>
         <div class="fs-body">
           {% set en = p.get('endnotes', {}) %}
+          <div class="row">
+            <div class="field"><label>Where the notes go</label>
+              <span class="hint">same writing either way — only the placement changes</span>
+              <select name="en_placement">
+                {% set ep = en.get('placement', 'end') %}
+                <option value="end"  {{ 'selected' if ep != 'foot' }}>Endnotes — a Notes page at the back</option>
+                <option value="foot" {{ 'selected' if ep == 'foot' }}>Footnotes — at the foot of the page</option>
+              </select></div>
+            <div class="check"><input type="checkbox" id="f-en-r" name="en_foot_rule"
+                   {{ 'checked' if en.get('foot_rule', True) }}>
+              <label for="f-en-r">Rule above the footnotes</label></div>
+            <div class="field num"><label>Rule width</label><span class="hint">fraction of the measure</span>
+              <input type="number" step="0.05" name="en_foot_rule_width" value="{{ en.get('foot_rule_width', 0.3) }}"></div>
+          </div>
+          <div class="row">
+            <div class="field num"><label>Gap above notes</label><span class="hint">points · footnotes</span>
+              <input type="number" step="0.5" name="en_foot_gap" value="{{ en.get('foot_gap', 10.0) }}"></div>
+            <div class="field num"><label>Most of the page notes may take</label>
+              <span class="hint">0–1 · the rest runs to the next page</span>
+              <input type="number" step="0.05" min="0.1" max="0.8" name="en_foot_max_height" value="{{ en.get('foot_max_height', 0.4) }}"></div>
+          </div>
           <div class="row">
             <div class="field"><label>Page heading</label>
               <input type="text" name="en_heading" value="{{ en.get('heading', 'Notes') }}"></div>

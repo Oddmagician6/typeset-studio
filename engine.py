@@ -1369,6 +1369,28 @@ class DropCap(Flowable):
             c2.drawOn(c, 0, top - leading * self.lines - c2.height)
 
 
+class FnProbe(Flowable):
+    """Zero-size marker recording which page a chapter's opening notes fell on.
+
+    Everywhere else the measuring pass finds a reference by its link annotation,
+    but `_opening_para` re-sets the first words as plain text for the drop-cap /
+    raised-initial / small-caps treatments, and strips the link with everything
+    else. This rides just before that paragraph and reports the page it starts
+    on — which is where a chapter's first paragraph is, split or not.
+    """
+    def __init__(self, sink, chapter_idx, numbers):
+        super().__init__()
+        self._sink, self._ch, self._numbers = sink, chapter_idx, numbers
+
+    def wrap(self, availWidth, availHeight):
+        return (0, 0)
+
+    def draw(self):
+        page = self.canv.getPageNumber()
+        for n in self._numbers:
+            self._sink.setdefault((self._ch, n), page)
+
+
 class RaisedInitial(Flowable):
     """Opening paragraph whose first letter is set large on the first baseline.
 
@@ -1443,6 +1465,12 @@ class BookDoc(BaseDocTemplate):
         self.head_font = head_font
         self._body_start  = None           # page number of the first chapter opener
         self._toc_entries = []             # filled by TocMarker during build
+        # footnotes: page -> points to keep free at the foot, and the notes to
+        # draw there. Both are worked out by build_pdf's measuring passes.
+        self._fn_reserve  = {}
+        self._fn_assign   = {}
+        self._fn_flow     = {}
+        self._fn_drawn    = set()   # notes actually set on a page
         self._cover = cover or {}          # {path, overlay, color, title_font}
         trim = preset['trim']
         pw, ph = trim['w'] * inch, trim['h'] * inch
@@ -1520,9 +1548,57 @@ class BookDoc(BaseDocTemplate):
         _paint_cover_front(canv, tpl, cf, self.meta, 0, 0, self._pw, self._ph)
 
     def handle_pageBegin(self):
+        """Reset the page's markers, then shrink the frame if notes go at the foot.
+
+        ReportLab frames are fixed at template time, so the frame is mutated in
+        place each page and re-`_geom()`'d — the one hook that lets the text
+        block end higher on some pages than others. Its full height is stashed
+        the first time so the reservation is always measured from the original.
+        """
         self.canv._is_opener = False
         self.canv._is_blank = False
         self._handle_pageBegin()
+        f = self.frame
+        if '_fullHeight' not in f.__dict__:
+            f.__dict__['_fullHeight'] = f._height
+            f.__dict__['_fullY1'] = f._y1
+        keep = self._fn_reserve.get(self.page, 0)
+        f.__dict__['_y1'] = f._fullY1 + keep
+        f.__dict__['_height'] = f._fullHeight - keep
+        f._geom()
+        f._reset()
+
+    def _draw_footnotes(self, canv, page):
+        """Set this page's notes into the space handle_pageBegin kept free."""
+        keys = self._fn_assign.get(page)
+        if not keys:
+            return
+        em = self.preset.get('endnotes', {})
+        recto = (page % 2 == 1)
+        x = self._inside if recto else self._outside
+        w = self._pw - self._inside - self._outside
+        top = self._bottom + self._fn_reserve.get(page, 0) - em.get('foot_gap', 10.0)
+
+        if em.get('foot_rule', True):
+            rl = w * em.get('foot_rule_width', 0.3)
+            canv.setStrokeGray(0.45)
+            canv.setLineWidth(0.5)
+            canv.line(x, top, x + rl, top)
+            top -= 6
+
+        y = top
+        floor = self._bottom * 0.35        # never print into the trim edge
+        for key in keys:
+            fl = self._fn_flow.get(key)
+            if fl is None:
+                continue
+            _, h = fl.wrapOn(canv, w, self._ph)
+            if y - h < floor:
+                continue        # no room left: never print into the trim edge
+            y -= h
+            fl.drawOn(canv, x, y)
+            self._fn_drawn.add(key)
+            y -= fl.style.spaceAfter
 
     def handle_flowable(self, flowables):
         f = flowables[0]
@@ -1573,6 +1649,8 @@ class BookDoc(BaseDocTemplate):
             if rh.get('caps'):
                 txt = txt.upper()
             canv.drawCentredString(cx, y, txt)
+
+        self._draw_footnotes(canv, page)
 
         fo = p['folio']
         if fo['show'] and not (opener and fo.get('hide_on_opener')):
@@ -1632,7 +1710,10 @@ def _styles(preset, fonts):
 _TAG_RE = re.compile(r'<[^>]+>')
 _NOTE_MARK_RE = re.compile(r'<note n="(\d+)" id="[\w\-]+"/>')
 # the same number once _apply_note_markers has made it a linked <super>
-_NOTE_SUPER_RE = re.compile(r'<a href="#note-\d+-(\d+)"><super[^>]*>\d+</super></a>')
+# the rendered marker, with or without its link — a footnote's marker has no
+# anchor to point at, and the opening-paragraph fix has to catch both forms
+_NOTE_SUPER_RE = re.compile(
+    r'(?:<a href="#note-\d+-\d+">)?<super[^>]*>(\d+)</super>(?:</a>)?')
 
 
 def _esc_markup(text):
@@ -2350,7 +2431,111 @@ def _note_anchor(ch_idx, n):
     return f'note-{ch_idx}-{n}'
 
 
-def _apply_note_markers(chapters, preset):
+_FN_SCHEME = 'tsfn://'          # measuring-pass marker; never reaches a real build
+
+
+def _footnote_style(preset, fonts, st):
+    em   = preset.get('endnotes', {})
+    size = em.get('font_size', 0) or (st['body'].fontSize - 2.0)
+    return ParagraphStyle(
+        'footnote', parent=st['body'], fontName=fonts['regular'],
+        fontSize=size, leading=size * em.get('line_leading', 1.25),
+        leftIndent=em.get('indent', 0.22) * inch,
+        firstLineIndent=-em.get('indent', 0.22) * inch,
+        alignment=TA_LEFT, spaceBefore=0, spaceAfter=em.get('entry_gap', 2.0))
+
+
+def _footnote_flowables(chapters, preset, fonts, st):
+    """A Paragraph per note, keyed (chapter index, number) — laid out at the foot."""
+    style = _footnote_style(preset, fonts, st)
+    out = {}
+    for i, ch in enumerate(chapters, start=1):
+        for note in ch.get('notes') or []:
+            body = note['text'] or '<i>[no note text]</i>'
+            out[(i, note['n'])] = Paragraph(
+                f'{note["n"]}.&#160;&#160;{body}', style)
+    return out
+
+
+def _footnote_pages(pdf_path):
+    """Read a measuring build back: {(chapter, n): page} from the marker links.
+
+    The reference's *page* is simply the page its link annotation sits on, so no
+    destination has to exist — which matters, because in footnote mode there is
+    no endnotes page for it to point at. Needs PyMuPDF; the caller falls back to
+    endnotes if it isn't installed.
+    """
+    import fitz
+    found = {}
+    with fitz.open(pdf_path) as doc:
+        found['#pages'] = doc.page_count
+        for pno, page in enumerate(doc, start=1):
+            for link in page.get_links():
+                uri = link.get('uri') or ''
+                if not uri.startswith(_FN_SCHEME):
+                    continue
+                try:
+                    ch, n = uri[len(_FN_SCHEME):].split('-')
+                    found.setdefault((int(ch), int(n)), pno)
+                except ValueError:
+                    continue
+    return found
+
+
+def _plan_footnotes(pages, flowables, avail_w, text_h, preset, last_page=None):
+    """Turn {note: page} into per-page (reserved height, notes) plans.
+
+    A page whose notes would eat more than `max_height` of the text block keeps
+    what fits and pushes the rest onto the next page — which is what a
+    typesetter does with an overlong note rather than letting it swallow the
+    page.
+    """
+    em = preset.get('endnotes', {})
+    cap = text_h * em.get('foot_max_height', 0.4)
+    gap = em.get('foot_gap', 10.0)
+    rule = em.get('foot_rule', True)
+
+    by_page = {}
+    for key, page in pages.items():
+        by_page.setdefault(page, []).append(key)
+    for page in by_page:
+        by_page[page].sort()
+
+    reserve, assign, spill = {}, {}, []
+    # walk contiguous pages from the first with notes, so an overflow lands on
+    # the very next page rather than skipping to the next page that has its own
+    # Spill runs one page past the end of today's document on purpose: reserving
+    # room pushes body text along, so the next pass usually has the page to hold
+    # it. Anything still homeless after that is reported, never dropped quietly.
+    stop = (last_page or (max(by_page) if by_page else 0)) + 1
+    for page in range(min(by_page) if by_page else 0, stop + 1):
+        queue = spill + by_page.get(page, [])
+        spill = []
+        if not queue:
+            continue
+        # The cap keeps notes from swallowing a page — but only where there is a
+        # later page to push them onto. On the last one the notes take whatever
+        # room they need: a crowded foot is a real book, a dropped note is a bug.
+        may_spill = page < stop - 1
+        used, keep = 0.0, []
+        for key in queue:
+            fl = flowables.get(key)
+            if fl is None:
+                continue
+            _, h = fl.wrap(avail_w, text_h)
+            h += fl.style.spaceAfter
+            if keep and used + h > cap and may_spill:
+                spill.append(key)          # doesn't fit: it runs on to the next page
+                continue
+            used += h
+            keep.append(key)
+        if keep:
+            assign[page] = keep
+            reserve[page] = min(used + gap + (6 if rule else 0), text_h - 24)
+    return reserve, assign, list(spill)
+
+
+def _apply_note_markers(chapters, preset, measure=False):
     """Turn `<note n=… id=…/>` into a linked superscript, per chapter.
 
     Must happen before anything reaches ReportLab: the neutral marker is not
@@ -2360,14 +2545,27 @@ def _apply_note_markers(chapters, preset):
     the decorative chapter openings fall back to) reads as two different things.
     """
     index = {id(ch): i for i, ch in enumerate(chapters, start=1)}
-    size = round(preset['body']['size'] * preset.get('endnotes', {})
-                 .get('marker_scale', 0.62), 2)
+    em = preset.get('endnotes', {})
+    size = round(preset['body']['size'] * em.get('marker_scale', 0.62), 2)
+    foot = em.get('placement', 'end') == 'foot'
 
     def render(text, ch):
         i = index[id(ch)]
-        return _NOTE_MARK_RE.sub(
-            lambda m: (f'<a href="#{_note_anchor(i, m.group(1))}">'
-                       f'<super size="{size}">{m.group(1)}</super></a>'), text)
+
+        def one(m):
+            mark = f'<super size="{size}">{m.group(1)}</super>'
+            if measure:
+                # A throwaway URI, because the *page its link lands on* is
+                # exactly what the measuring pass needs to learn.
+                return f'<a href="{_FN_SCHEME}{i}-{m.group(1)}">{mark}</a>'
+            if foot:
+                # No link: the note is on this very page, and there is no
+                # endnotes page for a destination to live on — ReportLab refuses
+                # to save a link whose target does not exist.
+                return mark
+            return f'<a href="#{_note_anchor(i, m.group(1))}">{mark}</a>'
+
+        return _NOTE_MARK_RE.sub(one, text)
 
     return _ms_map_texts(chapters, render)
 
@@ -2492,13 +2690,15 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
 
 
 def _build_story(manuscript, preset, meta, fonts, st, head_font,
-                 has_cover=False, avail_w=0, hyph=None, toc_flowables=None):
+                 has_cover=False, avail_w=0, hyph=None, toc_flowables=None,
+                 fn_measure=False, fn_probe=None):
     glyph = preset['scene_break']['glyph']
     story = []
     # note markers are neutral in the parsed model; make them superscripts before
     # any of this text reaches ReportLab
     manuscript = dict(manuscript)
-    manuscript['chapters'] = _apply_note_markers(manuscript['chapters'], preset)
+    manuscript['chapters'] = _apply_note_markers(manuscript['chapters'], preset,
+                                                 measure=fn_measure)
 
     # ---- cover page (full-bleed art drawn by the page template) ----
     if has_cover:
@@ -2653,6 +2853,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 flush_next = True
             else:
                 if not opened:
+                    if fn_probe is not None:
+                        nums = _NOTE_SUPER_RE.findall(val) or                                re.findall(r'{}(\d+)-(\d+)'.format(re.escape(_FN_SCHEME)), val)
+                        nums = [n[-1] if isinstance(n, tuple) else n for n in nums]
+                        if nums:
+                            story.append(FnProbe(fn_probe, idx, [int(n) for n in nums]))
                     story.extend(_opening_para(val, st, preset, fonts, hyph=hyph))
                     opened = True
                 elif flush_next:
@@ -2669,7 +2874,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
 
     # Notes come first in the back matter, right after the last chapter — they
     # belong to the text in a way acknowledgments and author bios don't.
-    if any(ch.get('notes') for ch in manuscript['chapters']):
+    if (any(ch.get('notes') for ch in manuscript['chapters'])
+            and preset.get('endnotes', {}).get('placement', 'end') != 'foot'):
         story.append(RectoBreak() if rhs else PageBreak())
         _bm_first = False
         story.extend(_endnotes_page(manuscript['chapters'], fonts, st, preset))
@@ -2756,6 +2962,65 @@ def _prepare_cover(meta, preset):
         return None
 
 
+def _resolve_footnotes(build, chapters, preset, fonts, st, avail_w, text_h,
+                       passes=3, probe=None):
+    """Work out what to keep free at the foot of each page, and what goes there.
+
+    Reserving space pushes text down, which can move a reference onto the next
+    page, which changes the reservation — so this iterates. Reservations only
+    ever grow between passes (`max`), which stops the two states of a reference
+    sitting on a page boundary from flipping back and forth forever. Three
+    passes settles every book tested; whatever it has after that is used, and a
+    stale note simply sits one page from its reference rather than breaking.
+
+    `build(reserve, assign)` must build to a temp path and return it.
+    """
+    flow = _footnote_flowables(chapters, preset, fonts, st)
+    if not flow:
+        return {}, {}
+    reserve, assign, seen, unplaced = {}, {}, None, []
+    last_seen = 0
+    for _ in range(passes):
+        tmp = build(reserve, assign)
+        try:
+            pages = _footnote_pages(tmp)
+            if probe:
+                # opening paragraphs report themselves; links cover the rest
+                for key, page in probe.items():
+                    pages.setdefault(key, page)
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        if not pages:
+            break
+        # Deliberately re-plan even when every reference sits where it did:
+        # the reservation may have grown the book, and the extra pages are
+        # exactly where overflowing notes go. `merged == reserve` below is
+        # the real stopping condition.
+        seen = pages
+        doc_pages = pages.pop('#pages', None)
+        last_seen = doc_pages or last_seen
+        new_reserve, assign, unplaced = _plan_footnotes(
+            pages, flow, avail_w, text_h, preset, last_page=doc_pages)
+        merged = dict(reserve)
+        for page, h in new_reserve.items():        # monotone: damps oscillation
+            merged[page] = max(merged.get(page, 0), h)
+        if merged == reserve:
+            break
+        reserve = merged
+
+    # A page the book doesn't have can't show a note. Drop those assignments
+    # and count them, so the build reports the shortfall instead of quietly
+    # swallowing it — there is no honest way to fit more notes than page.
+    if last_seen:
+        for page in [pg for pg in assign if pg > last_seen]:
+            unplaced.extend(assign.pop(page))
+            reserve.pop(page, None)
+    return reserve, assign, unplaced
+
+
 def build_pdf(manuscript, preset, out_path, meta):
     fonts = register_fonts(preset)
     st = _styles(preset, fonts)
@@ -2781,9 +3046,53 @@ def build_pdf(manuscript, preset, out_path, meta):
     avail_w = (preset['trim']['w'] - m['inside'] - m['outside']) * inch
     hyph    = _pyphen.Pyphen(lang='en_US') if (preset['body'].get('hyphenate') and _HAVE_PYPHEN) else None
 
+    text_h = (preset['trim']['h'] - m['top'] - m['bottom']) * inch
+    foot_notes = (preset.get('endnotes', {}).get('placement', 'end') == 'foot'
+                  and any(ch.get('notes') for ch in manuscript['chapters']))
+    fn_reserve, fn_assign, unplaced_notes = {}, {}, []
+    fn_flow = _footnote_flowables(manuscript['chapters'], preset, fonts, st)         if foot_notes else {}
+
     def _make_doc(path):
-        return BookDoc(path, preset, meta, head_font, cover=cover,
-                       title=meta.get('title', ''), author=meta.get('author', ''))
+        doc = BookDoc(path, preset, meta, head_font, cover=cover,
+                      title=meta.get('title', ''), author=meta.get('author', ''))
+        doc._fn_reserve, doc._fn_assign, doc._fn_flow = fn_reserve, fn_assign, fn_flow
+        return doc
+
+    def _resolve_foot(make_toc=None):
+        """Measure and plan the footnotes, with the TOC already in place.
+
+        The contents pages shift every page number after them, so measuring
+        without them would put every note one spread out.
+        """
+        probe = {}
+
+        def _measure(reserve, assign):
+            fd, tmp = tempfile.mkstemp(suffix='.pdf')
+            os.close(fd)
+            probe.clear()
+            story = _build_story(manuscript, preset, meta, fonts, st, head_font,
+                                 has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
+                                 fn_measure=True, fn_probe=probe,
+                                 toc_flowables=make_toc() if make_toc else None)
+            d = _make_doc(tmp)
+            d._fn_reserve, d._fn_assign = reserve, assign
+            d.build(story)
+            return tmp
+        found_reserve, found_assign, homeless = _resolve_footnotes(
+            _measure, manuscript['chapters'], preset, fonts, st, avail_w, text_h,
+            probe=probe)
+        fn_reserve.clear(); fn_reserve.update(found_reserve)
+        fn_assign.clear(); fn_assign.update(found_assign)
+        unplaced_notes.clear(); unplaced_notes.extend(homeless)
+
+    if foot_notes and not meta.get('include_toc'):
+        try:
+            _resolve_foot()
+        except ImportError:
+            # no PyMuPDF: keep the notes, at the back, rather than lose them
+            preset = dict(preset)
+            preset['endnotes'] = dict(preset.get('endnotes', {}), placement='end')
+            foot_notes = False
 
     if meta.get('include_toc'):
         # Pass 1 — no TOC, just capture chapter positions
@@ -2806,19 +3115,35 @@ def build_pdf(manuscript, preset, out_path, meta):
         toc_final = _build_toc(entries, body_start, avail_w, preset, fonts, st,
                                 folio_offset=toc_pages)
 
+        if foot_notes:
+            try:
+                # a fresh TOC per pass: platypus flowables carry layout state, and
+                # a list already drawn once comes out blank the second time
+                _resolve_foot(lambda: _build_toc(entries, body_start, avail_w,
+                                                 preset, fonts, st,
+                                                 folio_offset=toc_pages))
+            except ImportError:
+                preset = dict(preset)
+                preset['endnotes'] = dict(preset.get('endnotes', {}), placement='end')
+                foot_notes = False
+
         # Pass 2 — with TOC injected
         story2 = _build_story(manuscript, preset, meta, fonts, st, head_font,
                                has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
-                               toc_flowables=toc_final)
+                               toc_flowables=_build_toc(entries, body_start, avail_w,
+                                                        preset, fonts, st,
+                                                        folio_offset=toc_pages))
         doc2 = _make_doc(out_path)
         doc2.build(story2)
         page_count = doc2.page
+        unplaced_notes.extend(set(fn_flow) - doc2._fn_drawn)
     else:
         story = _build_story(manuscript, preset, meta, fonts, st, head_font,
                              has_cover=bool(cover), avail_w=avail_w, hyph=hyph)
         doc = _make_doc(out_path)
         doc.build(story)
         page_count = doc.page
+        unplaced_notes.extend(set(fn_flow) - doc._fn_drawn)
     if cover_path:
         try:
             os.remove(cover_path)
@@ -2826,6 +3151,7 @@ def build_pdf(manuscript, preset, out_path, meta):
             pass
     return {
         'page_count':     page_count,
+        'notes_unplaced': len(unplaced_notes),
         'font_family':    fonts['family'],
         'font_fallback':  fonts['fallback'],
         'font_details':   fonts['details'],

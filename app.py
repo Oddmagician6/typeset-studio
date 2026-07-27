@@ -212,6 +212,13 @@ def _preflight(build_result, preset, page_count):
                               if build_result.get('fonts_embedded')
                               else 'Standard PDF fonts not embedded — platforms may reject')})
 
+    missing = build_result.get('notes_unplaced', 0)
+    if missing:
+        checks.append({
+            'label': 'Footnotes', 'ok': False,
+            'detail': (f'{missing} note(s) had no room on the page they belong to — '
+                       'shorten them, or set the style to put notes at the back')})
+
     if page_count:
         kdp_ok = 24 <= page_count <= 828
         checks.append({'label': 'Page count', 'ok': kdp_ok,
@@ -332,9 +339,12 @@ DEFAULTS = {
     # Links are clickable in both outputs. `underline` is the print setting;
     # `color`/`epub_underline` style them in the ebook only.
     'link': {'underline': False, 'color': '', 'epub_underline': True},
-    'endnotes': {'heading': 'Notes', 'group_by_chapter': True, 'font_size': 0,
+    'endnotes': {'placement': 'end',
+                 'heading': 'Notes', 'group_by_chapter': True, 'font_size': 0,
                  'line_leading': 1.35, 'indent': 0.3, 'entry_gap': 3.0,
-                 'group_gap': 12.0, 'marker_scale': 0.62},
+                 'group_gap': 12.0, 'marker_scale': 0.62,
+                 'foot_gap': 10.0, 'foot_rule': True, 'foot_rule_width': 0.3,
+                 'foot_max_height': 0.4},
     'scene_break': {'type': 'glyph', 'glyph': '* * *', 'size': 11.0, 'gap': 9.0, 'image': ''},
     'running_head': {'show': True, 'caps': True, 'size': 8.5, 'gap': 0.28},
     'folio': {'show': True, 'position': 'outer', 'size': 9.5, 'gap': 0.42,
@@ -680,6 +690,11 @@ def parse_preset_form(form):
             'epub_underline': 'lk_epub_underline' in form,
         },
         'endnotes': {
+            'placement':        form.get('en_placement', 'end'),
+            'foot_gap':         _f(form, 'en_foot_gap', 10.0),
+            'foot_rule':        'en_foot_rule' in form,
+            'foot_rule_width':  _f(form, 'en_foot_rule_width', 0.3),
+            'foot_max_height':  _f(form, 'en_foot_max_height', 0.4),
             'heading':          form.get('en_heading', 'Notes') or 'Notes',
             'group_by_chapter': 'en_group_by_chapter' in form,
             'font_size':        _f(form, 'en_font_size', 0),
