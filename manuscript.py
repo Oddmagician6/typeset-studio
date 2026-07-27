@@ -23,6 +23,7 @@ Anything before the first "# " is treated as the opening of an untitled first
 chapter, so a plain manuscript with no headings still works.
 """
 
+import os
 import re
 import html
 
@@ -287,46 +288,291 @@ def parse_markdown(raw, smartquotes=True):
     return {'chapters': chapters}
 
 
-def import_docx(path):
+# ---------------------------------------------------------------- .docx import
+
+# Images pulled out of a Word file are stored here as figures. app.py points this
+# at the writable data dir (same arrangement as engine.FIGURE_DIR); manuscript.py
+# never imports app or engine.
+FIGURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
+
+_SLUG_RE = re.compile(r'[^a-z0-9]+')
+
+
+def _slug(name):
+    return _SLUG_RE.sub('-', (name or '').lower()).strip('-') or 'image'
+
+
+def _emph(runs):
+    """Word runs -> Markdown emphasis, mirroring the old importer's rules."""
+    out = []
+    for r in runs:
+        t = r.text
+        if not t:
+            continue
+        if r.bold:
+            t = f'**{t}**'
+        elif r.italic:
+            t = f'*{t}*'
+        out.append(t)
+    return ''.join(out)
+
+
+def _para_md(p, report):
+    """Paragraph text with emphasis, including runs inside hyperlinks.
+
+    ``Paragraph.runs`` skips runs nested in a ``w:hyperlink``, so the old
+    importer silently dropped every linked phrase. ``iter_inner_content`` walks
+    runs and hyperlinks in document order. The URL itself is dropped (the book
+    model has no link type yet) but the words survive, and the link is counted.
+    """
+    try:
+        parts = list(p.iter_inner_content())
+    except AttributeError:                       # older python-docx
+        return _emph(p.runs) or p.text.strip()
+    chunks = []
+    for item in parts:
+        if hasattr(item, 'address'):             # Hyperlink
+            report['links'] += 1
+            chunks.append(_emph(item.runs))
+        else:
+            chunks.append(_emph([item]))
+    return ''.join(chunks) or p.text.strip()
+
+
+def _para_images(p, stem, report):
+    """Save every image embedded in a paragraph; yield (filename, alt) pairs.
+
+    Names are content-addressed (``<docx>-<hash>.png``) so re-importing the same
+    Word file overwrites the same figure instead of piling up duplicates — the
+    project build path re-imports on every rebuild.
+    """
+    from docx.oxml.ns import qn
+    import hashlib
+    found = []
+    blips = p._p.findall('.//' + qn('a:blip'))
+    if not blips:
+        return found
+    # Real alt text lives in docPr/@descr, one per image, in document order.
+    # @name is ignored on purpose — Word fills it with "Picture 1", which is
+    # noise, not a description.
+    descrs = [(el.get('descr') or '') for el in p._p.findall('.//' + qn('wp:docPr'))]
+    for i, blip in enumerate(blips):
+        rid = blip.get(qn('r:embed')) or blip.get(qn('r:link'))
+        if not rid:
+            continue
+        try:
+            part = p.part.related_parts[rid]
+            blob = part.blob
+        except Exception:
+            report['images_failed'] += 1
+            continue
+        ext = os.path.splitext(str(part.partname))[1].lower() or '.png'
+        if ext not in ('.png', '.jpg', '.jpeg', '.gif'):
+            report['images_failed'] += 1
+            continue
+        fn = f'{stem}-{hashlib.sha1(blob).hexdigest()[:8]}{ext}'
+        dest = os.path.join(FIGURE_DIR, fn)
+        try:
+            os.makedirs(FIGURE_DIR, exist_ok=True)
+            if not os.path.exists(dest):
+                with open(dest, 'wb') as f:
+                    f.write(blob)
+        except OSError:
+            report['images_failed'] += 1
+            continue
+        found.append((fn, descrs[i] if i < len(descrs) else ''))
+    return found
+
+
+def _table_md(tbl, report):
+    """A Word table -> a plain ~~~ block, one paragraph per row.
+
+    There is no table block type yet, so this preserves the words (set apart from
+    the body) rather than dropping them. The import summary says so plainly.
+    """
+    rows = []
+    for row in tbl.rows:
+        cells = [' '.join(c.text.split()) for c in row.cells]
+        # a merged row repeats the same cell object; collapse the repeats
+        dedup = [c for i, c in enumerate(cells) if i == 0 or c != cells[i - 1]]
+        line = ' · '.join(c for c in dedup if c)
+        if line:
+            rows.append(line)
+    if not rows:
+        return []
+    report['tables'] += 1
+    out = ['', '~~~']
+    for i, r in enumerate(rows):
+        if i:
+            out.append('')
+        out.append(r)
+    out += ['~~~', '']
+    return out
+
+
+def _new_report():
+    return {'chapters': 0, 'subheads': 0, 'figures': 0, 'tables': 0,
+            'quotes': 0, 'lists': 0, 'links': 0, 'footnotes': 0,
+            'images_failed': 0}
+
+
+def import_docx(path, report=None):
     """Best-effort .docx -> canonical Markdown string.
 
-    Heading 1/Title styles become chapters; centered short asterisk/blank
-    paragraphs become scene breaks; bold/italic runs are preserved.
+    Heading 1/Title become chapters, other headings subheads; centered short
+    asterisk paragraphs become scene breaks; bold/italic survive. Beyond that:
+
+    * **images** are extracted to the figure library and placed as ``~~~ figure``
+      blocks, with a following Caption-styled paragraph used as the caption;
+    * **tables** become plain ``~~~`` blocks (no table type yet) instead of being
+      dropped — ``doc.paragraphs`` skips them entirely;
+    * **hyperlink text** is kept (see ``_para_md``);
+    * **Quote** styles become plain ``~~~`` blocks;
+    * **list items** keep a bullet or number prefix as literal text.
+
+    Pass a dict as ``report`` to receive counts of what was imported and what
+    could not be — ``import_summary`` turns it into a sentence for the UI.
     """
     from docx import Document
+    from docx.oxml.ns import qn
+    from docx.table import Table
+
+    rep = report if report is not None else {}
+    rep.update({k: v for k, v in _new_report().items() if k not in rep})
+
     doc = Document(path)
+    stem = _slug(os.path.splitext(os.path.basename(path))[0])
+    rep['footnotes'] = (len(doc.element.body.findall('.//' + qn('w:footnoteReference')))
+                        + len(doc.element.body.findall('.//' + qn('w:endnoteReference'))))
+
     out = []
-    for p in doc.paragraphs:
+    quote_buf = []          # consecutive Quote-styled paragraphs -> one block
+    list_n = 0              # running number for a numbered list
+    fig_caption_at = None   # index in `out` where a Caption paragraph can land
+
+    def flush_quotes():
+        nonlocal quote_buf
+        if quote_buf:
+            rep['quotes'] += 1
+            out.extend(['', '~~~'])
+            for i, q in enumerate(quote_buf):
+                if i:
+                    out.append('')
+                out.append(q)
+            out.extend(['~~~', ''])
+            quote_buf = []
+
+    try:
+        body = list(doc.iter_inner_content())
+    except AttributeError:                        # older python-docx: no tables
+        body = list(doc.paragraphs)
+
+    for item in body:
+        if isinstance(item, Table):
+            flush_quotes()
+            fig_caption_at = None
+            out.extend(_table_md(item, rep))
+            continue
+
+        p = item
         style = (p.style.name or '').lower()
-        text = p.text.strip()
+        text = _para_md(p, rep).strip()
+
+        images = _para_images(p, stem, rep)
+        if images:
+            flush_quotes()
+            list_n = 0
+            for fn, alt in images:
+                rep['figures'] += 1
+                alt_attr = f' alt="{alt}"' if alt and '"' not in alt else ''
+                out.extend(['', f'~~~ figure src="{fn}"{alt_attr}', ''])
+                fig_caption_at = len(out) - 1     # the blank line is the caption slot
+                out.extend(['~~~', ''])
+            if not text:
+                continue                          # image-only paragraph
+
+        if style.startswith('caption') and fig_caption_at is not None and text:
+            out[fig_caption_at] = text            # caption belongs to the figure
+            fig_caption_at = None
+            continue
+        if text:
+            fig_caption_at = None
+
         if style.startswith('heading 1') or style == 'title':
-            out.append('')
-            out.append('# ' + text)
-            out.append('')
+            flush_quotes()
+            list_n = 0
+            rep['chapters'] += 1
+            out.extend(['', '# ' + text, ''])
             continue
         if style.startswith('heading'):
-            out.append('')
-            out.append('## ' + text)
-            out.append('')
+            flush_quotes()
+            list_n = 0
+            rep['subheads'] += 1
+            out.extend(['', '## ' + text, ''])
             continue
         if not text:
             continue
         if SCENE_BREAK_RE.match(text):
-            out.append('')
-            out.append('* * *')
-            out.append('')
+            flush_quotes()
+            list_n = 0
+            out.extend(['', '* * *', ''])
             continue
-        # rebuild inline emphasis from runs
-        chunks = []
-        for r in p.runs:
-            t = r.text
-            if not t:
-                continue
-            if r.bold:
-                t = f'**{t}**'
-            elif r.italic:
-                t = f'*{t}*'
-            chunks.append(t)
-        out.append(''.join(chunks) if chunks else text)
-        out.append('')
+        if 'quote' in style:
+            quote_buf.append(text)
+            continue
+        flush_quotes()
+
+        numbered = 'number' in style
+        is_list = ('list' in style
+                   or (p._p.pPr is not None and p._p.pPr.numPr is not None))
+        if is_list:
+            rep['lists'] += 1
+            if numbered:
+                list_n += 1
+                text = f'{list_n}. {text}'
+            else:
+                list_n = 0
+                text = '• ' + text
+        else:
+            list_n = 0
+
+        out.extend([text, ''])
+
+    flush_quotes()
     return '\n'.join(out)
+
+
+def import_summary(rep):
+    """Human-readable '…imported, …not imported' lines for a report dict."""
+    if not rep:
+        return '', ''
+    got = []
+    if rep.get('chapters'):
+        got.append(f"{rep['chapters']} chapter" + ('s' if rep['chapters'] != 1 else ''))
+    if rep.get('subheads'):
+        got.append(f"{rep['subheads']} subhead" + ('s' if rep['subheads'] != 1 else ''))
+    if rep.get('figures'):
+        got.append(f"{rep['figures']} image" + ('s' if rep['figures'] != 1 else ''))
+    if rep.get('tables'):
+        got.append(f"{rep['tables']} table" + ('s' if rep['tables'] != 1 else ''))
+    if rep.get('quotes'):
+        got.append(f"{rep['quotes']} quotation" + ('s' if rep['quotes'] != 1 else ''))
+    if rep.get('lists'):
+        got.append(f"{rep['lists']} list item" + ('s' if rep['lists'] != 1 else ''))
+
+    lost = []
+    if rep.get('tables'):
+        lost.append('tables were kept as set-apart blocks, not laid out as tables')
+    if rep.get('lists'):
+        lost.append('list items keep their bullet or number as plain text')
+    if rep.get('links'):
+        n = rep['links']
+        lost.append(f"{n} link kept its text but not the web address" if n == 1
+                    else f"{n} links kept their text but not the web addresses")
+    if rep.get('footnotes'):
+        lost.append(f"{rep['footnotes']} footnote/endnote"
+                    + ('s were' if rep['footnotes'] != 1 else ' was') + ' not imported')
+    if rep.get('images_failed'):
+        lost.append(f"{rep['images_failed']} image"
+                    + ('s' if rep['images_failed'] != 1 else '') + ' could not be read')
+    return ', '.join(got), '; '.join(lost)

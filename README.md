@@ -89,8 +89,26 @@ The tool reads a light, plain-text convention:
 | `**bold**`         | **bold**                      |
 | blank line         | new paragraph                 |
 
-For Word files, a **Heading 1** paragraph becomes a chapter; everything else flows
-as body text. (Images inside a `.docx` are not imported yet — add them as figures.)
+### Word files
+
+A `.docx` is converted to the same convention on import:
+
+| In Word | You get |
+|---------|---------|
+| Heading 1 / Title | a new chapter |
+| Heading 2, 3, … | a subhead |
+| **bold** / *italic* runs | inline emphasis |
+| a centred `* * *` line | a scene break |
+| an image | a figure, with a following *Caption* paragraph as its caption |
+| a table | a set-apart block, one row per line (there is no table layout yet) |
+| Quote / Intense Quote | a set-apart block |
+| a bulleted or numbered list | paragraphs keeping their bullet or number as text |
+| a hyperlink | its words (the web address is dropped) |
+
+After importing, the app tells you exactly what came across and what didn't — nothing
+is dropped silently. Footnotes and endnotes are **not** imported yet; you'll be told how
+many were found. Images land in your Figures library, named after the Word file, so
+re-importing the same document doesn't pile up copies.
 
 ### Illustrations
 

@@ -116,6 +116,7 @@ engine.FONT_DIR = FONT_DIR
 engine.COVER_ASSET_DIR = COVER_ASSET_DIR
 engine.FIGURE_DIR = FIGURE_DIR
 epub.FIGURE_DIR = FIGURE_DIR
+manuscript.FIGURE_DIR = FIGURE_DIR    # where .docx images are extracted to
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 app.secret_key = 'typeset-studio-local'
@@ -1289,6 +1290,19 @@ def fonts_delete(name):
     return redirect(url_for('fonts_page'))
 
 
+def _flash_import(rep):
+    """Tell the user what came out of a Word file — and what didn't.
+
+    Silently dropping half a manuscript is the worst failure mode an importer
+    has, so both halves of the summary are surfaced.
+    """
+    got, lost = manuscript.import_summary(rep)
+    if got:
+        flash(f'Imported from Word: {got}.')
+    if lost:
+        flash(f'Note: {lost}.')
+
+
 FIGURE_EXTS = ('.jpg', '.jpeg', '.png', '.gif')
 
 
@@ -1404,7 +1418,9 @@ def generate():
         ms_path, ms_type = dest, 'file'
         if fn.lower().endswith('.docx'):
             try:
-                raw = manuscript.import_docx(dest)
+                rep = {}
+                raw = manuscript.import_docx(dest, report=rep)
+                _flash_import(rep)
             except ModuleNotFoundError:
                 flash('python-docx is not installed. Run: pip install python-docx')
                 return render_template('generate.html', presets=presets, form=form)
@@ -1869,7 +1885,10 @@ def _project_manuscript_text(proj):
         if os.path.exists(path):
             if ms_file.lower().endswith('.docx'):
                 try:
-                    return manuscript.import_docx(path)
+                    rep = {}
+                    text = manuscript.import_docx(path, report=rep)
+                    _flash_import(rep)     # only route calling this renders a page
+                    return text
                 except Exception:
                     return ''
             return open(path, encoding='utf-8', errors='replace').read()

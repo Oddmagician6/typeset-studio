@@ -158,7 +158,11 @@ Each type has a distinct visual signature in PDF (header between rules, italic b
 Courier uppercase, bold headline, classification banner) and semantic CSS classes in
 EPUB (`doc-block-letter`, etc.). Plain `~~~` with no type is unchanged.
 
-`.docx` import (`manuscript.import_docx`) maps Heading 1 → chapter, runs → bold/italic.
+`.docx` import (`manuscript.import_docx`) maps Heading 1/Title → chapter, other headings →
+subhead, runs → bold/italic, images → `~~~ figure` (extracted to the figure library), tables
+and Quote styles → plain `~~~` blocks, list items → bullet/number-prefixed paragraphs, and
+hyperlink text → plain text. Pass a dict as `report=` for counts; `import_summary(report)`
+turns it into the two sentences the UI flashes. See feature #47.
 
 ### Project (projects/*.json) — a saved book
 ```
@@ -829,6 +833,45 @@ and the #43 designed-cover EPUB test still passes.
 **Not done — `.docx` images.** Word still drops images (and tables) on import; that is Tier-5C's
 import-fidelity item, and the natural next step now that a figure block exists to import *into*.
 
+**47. `.docx` import fidelity** *(Tier-5C — "the gap most likely to read as *the tool is broken*";
+unblocked by #46, since there is finally a figure block to import *into*)*
+`import_docx` walked `doc.paragraphs` and rebuilt emphasis from `p.runs`. Measured on a Word file
+exercising the usual features, that silently lost: **both images**, **the entire table** (
+`doc.paragraphs` skips `w:tbl` outright), and **every hyperlinked phrase** — `Paragraph.runs` does
+not include runs nested in a `w:hyperlink`, so "the survey map" vanished mid-sentence. Quotes and
+list items arrived indistinguishable from body text.
+- `manuscript.py`: the importer now walks `doc.iter_inner_content()` (paragraphs **and** tables, in
+  document order). New helpers `_para_md` (walks runs *and* hyperlinks — keeps the words, drops the
+  URL, counts it), `_para_images` (pulls `a:blip` → `related_parts` blobs into the figure library),
+  `_table_md`, `_slug`, `_emph`. Also `FIGURE_DIR` as a module global, set by `app.py` like
+  `engine.FIGURE_DIR` — manuscript.py still imports neither app nor engine.
+- **Mapping:** images → `~~~ figure`, with a following **Caption**-styled paragraph becoming the
+  caption; tables → a plain `~~~` block, one row per paragraph, cells joined with ` · `; Quote /
+  Intense Quote (consecutive ones merged) → a plain `~~~` block; list items → paragraphs keeping a
+  `• ` bullet or a running `1. ` number as literal text; hyperlink text → plain text.
+- **Image names are content-addressed** (`<docx-slug>-<sha1[:8]>.ext`), so the project build path —
+  which re-imports the `.docx` on *every* rebuild — overwrites the same file instead of piling up
+  copies. Verified idempotent. `docPr/@descr` becomes the figure's `alt`; `@name` is ignored on
+  purpose (Word fills it with "Picture 1").
+- **Nothing is dropped silently.** `import_docx(path, report=dict)` fills counts; `import_summary()`
+  turns them into two sentences, flashed by `app._flash_import` on the two paths where a user has
+  just supplied the file (the compose upload, and opening the manuscript editor on a `.docx`
+  project). It reports both halves — what came across, *and* that tables aren't laid out as tables,
+  lists keep their marker as text, links lost their address, and **how many footnotes/endnotes were
+  found but not imported** (there is still no note block; that is Tier-5A).
+- Signature stays `import_docx(path) -> str`, so all five existing call sites are untouched.
+Verified by a scripted pass: a plain manuscript parses **identically to the old importer** (no
+regression) and writes nothing to the figure library; footnotes counted and surfaced; an unreadable
+image format reported rather than crashing; re-import byte-identical with no duplicate figures; an
+imported manuscript still satisfies the doc_model fidelity + stability properties. Then end-to-end
+through the real compose flow: the flash reads *"Imported from Word: 1 chapter, 1 subhead, 2 images,
+1 table, 1 quotation, 3 list items"*, and the built PDF contains the linked phrase, both table rows,
+the bullets, the numbered item and the quotation — every one of which the old importer dropped —
+with both images in the PDF **and** the EPUB.
+**Still not imported:** footnotes/endnotes (no note block yet), tables as real tables (no table
+block), and link addresses (no link type). Each is blocked on a Tier-5A block type, not on the
+importer.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1053,9 +1096,7 @@ seven-file round: `manuscript.py` (parse) · `engine.py` (render) · `epub.py` (
 - ~~**Images / figures — the single biggest hole.**~~ — **SHIPPED (feature #46):** a
   `~~~ figure src="…"` block (caption = the block's content), inline or `full="yes"` for its own
   page, a shared library + Figures manager, a preset `figure` section, and `<figure>` output in the
-  EPUB. **Still open:** `manuscript.import_docx` continues to **drop every image** in a Word file
-  (it iterates `doc.paragraphs`, so inline shapes and tables never appear) — see the import-fidelity
-  item below, which is now the obvious next step since there is finally a block to import *into*.
+  EPUB. Word images now import into it too — **SHIPPED (feature #47)**.
 - **Lists (bulleted / numbered).** No `ListFlowable` anywhere in `engine.py`. Markdown `- ` /
   `1. ` parsing, a preset `list` section (bullet glyph, indent, spacing), `<ul>`/`<ol>` in EPUB.
 - **Block quotation.** Today the nearest thing is a plain `~~~` doc block, which is an
@@ -1085,14 +1126,12 @@ in EPUB, plus internal links to chapters (the TOC already computes the targets).
 
 **C. Import fidelity — the gap most likely to read as "the tool is broken"**
 
-`manuscript.import_docx` (`manuscript.py:287`) maps Heading 1/Title → chapter, other headings →
-subhead, scene breaks, and bold/italic runs. Dropped on the floor: **images, tables, footnotes,
-lists, block quotes, alignment, page breaks, hyperlinks**. Vellum's entire pitch is that a
-well-styled `.docx` arrives structurally intact. Each Tier-5A block type should land its
-`.docx` mapping in the same change (Word's `List Paragraph`, `Quote`/`Intense Quote`,
-`p.alignment`, `w:drawing`), and a first pass should at minimum **stop discarding content
-silently** — a post-import summary ("3 images and 1 table were not imported") on the compose
-page would be honest and cheap. Also still open from #30: no `.docx` **poem** import.
+~~The importer dropped images, tables, hyperlink text, lists and quotes on the floor.~~ —
+**SHIPPED (feature #47):** images become figures, tables and Quote styles become set-apart blocks,
+hyperlink text survives, list markers are kept as text, and an import summary reports both what
+came across and what didn't. **Remaining**, each blocked on a Tier-5A block type rather than on the
+importer: **footnotes/endnotes** (counted and reported, not imported), **tables as real tables**,
+and **link addresses**. Also still open from #30: no `.docx` **poem** import.
 
 **D. Output correctness / validation — paid tools quietly win here**
 
@@ -1167,10 +1206,10 @@ project persistence. Add an **uncounted-chapter marker** to the heading syntax a
 - **Freeform cover canvas** — already ruled out in the cover strategy note below; restated here
   because Book Brush-style tools show up in every comparison.
 
-**Suggested order.** Designed-cover-in-EPUB (D) → bundled typefaces (E) → figures/images incl.
-`.docx` (A + C) → lists / block quote / alignment (A) → links (B) → element vocabulary (F) →
-endnotes (A) → EPUB preflight + device preview (D) → large print + trim presets (G) → footnotes
-(A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
+**Suggested order.** ~~Designed-cover-in-EPUB (D)~~ #43 → ~~bundled typefaces (E)~~ #44 →
+~~figures/images incl. `.docx` (A + C)~~ #46/#47 → **lists / block quote / alignment (A)** ← next
+→ links (B) → element vocabulary (F) → endnotes (A) → EPUB preflight + device preview (D) →
+large print + trim presets (G) → footnotes (A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 
 ### ◻ Strategy notes (context for prioritising, not committed work)
