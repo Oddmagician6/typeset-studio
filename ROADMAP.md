@@ -79,6 +79,8 @@ quote:         {indent, right_indent, first_indent, font_size, line_leading,
                source_style, source_align, source_gap}
                style / source_style: "regular" | "italic"
 align:         {space_around, indent, para_gap}     alignment blocks only
+link:          {underline, color, epub_underline}
+               underline is the PRINT setting; color/epub_underline are ebook-only
 figure:        {width, align, max_height, space_around,
                caption_size, caption_style, caption_align, caption_gap}
                width/max_height are fractions (of the text width / text height)
@@ -152,6 +154,7 @@ punctuation applied first. Markup conventions:
 | `~~~ list` / `~~~ list type="number"` | a list — **one item per line** |
 | `~~~ quote source="…"` | an inset quotation (prose; lines wrap) |
 | `~~~ center` / `right` / `left` | an aligned block — **one line per line** |
+| `[text](https://…)` | a link: web, `mailto:`, or an in-book `#anchor` |
 | `*italic*`         | *italic*                       |
 | `**bold**`         | **bold**                       |
 | blank line         | new paragraph                  |
@@ -255,6 +258,10 @@ created, updated    ISO 8601 datetime strings
   before any character/word-level operations (drop cap, raised initial, small-caps lead-in)
   — these styles are incompatible with inline markup on the first paragraph anyway. Never
   pass raw `text` with embedded tags to code that slices by index or splits on spaces.
+  **Since #49 this also drops links** in a chapter's first paragraph under those three styles
+  (`open_style: "none"` keeps them, since it passes the original markup through). The words
+  survive, the `<a>` does not. Documented in the README rather than worked around: recovering
+  it would mean mapping character offsets back through the markup for a rare case.
 
 - **TOC two-pass build:** when `meta['include_toc']` is True, `build_pdf` runs the story
   through a first (temp-file) build to capture `doc._toc_entries` and `doc._body_start`,
@@ -921,6 +928,46 @@ end-to-end where the imported bullets, numbers and quotation all render; and a *
 rich mode shows bullets, counters, the quote rule and centred text, and pressing Enter in a list makes
 a new item that serializes as its own line. All prior suites still pass.
 
+**49. Links — `[text](target)`, clickable in both outputs** *(Tier-5B)*
+Nothing emitted an `<a>`, so an *Also By* page couldn't send a reader anywhere — the gap with the
+most direct commercial cost, and one a free competitor (Reedsy) already closes.
+- **Targets are restricted on purpose**: `http(s)://`, `mailto:`, or an in-book `#anchor`
+  (`manuscript.LINK_TARGET`). A permissive rule would silently turn `[sic](ibid)` in an existing
+  manuscript into a link — the same backward-compatibility trap avoided for lists in #48. `\[`
+  escapes a literal bracket.
+- `manuscript.py`: `_inline` stashes link targets **before** the emphasis passes (a URL containing
+  `_` or `*` would otherwise be eaten) and re-wraps them afterwards, so emphasis *inside* link text
+  still works. New `chapter_anchors(chapter, idx)` — `#chapter-N` plus the title slug — lives here,
+  not in the engine, because **both** builders need the same answer and neither should import the
+  other; `epub.py` picks it up as its one project import (manuscript.py is stdlib-only too).
+- `engine.py`: chapter openers plant `<a name="…"/>` destinations, so `#anchor` links resolve inside
+  the PDF (verified as real GOTO links, not just text). Links are clickable but **unstyled in print**
+  by default — colour and underline are screen idioms and a POD interior is black; a preset can turn
+  the underline on.
+- `epub.py`: `<a href>` passes through as valid XHTML; in-book `#anchor` targets are rewritten to the
+  chapter *file* that holds them (`_ANCHORS` + `_resolve_anchors`), and link colour/underline come
+  from the preset via the stylesheet.
+- **Matter pages were quietly wrong and are now fixed.** `_matter_xhtml` rendered *raw author text*,
+  so the ebook showed literal `**asterisks**` where the PDF (which runs the same text through
+  `_ms_inline`) showed bold — and would have dropped every link on the Also By page. It now uses
+  `_md_emph_to_html`, extended to handle links the same way `_inline` does.
+- **Round-trip**: runs gained a `link` field across `doc_model.py`, `static/doc_model.js` **and**
+  `static/wysiwyg.js` (which now renders real `<a>` elements and reads them back). `to_markdown`
+  groups consecutive runs sharing a target, so `[**bold** link](url)` round-trips as *one* link.
+  Found along the way: `doc_model.py` keeps its **own copy** of the escape layer, so `\[` had to be
+  added there too — the JS↔Python parity run is what caught it.
+Verified: 16 new `test_doc_model.py::test_links` checks (fidelity + stability, every target kind,
+emphasis inside a link, underscores in a URL surviving, `[sic](ibid)` and `\[` staying literal,
+chapter anchors); a JS↔Python parity run over a link corpus plus blocks, figures and poems; a
+rendered PDF with real external **and** internal (GOTO) links; an EPUB where in-book links resolve to
+`chapterNNN.xhtml` and the Also By page carries a live link; and a live browser pass — rich mode shows
+`<a>` elements, editing link text round-trips, and a link split across bold/plain runs re-serializes
+as one link, with no console errors.
+**Known limit (pre-existing, now documented):** a link in a chapter's *first* paragraph is lost under
+the drop-cap / raised-initial / small-caps-lead-in opening styles, because `_opening_para` re-sets
+those first words as plain text via `_plain()`. The words survive; the link doesn't. Opening style
+*None* keeps it.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1164,14 +1211,14 @@ seven-file round: `manuscript.py` (parse) · `engine.py` (render) · `epub.py` (
   `Table`-flowable split behaviour. Low priority for the fiction audience; note that `.docx`
   table text is currently dropped entirely.
 
-**B. Links — the biggest EPUB-specific gap**
+**B. Links — ~~the biggest EPUB-specific gap~~ SHIPPED (feature #49)**
 
-Nothing in `epub.py` emits an `<a>`. Vellum has Web Link, Internal Link, and **Store Link**
-(a "buy from your preferred retailer" page); Atticus has links throughout. An ebook whose
-*Also By* and *About the Author* pages aren't clickable is commercially weaker than a free
-competitor's output — Reedsy Studio does this. Wants: `[text](url)` inline in `manuscript.py`
-→ ReportLab `<a href>` in PDF (blue-free, print-safe: styled as normal text) and real anchors
-in EPUB, plus internal links to chapters (the TOC already computes the targets).
+~~Nothing in `epub.py` emits an `<a>`, so an ebook whose *Also By* and *About the Author*
+pages aren't clickable was commercially weaker than a free competitor's output.~~ **SHIPPED
+(feature #49):** `[text](url)` inline, web / `mailto:` / in-book `#anchor` targets, clickable in
+both outputs, print-safe by default. **Remaining:** Vellum's **Store Link** (a "buy from your
+preferred retailer" page) is a different feature — it needs the per-retailer ebook builds in
+section D, not link syntax.
 
 **C. Import fidelity — the gap most likely to read as "the tool is broken"**
 
@@ -1258,7 +1305,7 @@ project persistence. Add an **uncounted-chapter marker** to the heading syntax a
 
 **Suggested order.** ~~Designed-cover-in-EPUB (D)~~ #43 → ~~bundled typefaces (E)~~ #44 →
 ~~figures/images incl. `.docx` (A + C)~~ #46/#47 → ~~lists / block quote / alignment (A)~~ #48 →
-**links (B)** ← next → element vocabulary (F) → endnotes (A) → EPUB preflight + device preview (D) →
+~~links (B)~~ #49 → **element vocabulary (F)** ← next → endnotes (A) → EPUB preflight + device preview (D) →
 large print + trim presets (G) → footnotes (A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 

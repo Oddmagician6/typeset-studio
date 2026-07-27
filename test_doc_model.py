@@ -407,6 +407,64 @@ def test_blocks():
     _check("editor-built list round-trips", back == built, _diff(back, built))
 
 
+LINKS_MD = """\
+# Also By
+
+Find the rest at [ashforgestudio.com](https://ashforgestudio.com/books) or write
+to [the studio](mailto:hello@example.com).
+
+A [**bold** link](https://example.com/a_b_c) and a cross-reference to
+[the first chapter](#also-by).
+
+Literal [sic](ibid) is not a link, and \\[this](https://x.com) is escaped.
+"""
+
+
+def test_links():
+    """Links survive the round trip, and only real targets become links."""
+    print("\n[links]")
+    for smart in (True, False):
+        doc1 = doc_model.from_markdown(LINKS_MD, smartquotes=smart)
+        md2 = doc_model.to_markdown(doc1)
+        doc2 = doc_model.from_markdown(md2, smartquotes=smart)
+        eng_a = manuscript.parse_markdown(LINKS_MD, smartquotes=smart)
+        eng_b = manuscript.parse_markdown(md2, smartquotes=smart)
+        _check(f"link engine fidelity (smart={smart})", eng_a == eng_b, _diff(eng_a, eng_b))
+        _check(f"link model stability (smart={smart})", doc1 == doc2, _diff(doc1, doc2))
+
+    runs = [r for b in doc_model.from_markdown(LINKS_MD) if b["type"] == "para"
+            for r in b["runs"]]
+    linked = [r for r in runs if r["link"]]
+    _check("four links found", len(linked) == 5, [r["link"] for r in linked])
+    _check("web target kept",
+           any(r["link"] == "https://ashforgestudio.com/books" for r in linked))
+    _check("mailto kept", any(r["link"] == "mailto:hello@example.com" for r in linked))
+    _check("in-book anchor kept", any(r["link"] == "#also-by" for r in linked))
+    _check("emphasis inside a link survives",
+           any(r["bold"] and r["link"].startswith("https://example.com") for r in linked))
+    _check("underscores in a target are not italicised",
+           any(r["link"] == "https://example.com/a_b_c" for r in linked),
+           [r["link"] for r in linked])
+
+    # things that must NOT become links
+    plain = " ".join(r["text"] for r in runs if not r["link"])
+    _check("[sic](ibid) stays literal", "[sic](ibid)" in plain, plain)
+    _check("escaped bracket stays literal", "[this](https://x.com)" in plain, plain)
+
+    # the engine markup carries a real anchor
+    eng = manuscript.parse_markdown(LINKS_MD)
+    body = " ".join(b[1] for ch in eng["chapters"] for b in ch["blocks"] if b[0] == "para")
+    _check("engine emits <a href>", '<a href="mailto:hello@example.com">' in body, body[:200])
+    _check("engine escapes nothing odd in the target",
+           '<a href="https://example.com/a_b_c">' in body, body[:400])
+
+    # chapter anchors, shared by both builders
+    anchors = manuscript.chapter_anchors({"title": "The Salt Road"}, 2)
+    _check("anchors: positional + slug", anchors == ["chapter-2", "the-salt-road"], anchors)
+    _check("untitled chapter still linkable",
+           manuscript.chapter_anchors({"title": None}, 3) == ["chapter-3"])
+
+
 if __name__ == "__main__":
     test_roundtrips()
     test_adversarial()
@@ -415,6 +473,7 @@ if __name__ == "__main__":
     test_bylines()
     test_figures()
     test_blocks()
+    test_links()
     print()
     if _failures:
         print(f"FAILED ({len(_failures)}): " + "; ".join(_failures))

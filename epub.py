@@ -11,32 +11,79 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 
+# The only project import: the shared link-anchor rule, so the EPUB resolves
+# `[see](#slug)` to the same chapter the PDF does. manuscript.py is stdlib-only,
+# so this keeps epub.py dependency-free as well.
+from manuscript import chapter_anchors as _ms_anchors, LINK_RE as _LINK_RE
+
+
+# In-book links (`[see](#the-salt-road)`) carry a bare fragment, which in a
+# multi-file EPUB has to become "that chapter's file". Filled per build.
+_ANCHORS = {}
+
+_HREF_RE = re.compile(r'(<a\s[^>]*href=")#([^"]+)(")')
+
+
+def _resolve_anchors(text):
+    """Point `href="#anchor"` at the chapter file that anchor lives in."""
+    if not _ANCHORS:
+        return text
+    def sub(m):
+        target = _ANCHORS.get(m.group(2))
+        return m.group(1) + (target or ('#' + m.group(2))) + m.group(3)
+    return _HREF_RE.sub(sub, text)
+
 
 # ---------------------------------------------------------------- markup
 def _markup_to_html(text):
-    """Convert ReportLab XML tags to HTML equivalents."""
+    """Convert ReportLab XML tags to HTML equivalents.
+
+    `<a href="…">` is already valid XHTML and passes straight through, except
+    that in-book `#anchor` targets are rewritten to the file that holds them.
+    """
     text = text.replace('<b>', '<strong>').replace('</b>', '</strong>')
     text = text.replace('<i>', '<em>').replace('</i>', '</em>')
-    return text
+    return _resolve_anchors(text)
 
 
 def _md_emph_to_html(text):
-    """Escape XML, then convert Markdown emphasis to HTML (bold before italic).
+    """Escape XML, then convert Markdown links and emphasis to HTML.
 
-    Mirrors manuscript._inline's emphasis substitutions, for the few places that
-    render raw author text (e.g. the contributors page) rather than already-parsed
-    manuscript blocks.
+    Mirrors manuscript._inline (links carved out first, then bold before italic)
+    for the places that render **raw author text** — the matter pages and the
+    contributors list — rather than already-parsed manuscript blocks. The PDF
+    runs the same text through `_ms_inline`, so without this the ebook showed
+    literal asterisks and dropped every link on the Also By page.
     """
     text = html.escape(text, quote=False)
+
+    targets = []
+
+    def _stash(m):
+        targets.append(m.group(2))
+        return f'\x00{len(targets) - 1}\x00{m.group(1)}\x01'
+
+    text = _LINK_RE.sub(_stash, text)
     text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
     text = re.sub(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<em>\1</em>', text)
     text = re.sub(r'_(?!\s)(.+?)(?<!\s)_', r'<em>\1</em>', text)
-    return text
+    if targets:
+        text = re.sub(
+            r'\x00(\d+)\x00(.*?)\x01',
+            lambda m: '<a href="%s">%s</a>'
+                      % (html.escape(targets[int(m.group(1))], quote=True), m.group(2)),
+            text, flags=re.S)
+    return _resolve_anchors(text)
 
 
 # ---------------------------------------------------------------- CSS
-def _style_css():
-    return """\
+def _style_css(preset=None):
+    lm = (preset or {}).get('link', {})
+    colour = (lm.get('color') or '').strip()
+    rules = ['a { color: %s; }' % (colour or 'inherit'),
+             'a { text-decoration: %s; }'
+             % ('underline' if lm.get('epub_underline', True) else 'none')]
+    return '\n'.join(rules) + '\n' + """\
 body {
   font-family: Georgia, "Times New Roman", serif;
   font-size: 100%;
@@ -275,7 +322,7 @@ def _matter_xhtml(heading, text, css_class):
                 md += ' — ' + bio.strip()
             body += f'  <p>{_md_emph_to_html(md)}</p>\n'
             continue
-        body += f'  <p{cls}>{_markup_to_html(b)}</p>\n'
+        body += f'  <p{cls}>{_md_emph_to_html(b)}</p>\n'
     body += '</div>\n'
     return _xhtml(heading or 'Front Matter', body)
 
@@ -604,6 +651,12 @@ def build_epub(manuscript, preset, out_path, meta):
     figures  = _collect_figures(chapters)
     fig_href = {src: f['href'] for src, f in figures.items()}
 
+    # anchor -> chapter file, so `[see](#slug)` resolves across the spine
+    _ANCHORS.clear()
+    for _i, _ch in enumerate(chapters, start=1):
+        for _a in _ms_anchors(_ch, _i):
+            _ANCHORS.setdefault(_a, f'chapter{_i:03d}.xhtml')
+
     level = meta.get('front_matter', 'full')
     if level is True:  level = 'full'
     if level is False: level = 'none'
@@ -684,7 +737,7 @@ def build_epub(manuscript, preset, out_path, meta):
                     _content_opf(uid, meta, manifest_items, spine_items, modified))
         zf.writestr('OEBPS/nav.xhtml',
                     _nav_xhtml(chapters, has_cover, has_front, preset, meta=meta))
-        zf.writestr('OEBPS/style.css', _style_css())
+        zf.writestr('OEBPS/style.css', _style_css(preset))
 
         if has_cover:
             zf.write(cover_src, f'OEBPS/{cover_img_fn}')

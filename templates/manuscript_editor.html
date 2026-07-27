@@ -169,6 +169,8 @@
     content:"Caption (optional)…";color:var(--faint)}
   .ms-rich strong{font-weight:700}
   .ms-rich em{font-style:italic}
+  /* links read as links while writing; the book's own styling is the preset's */
+  .ms-rich a{color:var(--red);text-decoration:underline;text-underline-offset:2px}
   @media (max-width:880px){.work{grid-template-columns:1fr}.side{position:static}}
 {% endblock %}
 

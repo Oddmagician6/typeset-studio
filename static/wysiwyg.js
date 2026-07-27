@@ -21,14 +21,19 @@
       var node = document.createTextNode(r.text);
       if (r.bold && r.italic) {
         var s = document.createElement('strong'), e = document.createElement('em');
-        e.appendChild(node); s.appendChild(e); el.appendChild(s);
+        e.appendChild(node); s.appendChild(e); node = s;
       } else if (r.bold) {
-        var b = document.createElement('strong'); b.appendChild(node); el.appendChild(b);
+        var b = document.createElement('strong'); b.appendChild(node); node = b;
       } else if (r.italic) {
-        var i = document.createElement('em'); i.appendChild(node); el.appendChild(i);
-      } else {
-        el.appendChild(node);
+        var i = document.createElement('em'); i.appendChild(node); node = i;
       }
+      if (r.link) {                        // the link wraps whatever emphasis it has
+        var a = document.createElement('a');
+        a.setAttribute('href', r.link);
+        a.appendChild(node);
+        node = a;
+      }
+      el.appendChild(node);
     });
     if (!el.childNodes.length) el.appendChild(document.createElement('br'));
   }
@@ -219,13 +224,18 @@
     return el.style && el.style.fontStyle === 'italic';
   }
 
-  function collectRuns(node, bold, italic, runs) {
+  function collectRuns(node, bold, italic, runs, link) {
     node.childNodes.forEach(function (child) {
       if (child.nodeType === 3) {                       // text
-        if (child.data) runs.push({ text: child.data, bold: bold, italic: italic });
+        if (child.data) runs.push({ text: child.data, bold: bold, italic: italic,
+                                    link: link || '' });
       } else if (child.nodeType === 1) {                // element
         if (child.tagName === 'BR') return;             // soft breaks -> ignored
-        collectRuns(child, bold || isBoldEl(child), italic || isItalicEl(child), runs);
+        var href = link || '';
+        if (child.tagName === 'A' && child.getAttribute('href'))
+          href = child.getAttribute('href');
+        collectRuns(child, bold || isBoldEl(child), italic || isItalicEl(child),
+                    runs, href);
       }
     });
   }
@@ -234,15 +244,16 @@
     var out = [];
     runs.forEach(function (r) {
       var last = out[out.length - 1];
-      if (last && last.bold === r.bold && last.italic === r.italic) last.text += r.text;
-      else out.push({ text: r.text, bold: r.bold, italic: r.italic });
+      if (last && last.bold === r.bold && last.italic === r.italic
+          && (last.link || '') === (r.link || '')) last.text += r.text;
+      else out.push({ text: r.text, bold: r.bold, italic: r.italic, link: r.link || '' });
     });
     return out.filter(function (r) { return r.text !== ''; });
   }
 
   function readInline(el) {
     var runs = [];
-    collectRuns(el, false, false, runs);
+    collectRuns(el, false, false, runs, '');
     return coalesce(runs);
   }
 

@@ -249,7 +249,7 @@
       </fieldset>
 
       <fieldset>
-        <legend>Lists, quotations &amp; alignment</legend>
+        <legend>Lists, quotations, alignment &amp; links</legend>
         <div class="fs-body">
           {% set li = p.get('list', {}) %}
           {% set q  = p.get('quote', {}) %}
@@ -323,7 +323,24 @@
             <div class="field num"><label>Between aligned lines</label><span class="hint">points</span>
               <input type="number" step="0.5" name="al_para_gap" value="{{ al.get('para_gap', 3.0) }}"></div>
           </div>
+          {% set lk = p.get('link', {}) %}
+          <div class="row">
+            <div class="check"><input type="checkbox" id="f-lk-u" name="lk_underline"
+                   {{ 'checked' if lk.get('underline') }}>
+              <label for="f-lk-u">Underline links in the printed book</label>
+              <span class="hint">off by default — links stay clickable but read as ordinary text</span></div>
+          </div>
+          <div class="row">
+            <div class="check"><input type="checkbox" id="f-lk-eu" name="lk_epub_underline"
+                   {{ 'checked' if lk.get('epub_underline', True) }}>
+              <label for="f-lk-eu">Underline links in the ebook</label></div>
+            <div class="field"><label>Ebook link colour</label>
+              <span class="hint">blank = same as the text. Ebook only; a print interior is usually black</span>
+              <input type="text" name="lk_color" placeholder="#7a1f14" value="{{ lk.get('color','') }}"></div>
+          </div>
           <p class="hint" style="margin-top:6px;line-height:1.6">
+            <code>[text](https://example.com)</code> — also <code>mailto:</code> and
+            <code>[see](#chapter-2)</code> or <code>#the-chapter-title</code> for a link inside the book.<br>
             <code>~~~ list</code> — one item per paragraph; <code>~~~ list type="number"</code> numbers them
             (<code>start="3"</code> to continue).<br>
             <code>~~~ quote source="Marcus Aurelius"</code> — an inset quotation; the source line is optional.<br>

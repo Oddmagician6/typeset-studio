@@ -88,6 +88,7 @@ The tool reads a light, plain-text convention:
 | `~~~ list` … `~~~` | a bulleted list — one item per line |
 | `~~~ quote` … `~~~` | an inset quotation |
 | `~~~ center` … `~~~` | a centred block (also `right`, `left`) |
+| `[text](https://…)` | a link (also `mailto:` and `#in-book` targets) |
 | `*italic*`         | *italic*                      |
 | `**bold**`         | **bold**                      |
 | blank line         | new paragraph                 |
@@ -113,6 +114,38 @@ After importing, the app tells you exactly what came across and what didn't — 
 is dropped silently. Footnotes and endnotes are **not** imported yet; you'll be told how
 many were found. Images land in your Figures library, named after the Word file, so
 re-importing the same document doesn't pile up copies.
+
+### Links
+
+```
+Find the rest at [ashforgestudio.com](https://ashforgestudio.com/books),
+or write to [the studio](mailto:hello@example.com).
+
+The route is described again in [the second chapter](#the-plateau).
+```
+
+Links work in **both** outputs — clickable in the PDF, real links in the EPUB. This
+matters most on the *Also By* and *About the Author* pages, where a reader tapping
+your newsletter link is the whole point.
+
+Three kinds of target are recognised, and only these — so ordinary prose like
+`[sic](ibid)` is never mistaken for a link:
+
+- `https://…` or `http://…`
+- `mailto:…`
+- `#in-book` — either `#chapter-2` or the chapter title's slug, e.g. `#the-plateau`
+
+To type a literal bracket that would otherwise start a link, escape it: `\[`.
+
+In print, links are **clickable but unstyled** by default: no colour, no underline,
+because a POD interior is usually black and a blue link looks like a mistake on paper.
+The style can turn on a print underline, and set the ebook's link colour separately —
+see *Lists, quotations, alignment & links* in the style editor.
+
+One limit: a link in a chapter's **first paragraph** is dropped when the style uses a
+drop cap, raised initial or small-caps lead-in. Those openings re-set the first words
+as plain text, so any markup in them goes; the words survive, the link doesn't. Put
+links in a later paragraph, or use an opening style of *None*.
 
 ### Lists, quotations and aligned passages
 

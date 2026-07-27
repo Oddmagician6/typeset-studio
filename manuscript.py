@@ -59,19 +59,30 @@ _BSL        = chr(92)
 _PARK_STAR  = chr(0xE000)
 _PARK_UNDER = chr(0xE001)
 _PARK_BSL   = chr(0xE002)
+_PARK_BRK   = chr(0xE003)
 
 
 def _park_escapes(text):
     text = text.replace(_BSL + _BSL, _PARK_BSL)      # \\  -> literal backslash
     text = text.replace(_BSL + '*', _PARK_STAR)      # \*  -> literal *
     text = text.replace(_BSL + '_', _PARK_UNDER)     # \_  -> literal _
+    text = text.replace(_BSL + '[', _PARK_BRK)       # \[  -> literal [
     return text
 
 
 def _restore_escapes(text):
     return (text.replace(_PARK_STAR, '*')
                 .replace(_PARK_UNDER, '_')
+                .replace(_PARK_BRK, '[')
                 .replace(_PARK_BSL, _BSL))
+
+
+# A link is `[text](target)`. The target is deliberately restricted to things that
+# are unambiguously links — a web address, an email, or an in-book `#anchor`. That
+# keeps ordinary prose like "[sic](ibid)" from silently becoming a link, which a
+# permissive rule would do to manuscripts that predate this feature.
+LINK_TARGET = r'(?:https?://[^\s)]+|mailto:[^\s)]+|#[A-Za-z0-9][\w\-]*)'
+LINK_RE = re.compile(r'\[([^\[\]]+)\]\((' + LINK_TARGET + r')\)')
 
 
 def _is_block_line(line):
@@ -117,9 +128,28 @@ def _inline(text, smartquotes=True):
     if smartquotes:
         text = _smarten(text)
     text = html.escape(text, quote=False)
+
+    # Pull link targets out before the emphasis passes: a URL may contain
+    # underscores or asterisks, which would otherwise be read as markup.
+    targets = []
+
+    def _stash(m):
+        targets.append(m.group(2))
+        return f'\x00{len(targets) - 1}\x00{m.group(1)}\x01'
+
+    text = LINK_RE.sub(_stash, text)
+
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<i>\1</i>', text)
     text = re.sub(r'_(?!\s)(.+?)(?<!\s)_', r'<i>\1</i>', text)
+
+    if targets:
+        # the link text keeps whatever emphasis it was given
+        text = re.sub(
+            r'\x00(\d+)\x00(.*?)\x01',
+            lambda m: f'<a href="{html.escape(targets[int(m.group(1))], quote=True)}">'
+                      f'{m.group(2)}</a>',
+            text, flags=re.S)
     return _restore_escapes(text)
 
 
@@ -311,8 +341,29 @@ FIGURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
 _SLUG_RE = re.compile(r'[^a-z0-9]+')
 
 
+def slugify(name):
+    """'The Salt Road' -> 'the-salt-road'. Also the id used by `#anchor` links."""
+    return _SLUG_RE.sub('-', (name or '').lower()).strip('-')
+
+
+def chapter_anchors(chapter, idx):
+    """Link destinations for a chapter: `#chapter-N`, plus `#<title-slug>`.
+
+    Lives here rather than in the engine because both outputs need the same
+    answer — the PDF plants these as named destinations, the EPUB maps them to
+    the chapter's file — and neither builder should have to import the other.
+    The positional form is always present, so a chapter with no title (or a
+    title that slugs to nothing) can still be linked to.
+    """
+    names = [f'chapter-{idx}']
+    slug = slugify(chapter.get('title') or '')
+    if slug and slug not in names:
+        names.append(slug)
+    return names
+
+
 def _slug(name):
-    return _SLUG_RE.sub('-', (name or '').lower()).strip('-') or 'image'
+    return slugify(name) or 'image'
 
 
 def _emph(runs):

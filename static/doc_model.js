@@ -25,6 +25,9 @@
   // Fenced blocks whose content is line-oriented — one source line per item /
   // per line, not wrapped into a paragraph. Mirrors manuscript.LINE_BLOCKS.
   var LINE_BLOCKS = ['list', 'center', 'centre', 'right', 'left'];
+  // A link target is restricted to unambiguous forms, so ordinary prose like
+  // "[sic](ibid)" never becomes a link. Mirrors manuscript.LINK_RE.
+  var LINK_RE = /\[([^\[\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+|#[A-Za-z0-9][\w\-]*)\)/g;
   var SCENE_BREAK_RE = /^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$/;
   var CHAPTER_RE     = /^#\s+(.*)$/;
   var SUBHEAD_RE     = /^##\s+(.*)$/;
@@ -52,26 +55,29 @@
 
   // ---- escape layer (private-use codepoints, same scheme as Python) --------
   var BSL = '\\';
-  var PARK_STAR = '', PARK_UNDER = '', PARK_BSL = '';
+  var PARK_STAR = '', PARK_UNDER = '', PARK_BSL = '', PARK_BRK = '';
 
   function parkEscapes(text) {
     return text.split(BSL + BSL).join(PARK_BSL)   // \\ -> literal backslash
                .split(BSL + '*').join(PARK_STAR)  // \* -> literal *
-               .split(BSL + '_').join(PARK_UNDER); // \_ -> literal _
+               .split(BSL + '_').join(PARK_UNDER)  // \_ -> literal _
+               .split(BSL + '[').join(PARK_BRK);   // \[ -> literal [
   }
   function restoreEscapes(text) {
     return text.split(PARK_STAR).join('*')
                .split(PARK_UNDER).join('_')
+               .split(PARK_BRK).join('[')
                .split(PARK_BSL).join(BSL);
   }
   function escapeAll(text) {
     return text.split(BSL).join(BSL + BSL)
                .split('*').join(BSL + '*')
-               .split('_').join(BSL + '_');
+               .split('_').join(BSL + '_')
+               .split('[').join(BSL + '[');
   }
 
-  function run(text, bold, italic) {
-    return { text: text, bold: !!bold, italic: !!italic };
+  function run(text, bold, italic, link) {
+    return { text: text, bold: !!bold, italic: !!italic, link: link || '' };
   }
 
   // ---- inline: markdown <-> runs -------------------------------------------
@@ -113,14 +119,14 @@
     var out = [];
     runs.forEach(function (r) {
       var last = out[out.length - 1];
-      if (last && last.bold === r.bold && last.italic === r.italic) last.text += r.text;
-      else out.push({ text: r.text, bold: r.bold, italic: r.italic });
+      if (last && last.bold === r.bold && last.italic === r.italic
+          && (last.link || '') === (r.link || '')) last.text += r.text;
+      else out.push({ text: r.text, bold: r.bold, italic: r.italic, link: r.link || '' });
     });
     return out.filter(function (r) { return r.text !== ''; });
   }
 
-  function parseInline(text) {
-    text = parkEscapes(text);
+  function emphasisRuns(text) {
     var runs = [];
     splitBySpans(text, BOLD_RE).forEach(function (seg) {
       if (seg.hit) { runs.push(run(seg.text, true, false)); return; }
@@ -133,18 +139,45 @@
     return runs;
   }
 
+  // Links are carved out before the emphasis passes: a target may contain _ or *.
+  function parseInline(text) {
+    text = parkEscapes(text);
+    var out = [], pos = 0;
+    eachMatch(LINK_RE, text, function (m) {
+      if (m.index > pos) out = out.concat(emphasisRuns(text.slice(pos, m.index)));
+      var target = restoreEscapes(m[2]);
+      emphasisRuns(m[1]).forEach(function (r) { r.link = target; out.push(r); });
+      pos = m.index + m[0].length;
+    });
+    if (pos < text.length) out = out.concat(emphasisRuns(text.slice(pos)));
+    return coalesce(out);
+  }
+
+  function emphMd(r) {
+    if (r.bold)   return '**' + escapeAll(r.text) + '**';
+    if (r.italic) return '*' + escapeAll(r.text) + '*';
+    return escapePlain(r.text);
+  }
+
   function runsToMd(runs) {
-    return runs.map(function (r) {
-      if (r.bold)   return '**' + escapeAll(r.text) + '**';
-      if (r.italic) return '*' + escapeAll(r.text) + '*';
-      return escapePlain(r.text);
-    }).join('');
+    var parts = [], i = 0;
+    while (i < runs.length) {
+      var link = runs[i].link || '';
+      if (!link) { parts.push(emphMd(runs[i])); i++; continue; }
+      var inner = [];                       // one [..](..) per run of the same link
+      while (i < runs.length && (runs[i].link || '') === link) {
+        inner.push(emphMd(runs[i])); i++;
+      }
+      parts.push('[' + inner.join('') + '](' + link + ')');
+    }
+    return parts.join('');
   }
 
   function sameRuns(a, b) {
     if (a.length !== b.length) return false;
     for (var i = 0; i < a.length; i++) {
-      if (a[i].text !== b[i].text || a[i].bold !== b[i].bold || a[i].italic !== b[i].italic)
+      if (a[i].text !== b[i].text || a[i].bold !== b[i].bold || a[i].italic !== b[i].italic
+          || (a[i].link || '') !== (b[i].link || ''))
         return false;
     }
     return true;
@@ -154,7 +187,8 @@
     // Escape only if the literal text would otherwise re-parse as emphasis.
     var escapedBsl = text.split(BSL).join(BSL + BSL);
     if (sameRuns(parseInline(escapedBsl), [run(text, false, false)])) return escapedBsl;
-    return escapedBsl.split('*').join(BSL + '*').split('_').join(BSL + '_');
+    return escapedBsl.split('*').join(BSL + '*').split('_').join(BSL + '_')
+                     .split('[').join(BSL + '[');
   }
 
   function isBlockLine(line) {

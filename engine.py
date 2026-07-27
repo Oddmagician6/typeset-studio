@@ -25,7 +25,7 @@ try:
 except ImportError:
     _HAVE_PYPHEN = False
 
-from manuscript import _inline as _ms_inline
+from manuscript import _inline as _ms_inline, chapter_anchors as _ms_anchors
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
@@ -1588,10 +1588,14 @@ class BookDoc(BaseDocTemplate):
 # ---------------------------------------------------------------- styles
 def _styles(preset, fonts):
     b = preset['body']
+    # Links are clickable but unstyled in print by default — a coloured or
+    # underlined link is a screen idiom, and a POD interior is usually black.
+    # The style can turn the underline on; colour is an ebook-only setting.
     body = ParagraphStyle('body', fontName=fonts['regular'], fontSize=b['size'],
                           leading=b['leading'],
                           alignment=TA_JUSTIFY if b['justify'] else TA_LEFT,
                           firstLineIndent=b['indent'] * inch,
+                          linkUnderline=1 if preset.get('link', {}).get('underline') else 0,
                           allowWidows=0, allowOrphans=0)
     first = ParagraphStyle('first', parent=body, firstLineIndent=0)
     c = preset['chapter']
@@ -2487,12 +2491,18 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
 
         story.append(TocMarker(idx, ch.get('title'), ch.get('part')))
         story.append(Spacer(1, c['sink'] * inch))
+        # Destinations for in-book links: `[see](#chapter-2)` or the title's slug.
+        anchors = ''.join(f'<a name="{a}"/>' for a in _ms_anchors(ch, idx))
         if c.get('show_number', True):
             label = c.get('number_format', 'Chapter {n}').format(n=idx)
-            story.append(Paragraph(label, st['chap_num']))
+            story.append(Paragraph(anchors + label, st['chap_num']))
+            anchors = ''
             story.append(Spacer(1, 0.12 * inch))
         if ch['title']:
-            story.append(Paragraph(ch['title'], st['chap_title']))
+            story.append(Paragraph(anchors + ch['title'], st['chap_title']))
+            anchors = ''
+        if anchors:                       # no number and no title: park them here
+            story.append(Paragraph(anchors, st['chap_num']))
         if ch.get('byline'):
             story.append(Spacer(1, 0.12 * inch))
             story.append(Paragraph(_ms_inline(ch['byline'], sq), st['chap_byline']))

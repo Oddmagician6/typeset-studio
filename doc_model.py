@@ -70,18 +70,21 @@ _BSL = chr(92)                 # a single backslash
 _PARK_STAR = chr(0xE000)
 _PARK_UNDER = chr(0xE001)
 _PARK_BSL = chr(0xE002)
+_PARK_BRK = chr(0xE003)
 
 
 def _park_escapes(text):
     text = text.replace(_BSL + _BSL, _PARK_BSL)      # \\  -> literal backslash
     text = text.replace(_BSL + '*', _PARK_STAR)      # \*  -> literal *
     text = text.replace(_BSL + '_', _PARK_UNDER)     # \_  -> literal _
+    text = text.replace(_BSL + '[', _PARK_BRK)       # \[  -> literal [
     return text
 
 
 def _restore_escapes(text):
     return (text.replace(_PARK_STAR, '*')
                 .replace(_PARK_UNDER, '_')
+                .replace(_PARK_BRK, '[')
                 .replace(_PARK_BSL, _BSL))
 
 
@@ -89,7 +92,8 @@ def _escape_all(text):
     """Escape every literal emphasis char (used inside emphasis spans)."""
     return (text.replace(_BSL, _BSL + _BSL)
                 .replace('*', _BSL + '*')
-                .replace('_', _BSL + '_'))
+                .replace('_', _BSL + '_')
+                .replace('[', _BSL + '['))
 
 
 def _escape_plain(text):
@@ -103,23 +107,46 @@ def _escape_plain(text):
     escaped_bsl = text.replace(_BSL, _BSL + _BSL)
     if _parse_inline(escaped_bsl, smartquotes=False) == [_run(text)]:
         return escaped_bsl
-    return escaped_bsl.replace('*', _BSL + '*').replace('_', _BSL + '_')
+    return (escaped_bsl.replace('*', _BSL + '*')
+                       .replace('_', _BSL + '_')
+                       .replace('[', _BSL + '['))
 
 
 # ---------------------------------------------------------------------------
 # Inline: Markdown emphasis  <->  runs
 # ---------------------------------------------------------------------------
 
-def _run(text, bold=False, italic=False):
-    return {"text": text, "bold": bold, "italic": italic}
+def _run(text, bold=False, italic=False, link=""):
+    return {"text": text, "bold": bold, "italic": italic, "link": link}
 
 
 def _parse_inline(text, smartquotes=True):
-    """Smarten (optional), then split into emphasis runs."""
+    """Smarten (optional), then split into emphasis runs.
+
+    Links are carved out first: a target may contain ``_`` or ``*``, which the
+    emphasis passes would otherwise eat. Each run carries the link it sits in
+    (``""`` for ordinary text), so emphasis inside a link survives.
+    """
     text = _park_escapes(text)
     if smartquotes:
         text = manuscript._smarten(text)
 
+    out = []
+    pos = 0
+    for m in manuscript.LINK_RE.finditer(text):
+        if m.start() > pos:
+            out.extend(_emphasis_runs(text[pos:m.start()]))
+        for r in _emphasis_runs(m.group(1)):
+            r["link"] = _restore_escapes(m.group(2))
+            out.append(r)
+        pos = m.end()
+    if pos < len(text):
+        out.extend(_emphasis_runs(text[pos:]))
+    return _coalesce(out)
+
+
+def _emphasis_runs(text):
+    """Split one link-free stretch into bold/italic runs."""
     runs = []
     # Pass 1: carve out bold spans.
     segments = []                                        # (is_bold, str)
@@ -179,23 +206,44 @@ def _coalesce(runs):
     """Merge adjacent runs with identical emphasis (keeps the model canonical)."""
     out = []
     for r in runs:
-        if out and out[-1]["bold"] == r["bold"] and out[-1]["italic"] == r["italic"]:
+        if (out and out[-1]["bold"] == r["bold"]
+                and out[-1]["italic"] == r["italic"]
+                and out[-1].get("link", "") == r.get("link", "")):
             out[-1]["text"] += r["text"]
         else:
             out.append(dict(r))
     return [r for r in out if r["text"]]
 
 
+def _emph_md(r):
+    if r["bold"]:
+        return f"**{_escape_all(r['text'])}**"
+    if r["italic"]:
+        return f"*{_escape_all(r['text'])}*"
+    return _escape_plain(r["text"])
+
+
 def _runs_to_md(runs):
-    """Serialize runs back to Markdown emphasis. _italic_ normalizes to *italic*."""
+    """Serialize runs back to Markdown. _italic_ normalizes to *italic*.
+
+    Consecutive runs sharing a link are wrapped in one `[…](target)`, so a link
+    whose text is partly bold round-trips as a single link rather than two.
+    """
     parts = []
-    for r in runs:
-        if r["bold"]:
-            parts.append(f"**{_escape_all(r['text'])}**")
-        elif r["italic"]:
-            parts.append(f"*{_escape_all(r['text'])}*")
-        else:
-            parts.append(_escape_plain(r["text"]))
+    i = 0
+    while i < len(runs):
+        link = runs[i].get("link", "")
+        if not link:
+            parts.append(_emph_md(runs[i]))
+            i += 1
+            continue
+        j = i
+        inner = []
+        while j < len(runs) and runs[j].get("link", "") == link:
+            inner.append(_emph_md(runs[j]))
+            j += 1
+        parts.append(f"[{''.join(inner)}]({link})")
+        i = j
     return "".join(parts)
 
 

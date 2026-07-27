@@ -273,6 +273,9 @@ DEFAULTS = {
               'space_around': 11.0, 'para_gap': 4.0,
               'source_style': 'italic', 'source_align': 'right', 'source_gap': 3.0},
     'align': {'space_around': 9.0, 'indent': 0.0, 'para_gap': 3.0},
+    # Links are clickable in both outputs. `underline` is the print setting;
+    # `color`/`epub_underline` style them in the ebook only.
+    'link': {'underline': False, 'color': '', 'epub_underline': True},
     'scene_break': {'type': 'glyph', 'glyph': '* * *', 'size': 11.0, 'gap': 9.0, 'image': ''},
     'running_head': {'show': True, 'caps': True, 'size': 8.5, 'gap': 0.28},
     'folio': {'show': True, 'position': 'outer', 'size': 9.5, 'gap': 0.42,
@@ -611,6 +614,11 @@ def parse_preset_form(form):
             'space_around':  _f(form, 'al_space_around', 9.0),
             'indent':        _f(form, 'al_indent', 0.0),
             'para_gap':      _f(form, 'al_para_gap', 3.0),
+        },
+        'link': {
+            'underline':      'lk_underline' in form,
+            'color':          (form.get('lk_color', '') or '').strip(),
+            'epub_underline': 'lk_epub_underline' in form,
         },
         'scene_break': {
             'type':  form.get('sb_type', 'glyph'),
