@@ -1103,6 +1103,28 @@ literal does not survive — it arrives as a real line break and the script dies
 `SyntaxError` that only shows in the browser console. This script therefore contains no backslash
 escapes at all. Worth remembering before adding any.
 
+**54. Large-print editions and standard trim sizes** *(Tier-5G's cheap end)*
+- **Large print** is a *derived style*, not a per-book switch: a **Large print** action on every
+  style card writes a new preset beside the original, which you can then tweak like any other. That
+  fits the app's bet that the preset owns typography, and it means one book can produce two editions
+  from two styles rather than one style with a mode.
+  `app.make_large_print()` scales every point size by a single factor so the page keeps its
+  proportions, then applies the **RNIB/NAVH** rules on top: a **16pt floor**, 1.45 leading,
+  **ragged right** (justified large print opens rivers that are much harder to track), **no
+  hyphenation** (broken words are the hardest thing to track of all), wider margins, and a **7 × 10"**
+  page — 16pt in a mass-market trim would give about six words a line. A trailing `(6×9)` in the
+  style's name is rewritten rather than left lying about the page size, and running it twice is a
+  no-op rather than a runaway.
+- **Standard trims**: `TRIM_PRESETS` (thirteen sizes both KDP and IngramSpark accept) drives a
+  picker beside the trim fields. It fills them in, and typing a size selects the matching entry —
+  but the number fields stay the source of truth, so a non-standard trim is still perfectly allowed.
+  Vellum offers 24 named trims; ours is the subset that is actually printable at both platforms.
+Verified: derivations from a 6×9 and from the 4.25×6.87 mass market (both land at 16/23.2 on 7×10,
+ragged right, hyphenation off, margins widened, chapter titles and folios scaled); the route creating
+a real preset that then **builds a book** — a 504×720 pt page at 16pt measured out of the PDF; a
+rendered side-by-side proof of the standard and large-print settings looked at; and the picker
+rendering all thirteen options with the current trim preselected.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1408,12 +1430,10 @@ someone asks for it.
 
 - **Hardcover case-wrap / dust jacket.** `build_cover_wrap` is paperback-only; hardcover needs
   hinge gaps, board overhang and wrap-around bleed. A natural extension of `WRAP_RETAILERS` (#24).
-- **Large-print edition** — Vellum ships it as a one-click variant. For us it is nearly free: a
-  derived preset (larger size/leading, wider margins, fewer words per line) generated from any
-  existing style. Possibly the cheapest item in G.
-- **Trim-size presets** — Vellum offers 24 named trims; our trim is free-entry. A datalist of
-  standard KDP/IngramSpark trims in `editor.html` is minutes of work and prevents typos that
-  fail upload.
+- ~~**Large-print edition**~~ — **SHIPPED (feature #54):** a *Large print* action on every style
+  card derives one, following the RNIB/NAVH rules.
+- ~~**Trim-size presets**~~ — **SHIPPED (feature #54):** thirteen standard trims in the style
+  editor; free entry still works.
 - **Box sets / omnibus** — combine several projects into one book with merged front matter and a
   unified TOC (Vellum's "Volume" element, Atticus's bundles). Needs a multi-manuscript build path;
   defer.
@@ -1436,7 +1456,8 @@ someone asks for it.
 ~~figures/images incl. `.docx` (A + C)~~ #46/#47 → ~~lists / block quote / alignment (A)~~ #48 →
 ~~links (B)~~ #49 → ~~endnotes (A)~~ #50 → ~~element vocabulary (F)~~ #51 →
 ~~EPUB preflight (D)~~ #52 → ~~device preview (D)~~ #53 →
-**large print + trim presets (G)** ← next → endnotes (A) → EPUB preflight + device preview (D) →
+~~large print + trim presets (G)~~ #54 → **what's left**: footnotes (A), hardcover wrap and
+box sets (G), PDF/X-1a and spread balancing (D), an ornament library (E) → endnotes (A) → EPUB preflight + device preview (D) →
 large print + trim presets (G) → footnotes (A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 

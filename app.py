@@ -867,13 +867,13 @@ def index():
 @app.route('/editor/new')
 def editor_new():
     return render_template('editor.html', pid=None, p=DEFAULTS, is_new=True,
-                           fonts=list_fonts())
+                           fonts=list_fonts(), trim_presets=TRIM_PRESETS)
 
 
 @app.route('/editor/<pid>')
 def editor(pid):
     return render_template('editor.html', pid=pid, p=load_preset(pid), is_new=False,
-                           fonts=list_fonts())
+                           fonts=list_fonts(), trim_presets=TRIM_PRESETS)
 
 
 @app.route('/save', methods=['POST'])
@@ -894,6 +894,98 @@ def clone(pid):
     new_id = unique_id(slugify(data['name']))
     save_preset(new_id, data)
     flash('Created a copy you can rename and tweak.')
+    return redirect(url_for('editor', pid=new_id))
+
+
+# Standard interior trims both KDP and IngramSpark accept, so a style can be set
+# to a real size instead of a typo that fails at upload.
+TRIM_PRESETS = [
+    (4.25, 6.87, 'Mass market'),
+    (5.0,  8.0,  'Digest'),
+    (5.06, 7.81, 'A-format'),
+    (5.25, 8.0,  'Small trade'),
+    (5.5,  8.5,  'Trade — the common one'),
+    (6.0,  9.0,  'Trade — the other common one'),
+    (6.14, 9.21, 'Royal / B-format'),
+    (6.69, 9.61, 'Crown quarto'),
+    (7.0,  10.0, 'Large print / workbook'),
+    (7.44, 9.69, 'Textbook'),
+    (7.5,  9.25, 'Textbook (wide)'),
+    (8.0,  10.0, 'Illustrated'),
+    (8.25, 11.0, 'Letter — manuals, workbooks'),
+]
+
+# Large print, following the RNIB / NAVH guidance: 16pt minimum, generous
+# leading, ragged right (a justified large-print page opens rivers that are much
+# harder to track), no hyphenation, and room in the margins for a thumb.
+LARGE_PRINT_MIN_SIZE = 16.0
+LARGE_PRINT_TRIM = (7.0, 10.0)
+
+
+def _scale_sizes(section, factor, keys):
+    for k in keys:
+        v = section.get(k)
+        if isinstance(v, (int, float)) and v > 0:
+            section[k] = round(v * factor, 1)
+
+
+def make_large_print(preset):
+    """Derive a large-print edition from an ordinary style.
+
+    Everything typographic scales by one factor so the page keeps its
+    proportions, then the accessibility rules are applied on top: a 16pt floor,
+    ragged right, no hyphenation, wider margins, and a trim big enough to still
+    hold a sensible line at that size — 16pt type in a mass-market trim would
+    give about six words a line.
+    """
+    import copy
+    lp = copy.deepcopy(preset)
+    body = lp.setdefault('body', {})
+    base = body.get('size', 11.0) or 11.0
+    factor = max(1.0, LARGE_PRINT_MIN_SIZE / base)
+
+    body['size'] = round(base * factor, 1)
+    body['leading'] = round(body['size'] * 1.45, 1)
+    body['justify'] = False          # ragged right is the recommendation
+    body['hyphenate'] = False        # broken words are the hardest to track
+    body['indent'] = round(body.get('indent', 0.3) * 1.2, 2)
+
+    if lp.get('trim', {}).get('w', 6.0) < LARGE_PRINT_TRIM[0]:
+        lp['trim'] = {'w': LARGE_PRINT_TRIM[0], 'h': LARGE_PRINT_TRIM[1]}
+    m = lp.setdefault('margins', {})
+    m['top'] = max(m.get('top', 0.75), 0.85)
+    m['bottom'] = max(m.get('bottom', 0.8), 0.9)
+    m['inside'] = max(m.get('inside', 0.85), 1.0)
+    m['outside'] = max(m.get('outside', 0.6), 0.7)
+
+    _scale_sizes(lp.get('chapter', {}), factor, ('number_size', 'title_size'))
+    _scale_sizes(lp.get('part_divider', {}), factor, ('number_size', 'title_size'))
+    _scale_sizes(lp.get('scene_break', {}), factor, ('size',))
+    _scale_sizes(lp.get('running_head', {}), factor, ('size',))
+    _scale_sizes(lp.get('folio', {}), factor, ('size',))
+    for key in ('document_block', 'poem', 'list', 'quote', 'figure', 'endnotes'):
+        _scale_sizes(lp.get(key, {}), factor,
+                     ('font_size', 'header_size', 'title_size', 'caption_size'))
+
+    name = preset.get('name', 'Style')
+    # a trailing "(6×9)" in the name would now be a lie about the page
+    name = re.sub(r'\s*\([\d.]+\s*[×x]\s*[\d.]+\)\s*$', '', name).strip()
+    tw, th = lp['trim']['w'], lp['trim']['h']
+    lp['name'] = (name if 'large print' in name.lower()
+                  else f'{name} — Large Print ({tw:g}×{th:g})')
+    lp['description'] = (f'Large-print edition: {body["size"]:g}pt, ragged right, '
+                         f'wide margins. Derived from "{name}".')
+    return lp
+
+
+@app.route('/large-print/<pid>', methods=['POST'])
+def large_print(pid):
+    data = load_preset(pid)
+    lp = make_large_print(data)
+    new_id = unique_id(slugify(lp['name']))
+    save_preset(new_id, lp)
+    flash(f'Created “{lp["name"]}” — {lp["body"]["size"]:g}pt on a '
+          f'{lp["trim"]["w"]:g}×{lp["trim"]["h"]:g}" page. Tweak it like any style.')
     return redirect(url_for('editor', pid=new_id))
 
 

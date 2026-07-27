@@ -35,8 +35,19 @@ python app.py
 ## Using it
 
 **Styles** (the home page) lists every style as a spec card. From a card you can
-**Set a book** in that style, **Edit** it, **Duplicate** it, or **Delete** it.
-Use **New style** to start one from scratch.
+**Set a book** in that style, **Edit** it, **Duplicate** it, derive a **Large print**
+edition of it, or **Delete** it. Use **New style** to start one from scratch.
+
+**Large print** makes a second style from the one you're looking at, following the
+RNIB/NAVH guidance: 16pt minimum, generous leading, ragged right (justified text opens
+rivers that are much harder to track), no hyphenation, wider margins, and a 7 × 10"
+page — 16pt type in a mass-market trim would give about six words a line. It's an
+ordinary style afterwards, so tweak it like any other, and your original is untouched.
+One book, two editions.
+
+The style editor's **Standard sizes** list covers the trims KDP and IngramSpark accept;
+picking one fills in the width and height. A non-standard size is still allowed — just
+type it.
 
 **Set a book**:
 1. Pick a style.

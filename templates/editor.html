@@ -82,7 +82,16 @@
             <div class="field num"><label>Page width</label><span class="hint">inches</span>
               <input type="number" step="0.05" id="f-tw" name="trim_w" value="{{ p.trim.w }}"></div>
             <div class="field num"><label>Page height</label><span class="hint">inches</span>
-              <input type="number" step="0.05" name="trim_h" value="{{ p.trim.h }}"></div>
+              <input type="number" step="0.05" id="f-th" name="trim_h" value="{{ p.trim.h }}"></div>
+            <div class="field"><label>Standard sizes</label>
+              <span class="hint">every one is accepted by KDP and IngramSpark</span>
+              <select id="trim-pick">
+                <option value="">Choose a trim…</option>
+                {% for w, h, label in trim_presets %}
+                <option value="{{ w }}x{{ h }}"
+                  {{ 'selected' if p.trim.w == w and p.trim.h == h }}>{{ w }} × {{ h }}" — {{ label }}</option>
+                {% endfor %}
+              </select></div>
           </div>
           <div class="row">
             <div class="field num"><label>Top</label><span class="hint">inches</span>
@@ -547,6 +556,32 @@
       document.getElementById('pv-folio').textContent = fo;
     }
     updatePreview();
+
+    // Standard-trim picker: fills the two number fields, which stay the source of
+    // truth (a non-standard trim is still perfectly allowed - just type it).
+    (function () {
+      var pick = document.getElementById('trim-pick');
+      if (!pick) return;
+      var w = document.getElementById('f-tw'), h = document.getElementById('f-th');
+      pick.addEventListener('change', function () {
+        if (!pick.value) return;
+        var parts = pick.value.split('x');
+        w.value = parts[0];
+        h.value = parts[1];
+        updatePreview();
+      });
+      function syncPick() {                 // typing a size selects it in the list
+        var want = parseFloat(w.value) + 'x' + parseFloat(h.value);
+        var found = false;
+        for (var i = 0; i < pick.options.length; i++) {
+          if (pick.options[i].value === want) { pick.selectedIndex = i; found = true; break; }
+        }
+        if (!found) pick.selectedIndex = 0;
+      }
+      w.addEventListener('input', syncPick);
+      h.addEventListener('input', syncPick);
+      syncPick();
+    })();
 
     document.getElementById('preview-btn').addEventListener('click', async () => {
       const btn    = document.getElementById('preview-btn');

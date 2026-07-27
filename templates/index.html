@@ -67,6 +67,10 @@
             <form class="inline-form" method="post" action="{{ url_for('clone', pid=item.id) }}">
               <button class="btn btn-sm" type="submit">Duplicate</button>
             </form>
+            <form class="inline-form" method="post" action="{{ url_for('large_print', pid=item.id) }}">
+              <button class="btn btn-sm" type="submit"
+                      title="Derive a large-print edition: 16pt, ragged right, wide margins">Large print</button>
+            </form>
             <span class="sep"></span>
             <form class="inline-form" method="post" action="{{ url_for('delete', pid=item.id) }}"
                   onsubmit="return confirm('Delete the “{{ p.name }}” style? This cannot be undone.');">
