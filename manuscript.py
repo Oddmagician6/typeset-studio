@@ -550,26 +550,132 @@ def _emph(runs):
     return ''.join(out)
 
 
-def _para_md(p, report):
-    """Paragraph text with emphasis, including runs inside hyperlinks.
+def _one_line(text):
+    """Collapse a Word paragraph's manual line breaks. Right for a heading, a
+    list item or a table cell; wrong for body text, where the break is the
+    author saying "break here" — see the poem/aligned handling in import_docx."""
+    return ' '.join((text or '').split())
+
+
+def _link_md(text, address):
+    """`[text](url)` if the address is one this convention accepts, else None.
+
+    ``LINK_TARGET`` is deliberately narrow (see the note beside it), so a Word
+    link to a bookmark or a local file keeps its words and loses its address
+    rather than producing a link the parser would not read back. Brackets in
+    the text would break ``LINK_RE``'s own bracket matching, so those fall back
+    too — rarer than a link, and a wrong link is worse than a plain phrase.
+    """
+    address = (address or '').strip()
+    if not text or not address or '[' in text or ']' in text:
+        return None
+    if not re.fullmatch(LINK_TARGET, address):
+        return None
+    return f'[{text}]({address})'
+
+
+def _notes_map(doc):
+    """{(kind, word_id): note_text} from word/footnotes.xml and endnotes.xml.
+
+    python-docx has no footnote API, so the parts are read straight off the
+    package. Separator pseudo-notes (the little rule Word draws above the note
+    area) carry a ``w:type`` and are skipped — they are furniture, not notes.
+    """
+    from docx.oxml.ns import qn
+    from docx.oxml import parse_xml
+    from docx.text.paragraph import Paragraph
+
+    try:
+        parts = list(doc.part.package.iter_parts())
+    except Exception:
+        return {}
+
+    out = {}
+    for part in parts:
+        name = str(getattr(part, 'partname', ''))
+        kind = ('footnote' if name.endswith('/footnotes.xml')
+                else 'endnote' if name.endswith('/endnotes.xml') else '')
+        if not kind:
+            continue
+        try:
+            root = parse_xml(part.blob)
+        except Exception:
+            continue
+        for el in root.findall(qn('w:' + kind)):
+            if el.get(qn('w:type')):          # separator / continuationSeparator
+                continue
+            paras = [_one_line(_emph(Paragraph(pe, part).runs))
+                     for pe in el.findall(qn('w:p'))]
+            text = ' '.join(t for t in paras if t).strip()
+            if text:
+                out[(kind, el.get(qn('w:id')))] = text
+    return out
+
+
+def _run_note_refs(run):
+    """(kind, word_id) for every footnote/endnote reference inside one run."""
+    from docx.oxml.ns import qn
+    found = []
+    for kind in ('footnote', 'endnote'):
+        for el in run._r.findall('.//' + qn(f'w:{kind}Reference')):
+            found.append((kind, el.get(qn('w:id'))))
+    return found
+
+
+def _para_md(p, report, notes=None):
+    """Paragraph text with emphasis, links and note references.
 
     ``Paragraph.runs`` skips runs nested in a ``w:hyperlink``, so the old
     importer silently dropped every linked phrase. ``iter_inner_content`` walks
-    runs and hyperlinks in document order. The URL itself is dropped (the book
-    model has no link type yet) but the words survive, and the link is counted.
+    runs and hyperlinks in document order, which is also what lets a note
+    reference land at the right point in the sentence rather than at the end.
+
+    `notes` is the note context from ``import_docx``; pass None to skip note
+    handling entirely (the table-cell path does).
     """
     try:
         parts = list(p.iter_inner_content())
     except AttributeError:                       # older python-docx
-        return _emph(p.runs) or p.text.strip()
+        return _emph(p.runs) or p.text
+
     chunks = []
     for item in parts:
         if hasattr(item, 'address'):             # Hyperlink
-            report['links'] += 1
-            chunks.append(_emph(item.runs))
-        else:
-            chunks.append(_emph([item]))
-    return ''.join(chunks) or p.text.strip()
+            text = _emph(item.runs)
+            md = _link_md(text, getattr(item, 'address', ''))
+            if md:
+                report['links_kept'] += 1
+                chunks.append(md)
+            else:
+                report['links'] += 1
+                chunks.append(text)
+            continue
+        chunks.append(_emph([item]))
+        if notes is not None:
+            for ref in _run_note_refs(item):
+                chunks.append(_note_ref(ref, notes, report))
+    return ''.join(chunks) or p.text
+
+
+def _note_ref(ref, notes, report):
+    """A `[^label]` marker for one Word note, registering its text for output.
+
+    Labels are allocated here rather than reused from Word's ids, which are
+    sparse and start at 2. The same note cited twice keeps one label, exactly
+    as the endnote convention already handles.
+    """
+    if ref in notes['seen']:
+        return f'[^{notes["seen"][ref]}]'
+    text = notes['texts'].get(ref)
+    if not text:
+        report['notes_lost'] += 1
+        return ''
+    notes['n'] += 1
+    label = f'note{notes["n"]}'
+    notes['seen'][ref] = label
+    notes['defs'].append((label, text))
+    report['notes'] += 1
+    return f'[^{label}]'
 
 
 def _para_images(p, stem, report):
@@ -643,7 +749,12 @@ def _table_md(tbl, report):
 
 def _new_report():
     return {'chapters': 0, 'subheads': 0, 'figures': 0, 'tables': 0,
-            'quotes': 0, 'lists': 0, 'aligned': 0, 'links': 0, 'footnotes': 0,
+            'quotes': 0, 'lists': 0, 'aligned': 0, 'poems': 0,
+            'links': 0,        # kept their words, lost the address
+            'links_kept': 0,   # kept the address too
+            'notes': 0,        # Word footnotes/endnotes imported as endnotes
+            'notes_lost': 0,   # a reference whose note text could not be read
+            'breaks': 0,       # paragraphs whose manual line breaks were kept
             'images_failed': 0}
 
 
@@ -657,15 +768,20 @@ def import_docx(path, report=None):
       blocks, with a following Caption-styled paragraph used as the caption;
     * **tables** become ``~~~ table`` blocks, columns intact, instead of being
       dropped — ``doc.paragraphs`` skips them entirely;
-    * **hyperlink text** is kept (see ``_para_md``);
-    * **Quote** styles become plain ``~~~`` blocks;
-    * **list items** keep a bullet or number prefix as literal text.
+    * **hyperlinks** keep their address when it is one this convention accepts
+      (see ``_link_md``), otherwise just their words;
+    * **footnotes and endnotes** become ``[^label]`` references with their text
+      collected at the end of the chapter that cites them;
+    * **verse** (a Verse/Poem/Poetry paragraph style) becomes a ``~~~ poem``;
+    * **manual line breaks** elsewhere are kept with a ``~~~ left`` block rather
+      than being joined into a paragraph;
+    * **Quote** styles become ``~~~ quote`` blocks;
+    * **list items** become ``~~~ list`` blocks.
 
     Pass a dict as ``report`` to receive counts of what was imported and what
     could not be — ``import_summary`` turns it into a sentence for the UI.
     """
     from docx import Document
-    from docx.oxml.ns import qn
     from docx.table import Table
 
     rep = report if report is not None else {}
@@ -673,12 +789,14 @@ def import_docx(path, report=None):
 
     doc = Document(path)
     stem = _slug(os.path.splitext(os.path.basename(path))[0])
-    rep['footnotes'] = (len(doc.element.body.findall('.//' + qn('w:footnoteReference')))
-                        + len(doc.element.body.findall('.//' + qn('w:endnoteReference'))))
+    # note text is read once up front; `defs` collects what the current chapter
+    # cites, so the definitions land in the chapter that owns them
+    notes = {'texts': _notes_map(doc), 'seen': {}, 'defs': [], 'n': 0}
 
     out = []
     quote_buf = []          # consecutive Quote-styled paragraphs -> one block
     list_buf = []           # consecutive list paragraphs -> one ~~~ list block
+    poem_buf = []           # consecutive verse paragraphs -> one ~~~ poem
     list_numbered = False
     fig_caption_at = None   # index in `out` where a Caption paragraph can land
 
@@ -706,9 +824,33 @@ def import_docx(path, report=None):
             out.extend(['~~~', ''])
             list_buf = []
 
+    def flush_poem():
+        nonlocal poem_buf
+        if poem_buf:
+            rep['poems'] += 1
+            out.extend(['', '~~~ poem'])
+            for i, stanza in enumerate(poem_buf):
+                if i:
+                    out.append('')            # a blank line starts a new stanza
+                out.extend(stanza)
+            out.extend(['~~~', ''])
+            poem_buf = []
+
+    def flush_notes():
+        """Emit this chapter's note texts. They must sit in the chapter that
+        cites them — numbering restarts per chapter — so this runs at every
+        chapter boundary, not at the end of the document."""
+        if notes['defs']:
+            out.append('')
+            for label, text in notes['defs']:
+                out.append(f'[^{label}]: {text}')
+            out.append('')
+            notes['defs'] = []
+
     def flush_all():
         flush_quotes()
         flush_list()
+        flush_poem()
 
     try:
         body = list(doc.iter_inner_content())
@@ -717,14 +859,20 @@ def import_docx(path, report=None):
 
     for item in body:
         if isinstance(item, Table):
-            flush_quotes()
+            # every buffer, not just quotes: whatever is still buffered came
+            # *before* this table in the document and must be emitted first
+            flush_all()
             fig_caption_at = None
             out.extend(_table_md(item, rep))
             continue
 
         p = item
         style = (p.style.name or '').lower()
-        text = _para_md(p, rep).strip()
+        # keep the manual line breaks for now; each branch below decides whether
+        # they mean anything (verse, an address block) or should be collapsed
+        raw = _para_md(p, rep, notes).strip()
+        lines = [ln.strip() for ln in raw.split('\n') if ln.strip()]
+        text = _one_line(raw)
 
         images = _para_images(p, stem, rep)
         if images:
@@ -747,6 +895,7 @@ def import_docx(path, report=None):
 
         if style.startswith('heading 1') or style == 'title':
             flush_all()
+            flush_notes()                     # the outgoing chapter's notes
             rep['chapters'] += 1
             out.extend(['', '# ' + text, ''])
             continue
@@ -761,8 +910,16 @@ def import_docx(path, report=None):
             flush_all()
             out.extend(['', '* * *', ''])
             continue
+        # Word has no verse element; a style named for it is the only explicit
+        # signal an author can give, so it is the only one trusted here
+        if any(w in style for w in ('verse', 'poem', 'poetry')):
+            flush_quotes()
+            flush_list()
+            poem_buf.append(lines)
+            continue
         if 'quote' in style:
             flush_list()
+            flush_poem()
             quote_buf.append(text)
             continue
 
@@ -774,6 +931,7 @@ def import_docx(path, report=None):
             if list_buf and numbered != list_numbered:
                 flush_list()                  # bullets and numbers are separate lists
             flush_quotes()
+            flush_poem()
             list_numbered = numbered
             rep['lists'] += 1
             list_buf.append(text)
@@ -788,12 +946,22 @@ def import_docx(path, report=None):
             centred = False
         if centred:
             rep['aligned'] += 1
-            out.extend(['', '~~~ center', text, '~~~', ''])
+            out.extend(['', '~~~ center'] + lines + ['~~~', ''])
+            continue
+
+        # A manual line break is the author saying "break here" — Word's only
+        # way to say it. Joining those lines into a paragraph loses the one
+        # thing they were for, so they go in the line-preserving block that
+        # claims the least: alignment only, no change of size or face.
+        if len(lines) > 1:
+            rep['breaks'] += 1
+            out.extend(['', '~~~ left'] + lines + ['~~~', ''])
             continue
 
         out.extend([text, ''])
 
     flush_all()
+    flush_notes()
     return '\n'.join(out)
 
 
@@ -817,15 +985,26 @@ def import_summary(rep):
     if rep.get('aligned'):
         got.append(f"{rep['aligned']} centred passage"
                    + ('s' if rep['aligned'] != 1 else ''))
+    if rep.get('poems'):
+        got.append(f"{rep['poems']} poem" + ('s' if rep['poems'] != 1 else ''))
+    if rep.get('links_kept'):
+        got.append(f"{rep['links_kept']} link" + ('s' if rep['links_kept'] != 1 else ''))
+    if rep.get('notes'):
+        got.append(f"{rep['notes']} note" + ('s' if rep['notes'] != 1 else '')
+                   + ' (as endnotes)')
+    if rep.get('breaks'):
+        got.append(f"{rep['breaks']} passage" + ('s' if rep['breaks'] != 1 else '')
+                   + ' with kept line breaks')
 
     lost = []
     if rep.get('links'):
         n = rep['links']
-        lost.append(f"{n} link kept its text but not the web address" if n == 1
-                    else f"{n} links kept their text but not the web addresses")
-    if rep.get('footnotes'):
-        lost.append(f"{rep['footnotes']} footnote/endnote"
-                    + ('s were' if rep['footnotes'] != 1 else ' was') + ' not imported')
+        lost.append(f"{n} link kept its text but not the address" if n == 1
+                    else f"{n} links kept their text but not the addresses")
+    if rep.get('notes_lost'):
+        n = rep['notes_lost']
+        lost.append(f"{n} note reference had no readable text" if n == 1
+                    else f"{n} note references had no readable text")
     if rep.get('images_failed'):
         lost.append(f"{rep['images_failed']} image"
                     + ('s' if rep['images_failed'] != 1 else '') + ' could not be read')

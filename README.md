@@ -122,12 +122,27 @@ A `.docx` is converted to the same convention on import:
 | Quote / Intense Quote | a quotation block |
 | a bulleted or numbered list | a list block |
 | a centred paragraph | a centred block |
-| a hyperlink | its words (the web address is dropped) |
+| a hyperlink | a link, address and all |
+| a footnote or endnote | an endnote, its text collected in the same chapter |
+| a Verse / Poem / Poetry paragraph style | a poem block, verse lines kept |
+| manual line breaks (Shift+Enter) | a line-preserving block, so the breaks survive |
 
 After importing, the app tells you exactly what came across and what didn't — nothing
-is dropped silently. Footnotes and endnotes are **not** imported yet; you'll be told how
-many were found. Images land in your Figures library, named after the Word file, so
+is dropped silently. Images land in your Figures library, named after the Word file, so
 re-importing the same document doesn't pile up copies.
+
+A few things are worth knowing:
+
+- **Notes.** Word footnotes and endnotes both become endnotes here — where they *print*
+  is the style's choice, under *Notes* in the style editor, so the same import can give
+  you a book with notes at the foot of the page or a Notes page at the back.
+- **Links.** A web or email address comes across. A link to a bookmark or a file on your
+  computer keeps its words and loses the address, and you're told how many.
+- **Verse.** Word has no verse element, so a paragraph *style* named Verse, Poem or
+  Poetry is the only signal trusted. Consecutive verse paragraphs become one poem, one
+  stanza each.
+- **Line breaks.** A manual break is you saying "break here", so those lines are kept
+  rather than run together — in a block that changes alignment only, not the type.
 
 ### Prologues, epilogues and other unnumbered chapters
 

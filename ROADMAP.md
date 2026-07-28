@@ -29,6 +29,7 @@ ornaments.py      The twelve bundled scene-break ornaments — one vector defini
                   walked by engine.py (ReportLab) and by svg() (EPUB + the editor picker).
 test_epub.py      EPUB self-check tests: builds one good file, then breaks it eleven ways.
 test_footnotes.py Footnote placement: builds books and measures where the notes landed.
+test_import.py    .docx import fidelity: builds real Word files and looks for the words.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -193,10 +194,12 @@ Courier uppercase, bold headline, classification banner) and semantic CSS classe
 EPUB (`doc-block-letter`, etc.). Plain `~~~` with no type is unchanged.
 
 `.docx` import (`manuscript.import_docx`) maps Heading 1/Title → chapter, other headings →
-subhead, runs → bold/italic, images → `~~~ figure` (extracted to the figure library), tables
-and Quote styles → plain `~~~` blocks, list items → bullet/number-prefixed paragraphs, and
-hyperlink text → plain text. Pass a dict as `report=` for counts; `import_summary(report)`
-turns it into the two sentences the UI flashes. See feature #47.
+subhead, runs → bold/italic, images → `~~~ figure` (extracted to the figure library), tables →
+`~~~ table`, Quote styles → `~~~ quote`, lists → `~~~ list`, hyperlinks → `[text](url)`,
+footnotes/endnotes → `[^label]` + definitions in the citing chapter, Verse/Poem/Poetry styles →
+`~~~ poem`, and manual line breaks → `~~~ left`. Pass a dict as `report=` for counts;
+`import_summary(report)` turns it into the two sentences the UI flashes. See features #47, #57,
+#58.
 
 ### Project (projects/*.json) — a saved book
 ```
@@ -1308,6 +1311,55 @@ no data loss" obligation the Tier-4 editor note flags.
 **Not done:** merged cells, per-cell alignment, and a table that is wider than the page (the
 column measure fills the text width; a landscape or rotated table is a different feature).
 
+**58. `.docx` import — notes, link addresses and verse** *(Tier-5C; closes section C. All
+three were blocked on a missing block type until #49/#50/#30 built the targets, so this is
+importer work only)*
+- **Word footnotes *and* endnotes become endnotes.** python-docx has no note API, so
+  `_notes_map` reads `word/footnotes.xml` and `word/endnotes.xml` straight off the package and
+  builds `{(kind, word_id): text}` — **keyed by kind as well as id**, because the two parts
+  number independently and footnote 2 is not endnote 2. Word's separator pseudo-notes (the
+  little rule it draws above the note area) carry a `w:type` and are skipped. `_run_note_refs`
+  finds the references inside each run, so a marker lands **at the point in the sentence where
+  it belongs** rather than at the end of the paragraph. Labels are allocated fresh (`note1`,
+  `note2`, …) — Word's ids are sparse and start at 2 — and the same note cited twice keeps one.
+  Definitions are buffered and flushed **at each chapter boundary**, because numbering restarts
+  per chapter and a note must live in the chapter that cites it. Where they *print* is then the
+  style's choice (#55), so one import can produce either book.
+- **Link addresses survive.** `_link_md` emits `[text](url)` only when the address matches
+  `LINK_TARGET` — the same narrow rule #49 chose for authored links. A Word link to a bookmark
+  or a local file keeps its words and loses its address, because a link the parser wouldn't read
+  back is worse than a plain phrase; brackets in the link text fall back for the same reason.
+  Both outcomes are counted separately (`links_kept` / `links`).
+- **Verse imports as a poem.** Word has no verse element, so a paragraph *style* named Verse /
+  Poem / Poetry is the only signal trusted — a heuristic on line length would misfire on real
+  manuscripts. Consecutive verse paragraphs merge into one `~~~ poem`, one stanza each.
+- **Manual line breaks stop being silently joined.** `Run.text` turns `w:br` into `\n`, and the
+  importer used to collapse it, losing the one thing the author used it for. A multi-line
+  paragraph now becomes a `~~~ left` block — the line-preserving block that claims the least
+  (alignment only; the style still owns size, face and leading). Headings, list items and table
+  cells still collapse, via the new `_one_line`.
+- The import summary moves notes and links from the "not imported" half to the "imported" half
+  and gains poems and kept-line-break passages; `notes_lost` covers a reference whose text can't
+  be read.
+**Pre-existing ordering bug found and fixed:** the `Table` branch flushed only the quote buffer,
+so a Word **list** sitting immediately before a table was emitted *after* it — wrong since #48,
+and invisible until the poem buffer made a second case of it. It now flushes every buffer, and
+`test_import.py` pins the order.
+Verified by the new `test_import.py` (38 checks): it builds real `.docx` files — injecting the
+footnote/endnote parts by hand, since python-docx cannot author them — and checks the markers'
+position in the sentence, both note parts being read, separators skipped, per-chapter placement
+and renumbering, both address kinds surviving, an underscored URL not becoming emphasis, stanzas
+and italics inside verse, three-line address blocks, block order, byte-identical re-import, the
+summary's wording, and then **builds the book**: a PDF with live `https`/`mailto` annotations
+and the note text on the Notes page, and an EPUB that passes #52's preflight. Also run end to
+end through `POST /generate`, where the flash reads *"Imported from Word: 2 chapters, 1 poem,
+2 links, 4 notes (as endnotes), 1 passage with kept line breaks."*
+**Note on the PDF-link check:** it uses a preset with `open_style: none` on purpose — a link in
+a chapter's *first* paragraph is still lost under the drop-cap / raised-initial / small-caps
+openings, the documented limit from #49.
+**Not imported:** notes inside table cells (the cell path reads plain text), comments, tracked
+changes, and Word's own numbering restarts.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1429,7 +1481,8 @@ doc_model / WYSIWYG round-trip:
 
 - **Poetry collections — SHIPPED (feature #30).** Line-preserving `~~~ poem` blocks with
   stanza spacing, a poem-title style, and a hanging runover indent; round-trips through
-  `doc_model` + the WYSIWYG. v1 follow-ups noted in #30 (no `.docx` poem import; presets fall
+  `doc_model` + the WYSIWYG. v1 follow-ups noted in #30 (~~no `.docx` poem import~~ — shipped
+  in #58 via the Verse/Poem/Poetry paragraph style; presets fall
   back to `DEFAULTS`; EPUB runover is per-stanza).
 
 - **Anthologies / essay collections — SHIPPED (feature #31).** Per-piece byline
@@ -1559,15 +1612,16 @@ both outputs, print-safe by default. **Remaining:** Vellum's **Store Link** (a "
 preferred retailer" page) is a different feature — it needs the per-retailer ebook builds in
 section D, not link syntax.
 
-**C. Import fidelity — the gap most likely to read as "the tool is broken"**
+**C. Import fidelity — the gap most likely to read as "the tool is broken"** *(clear)*
 
 ~~The importer dropped images, tables, hyperlink text, lists and quotes on the floor.~~ —
 **SHIPPED (feature #47):** images become figures, hyperlink text survives, tables become set-apart
 blocks, and an import summary reports both what came across and what didn't. **#48 then upgraded
 it further:** Word lists, Quote styles and centred paragraphs now import as real `list` / `quote` /
-`center` blocks rather than approximations. ~~**Remaining**: tables as real tables~~ — **SHIPPED (feature #57)**, the last thing blocked on a
-missing block type. **Remaining is now importer work only**: Word **footnotes** and link
-**addresses** (#49 and #50 built the targets), and `.docx` **poem** import (open since #30).
+`center` blocks rather than approximations. ~~**Remaining**: tables as real tables~~ — **SHIPPED (feature #57)**; ~~Word footnotes, link
+addresses and poem import~~ — **SHIPPED (feature #58)**, which also stopped manual line breaks
+being silently joined. **Section C is clear.** Still out of scope: notes inside table cells,
+comments, tracked changes.
 
 **D. Output correctness / validation — paid tools quietly win here**
 
@@ -1642,9 +1696,9 @@ someone asks for it.
 ~~links (B)~~ #49 → ~~endnotes (A)~~ #50 → ~~element vocabulary (F)~~ #51 →
 ~~EPUB preflight (D)~~ #52 → ~~device preview (D)~~ #53 →
 ~~large print + trim presets (G)~~ #54 → ~~footnotes (A)~~ #55 → ~~ornament library (E)~~ #56 →
-~~tables (A)~~ #57 →
-**what's left**: the `.docx` follow-ups in (C) — Word footnotes, link addresses, poem import —
-then chapter-heading art (E), hardcover wrap and box sets (G), PDF/X-1a and spread balancing (D). Note this whole tier is *feature* work: per the strategy note below, **packaging still
+~~tables (A)~~ #57 → ~~the `.docx` follow-ups (C)~~ #58 →
+**what's left**: chapter-heading art (E), hardcover wrap and box sets (G), PDF/X-1a and spread
+balancing (D). Sections **A, B, C and F are now clear**; D and E have one item each. Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 
 ### ◻ Strategy notes (context for prioritising, not committed work)
