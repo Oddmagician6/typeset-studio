@@ -200,6 +200,13 @@ WRAP_RETAILERS = {
 # promise about a particular printer.
 HARDCOVER = {'wrap': 0.625, 'hinge': 0.375, 'board': 0.06}
 
+# A dust jacket wraps the finished case, so it is measured off the boards, not
+# the block: `board_ext` is how far the board stands proud of the pages (an
+# eighth of an inch is the trade norm), and `flap` is the folded-in end. Flaps
+# run 3–4"; 3.5" is the common house figure. Jackets are printer-specific —
+# among the retailers we preset, only IngramSpark prints them.
+JACKET = {'flap': 3.5, 'board_ext': 0.125, 'hinge': 0.375}
+
 # KDP's hardcover programme is narrower than its paperback one; the wrap builds
 # either way, but a book outside these is one KDP will refuse.
 _KDP_HARDCOVER_TRIMS = [(5.5, 8.5), (6.0, 9.0), (6.14, 9.21), (7.0, 10.0), (8.25, 11.0)]
@@ -1496,11 +1503,17 @@ def _wrap_from_form(form, out_path, back_image=None):
     ppi = _PAPER.get(paper, _PAPER['white'])['ppi']
     retailer = form.get('wrap_retailer', 'kdp')
     rc = WRAP_RETAILERS.get(retailer, WRAP_RETAILERS['kdp'])
-    hard = form.get('wrap_binding', 'paperback') == 'hardcover'
+    binding = form.get('wrap_binding', 'paperback')
+    if binding not in ('paperback', 'hardcover', 'jacket'):
+        binding = 'paperback'
+    hard = binding == 'hardcover'
+    jacket = binding == 'jacket'
     trim_w = _f(form, 'wrap_trim_w', 6.0)
     trim_h = _f(form, 'wrap_trim_h', 9.0)
-    # a case spine carries the boards as well as the paper
-    spine_w = pages * ppi + (_f(form, 'wrap_board', HARDCOVER['board']) if hard else 0.0)
+    # a case spine carries the boards as well as the paper — and a jacket wraps
+    # that same case, so it takes the same spine
+    spine_w = pages * ppi + (_f(form, 'wrap_board', HARDCOVER['board'])
+                             if (hard or jacket) else 0.0)
     dims = {
         'trim_w': trim_w,
         'trim_h': trim_h,
@@ -1508,12 +1521,17 @@ def _wrap_from_form(form, out_path, back_image=None):
         'bleed':  _f(form, 'wrap_bleed', rc['bleed']),
         'pages':  pages,
         'spine_text_min': rc['spine_text_min'],
-        'binding': 'hardcover' if hard else 'paperback',
+        'binding': binding,
         'wrap':   _f(form, 'wrap_turnin', HARDCOVER['wrap']),
         'hinge':  _f(form, 'wrap_hinge', HARDCOVER['hinge']),
+        'flap':   _f(form, 'wrap_flap', JACKET['flap']),
+        'board_ext': _f(form, 'wrap_board_ext', JACKET['board_ext']),
     }
     dims['warnings'] = (hardcover_warnings(retailer, trim_w, trim_h, pages, paper)
-                        if hard else [])
+                        if (hard or jacket) else [])
+    if jacket and retailer == 'kdp':
+        dims['warnings'].append('KDP does not print dust jackets — this file is for '
+                                'IngramSpark or another printer.')
     meta = {
         'title':  form.get('prev_title', ''),
         'author': form.get('prev_author', ''),
@@ -1524,6 +1542,8 @@ def _wrap_from_form(form, out_path, back_image=None):
         'cover_epigraph':   form.get('prev_epigraph', ''),
         'cover_studio':     form.get('prev_studio', ''),
         'cover_blurb':      form.get('wrap_blurb', ''),
+        'cover_jacket_blurb': form.get('wrap_flap_blurb', ''),
+        'cover_author_bio':   form.get('wrap_flap_bio', ''),
         'cover_back_image':   back_image or '',
         'cover_back_image_w': _f(form, 'wrap_back_w', 1.5),
         'cover_back_image_y': _f(form, 'wrap_back_y', 0.4),
@@ -1549,7 +1569,8 @@ def cover_wrap():
                     os.remove(p)
                 except OSError:
                     pass
-    kind = ('-case-wrap' if request.form.get('wrap_binding') == 'hardcover' else '-wrap')
+    kind = {'hardcover': '-case-wrap', 'jacket': '-jacket'}.get(
+        request.form.get('wrap_binding'), '-wrap')
     name = slugify(request.form.get('name', 'cover')) + kind + '.pdf'
     return Response(data, mimetype='application/pdf',
                     headers={'Content-Disposition': f'attachment; filename="{name}"'})
@@ -1572,8 +1593,13 @@ def cover_wrap_preview():
         b64 = base64.b64encode(pix.tobytes('png')).decode()
         doc.close()
         spine_txt = 'spine text on' if res.get('spine_text') else 'spine text off (too few pages)'
-        kind = ('case laminate · %g" wrap · %g" hinge'
-                % (res['wrap'], res['hinge'])) if res['binding'] == 'hardcover' else 'paperback'
+        if res['binding'] == 'hardcover':
+            kind = 'case laminate · %g" wrap · %g" hinge' % (res['wrap'], res['hinge'])
+        elif res['binding'] == 'jacket':
+            kind = ('dust jacket · %g" flaps · %g" panels'
+                    % (res['flap'], res['panel_w']))
+        else:
+            kind = 'paperback'
         info = (f"{dims['trim_w']:g}×{dims['trim_h']:g}\" {kind} · spine {res['spine_w']:g}\" · "
                 f"full {res['wrap_w']:g}×{res['wrap_h']:g}\" · {spine_txt}")
         return jsonify({'ok': True, 'image': f'data:image/png;base64,{b64}', 'info': info,

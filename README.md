@@ -470,16 +470,29 @@ and front in a single page, sized for the printer. Pick the **binding**:
   `wrap + bleed + back + hinge + spine + hinge + front + bleed + wrap` across and
   `wrap + bleed + trim + bleed + wrap` down — a 200-page 6×9 comes out at 14.76 × 10.5".
 
+- **Dust jacket** — the paper jacket that goes *over* a hardcover, so it is measured off
+  the finished case rather than the pages: panels are the **board** (trim plus a board
+  extension, 0.125", on the fore-edge and at head and tail), with a folded **flap** at each
+  end (3.5" is the usual house figure). Laid flat, printed side up, the order is back flap,
+  back, spine, front, front flap — each flap folds in behind the cover it adjoins.
+
 Nothing that must be seen may sit in the turn-in or the hinge: the turn-in disappears
 around the board, and printed detail in the hinge cracks as the cover flexes. Tick
 **Proof guides** to see them — magenta for panels and folds, blue for the turn-in — and
 untick it before you upload.
 
-All three allowances are editable, because printers differ. The defaults are the numbers
-KDP and IngramSpark publish; **always confirm against the retailer's own downloadable
-cover template** for your trim. KDP's hardcover programme is narrower than its paperback
-one — 75–550 pages, white paper, and five trims — and the wrap preview says so if the
-book you've set up falls outside it.
+**Flap copy.** A jacket adds two text boxes. The **front flap** takes the jacket blurb
+(the hook), under the book's title; leave it blank and the back-cover blurb moves there
+instead, and the back panel drops it so the same paragraph isn't printed twice on one
+jacket. The **back flap** takes an *About the author* note — and the back-cover image moves
+there too, because on a jacket the author photo belongs on the flap. Set a front-flap blurb
+of its own and the back panel keeps its own text, which is where reviews usually go.
+
+Every allowance is editable, because printers differ. The defaults are the numbers KDP and
+IngramSpark publish; **always confirm against the retailer's own downloadable cover
+template** for your trim. KDP's hardcover programme is narrower than its paperback one —
+75–550 pages, white paper, and five trims — and the wrap preview says so if the book you've
+set up falls outside it. KDP doesn't print dust jackets at all; the preview says that too.
 
 ---
 

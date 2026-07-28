@@ -464,12 +464,17 @@
               <select name="wrap_binding" id="wrap-binding">
                 <option value="paperback">Paperback — perfect bound</option>
                 <option value="hardcover">Hardcover — case laminate</option>
+                <option value="jacket">Dust jacket — over a hardcover</option>
               </select></div>
           </div>
           <div class="row" id="wrap-hardcover" hidden>
             {{ nf('Wrap (turn-in)', 'wrap_turnin', 0.625, 'inches · glued round the boards') }}
             {{ nf('Hinge', 'wrap_hinge', 0.375, 'inches · each side of the spine') }}
             {{ nf('Board allowance', 'wrap_board', 0.06, 'inches · added to the spine') }}
+          </div>
+          <div class="row" id="wrap-jacket" hidden>
+            {{ nf('Flap width', 'wrap_flap', 3.5, 'inches · folded in at each end') }}
+            {{ nf('Board extension', 'wrap_board_ext', 0.125, 'inches · board past the pages') }}
           </div>
           <p class="hint" id="wrap-hardcover-note" hidden style="margin:-4px 0 6px"></p>
           <div class="row">
@@ -503,6 +508,14 @@
             <div class="field wide"><label>Back-cover blurb</label>
               <span class="hint">shown centred on the back · blank line starts a new paragraph</span>
               <textarea name="wrap_blurb" rows="4"></textarea></div>
+          </div>
+          <div class="row" id="wrap-flap-copy" hidden>
+            <div class="field wide"><label>Front-flap copy</label>
+              <span class="hint">the jacket blurb · leave blank to move the back-cover blurb here</span>
+              <textarea name="wrap_flap_blurb" rows="4"></textarea></div>
+            <div class="field wide"><label>Back-flap copy</label>
+              <span class="hint">about the author · the photo below moves here on a jacket</span>
+              <textarea name="wrap_flap_bio" rows="4"></textarea></div>
           </div>
           <div class="row">
             <div class="field wide"><label>Back-cover image</label>
@@ -625,13 +638,22 @@
       var bindingSel = document.getElementById('wrap-binding');
       var hardRow    = document.getElementById('wrap-hardcover');
       var hardNote   = document.getElementById('wrap-hardcover-note');
+      var jacketRow  = document.getElementById('wrap-jacket');
+      var flapCopy   = document.getElementById('wrap-flap-copy');
       function updateBinding(){
         if (!bindingSel) return;
-        var hard = bindingSel.value === 'hardcover';
+        var hard   = bindingSel.value === 'hardcover';
+        var jacket = bindingSel.value === 'jacket';
         hardRow.hidden = !hard;
-        hardNote.hidden = !hard;
+        jacketRow.hidden = !jacket;
+        flapCopy.hidden = !jacket;
         var r = retailerData[retailerSel && retailerSel.value];
-        hardNote.textContent = hard && r ? (r.hardcover_note || '') : '';
+        hardNote.hidden = !(hard || jacket);
+        hardNote.textContent = jacket
+          ? 'A jacket wraps the finished case, so its panels are the board — trim plus the '
+            + 'board extension — and the flaps fold in behind the covers. Only IngramSpark '
+            + 'prints jackets among the presets here; confirm flap and hinge with your printer.'
+          : (hard && r ? (r.hardcover_note || '') : '');
       }
       if (bindingSel) bindingSel.addEventListener('change', updateBinding);
 
@@ -675,7 +697,8 @@
           var url  = URL.createObjectURL(blob);
           var a    = document.createElement('a');
           var nm   = (document.querySelector('[name=name]').value || 'cover');
-          var kind = (bindingSel && bindingSel.value === 'hardcover') ? '-case-wrap' : '-wrap';
+          var bv = bindingSel && bindingSel.value;
+          var kind = bv === 'hardcover' ? '-case-wrap' : (bv === 'jacket' ? '-jacket' : '-wrap');
           a.href = url; a.download = nm.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + kind + '.pdf';
           document.body.appendChild(a); a.click(); a.remove();
           URL.revokeObjectURL(url);

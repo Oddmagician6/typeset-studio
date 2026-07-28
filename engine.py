@@ -1110,6 +1110,79 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
     canv.restoreState()
 
 
+def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
+    """A dust-jacket flap: the front one sells the book, the back one the author.
+
+    A flap is a tall, narrow column — under three inches of measure once it is
+    inset — so it takes the back panel's serif at a smaller size and none of
+    its furniture: no border (the fold is its edge), no ornament. The book's
+    title heads the front flap, the way a jacket does, because the flap is what
+    a browser reads with the book open in their hands.
+    """
+    pad = min(0.42 * inch, w * 0.14)
+    colw = w - 2 * pad
+    if colw <= 24:                       # a flap too narrow to set type in
+        return
+    cx = x0 + w / 2.0
+    size, lead = 9.5, 13.5
+    canv.saveState()
+
+    top = y0 + h - 0.9 * inch
+    if side == 'front':
+        title = (meta.get('title') or '').upper()
+        if title:
+            canv.setFillColor(_pal_color(tpl, tpl.get('title', {}).get('color', 'gold')))
+            for ln in _wrap_tracked(title, cf['display'], 13, colw, 1.2):
+                _tracked_centre(canv, cx, top, ln, cf['display'], 13, 1.2)
+                top -= 17
+            top -= 10
+        body = meta.get('cover_jacket_blurb') or meta.get('cover_blurb') or ''
+    else:
+        label = 'ABOUT THE AUTHOR' if (meta.get('cover_author_bio') or '').strip() else ''
+        if label:
+            canv.setFillColor(_pal_color(tpl, tpl.get('collection', {}).get('color', 'gold')))
+            _tracked_centre(canv, cx, top, label, cf['serif'], 8.0, 2.6)
+            top -= 20
+        # the author photo belongs on the back flap of a jacket, not the panel
+        bimg = meta.get('cover_back_image')
+        if bimg and os.path.exists(bimg):
+            try:
+                from reportlab.lib.utils import ImageReader
+                ir = ImageReader(bimg)
+                iw, ih = ir.getSize()
+                tw = min(max(meta.get('cover_back_image_w', 1.5), 0.25) * inch, colw)
+                thh = tw * (ih / iw) if iw else tw
+                canv.drawImage(ir, cx - tw / 2.0, top - thh, width=tw, height=thh,
+                               preserveAspectRatio=True, mask='auto')
+                top -= thh + 14
+            except Exception:
+                pass
+        body = meta.get('cover_author_bio') or ''
+
+    if body:
+        canv.setFillColor(_pal_color(tpl, 'ink'))
+        yy = top
+        for para in body.split('\n'):
+            if not para.strip():
+                yy -= lead * 0.6
+                continue
+            for ln in _wrap_tracked(para, cf['serif'], size, colw, 0.0):
+                # _tracked_left, not drawString: character spacing is part of the
+                # PDF text state, so the tracking set by the line above would
+                # still be in force and the flap copy would run past its fold
+                _tracked_left(canv, x0 + pad, yy, ln, cf['serif'], size, 0.0)
+                yy -= lead
+
+    st = tpl.get('studio', {})
+    studio = (meta.get('cover_studio') or meta.get('publisher') or '').upper()
+    if studio:
+        canv.setFillColor(_pal_color(tpl, st.get('color', 'muted')))
+        _tracked_centre(canv, cx, y0 + 0.55 * inch, studio,
+                        cf['serif'], min(st.get('size', 8.5), 8.0),
+                        st.get('tracking', 2.4))
+    canv.restoreState()
+
+
 def _paint_spine(canv, tpl, cf, meta, x0, y0, w, h, draw_text=True):
     """Rotated spine text (title + author), if allowed and wide enough to carry it."""
     if not draw_text or w < 0.10 * inch:   # retailer minimum not met, or physically too thin
@@ -1140,12 +1213,12 @@ def _paint_spine(canv, tpl, cf, meta, x0, y0, w, h, draw_text=True):
     canv.restoreState()
 
 
-def _paint_wrap_guides(canv, W, H, edge, tw, sp, th, hinge=0.0, wrap=0.0):
+def _paint_wrap_guides(canv, W, H, folds, y0, panel_h, wrap=0.0):
     """Dashed proof guides for the folds and the zones art must not rely on.
 
-    Magenta marks the panel/trim box and every fold the press makes — for a
-    paperback the two spine folds, for a case laminate the four (hinge and
-    spine). A second, paler rectangle marks the **turn-in**: on a hardcover
+    Magenta marks every vertical the press folds or trims at — two on a
+    paperback, four on a case laminate, six on a jacket — plus the top and
+    bottom of the panels. A second, blue rectangle marks the **turn-in**:
     everything outside it is glued around the board and will never be seen, so
     it is a different kind of boundary from a trim line and is drawn as one.
     Proof only — never send a guided PDF to print.
@@ -1157,14 +1230,10 @@ def _paint_wrap_guides(canv, W, H, edge, tw, sp, th, hinge=0.0, wrap=0.0):
         canv.setStrokeColorRGB(0.25, 0.55, 0.85)
         canv.rect(wrap, wrap, W - 2 * wrap, H - 2 * wrap, stroke=1, fill=0)
     canv.setStrokeColorRGB(0.85, 0.2, 0.5)
-    # panel edges and every fold, left to right
-    xs = [edge, edge + tw, edge + tw + hinge,
-          edge + tw + hinge + sp, edge + tw + 2 * hinge + sp,
-          edge + 2 * tw + 2 * hinge + sp]
-    for x in sorted(set(round(v, 4) for v in xs)):
+    for x in sorted(set(round(v, 4) for v in folds)):
         canv.line(x, 0, x, H)
-    canv.line(0, edge, W, edge)
-    canv.line(0, edge + th, W, edge + th)
+    canv.line(0, y0, W, y0)
+    canv.line(0, y0 + panel_h, W, y0 + panel_h)
     canv.restoreState()
 
 
@@ -1186,6 +1255,15 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
     A paperback passes neither, making both zero and the geometry identical to
     what it was before hardcover existed.
 
+    A **dust jacket** (`binding: 'jacket'`) wraps the finished case rather than
+    the block, so its panels are the *board* — trim plus `board_ext` on the
+    fore-edge, and on both the head and the tail — and it gains a folded flap
+    at each end instead of a turn-in:
+    `bleed + flap + panel + hinge + spine + hinge + panel + flap + bleed`
+    across, `bleed + trim + 2·board_ext + bleed` down. Laid flat and printed
+    side up the order is back flap, back, spine, front, front flap — the flaps
+    fold in behind the covers they adjoin.
+
     Returns the finished wrap dimensions (inches) and whether spine text was drawn.
     """
     from reportlab.pdfgen import canvas as _canvas
@@ -1193,33 +1271,55 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
     th = dims['trim_h'] * inch
     sp = max(dims.get('spine_w', 0.0), 0.0) * inch
     bl = dims.get('bleed', 0.125) * inch
-    hard = dims.get('binding', 'paperback') == 'hardcover'
+    binding = dims.get('binding', 'paperback')
+    hard = binding == 'hardcover'
+    jacket = binding == 'jacket'
     wrap = max(dims.get('wrap', 0.625) * inch, 0.0) if hard else 0.0
-    hinge = max(dims.get('hinge', 0.375) * inch, 0.0) if hard else 0.0
+    hinge = max(dims.get('hinge', 0.375) * inch, 0.0) if (hard or jacket) else 0.0
+    flap = max(dims.get('flap', 3.5) * inch, 0.0) if jacket else 0.0
+    bext = max(dims.get('board_ext', 0.125) * inch, 0.0) if jacket else 0.0
     pages = dims.get('pages')
     smin = dims.get('spine_text_min', 0) or 0
     draw_spine = (pages is None or pages >= smin) and sp >= 0.10 * inch
     edge = wrap + bl                       # outer allowance before a panel starts
-    W = 2 * edge + 2 * tw + 2 * hinge + sp
-    H = 2 * edge + th
+    pw = tw + bext                         # panel width: the board, on a jacket
+    ph = th + 2 * bext                     # panel height, likewise
+    W = 2 * edge + 2 * flap + 2 * pw + 2 * hinge + sp
+    H = 2 * edge + ph
     c = _canvas.Canvas(out_path, pagesize=(W, H))
     pal = tpl.get('palette', {})
     _paint_gradient(c, pal, 0, 0, W, H)
-    back_x = edge
-    spine_x = edge + tw + hinge
+    back_x = edge + flap
+    spine_x = back_x + pw + hinge
     front_x = spine_x + sp + hinge
-    _paint_back_panel(c, tpl, cf, meta, back_x, edge, tw, th)
-    _paint_spine(c, tpl, cf, meta, spine_x, edge, sp, th, draw_text=draw_spine)
-    _paint_background(c, tpl, front_x, edge, tw, th)
-    _paint_cover_front(c, tpl, cf, meta, front_x, edge, tw, th)
+    panel_meta = meta
+    if jacket:
+        # On a jacket the flaps own the author photo and — unless the jacket
+        # has copy of its own — the blurb, so the back panel doesn't print the
+        # same paragraph twice on one piece of paper. Set a jacket blurb and
+        # the back panel keeps its own text.
+        panel_meta = dict(meta)
+        panel_meta.pop('cover_back_image', None)
+        if not (meta.get('cover_jacket_blurb') or '').strip():
+            panel_meta.pop('cover_blurb', None)
+    _paint_back_panel(c, tpl, cf, panel_meta, back_x, edge, pw, ph)
+    _paint_spine(c, tpl, cf, meta, spine_x, edge, sp, ph, draw_text=draw_spine)
+    _paint_background(c, tpl, front_x, edge, pw, ph)
+    _paint_cover_front(c, tpl, cf, meta, front_x, edge, pw, ph)
+    if flap:
+        _paint_flap(c, tpl, cf, meta, edge, edge, flap, ph, 'back')
+        _paint_flap(c, tpl, cf, meta, front_x + pw, edge, flap, ph, 'front')
     if guides:
-        _paint_wrap_guides(c, W, H, edge, tw, sp, th, hinge=hinge, wrap=wrap)
+        folds = [edge, edge + flap, back_x + pw, spine_x, spine_x + sp,
+                 front_x, front_x + pw, front_x + pw + flap]
+        _paint_wrap_guides(c, W, H, folds, edge, ph, wrap=wrap)
     c.showPage()
     c.save()
     return {'wrap_w': round(W / inch, 3), 'wrap_h': round(H / inch, 3),
             'spine_w': round(sp / inch, 4), 'spine_text': bool(draw_spine),
-            'binding': 'hardcover' if hard else 'paperback',
-            'wrap': round(wrap / inch, 4), 'hinge': round(hinge / inch, 4)}
+            'binding': binding if binding in ('hardcover', 'jacket') else 'paperback',
+            'wrap': round(wrap / inch, 4), 'hinge': round(hinge / inch, 4),
+            'flap': round(flap / inch, 4), 'panel_w': round(pw / inch, 4)}
 
 
 # ---------------------------------------------------------------- fonts

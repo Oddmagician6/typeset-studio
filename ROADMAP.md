@@ -31,7 +31,7 @@ test_epub.py      EPUB self-check tests: builds one good file, then breaks it el
 test_footnotes.py Footnote placement: builds books and measures where the notes landed.
 test_import.py    .docx import fidelity: builds real Word files and looks for the words.
 test_chapter_art.py Chapter-opening art: geometry, then a real PDF and EPUB.
-test_wrap.py      Print-wrap arithmetic: paperback and case-laminate geometry, measured.
+test_wrap.py      Print-wrap arithmetic: paperback, case-laminate and jacket geometry, measured.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -300,6 +300,13 @@ created, updated    ISO 8601 datetime strings
   `[missing image: …]` note (EPUB) with the caption intact; it is never silently dropped. Note a
   *typed* empty fence is deliberately kept by `parse_markdown` (a caption-less figure is the common
   case) while a plain empty `~~~` is still discarded.
+
+- **On a cover canvas, never draw a paragraph with `drawString`.** Character spacing is part of
+  the PDF *text state*, not a per-call argument, so a plain `drawString`/`drawCentredString` after
+  any `_tracked_*` call inherits that call's tracking until the next `restoreState`. Copy measured
+  by `_wrap_tracked(..., 0.0)` then drawn that way comes out wider than it was measured and runs
+  past its panel — which is exactly what the jacket flaps did (#61). Use `_tracked_left` /
+  `_tracked_centre` with an explicit tracking, including `0.0`.
 
 - **Chapter art is built fresh per chapter, and clamped twice.** `_chapter_art` is called inside
   the chapter loop because appending *one* flowable instance to a story in several places is a
@@ -1447,6 +1454,35 @@ model yet (the blurb moves to the front flap; the back flap wants an author bio)
 IngramSpark-only among the retailers we preset, and their allowances vary more. Worth doing next in
 this area, with the flap-content model decided first.
 
+**61. Dust jackets — flaps, and the copy that goes on them** *(Tier-5G; the half #60 left)*
+The third binding. A jacket wraps the **finished case**, not the block, so it is measured off
+the boards — panels are trim + `board_ext` on the fore-edge and at head and tail — and it gains
+a folded flap at each end instead of a turn-in:
+`bleed + flap + panel + hinge + spine + hinge + panel + flap + bleed` across,
+`bleed + trim + 2·board_ext + bleed` down. Laid flat, printed side up, the order is back flap,
+back, spine, front, front flap. Defaults: 3.5" flaps, 0.125" board extension, #60's hinge, and
+the same spine as the case it covers.
+- `engine.py`: `_paint_flap` (front flap = title + jacket blurb; back flap = *About the author* +
+  the photo + studio line) and a jacket branch in `build_cover_wrap`; `_paint_wrap_guides` now takes
+  a **list of folds** instead of reconstructing them, so it draws two, four or six without caring
+  which binding asked. Zeroed jacket allowances collapse back onto the paperback geometry.
+- **The flap-content decision** (which #60 said to make first): the flaps own the author photo, and
+  own the blurb *unless* the jacket has copy of its own — a jacket with one blurb prints it on the
+  flap, not twice. `build_cover_wrap` hands the back panel a filtered `meta` rather than teaching
+  `_paint_back_panel` what a jacket is.
+- `app.py`: `JACKET` defaults, `binding` validated to the three known values (anything else is a
+  paperback), the jacket meta keys, a warning that KDP doesn't print jackets, and a `-jacket.pdf`
+  download name. `templates/cover_editor.html`: the third binding option, its two allowance fields,
+  the flap-copy textareas, and a jacket note — all hidden until chosen.
+**Bug found by the proof, and fixed:** flap copy ran past the fold and came out letterspaced.
+Character spacing is part of the PDF **text state**, so a plain `drawString` after a tracked line
+inherits that line's `Tc` — the copy was measured untracked and drawn tracked. Flap body lines now
+go through `_tracked_left(..., 0.0)`, the file's existing idiom for saying "no tracking, and mean
+it". `test_wrap.py` grew a check that reads the **word boxes** out of the built PDF and fails if any
+straddles a fold; it was confirmed to fail against the old code before being kept.
+Tests now 61 checks, covering all three geometries, the flap copy landing on the right flap, the
+no-double-blurb rule, and every binding downloading under its own name. Guided proof eyeballed.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1761,11 +1797,10 @@ someone asks for it.
 
 **G. Editions & scale — real, but heavier and lower-frequency**
 
-- ~~**Hardcover case-wrap.**~~ — **SHIPPED (feature #60):** a `binding` choice on the wrap export
-  adds the turn-in, the two hinge channels and the board allowance in the spine, to the retailers'
-  published formula; a paperback is unchanged. **Remaining: the dust jacket** — panels sized to the
-  boards, two flaps, and flap copy the model doesn't carry yet (see #60). Decide the flap-content
-  model before building it.
+- ~~**Hardcover case-wrap / dust jacket.**~~ — **SHIPPED (features #60 + #61):** the wrap export
+  takes a `binding` — paperback (unchanged), case laminate (turn-in, hinges, board in the spine),
+  or dust jacket (board-sized panels, flaps, and flap copy). All three to the printers' published
+  formulas, with every allowance editable.
 - ~~**Large-print edition**~~ — **SHIPPED (feature #54):** a *Large print* action on every style
   card derives one, following the RNIB/NAVH rules.
 - ~~**Trim-size presets**~~ — **SHIPPED (feature #54):** thirteen standard trims in the style
@@ -1794,10 +1829,10 @@ someone asks for it.
 ~~EPUB preflight (D)~~ #52 → ~~device preview (D)~~ #53 →
 ~~large print + trim presets (G)~~ #54 → ~~footnotes (A)~~ #55 → ~~ornament library (E)~~ #56 →
 ~~tables (A)~~ #57 → ~~the `.docx` follow-ups (C)~~ #58 → ~~chapter-heading art (E)~~ #59 →
-~~hardcover case wrap (G)~~ #60 →
-**what's left**: the dust jacket and box sets (G), PDF/X-1a and spread balancing (D), and
+~~hardcover case wrap (G)~~ #60 → ~~dust jackets (G)~~ #61 →
+**what's left**: box sets (G, explicitly deferred), PDF/X-1a and spread balancing (D), and
 full-bleed interior pages (E, an imposition change — see the note there). Sections **A, B, C
-and F are clear**; E's only remaining item is that bleed work. Note this whole tier is *feature* work: per the strategy note below, **packaging still
+and F are clear**; E's only remaining item is that bleed work, and G's is box sets. Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 
 ### ◻ Strategy notes (context for prioritising, not committed work)
