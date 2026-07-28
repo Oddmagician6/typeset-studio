@@ -19,7 +19,8 @@ import matter as _matter
 import ornaments as _orn
 from manuscript import (chapter_anchors as _ms_anchors, LINK_RE as _LINK_RE,
                         chapter_numbers as _ms_numbers,
-                        map_block_texts as _ms_map_texts)
+                        map_block_texts as _ms_map_texts,
+                        CELL_SEP as _MS_CELL)
 
 _NOTE_MARK_RE = re.compile(r'<note n="(\d+)" id="[\w\-]+"/>')
 
@@ -223,6 +224,18 @@ ul.block-list li, ol.block-list li { margin: 0.25em 0; text-indent: 0; }
 blockquote.block-quote { margin: 1.1em 6%; font-size: 0.95em; }
 blockquote.block-quote p { text-indent: 0; margin: 0 0 0.4em; }
 blockquote.block-quote p.quote-source { text-align: right; font-style: italic; font-size: 0.9em; color: #555; margin-top: 0.3em; }
+table.block-table { border-collapse: collapse; width: 100%; margin: 1.2em auto; font-size: 0.92em; }
+table.block-table caption { font-style: italic; font-size: 0.9em; color: #555; text-align: center; margin-bottom: 0.4em; caption-side: top; }
+table.block-table th, table.block-table td { padding: 0.3em 0.5em; text-align: left; vertical-align: top; text-indent: 0; }
+table.block-table th { font-weight: bold; }
+table.block-table.head-italic th { font-weight: normal; font-style: italic; }
+table.block-table.head-regular th { font-weight: normal; }
+table.block-table.head-smallcaps th { font-weight: normal; font-variant: small-caps; }
+table.block-table.rules-all th, table.block-table.rules-all td { border: 1px solid #444; }
+table.block-table.rules-horizontal tr { border-bottom: 1px solid #444; }
+table.block-table.rules-horizontal { border-top: 1px solid #444; }
+table.block-table.rules-header { border-top: 1.5px solid #222; border-bottom: 1.5px solid #222; }
+table.block-table.rules-header thead tr { border-bottom: 1px solid #444; }
 .align p { text-indent: 0; margin: 0.2em 0; }
 .align-center { text-align: center; }
 .align-right { text-align: right; }
@@ -425,6 +438,64 @@ def _figure_html(caption_paras, attrs, figures):
     return out
 
 
+_TABLE_RULES = ('all', 'horizontal', 'header', 'none')
+
+
+def _table_html(rows_paras, attrs, tm=None):
+    """A `~~~ table` block as a real `<table>`.
+
+    Cells were split at parse time and rejoined with `manuscript.CELL_SEP`, so
+    the emphasis inside a cell is already markup and only needs converting.
+    Short rows are padded, matching the PDF — the two outputs must agree on the
+    shape of the grid. The style's rule and header choices ride on class names
+    rather than being written into the stylesheet, so the CSS stays static.
+    """
+    tm = tm or {}
+    rows = [text.split(_MS_CELL) for _, text in rows_paras if text is not None]
+    rows = [r for r in rows if any(c.strip() for c in r)]
+    if not rows:
+        return []
+    cols = max(len(r) for r in rows)
+    rows = [r + [''] * (cols - len(r)) for r in rows]
+
+    header = str(attrs.get('header', 'yes')).strip().lower() not in ('no', 'false', '0')
+    header = header and len(rows) > 1
+    aligns = [a.strip().lower() for a in (attrs.get('align', '') or '').split(',') if a.strip()]
+    aligns = ((aligns + [aligns[-1]] * cols)[:cols] if aligns else ['left'] * cols)
+
+    def cell(tag, text, col):
+        style = (f' style="text-align:{aligns[col]}"'
+                 if aligns[col] in ('right', 'center') else '')
+        return f'      <{tag}{style}>{_markup_to_html(text)}</{tag}>'
+
+    rules = tm.get('rules', 'header')
+    if rules not in _TABLE_RULES:
+        rules = 'header'
+    head_cls = tm.get('header_style', 'bold')
+    width = max(0.2, min(1.0, tm.get('width', 1.0)))
+    wstyle = f' style="width:{width * 100:.0f}%"' if width < 1.0 else ''
+    out = [f'  <table class="block-table rules-{rules} head-{head_cls}"{wstyle}>']
+    caption = (attrs.get('caption', '') or '').strip()
+    if caption:
+        out.append(f'    <caption>{_md_emph_to_html(caption)}</caption>')
+    body = rows
+    if header:
+        out.append('    <thead>')
+        out.append('    <tr>')
+        out += [cell('th', t, c) for c, t in enumerate(rows[0])]
+        out.append('    </tr>')
+        out.append('    </thead>')
+        body = rows[1:]
+    out.append('    <tbody>')
+    for row in body:
+        out.append('    <tr>')
+        out += [cell('td', t, c) for c, t in enumerate(row)]
+        out.append('    </tr>')
+    out.append('    </tbody>')
+    out.append('  </table>')
+    return out
+
+
 SCENE_ORN_HREF = 'images/scene-break.svg'
 
 
@@ -516,6 +587,10 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None):
                 if source:
                     lines.append(f'    <p class="quote-source">{_md_emph_to_html(source)}</p>')
                 lines.append('  </blockquote>')
+                no_indent_next = True
+                continue
+            if btype == 'table':
+                lines.extend(_table_html(val, attrs, preset.get('table', {})))
                 no_indent_next = True
                 continue
             if btype in ('center', 'centre', 'right', 'left'):

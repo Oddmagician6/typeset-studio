@@ -337,6 +337,13 @@ DEFAULTS = {
               'space_around': 11.0, 'para_gap': 4.0,
               'source_style': 'italic', 'source_align': 'right', 'source_gap': 3.0},
     'align': {'space_around': 9.0, 'indent': 0.0, 'para_gap': 3.0},
+    # rules: "all" (a full grid) | "horizontal" | "header" (the book default —
+    # a rule above, under the header and at the foot) | "none"
+    'table': {'font_size': 0, 'line_leading': 1.3, 'header_style': 'bold',
+              'rules': 'header', 'rule_width': 0.5, 'cell_pad_x': 5.0,
+              'cell_pad_y': 3.0, 'space_around': 12.0, 'width': 1.0,
+              'align': 'center', 'caption_size': 0, 'caption_style': 'italic',
+              'caption_align': 'center', 'caption_gap': 5.0},
     # Links are clickable in both outputs. `underline` is the print setting;
     # `color`/`epub_underline` style them in the ebook only.
     'link': {'underline': False, 'color': '', 'epub_underline': True},
@@ -688,6 +695,22 @@ def parse_preset_form(form):
             'space_around':  _f(form, 'al_space_around', 9.0),
             'indent':        _f(form, 'al_indent', 0.0),
             'para_gap':      _f(form, 'al_para_gap', 3.0),
+        },
+        'table': {
+            'font_size':     _f(form, 'tb_font_size', 0),
+            'line_leading':  _f(form, 'tb_line_leading', 1.3),
+            'header_style':  form.get('tb_header_style', 'bold'),
+            'rules':         form.get('tb_rules', 'header'),
+            'rule_width':    _f(form, 'tb_rule_width', 0.5),
+            'cell_pad_x':    _f(form, 'tb_cell_pad_x', 5.0),
+            'cell_pad_y':    _f(form, 'tb_cell_pad_y', 3.0),
+            'space_around':  _f(form, 'tb_space_around', 12.0),
+            'width':         _f(form, 'tb_width', 1.0),
+            'align':         form.get('tb_align', 'center'),
+            'caption_size':  _f(form, 'tb_caption_size', 0),
+            'caption_style': form.get('tb_caption_style', 'italic'),
+            'caption_align': form.get('tb_caption_align', 'center'),
+            'caption_gap':   _f(form, 'tb_caption_gap', 5.0),
         },
         'link': {
             'underline':      'lk_underline' in form,
@@ -1687,10 +1710,10 @@ def generate():
         else:
             raw = open(dest, encoding='utf-8', errors='replace').read()
     elif form.get('pasted', '').strip():
-        raw = form['pasted']
+        raw = _norm_newlines(form['pasted'])
         stamp_p = datetime.now().strftime('%Y%m%d-%H%M%S')
         ms_path = os.path.join(UPLOAD_DIR, f'pasted-{stamp_p}.txt')
-        with open(ms_path, 'w', encoding='utf-8') as pf:
+        with open(ms_path, 'w', encoding='utf-8', newline='') as pf:
             pf.write(raw)
         ms_type = 'pasted'
     elif form.get('use_sample'):
@@ -2267,14 +2290,21 @@ def _wordcount(text):
     return len(re.findall(r"\b[\w'’-]+\b", text or ''))
 
 
+def _norm_newlines(text):
+    """LF only. Manuscripts are stored as the writer's own source, so a stray
+    CR is corruption, not formatting — and it compounds on every save."""
+    return (text or '').replace('\r\r\n', '\n').replace('\r\n', '\n').replace('\r', '\n')
+
+
 @app.route('/project/new-draft', methods=['POST'])
 def project_new_draft():
     name = request.form.get('name', '').strip() or 'Untitled draft'
     pid = unique_project_id(slugify(name) or 'draft')
     presets = list_presets()
     ms_file = pid + '.md'
-    with open(os.path.join(PROJECT_MS_DIR, ms_file), 'w', encoding='utf-8') as f:
-        f.write(STARTER_DRAFT)
+    with open(os.path.join(PROJECT_MS_DIR, ms_file), 'w',
+              encoding='utf-8', newline='') as f:
+        f.write(_norm_newlines(STARTER_DRAFT))
     now = datetime.now().isoformat(timespec='seconds')
     data = {
         'name': name, 'preset': presets[0]['id'] if presets else '',
@@ -2303,9 +2333,14 @@ def project_write(pid):
 @app.route('/project/<pid>/write/save', methods=['POST'])
 def project_write_save(pid):
     proj = load_project(pid)
-    text = request.form.get('text', '')
+    # Normalise the line endings, and write them through untranslated.
+    # A browser encodes a textarea's newlines as CRLF on submit, and a Windows
+    # text-mode write then turns each of those into CR CR LF — so every autosave
+    # grew the file another carriage return. Both halves are fixed here.
+    text = _norm_newlines(request.form.get('text', ''))
     new_file = pid + '.md'
-    with open(os.path.join(PROJECT_MS_DIR, new_file), 'w', encoding='utf-8') as f:
+    with open(os.path.join(PROJECT_MS_DIR, new_file), 'w',
+              encoding='utf-8', newline='') as f:
         f.write(text)
     old = proj.get('manuscript_file', '')
     if old and old != new_file:

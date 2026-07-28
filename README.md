@@ -100,6 +100,7 @@ The tool reads a light, plain-text convention:
 | `~~~ list` … `~~~` | a bulleted list — one item per line |
 | `~~~ quote` … `~~~` | an inset quotation |
 | `~~~ center` … `~~~` | a centred block (also `right`, `left`) |
+| `~~~ table` … `~~~` | a table — one row per line, cells split on `\|` |
 | `[text](https://…)` | a link (also `mailto:` and `#in-book` targets) |
 | `[^label]` … `[^label]: text` | an endnote reference and its text |
 | `*italic*`         | *italic*                      |
@@ -117,7 +118,7 @@ A `.docx` is converted to the same convention on import:
 | **bold** / *italic* runs | inline emphasis |
 | a centred `* * *` line | a scene break |
 | an image | a figure, with a following *Caption* paragraph as its caption |
-| a table | a set-apart block, one row per line (there is no table layout yet) |
+| a table | a real table, columns intact (a `\|` inside a cell becomes `/`) |
 | Quote / Intense Quote | a quotation block |
 | a bulleted or numbered list | a list block |
 | a centred paragraph | a centred block |
@@ -248,6 +249,35 @@ new paragraph, exactly like body text. `~~~ right` and `~~~ left` work like `~~~
 Alignment blocks change *alignment only*; the style still owns size, face and leading.
 Everything else about how these look — bullet character, indents, quote size, the source
 line — lives in the style, under *Lists, quotations & alignment* in the style editor.
+
+### Tables
+
+```
+~~~ table caption="Recorded yields, 1897" align="left,right,right"
+Region     | Wheat | Barley
+Northmarch | 1,240 | 880
+Salt Coast |   960 | 1,105
+~~~
+```
+
+One row per line; cells are separated by `|`. Spacing around the pipes is up to you —
+line them up in the source if it helps you read it, or don't.
+
+The **first row is the header**: it is set apart and it repeats at the top of every
+page a long table runs onto. Write `header="no"` if the table has no header row.
+
+Optional attributes:
+
+- `align="left,right,right"` — alignment per column. A short list repeats its last entry.
+- `widths="3,1,1"` — relative column widths. Left out, widths are measured from the
+  content, and no column is ever squeezed narrower than its longest word.
+- `caption="…"` — a caption above the table (book convention; figure captions go below).
+
+Emphasis and links work inside a cell. A cell cannot contain a literal `|` — that
+character always starts a new column.
+
+Everything else — size, rules, cell padding, header style, caption style — lives in the
+style, under *Tables* in the style editor.
 
 ### Illustrations
 

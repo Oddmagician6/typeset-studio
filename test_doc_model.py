@@ -19,6 +19,7 @@ sys.path.insert(0, HERE)
 
 import manuscript
 import doc_model
+import engine
 
 
 # ---- structural diff for readable failure messages --------------------------
@@ -407,6 +408,139 @@ def test_blocks():
     _check("editor-built list round-trips", back == built, _diff(back, built))
 
 
+TABLES_MD = """\
+# Yields and Measures
+
+Everything below was copied from the assessors' rolls.
+
+~~~ table caption="Recorded yields, 1897" align="left,right,right"
+Region | Wheat | Barley
+Northmarch | 1,240 | 880
+Salt Coast | 960 | 1,105
+~~~
+
+The second roll was kept by assessor rather than by region.
+
+~~~ table header="no" widths="2,1"
+Assessor | **Rolls held**
+J. Marsh | 14
+~~~
+
+~~~ table
+One | *two* | [the roll](https://example.com/a_b)
+Short row
+~~~
+"""
+
+
+def test_tables():
+    """A table is line-oriented (one row per line); cells split on `|`."""
+    print("\n[tables]")
+    for smart in (True, False):
+        doc1 = doc_model.from_markdown(TABLES_MD, smartquotes=smart)
+        md2 = doc_model.to_markdown(doc1)
+        doc2 = doc_model.from_markdown(md2, smartquotes=smart)
+        eng_a = manuscript.parse_markdown(TABLES_MD, smartquotes=smart)
+        eng_b = manuscript.parse_markdown(md2, smartquotes=smart)
+        _check(f"table engine fidelity (smart={smart})", eng_a == eng_b, _diff(eng_a, eng_b))
+        _check(f"table model stability (smart={smart})", doc1 == doc2, _diff(doc1, doc2))
+
+    # the round-trip model needs no concept of a cell: to it a row is a line,
+    # and the pipes are ordinary text. That is the whole reason this was cheap.
+    doc = doc_model.from_markdown(TABLES_MD)
+    tables = [b for b in doc if b["type"] == "docblock" and b["block_type"] == "table"]
+    _check("three tables parsed", len(tables) == 3, len(tables))
+    _check("a row is one line", len(tables[0]["children"]) == 3,
+           len(tables[0]["children"]))
+    _check("caption and alignment survive",
+           tables[0]["attrs"] == {"caption": "Recorded yields, 1897",
+                                  "align": "left,right,right"}, tables[0]["attrs"])
+    _check("header=no and widths survive",
+           tables[1]["attrs"] == {"header": "no", "widths": "2,1"}, tables[1]["attrs"])
+    _check("pipes stay in the line text",
+           "|" in "".join(r["text"] for r in tables[0]["children"][0]["runs"]),
+           tables[0]["children"][0]["runs"])
+
+    # the engine splits the cells, and each is inlined on its own
+    eng = manuscript.parse_markdown(TABLES_MD, smartquotes=False)
+    blocks = [b for ch in eng["chapters"] for b in ch["blocks"]
+              if b[0] == "doc_block" and b[2].get("_type") == "table"]
+    rows = [[c for c in text.split(manuscript.CELL_SEP)] for _, text in blocks[0][1]]
+    _check("cells are split on the pipe",
+           rows[0] == ["Region", "Wheat", "Barley"], rows[0])
+    _check("every row is present", len(rows) == 3, len(rows))
+    cells = blocks[2][1][0][1].split(manuscript.CELL_SEP)
+    _check("emphasis works inside a cell", cells[1] == "<i>two</i>", cells[1])
+    _check("a link works inside a cell", "<a href=" in cells[2], cells[2])
+    _check("a URL's underscore is not read as emphasis",
+           "a_b" in cells[2], cells[2])
+    _check("a short row keeps its one cell",
+           blocks[2][1][1][1].split(manuscript.CELL_SEP) == ["Short row"],
+           blocks[2][1][1][1])
+
+    # both builders pad a short row to the grid rather than dropping the words
+    grid = engine._table_rows(blocks[2][1])
+    _check("a ragged row is padded, not dropped",
+           len(grid) == 2 and len(grid[0]) == len(grid[1]) == 3, grid)
+    _check("padding is empty cells, words intact", grid[1][0] == "Short row", grid[1])
+
+    # hand-built model (what the Table button produces)
+    built = [{"type": "docblock", "block_type": "table", "attrs": {},
+              "children": [{"type": "para", "runs": [doc_model._run("Column | Column")]},
+                           {"type": "para", "runs": [doc_model._run("a | b")]}]}]
+    back = doc_model.from_markdown(doc_model.to_markdown(built))
+    _check("editor-built table round-trips", back == built, _diff(back, built))
+
+    _check_docx_tables()
+
+
+def _check_docx_tables():
+    """A Word table imports with its columns, which is the last thing #47 left
+    on the floor: `doc.paragraphs` skips tables entirely, and until there was a
+    table block the importer could only set the words apart as a plain block."""
+    import tempfile
+    try:
+        from docx import Document
+    except ImportError:
+        _check("python-docx present for the import check", False, "not installed")
+        return
+
+    d = Document()
+    d.add_heading("Yields", level=1)
+    d.add_paragraph("A paragraph before the table.")
+    t = d.add_table(rows=3, cols=3)
+    for r, row in enumerate([["Region", "Wheat", "Barley"],
+                             ["Northmarch", "1,240", "880"],
+                             ["Salt Coast|North", "960", "1,105"]]):
+        for c, v in enumerate(row):
+            t.rows[r].cells[c].text = v
+    d.add_paragraph("And a paragraph after it.")
+
+    fd, path = tempfile.mkstemp(suffix=".docx")
+    os.close(fd)
+    try:
+        d.save(path)
+        report = {}
+        md = manuscript.import_docx(path, report=report)
+    finally:
+        os.remove(path)
+
+    parsed = manuscript.parse_markdown(md, smartquotes=True)
+    blocks = [b for ch in parsed["chapters"] for b in ch["blocks"]
+              if b[0] == "doc_block"]
+    _check("a Word table imports as a table block",
+           [b[2].get("_type") for b in blocks] == ["table"],
+           [b[2].get("_type") for b in blocks])
+    rows = [text.split(manuscript.CELL_SEP) for _, text in blocks[0][1]]
+    _check("its columns survive", rows[0] == ["Region", "Wheat", "Barley"], rows[0])
+    _check("all three rows survive", len(rows) == 3, len(rows))
+    _check("a pipe inside a Word cell becomes a slash",
+           rows[2][0] == "Salt Coast/North", rows[2][0])
+    _check("the import summary no longer apologises for tables",
+           manuscript.import_summary(report) == ("1 chapter, 1 table", ""),
+           manuscript.import_summary(report))
+
+
 LINKS_MD = """\
 # Also By
 
@@ -602,6 +736,7 @@ if __name__ == "__main__":
     test_bylines()
     test_figures()
     test_blocks()
+    test_tables()
     test_links()
     test_notes()
     test_vocabulary()

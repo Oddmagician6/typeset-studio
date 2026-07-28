@@ -29,7 +29,8 @@ import matter as _matter
 import ornaments as _orn
 from manuscript import (_inline as _ms_inline, chapter_anchors as _ms_anchors,
                         chapter_numbers as _ms_numbers,
-                        map_block_texts as _ms_map_texts)
+                        map_block_texts as _ms_map_texts,
+                        CELL_SEP as _MS_CELL)
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
@@ -2414,6 +2415,190 @@ def _render_align_block(block_paras, how, preset, fonts, st, avail_w, hyph=None)
     return out
 
 
+def _table_rows(block_paras):
+    """The block's paragraphs -> a rectangular grid of cell markup.
+
+    Each paragraph is one row, cells already split at parse time and rejoined
+    with `manuscript.CELL_SEP`. Short rows are padded rather than dropped: a
+    ragged table is an authoring slip, and losing the words is worse than an
+    empty cell.
+    """
+    rows = [text.split(_MS_CELL) for _, text in block_paras if text is not None]
+    rows = [r for r in rows if any(c.strip() for c in r)]
+    if not rows:
+        return []
+    cols = max(len(r) for r in rows)
+    return [r + [''] * (cols - len(r)) for r in rows]
+
+
+def _table_widths(measured, attrs, target_w, size, pad):
+    """Column widths in points, summing to target_w.
+
+    `measured` is the grid as it will actually be set — (plain text, font name)
+    per cell — because the header is bold (or uppercased small caps) and
+    measuring it in the body face underestimates it enough to break a short
+    heading like "Sum" in half.
+
+    An explicit `widths="3,1,1"` gives relative shares and is taken literally:
+    the author asked for it. Otherwise the rule that matters is **no column is
+    narrower than its longest word**. A purely proportional split hands a column
+    of prose so much of the measure that a neighbouring "Briars Hollow" gets
+    force-broken mid-word, which reads as a bug in the book. So each column
+    starts at its longest word and the slack is shared out in proportion to how
+    much more each column could use.
+    """
+    cols = len(measured[0])
+    raw = (attrs.get('widths', '') or '').strip()
+    if raw:
+        try:
+            shares = [max(0.0, float(v)) for v in re.split(r'[,\s]+', raw) if v]
+        except ValueError:
+            shares = []
+        if shares and sum(shares) > 0:
+            shares = (shares + [shares[-1]] * cols)[:cols]
+            return [target_w * s / sum(shares) for s in shares]
+
+    nat, minw = [], []
+    for c in range(cols):
+        col = [row[c] for row in measured]
+        nat.append(max((stringWidth(t, f, size) for t, f in col), default=0.0) + pad)
+        words = [(w, f) for t, f in col for w in t.split()]
+        # +1pt: ReportLab's own wrap is not bit-identical to stringWidth, and a
+        # column exactly as wide as its longest word still breaks it
+        minw.append(max((stringWidth(w, f, size) for w, f in words), default=0.0)
+                    + pad + 1.0)
+
+    total_nat = sum(nat) or 1.0
+    # everything fits unwrapped (or nothing can): share the measure out by need
+    if total_nat <= target_w or sum(minw) >= target_w:
+        return [target_w * n / total_nat for n in nat]
+
+    slack = target_w - sum(minw)
+    extra = [max(0.0, nat[c] - minw[c]) for c in range(cols)]
+    total_extra = sum(extra) or 1.0
+    return [minw[c] + slack * extra[c] / total_extra for c in range(cols)]
+
+
+def _render_table_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=None):
+    """Flowables for `~~~ table` — one row per line, cells split on `|`.
+
+    The first row is a header unless `header="no"`; it repeats at the top of
+    every continuation page, which is the whole reason a table gets a real
+    `Table` flowable rather than a formatted paragraph. Column alignment comes
+    from `align="left,right,…"`; the caption sits *above* the table, which is
+    the book convention (figure captions sit below).
+    """
+    tm     = preset.get('table', {})
+    size   = tm.get('font_size', 0) or (st['body'].fontSize - 1.0)
+    lead   = size * tm.get('line_leading', 1.3)
+    space  = tm.get('space_around', 12.0)
+    padx   = tm.get('cell_pad_x', 5.0)
+    pady   = tm.get('cell_pad_y', 3.0)
+    rules  = tm.get('rules', 'header')
+    rule_w = tm.get('rule_width', 0.5)
+
+    rows = _table_rows(block_paras)
+    if not rows:
+        return []
+    cols = len(rows[0])
+
+    header = str(attrs.get('header', 'yes')).strip().lower() not in ('no', 'false', '0')
+    header = header and len(rows) > 1
+
+    # per-column alignment; a short list repeats its last entry
+    aligns = [a.strip().lower() for a in (attrs.get('align', '') or '').split(',') if a.strip()]
+    if aligns:
+        aligns = (aligns + [aligns[-1]] * cols)[:cols]
+    else:
+        aligns = ['left'] * cols
+
+    hstyle_name = tm.get('header_style', 'bold')
+    hfont = (fonts.get('bold', fonts['regular']) if hstyle_name == 'bold'
+             else fonts.get('italic', fonts['regular']) if hstyle_name == 'italic'
+             else fonts['regular'])
+
+    # the grid exactly as it will be set — text and face per cell — so the width
+    # measurement and the render can't disagree
+    def cell_text(text, is_head):
+        if is_head and hstyle_name == 'smallcaps':
+            return _plain(text).upper()
+        return text
+
+    measured = [[(_plain(cell_text(t, header and r == 0)),
+                  hfont if (header and r == 0) else fonts['regular'])
+                 for t in row]
+                for r, row in enumerate(rows)]
+
+    target_w = avail_w * max(0.2, min(1.0, tm.get('width', 1.0)))
+    widths = _table_widths(measured, attrs, target_w, size, padx * 2)
+
+    def cell_style(col, is_head):
+        return ParagraphStyle(
+            f'tcell{col}{int(is_head)}', parent=st['body'],
+            fontName=hfont if is_head else fonts['regular'],
+            fontSize=size, leading=lead,
+            alignment=_ALIGN_MAP.get(aligns[col], TA_LEFT),
+            firstLineIndent=0, leftIndent=0, rightIndent=0,
+            spaceBefore=0, spaceAfter=0,
+        )
+
+    data = []
+    for r, row in enumerate(rows):
+        is_head = header and r == 0
+        line = []
+        for c, text in enumerate(row):
+            body = cell_text(text, is_head)
+            if hyph and not is_head:
+                body = _hyphenate_markup(body, hyph)
+            line.append(Paragraph(body, cell_style(c, is_head)))
+        data.append(line)
+
+    tbl = Table(data, colWidths=widths, repeatRows=1 if header else 0,
+                hAlign=tm.get('align', 'CENTER').upper())
+    style = [
+        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING',   (0, 0), (-1, -1), padx),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), padx),
+        ('TOPPADDING',    (0, 0), (-1, -1), pady),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), pady),
+    ]
+    ink = _colors.black
+    if rules == 'all':
+        style.append(('GRID', (0, 0), (-1, -1), rule_w, ink))
+    elif rules == 'horizontal':
+        style.append(('LINEBELOW', (0, 0), (-1, -2), rule_w, ink))
+        style.append(('LINEABOVE', (0, 0), (-1, 0), rule_w, ink))
+        style.append(('LINEBELOW', (0, -1), (-1, -1), rule_w, ink))
+    elif rules != 'none':                       # 'header' — the book default
+        style.append(('LINEABOVE', (0, 0), (-1, 0), rule_w * 1.6, ink))
+        if header:
+            style.append(('LINEBELOW', (0, 0), (-1, 0), rule_w, ink))
+        style.append(('LINEBELOW', (0, -1), (-1, -1), rule_w * 1.6, ink))
+    tbl.setStyle(TableStyle(style))
+
+    out = [Spacer(1, space)]
+    caption = (attrs.get('caption', '') or '').strip()
+    if caption:
+        csize = tm.get('caption_size', 0) or size
+        cfont = (fonts.get('italic', fonts['regular'])
+                 if tm.get('caption_style', 'italic') == 'italic'
+                 else fonts.get('bold', fonts['regular'])
+                 if tm.get('caption_style', 'italic') == 'bold' else fonts['regular'])
+        cap_style = ParagraphStyle(
+            'tabcaption', parent=st['body'], fontName=cfont, fontSize=csize,
+            leading=csize * 1.3, firstLineIndent=0,
+            alignment=_ALIGN_MAP.get(tm.get('caption_align', 'center'), TA_CENTER),
+            spaceBefore=0, spaceAfter=tm.get('caption_gap', 5.0),
+        )
+        cap = Paragraph(_ms_inline(caption, False), cap_style)
+        # keep the caption with the table's first rows; never KeepTogether the
+        # whole table, which must be free to split across pages
+        cap.keepWithNext = True
+        out.append(cap)
+    out += [tbl, Spacer(1, space)]
+    return out
+
+
 def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_meta=None):
     """Return flowables for one ~~~ … ~~~ document block."""
     meta  = block_meta or {}
@@ -2428,6 +2613,8 @@ def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_
             return _render_list_block(block_paras, attrs, preset, fonts, st, avail_w, hyph)
         if btype == 'quote':
             return _render_quote_block(block_paras, attrs, preset, fonts, st, avail_w, hyph)
+        if btype == 'table':
+            return _render_table_block(block_paras, attrs, preset, fonts, st, avail_w, hyph)
         if btype in ('center', 'centre', 'right', 'left'):
             return _render_align_block(block_paras, btype, preset, fonts, st, avail_w, hyph)
         db             = preset.get('document_block', {})

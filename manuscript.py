@@ -29,10 +29,20 @@ import html
 
 
 # Fenced blocks whose content is line-oriented: every source line is its own item
-# (a list) or its own line (an alignment block), instead of being wrapped into a
-# paragraph. Poems are line-oriented too but keep stanzas, so they're handled
-# separately. doc_model.py and static/doc_model.js mirror this set.
-LINE_BLOCKS = ('list', 'center', 'centre', 'right', 'left')
+# (a list), its own line (an alignment block) or its own row (a table), instead of
+# being wrapped into a paragraph. Poems are line-oriented too but keep stanzas, so
+# they're handled separately. doc_model.py and static/doc_model.js mirror this set.
+LINE_BLOCKS = ('list', 'center', 'centre', 'right', 'left', 'table')
+
+# A table row's cells are split on `|` at parse time — *before* inline markup is
+# applied — and each cell is inlined on its own, then rejoined with this marker.
+# Splitting the finished markup instead would break a link whose URL contains a
+# pipe, and would make the renderers re-implement the emphasis rules. The marker
+# never reaches ReportLab or the XHTML: both builders split it back out first.
+# There is deliberately no escape for a literal `|` inside a cell — see the
+# ROADMAP note; a context-free escape can't express it without teaching the
+# round-trip model about cells.
+CELL_SEP = '<cell/>'
 
 SCENE_BREAK_RE = re.compile(r'^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$')
 CHAPTER_RE     = re.compile(r'^#\s+(.*)$')
@@ -335,6 +345,14 @@ def parse_markdown(raw, smartquotes=True):
                          if s.strip()]
                 if verse:
                     block_buf.append(('para', '<br/>'.join(verse)))
+            elif block_type == 'table':
+                # One source line = one row; cells split on `|`. Each cell is
+                # inlined separately so emphasis and links work inside a cell.
+                for s in block_para_buf:
+                    if not s.strip():
+                        continue
+                    cells = [_inline(c.strip(), smartquotes) for c in s.split('|')]
+                    block_buf.append(('para', CELL_SEP.join(cells)))
             elif block_type in LINE_BLOCKS:
                 # One line = one item / one line of the block. Wrapping prose into
                 # a paragraph is wrong here: a list's items and a sign's lines are
@@ -600,29 +618,27 @@ def _para_images(p, stem, report):
 
 
 def _table_md(tbl, report):
-    """A Word table -> a plain ~~~ block, one paragraph per row.
+    """A Word table -> a `~~~ table` block, one line per row.
 
-    There is no table block type yet, so this preserves the words (set apart from
-    the body) rather than dropping them. The import summary says so plainly.
+    Cells keep their columns now that there is a table block to import into.
+    A pipe inside a cell would read as a column break, so it becomes a slash —
+    the one substitution made here, and vanishingly rare in a Word table.
     """
     rows = []
     for row in tbl.rows:
-        cells = [' '.join(c.text.split()) for c in row.cells]
+        cells = [' '.join(c.text.split()).replace('|', '/') for c in row.cells]
         # a merged row repeats the same cell object; collapse the repeats
         dedup = [c for i, c in enumerate(cells) if i == 0 or c != cells[i - 1]]
-        line = ' · '.join(c for c in dedup if c)
-        if line:
-            rows.append(line)
+        if any(dedup):
+            rows.append(' | '.join(dedup))
     if not rows:
         return []
     report['tables'] += 1
-    out = ['', '~~~']
-    for i, r in enumerate(rows):
-        if i:
-            out.append('')
-        out.append(r)
-    out += ['~~~', '']
-    return out
+    # Word marks a header row in tblHeader; absent that, assume the first row is
+    # one only when every cell in it is non-empty and the table has body rows
+    header = len(rows) > 1 and all(c.strip() for c in rows[0].split('|'))
+    fence = '~~~ table' + ('' if header else ' header="no"')
+    return ['', fence] + rows + ['~~~', '']
 
 
 def _new_report():
@@ -639,7 +655,7 @@ def import_docx(path, report=None):
 
     * **images** are extracted to the figure library and placed as ``~~~ figure``
       blocks, with a following Caption-styled paragraph used as the caption;
-    * **tables** become plain ``~~~`` blocks (no table type yet) instead of being
+    * **tables** become ``~~~ table`` blocks, columns intact, instead of being
       dropped — ``doc.paragraphs`` skips them entirely;
     * **hyperlink text** is kept (see ``_para_md``);
     * **Quote** styles become plain ``~~~`` blocks;
@@ -803,8 +819,6 @@ def import_summary(rep):
                    + ('s' if rep['aligned'] != 1 else ''))
 
     lost = []
-    if rep.get('tables'):
-        lost.append('tables were kept as set-apart blocks, not laid out as tables')
     if rep.get('links'):
         n = rep['links']
         lost.append(f"{n} link kept its text but not the web address" if n == 1

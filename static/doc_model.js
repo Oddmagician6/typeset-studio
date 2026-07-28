@@ -23,8 +23,10 @@
 
   // ---- block-level patterns (mirror manuscript.py) -------------------------
   // Fenced blocks whose content is line-oriented — one source line per item /
-  // per line, not wrapped into a paragraph. Mirrors manuscript.LINE_BLOCKS.
-  var LINE_BLOCKS = ['list', 'center', 'centre', 'right', 'left'];
+  // per line / per table row, not wrapped into a paragraph. A table's `|` cell
+  // separators are ordinary text at this level; only the two builders split on
+  // them. Mirrors manuscript.LINE_BLOCKS.
+  var LINE_BLOCKS = ['list', 'center', 'centre', 'right', 'left', 'table'];
   // A link target is restricted to unambiguous forms, so ordinary prose like
   // "[sic](ibid)" never becomes a link. Mirrors manuscript.LINK_RE.
   var LINK_RE = /\[([^\[\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+|#[A-Za-z0-9][\w\-]*)\)/g;

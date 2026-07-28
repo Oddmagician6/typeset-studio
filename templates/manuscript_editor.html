@@ -157,6 +157,14 @@
   .ms-rich .wb-doc[data-btype="centre"] .wb-doc-para{text-align:center;font-style:normal}
   .ms-rich .wb-doc[data-btype="right"] .wb-doc-para{text-align:right;font-style:normal}
   .ms-rich .wb-doc[data-btype="left"] .wb-doc-para{text-align:left;font-style:normal}
+  /* a table row stays one editable line, with the cell pipes shown in the
+     accent colour so the columns read at a glance. A real grid would need the
+     round-trip model to know about cells; a row is a line, exactly as typed */
+  .ms-rich .wb-doc[data-btype="table"]{border-left:0;background:var(--surface-2);
+    padding:8px 10px;margin:16px 0;border:1px solid var(--rule)}
+  .ms-rich .wb-doc[data-btype="table"] .wb-doc-para{font-style:normal;
+    font-family:var(--mono);font-size:13px;margin:0 0 3px;white-space:pre-wrap}
+  .ms-rich .wb-doc[data-btype="table"] .wb-doc-para:first-child{font-weight:700}
   .ms-rich .wb-figure{margin:20px 0;text-align:center}
   .ms-rich .wb-figure-img img{max-width:100%;max-height:260px;display:inline-block}
   .ms-rich .wb-figure-gone{border:1px dashed var(--rule-strong);border-radius:2px;
@@ -209,6 +217,7 @@
         <button type="button" data-act="figure">Figure</button>
         <button type="button" data-act="list">List</button>
         <button type="button" data-act="quote">Quote</button>
+        <button type="button" data-act="table">Table</button>
         <button type="button" data-act="find">Find</button>
       </div>
       <input type="file" id="fig-file" accept=".jpg,.jpeg,.png,.gif" hidden>
@@ -245,6 +254,7 @@
           <tr><td><code>~~~ figure src="map.png"</code> … <code>~~~</code></td><td>an illustration; the block's text is the caption. Add <code>width="0.5"</code>, <code>align="left"</code> or <code>full="yes"</code></td></tr>
           <tr><td><code>~~~ list</code> … <code>~~~</code></td><td>a bulleted list — one item per line. <code>~~~ list type="number"</code> numbers them</td></tr>
           <tr><td><code>~~~ quote source="…"</code> … <code>~~~</code></td><td>an inset quotation; the source line is optional</td></tr>
+          <tr><td><code>~~~ table</code> … <code>~~~</code></td><td>a table — one row per line, cells split on <code>|</code>. The first row is the header (<code>header="no"</code> to turn that off); add <code>align="left,right"</code>, <code>widths="3,1"</code> or <code>caption="…"</code></td></tr>
           <tr><td><code>~~~ center</code> · <code>~~~ right</code> · <code>~~~ left</code></td><td>an aligned block — one line per line</td></tr>
           <tr><td><code>[text](https://…)</code></td><td>a link — also <code>mailto:</code> and <code>#chapter-2</code> inside the book</td></tr>
           <tr><td><code>a claim.[^src]</code> + <code>[^src]: the note</code></td><td>an endnote; numbers restart each chapter and a Notes page is added automatically</td></tr>
@@ -761,14 +771,20 @@
         },
         list:    function(){ insertDocBlock('list'); },
         quote:   function(){ insertDocBlock('quote'); },
+        // seeded with a header row and one body row, so the pipes that separate
+        // the cells are visible rather than something you have to know about
+        table:   function(){ insertDocBlock('table', ['Column | Column', ' | ']); },
         find:    function(){ exitRich(); openFind(); },
       };
 
-      // shared by the List / Quote buttons: drop an empty typed block in and put
-      // the caret in its first line
-      function insertDocBlock(btype){
+      // shared by the List / Quote / Table buttons: drop a typed block in and
+      // put the caret in its first line
+      function insertDocBlock(btype, lines){
+        var kids = (lines || ['']).map(function(t){
+          return {type:'para', runs: t ? [DocModel._run(t)] : []};
+        });
         var blk = WYS.renderBlock({type:'docblock', block_type:btype, attrs:{},
-                                   children:[{type:'para', runs:[]}]});
+                                   children:kids});
         var p = WYS.renderBlock({type:'para', runs:[]});
         var el = currentRichBlock();
         if (el){ el.after(blk); blk.after(p); } else { rich.appendChild(blk); rich.appendChild(p); }

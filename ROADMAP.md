@@ -80,6 +80,12 @@ document_block:{frame, indent, font_size, first_indent, space_around,
                header_size, dateline_style}
                frame: "none" | "ruled" | "box"
                dateline_style: "italic" | "bold" | "smallcaps"
+table:         {font_size, line_leading, header_style, rules, rule_width,
+               cell_pad_x, cell_pad_y, space_around, width, align,
+               caption_size, caption_style, caption_align, caption_gap}
+               rules: "all" | "horizontal" | "header" | "none"
+               header_style: "bold" | "italic" | "smallcaps" | "regular"
+               width is a fraction of the text column
 list:          {bullet, number_format, indent, marker_gap, item_gap,
                space_around, font_size, line_leading}   number_format uses "{n}"
 quote:         {indent, right_indent, first_indent, font_size, line_leading,
@@ -165,6 +171,7 @@ punctuation applied first. Markup conventions:
 | `~~~ letter from="X" to="Y" date="Z"` | typed epistolary block (see below) |
 | `~~~ figure src="map.png"` … `~~~` | an illustration; the block content is its caption |
 | `~~~ list` / `~~~ list type="number"` | a list — **one item per line** |
+| `~~~ table` | a table — **one row per line**, cells split on `\|` |
 | `~~~ quote source="…"` | an inset quotation (prose; lines wrap) |
 | `~~~ center` / `right` / `left` | an aligned block — **one line per line** |
 | `[text](https://…)` | a link: web, `mailto:`, or an in-book `#anchor` |
@@ -244,6 +251,23 @@ created, updated    ISO 8601 datetime strings
     via a text object's `setCharSpace` — the canvas has no `setCharSpace` in this ReportLab).
   Designed covers reach the EPUB as a rasterised page-1 JPEG (feature #43; `epub.py` itself is
   still image-only) and are persisted in saved projects (feature #29).
+
+- **A table's cells are split at *parse* time, not at render time.** `flush_block_para`
+  splits each row on `|` before `_inline` runs, inlines each cell on its own, and rejoins
+  them with `manuscript.CELL_SEP` (`<cell/>`); both builders split that back out. Splitting
+  the finished markup instead would cut a link whose URL contains a pipe, and would make
+  each builder re-implement the emphasis rules. **There is no escape for a literal `|` in a
+  cell**, deliberately: `|` is only special inside a table, so a context-free escape (the
+  `\*` / `\[` mechanism, which `doc_model` mirrors) cannot express it without teaching the
+  round-trip model about cells — a new node type for a rare need in a low-priority block.
+
+- **Table column widths are measured against the face each cell is actually set in.**
+  `_table_widths` takes the grid as `(plain text, font)` pairs because the header is bold
+  (or uppercased for small caps) and measuring it in the body face is enough to break a
+  short heading like "Sum" in half. The rule that matters is that **no column is narrower
+  than its longest word**: a purely proportional split gives a prose column so much of the
+  measure that a neighbour gets force-broken mid-word. Columns start at their longest word
+  and the slack is shared out by how much more each could use.
 
 - **An ornament is sized by width, not by point size.** `scene_break.size` is a height
   in points, which is the right handle for a glyph or an image but the wrong one for a
@@ -1231,6 +1255,59 @@ narrower on the phone width, console clean. `test_doc_model.py` / `test_epub.py`
 **Not done:** chapter-heading art and full-bleed interior pages (the heavier half of Tier-5E);
 ornaments are black only (a book interior is); no per-ornament colour or rotation.
 
+**57. Tables — real tables, with a repeating header** *(Tier-5A's last item; closes the
+in-chapter content cluster, and the last thing the `.docx` importer was dropping)*
+`~~~ table` — one row per line, cells split on `|`. The first row is a header unless
+`header="no"`; optional `align="left,right,right"`, `widths="3,1,1"` and `caption="…"`.
+- **The round-trip layer needed one word changed.** Adding `table` to `manuscript.LINE_BLOCKS`
+  (mirrored in `static/doc_model.js`) is the whole of it: to the model a row is a line and the
+  pipes are ordinary text, so `doc_model.py` was untouched. Verified by the new tests rather
+  than assumed — fidelity and stability hold at both smartquote settings, and a JS↔Python
+  parity run over the table corpus plus notes, links, blocks, figures and poems came back
+  byte-identical (model *and* serialization) at the JS port's supported mode.
+- Cells are split at parse time and rejoined with `CELL_SEP` — see the gotcha above for why,
+  and for why a literal `|` in a cell is deliberately not supported.
+- `engine.py`: `_table_rows` (pads a ragged row rather than dropping the words),
+  `_table_widths` (the longest-word rule — see the gotcha) and `_render_table_block`, which
+  builds a real platypus `Table` of `Paragraph` cells with `repeatRows=1`. **That repeat is
+  the whole reason a table gets a `Table` flowable** instead of formatted paragraphs: a table
+  that runs onto the next page carries its header with it. Never `KeepTogether` — the caption
+  uses `keepWithNext` so it can't be orphaned while the table stays free to split.
+- **The caption sits above the table**, which is the book convention; figure captions sit
+  below. The two blocks differ here on purpose.
+- `epub.py`: `_table_html` emits `<table>` / `<caption>` / `<thead>` / `<th>` with per-column
+  alignment. The style's rule and header choices ride on class names (`rules-header`,
+  `head-smallcaps`) so the stylesheet stays static, as the other block CSS is.
+- `app.py` + `templates/editor.html`: a `table` preset section through the three-place rule,
+  and a **Tables** fieldset (size, width, alignment, rules, rule width, header style, cell
+  padding, caption size/style/alignment/gap).
+- `templates/manuscript_editor.html`: a **Table** toolbar button that drops in a seeded
+  header row and body row, so the pipes are visible rather than something you have to know
+  about; a cheatsheet row; and rich-mode CSS keyed off `data-btype` — a row stays one
+  monospace editable line, since a real grid would need the model to know about cells.
+  `insertDocBlock` gained an optional seed-lines argument.
+- **`manuscript.import_docx` finally lays Word tables out as tables** (`_table_md`), header
+  row detected, columns intact; a `|` inside a Word cell becomes `/`. That removes the last
+  line from the import summary's "not imported" half for a table.
+Verified: 23 new `test_doc_model.py::test_tables` checks (fidelity + stability at both
+smartquote settings, one row per line, every attribute surviving, emphasis and a link with an
+underscored URL inside a cell, a ragged row padded not dropped, an editor-built model, and the
+`.docx` import end to end); rendered PDF proofs **looked at** — a captioned three-column table
+with right-aligned numerals, a headerless table with explicit widths, a wide table whose long
+cell wraps inside its column, and a 59-row table where the header repeats on all three pages;
+an EPUB with real `<thead>`/`<th>` markup whose #52 preflight is all clear; and a live browser
+pass — the Table button inserts the block, it renders as a monospace panel, and pressing Enter
+in a row makes a new row that serializes as its own line.
+**Found and fixed on the way — a data-loss bug in the manuscript editor's autosave.** Saving
+added a carriage return to *every* line ending, compounding on each save: a browser encodes a
+textarea's newlines as CRLF on submit, and the route's Windows text-mode write then turned each
+`\r\n` into `\r\r\n`. One real project manuscript had already been mangled and was repaired.
+`app._norm_newlines` plus `newline=''` on the three manuscript writes fixes both halves;
+verified stable across repeated saves. Unrelated to tables, but it is exactly the "autosave +
+no data loss" obligation the Tier-4 editor note flags.
+**Not done:** merged cells, per-cell alignment, and a table that is wider than the page (the
+column measure fills the text width; a landscape or rotated table is a different feature).
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1443,8 +1520,9 @@ is free, local, and offline.
 
 **A. In-chapter content features — the biggest cluster, and the "is this a real formatter?" bar**
 
-Vellum ships 16 "text features"; our block model has six (`para`, `subhead`, `scene`,
-`doc_block` ×5 types, `poem`). Each item below is a new block type, so each costs the same
+Vellum ships 16 "text features"; when this scan was run our block model had six (`para`,
+`subhead`, `scene`, `doc_block` ×5 types, `poem`) — it now also has figure, list, quote,
+alignment and table blocks, plus notes and links. Each item below is a new block type, so each costs the same
 seven-file round: `manuscript.py` (parse) · `engine.py` (render) · `epub.py` (XHTML + CSS) ·
 `doc_model.py` **and** `static/doc_model.js` (kept byte-identical) · `static/wysiwyg.js`
 (render/read) · `templates/manuscript_editor.html` (toolbar + cheatsheet) ·
@@ -1467,9 +1545,10 @@ seven-file round: `manuscript.py` (parse) · `engine.py` (render) · `epub.py` (
 - ~~**Footnotes.**~~ — **SHIPPED (feature #55)** as an `endnotes.placement` choice, reusing #50's
   syntax and numbering wholesale. **Not done:** a note longer than its page cannot be split across
   two note areas ("continued footnotes"); the surplus is reported rather than dropped.
-- **Tables.** Nonfiction only, and `_render_doc_block`'s `box` frame already proves the
-  `Table`-flowable split behaviour. Low priority for the fiction audience; note that `.docx`
-  table text is currently dropped entirely.
+- ~~**Tables.**~~ — **SHIPPED (feature #57)** as `~~~ table`, line-oriented (one row per
+  line, cells on `|`), with a header row that repeats on every page the table runs onto, a
+  preset `table` section, and real `<table>`/`<thead>` in the EPUB. Word tables import as
+  tables. **Tier 5A is now clear.**
 
 **B. Links — ~~the biggest EPUB-specific gap~~ SHIPPED (feature #49)**
 
@@ -1486,10 +1565,9 @@ section D, not link syntax.
 **SHIPPED (feature #47):** images become figures, hyperlink text survives, tables become set-apart
 blocks, and an import summary reports both what came across and what didn't. **#48 then upgraded
 it further:** Word lists, Quote styles and centred paragraphs now import as real `list` / `quote` /
-`center` blocks rather than approximations. **Remaining**, each blocked on a Tier-5A block type
-rather than on the importer: **tables as real tables**. **Word footnotes and link addresses are no
-longer blocked** — #49 and #50 built the targets, so importing them is now just importer work. Also
-still open from #30: no `.docx` **poem** import.
+`center` blocks rather than approximations. ~~**Remaining**: tables as real tables~~ — **SHIPPED (feature #57)**, the last thing blocked on a
+missing block type. **Remaining is now importer work only**: Word **footnotes** and link
+**addresses** (#49 and #50 built the targets), and `.docx` **poem** import (open since #30).
 
 **D. Output correctness / validation — paid tools quietly win here**
 
@@ -1564,9 +1642,9 @@ someone asks for it.
 ~~links (B)~~ #49 → ~~endnotes (A)~~ #50 → ~~element vocabulary (F)~~ #51 →
 ~~EPUB preflight (D)~~ #52 → ~~device preview (D)~~ #53 →
 ~~large print + trim presets (G)~~ #54 → ~~footnotes (A)~~ #55 → ~~ornament library (E)~~ #56 →
-**what's left**: tables (A), hardcover wrap and box sets (G), PDF/X-1a and spread balancing (D),
-chapter-heading art (E), and the `.docx` follow-ups in (C) — Word footnotes, link addresses, poem
-import. Note this whole tier is *feature* work: per the strategy note below, **packaging still
+~~tables (A)~~ #57 →
+**what's left**: the `.docx` follow-ups in (C) — Word footnotes, link addresses, poem import —
+then chapter-heading art (E), hardcover wrap and box sets (G), PDF/X-1a and spread balancing (D). Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 
 ### ◻ Strategy notes (context for prioritising, not committed work)

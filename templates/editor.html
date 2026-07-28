@@ -413,6 +413,83 @@
       </fieldset>
 
       <fieldset>
+        <legend>Tables</legend>
+        <div class="fs-body">
+          {% set tb = p.get('table', {}) %}
+          <div class="row">
+            <div class="field num"><label>Size</label><span class="hint">points · 0 = one below body</span>
+              <input type="number" step="0.5" name="tb_font_size" value="{{ tb.get('font_size', 0) }}"></div>
+            <div class="field num"><label>Line spacing</label><span class="hint">× size</span>
+              <input type="number" step="0.05" name="tb_line_leading" value="{{ tb.get('line_leading', 1.3) }}"></div>
+            <div class="field num"><label>Width</label><span class="hint">fraction of the text width</span>
+              <input type="number" step="0.05" min="0.2" max="1" name="tb_width" value="{{ tb.get('width', 1.0) }}"></div>
+            <div class="field"><label>Table alignment</label>
+              {% set tba = tb.get('align', 'center') %}
+              <select name="tb_align">
+                <option value="left" {{ 'selected' if tba=='left' }}>Left</option>
+                <option value="center" {{ 'selected' if tba=='center' }}>Centred</option>
+                <option value="right" {{ 'selected' if tba=='right' }}>Right</option>
+              </select></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Rules</label><span class="hint">how the grid is drawn</span>
+              {% set tbr = tb.get('rules', 'header') %}
+              <select name="tb_rules">
+                <option value="header" {{ 'selected' if tbr=='header' }}>Top, under the header, and foot</option>
+                <option value="horizontal" {{ 'selected' if tbr=='horizontal' }}>A rule between every row</option>
+                <option value="all" {{ 'selected' if tbr=='all' }}>Full grid</option>
+                <option value="none" {{ 'selected' if tbr=='none' }}>No rules</option>
+              </select></div>
+            <div class="field num"><label>Rule width</label><span class="hint">points</span>
+              <input type="number" step="0.1" name="tb_rule_width" value="{{ tb.get('rule_width', 0.5) }}"></div>
+            <div class="field"><label>Header row</label>
+              {% set tbh = tb.get('header_style', 'bold') %}
+              <select name="tb_header_style">
+                <option value="bold" {{ 'selected' if tbh=='bold' }}>Bold</option>
+                <option value="italic" {{ 'selected' if tbh=='italic' }}>Italic</option>
+                <option value="smallcaps" {{ 'selected' if tbh=='smallcaps' }}>Small caps</option>
+                <option value="regular" {{ 'selected' if tbh=='regular' }}>Regular</option>
+              </select></div>
+          </div>
+          <div class="row">
+            <div class="field num"><label>Cell padding across</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="tb_cell_pad_x" value="{{ tb.get('cell_pad_x', 5.0) }}"></div>
+            <div class="field num"><label>Cell padding down</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="tb_cell_pad_y" value="{{ tb.get('cell_pad_y', 3.0) }}"></div>
+            <div class="field num"><label>Space around table</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="tb_space_around" value="{{ tb.get('space_around', 12.0) }}"></div>
+          </div>
+          <div class="row">
+            <div class="field num"><label>Caption size</label><span class="hint">points · 0 = table size</span>
+              <input type="number" step="0.5" name="tb_caption_size" value="{{ tb.get('caption_size', 0) }}"></div>
+            <div class="field"><label>Caption style</label>
+              {% set tbc = tb.get('caption_style', 'italic') %}
+              <select name="tb_caption_style">
+                <option value="italic" {{ 'selected' if tbc=='italic' }}>Italic</option>
+                <option value="regular" {{ 'selected' if tbc=='regular' }}>Regular</option>
+                <option value="bold" {{ 'selected' if tbc=='bold' }}>Bold</option>
+              </select></div>
+            <div class="field"><label>Caption alignment</label>
+              {% set tbca = tb.get('caption_align', 'center') %}
+              <select name="tb_caption_align">
+                <option value="left" {{ 'selected' if tbca=='left' }}>Left</option>
+                <option value="center" {{ 'selected' if tbca=='center' }}>Centred</option>
+                <option value="right" {{ 'selected' if tbca=='right' }}>Right</option>
+              </select></div>
+            <div class="field num"><label>Caption gap</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="tb_caption_gap" value="{{ tb.get('caption_gap', 5.0) }}"></div>
+          </div>
+          <p class="hint" style="margin-top:6px;line-height:1.6">
+            <code>~~~ table</code> — one row per line, cells separated by <code>|</code>. The first row is
+            the header unless you write <code>header="no"</code>; it repeats at the top of each page the
+            table runs onto.<br>
+            <code>~~~ table align="left,right,right" widths="3,1,1" caption="Yields, 1897"</code> — column
+            alignment, relative column widths and a caption above the table are all optional.
+          </p>
+        </div>
+      </fieldset>
+
+      <fieldset>
         <legend>Notes</legend>
         <div class="fs-body">
           {% set en = p.get('endnotes', {}) %}
