@@ -309,6 +309,15 @@
               <option value="both" {{ 'selected' if fmt=='both' }}>PDF + EPUB</option>
             </select></div>
         </div>
+        <div class="check" style="margin-top:10px">
+          <input type="checkbox" id="press" name="press" {{ 'checked' if form and form.get('press') }}>
+          <label for="press">Press-ready interior</label>
+        </div>
+        <p class="hint" style="margin:4px 0 0">Sets black text as a single ink instead of
+          RGB — the difference between crisp type and a four-ink black that mis-registers —
+          declares the trim box, and leaves out links and the cover page, which a printer
+          wants as its own file. The result page then reports how the finished PDF measures
+          up. Leave it off for a proof you'll read on screen.</p>
       </div>
     </fieldset>
 

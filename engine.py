@@ -1803,6 +1803,19 @@ class BookDoc(BaseDocTemplate):
             self._fn_drawn.add(key)
             y -= fl.style.spaceAfter
 
+    _press_canvas = None          # set by build_pdf for a press-ready build
+
+    def build(self, flowables, **kw):
+        """Route a press build through the CMYK canvas, measuring passes included.
+
+        Every pass has to use it: a colour the press canvas would refuse must
+        surface on the first build, not after the footnote pass has already
+        laid the book out.
+        """
+        if self._press_canvas is not None:
+            kw.setdefault('canvasmaker', self._press_canvas)
+        return BaseDocTemplate.build(self, flowables, **kw)
+
     def handle_flowable(self, flowables):
         f = flowables[0]
         if isinstance(f, RectoBreak):
@@ -3465,13 +3478,145 @@ def _resolve_footnotes(build, chapters, preset, fonts, st, avail_w, text_h,
     return reserve, assign, unplaced
 
 
-def build_pdf(manuscript, preset, out_path, meta):
+_RGB_OP_RE = re.compile(r'(?<![A-Za-z/])(rg|RG)(?![A-Za-z])')
+
+
+def press_check(path):
+    """Read a built PDF back and report how close it is to press standard.
+
+    Measured off the file, not inferred from the build: the point of a press
+    check is to describe the artefact that will actually be uploaded. Returns
+    the same {label, ok, detail} rows the other preflight cards use, or None if
+    PyMuPDF isn't installed.
+
+    The honest headline is in the last row: this is a **press-friendly** PDF,
+    not a certified PDF/X-1a, because the standard also wants an embedded CMYK
+    output intent — an ICC profile we don't ship (see the README).
+    """
+    try:
+        import fitz
+    except ImportError:
+        return None
+
+    rgb_ops = links = rgb_imgs = 0
+    transparency = False
+    with fitz.open(path) as doc:
+        for page in doc:
+            rgb_ops += len(_RGB_OP_RE.findall(page.read_contents().decode('latin-1')))
+            links += len(page.get_links())
+        for xref in range(1, doc.xref_length()):
+            try:
+                obj = doc.xref_object(xref, compressed=True) or ''
+            except Exception:
+                continue
+            if '/Image' in obj and '/DeviceRGB' in obj:
+                rgb_imgs += 1
+            if '/SMask' in obj or '/ExtGState' in obj:
+                transparency = True
+    # the boxes live on the page objects; the file itself is the simplest read
+    with open(path, 'rb') as fh:
+        trimbox = b'/TrimBox' in fh.read()
+
+    out = [
+        {'label': 'Colour', 'ok': rgb_ops == 0,
+         'detail': ('Text and rules are K-only black — one ink under body type'
+                    if rgb_ops == 0 else
+                    f'{rgb_ops} RGB colour operations — a printer converts these, and '
+                    'RGB black usually becomes a four-ink black that mis-registers')},
+        {'label': 'Illustrations', 'ok': rgb_imgs == 0,
+         'detail': ('No RGB images' if rgb_imgs == 0 else
+                    f'{rgb_imgs} image(s) are RGB — POD printers convert them for you, '
+                    'but a press wants CMYK done deliberately')},
+        {'label': 'Transparency', 'ok': not transparency,
+         'detail': ('None — nothing to flatten' if not transparency else
+                    'Transparency present — PDF/X-1a requires it flattened')},
+        {'label': 'Annotations', 'ok': links == 0,
+         'detail': ('No annotations — nothing that only works on a screen'
+                    if links == 0 else
+                    f'{links} link annotation(s) — harmless in print, but PDF/X-1a '
+                    'forbids them inside the trim box')},
+        {'label': 'Trim box', 'ok': trimbox,
+         'detail': ('Declared, so a prepress check knows where the page ends'
+                    if trimbox else 'Not declared — printers fall back to the page box')},
+        {'label': 'Output intent', 'ok': False,
+         'detail': ('No embedded ICC profile, so this is press-friendly rather than '
+                    'certified PDF/X-1a. KDP and IngramSpark both accept it as is.')},
+    ]
+    return out
+
+
+def _press_canvasmaker(pw, ph):
+    """A canvas that emits what a printer wants, and refuses what it doesn't.
+
+    Two things happen here that can't be done after the fact:
+
+    * `enforceColorSpace='cmyk'` — ReportLab converts every grey to **K-only**
+      CMYK and raises on anything chromatic. That is the whole point: an RGB
+      black (`0 0 0 rg`) is what makes a POD printer lay down four inks under
+      body text and produce the muddy, mis-registered page authors complain
+      about. Our interiors are black and grey throughout, so the conversion is
+      exact — no colour is approximated, and a style that ever introduced a
+      chromatic colour raises rather than being silently converted.
+    * `TrimBox`/`BleedBox` — declared equal to the page, which is the truth for
+      an interior with no bleed, and is what a prepress check looks for first.
+
+    Links are dropped: PDF/X forbids annotations inside the trim box, and a URL
+    you cannot click is nothing on paper. The words survive, the annotation
+    doesn't.
+    """
+    from reportlab.pdfgen import canvas as _canvas
+
+    class PressCanvas(_canvas.Canvas):
+        def __init__(self, *a, **kw):
+            kw['enforceColorSpace'] = 'cmyk'
+            kw['trimBox'] = (0, 0, pw, ph)
+            kw['bleedBox'] = (0, 0, pw, ph)
+            _canvas.Canvas.__init__(self, *a, **kw)
+
+        def linkURL(self, *a, **kw):
+            pass
+
+        def linkRect(self, *a, **kw):
+            pass
+
+        def linkAbsolute(self, *a, **kw):
+            pass
+
+    return PressCanvas
+
+
+def build_pdf(manuscript, preset, out_path, meta, press=False):
+    """Build the interior. `press=True` asks for the press-ready variant.
+
+    A press build that hits a colour it cannot express falls back to a normal
+    one and says so in `press_error`, because a book that builds in RGB beats
+    a book that doesn't build.
+    """
+    if not press:
+        return _build_pdf(manuscript, preset, out_path, meta)
+    try:
+        return _build_pdf(manuscript, preset, out_path, meta, press=True)
+    except ValueError as exc:
+        if 'color' not in str(exc).lower():
+            raise
+        res = _build_pdf(manuscript, preset, out_path, meta)
+        res['press'] = False
+        res['press_error'] = str(exc)
+        return res
+
+
+def _build_pdf(manuscript, preset, out_path, meta, press=False):
     fonts = register_fonts(preset)
     st = _styles(preset, fonts)
     head_font = fonts['regular']
 
     cover = None
     cover_path = None            # temp image path to clean up (image mode only)
+    if press:
+        # A press interior carries no cover: KDP and IngramSpark both want the
+        # cover as its own file, and a designed cover is chromatic by nature —
+        # it would be the one thing in the book the CMYK canvas refused.
+        meta = dict(meta, cover_mode='none', cover_image='')
     if meta.get('cover_mode') == 'designed' and meta.get('cover_template_data'):
         ctpl = meta['cover_template_data']
         cover = {'mode': 'designed',
@@ -3500,6 +3645,8 @@ def build_pdf(manuscript, preset, out_path, meta):
         doc = BookDoc(path, preset, meta, head_font, cover=cover,
                       title=meta.get('title', ''), author=meta.get('author', ''))
         doc._fn_reserve, doc._fn_assign, doc._fn_flow = fn_reserve, fn_assign, fn_flow
+        if press:
+            doc._press_canvas = _press_canvasmaker(doc._pw, doc._ph)
         return doc
 
     def _resolve_foot(make_toc=None):
@@ -3600,4 +3747,5 @@ def build_pdf(manuscript, preset, out_path, meta):
         'font_fallback':  fonts['fallback'],
         'font_details':   fonts['details'],
         'fonts_embedded': not fonts['fallback'],
+        'press':          bool(press),
     }

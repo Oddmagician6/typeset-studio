@@ -295,6 +295,25 @@ def _run_epubcheck(epub_path):
     return {'label': 'epubcheck', 'ok': False, 'detail': first[:160]}
 
 
+def _press_report(pdf_name, build_result):
+    """Press-check rows for a just-built interior, or None if it wasn't asked for.
+
+    Only shown when the book was built press-ready: on an ordinary RGB build
+    every row would read as a failure, when in fact the file is exactly what
+    KDP and IngramSpark want.
+    """
+    if not pdf_name or not build_result or not build_result.get('press'):
+        return None
+    path = os.path.join(OUT_DIR, pdf_name)
+    if not os.path.exists(path):
+        return None
+    try:
+        return engine.press_check(path)
+    except Exception:
+        logging.exception('press check failed')
+        return None
+
+
 def _epub_preflight(epub_name):
     """Checks for a just-built EPUB, or None if this book didn't make one."""
     if not epub_name:
@@ -1858,6 +1877,7 @@ def generate():
         'cover_color': form.get('cover_color', 'light'),
         'include_toc':    'include_toc' in form,
         'smartquotes':    'smartquotes' in form,
+        'press':          'press' in form,
         **{k: form.get(k, '').strip() for k in matter.KEYS},
     }
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -1873,8 +1893,12 @@ def generate():
     if fmt in ('pdf', 'both'):
         out_name = f'{base}-{stamp}.pdf'
         try:
-            build_result = engine.build_pdf(ms, preset, os.path.join(OUT_DIR, out_name), meta)
+            build_result = engine.build_pdf(ms, preset, os.path.join(OUT_DIR, out_name),
+                                            meta, press=meta['press'])
             page_count   = build_result['page_count']
+            if meta['press'] and build_result.get('press_error'):
+                flash('This book has colour in it, so it was built the normal way: '
+                      + build_result['press_error'])
         except Exception as exc:
             logging.error('PDF build failed: %s', traceback.format_exc())
             flash(f'PDF build failed: {exc}')
@@ -1892,12 +1916,13 @@ def generate():
 
     spec      = print_spec(page_count, preset) if page_count else None
     preflight = _preflight(build_result, preset, page_count) if build_result else None
+    press     = _press_report(out_name, build_result)
     chapters  = len(ms['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
                            meta=meta, preset=preset, preset_id=pid,
                            chapters=chapters, ms_path=ms_path, ms_type=ms_type,
                            cover_path=cover_path, from_project=None, fmt=fmt,
-                           spec=spec, preflight=preflight,
+                           spec=spec, preflight=preflight, press=press,
                            epub_preflight=_epub_preflight(epub_name))
 
 
@@ -2255,6 +2280,7 @@ def project_create():
         'format':      form.get('fmt', 'pdf'),
         'include_toc': form.get('include_toc') == '1',
         'smartquotes': form.get('smartquotes') == '1',
+        'press': form.get('press') == '1',
         **{k: form.get(k, '').strip() for k in matter.KEYS},
         'manuscript_file': ms_file,
         'manuscript_type': ms_type,
@@ -2314,6 +2340,7 @@ def project_edit(pid):
             'format':      form.get('format', proj.get('format', 'pdf')),
             'include_toc': 'include_toc' in form,
             'smartquotes': 'smartquotes' in form,
+            'press': 'press' in form,
             **{k: form.get(k, '').strip() for k in matter.KEYS},
             'title':            form.get('title', '').strip(),
             'subtitle':         form.get('subtitle', '').strip(),
@@ -2566,6 +2593,7 @@ def project_generate(pid):
         'cover_studio':     proj.get('cover_studio', ''),
         'include_toc':   proj.get('include_toc', False),
         'smartquotes':   proj.get('smartquotes', True),
+        'press':         proj.get('press', False),
         **{k: proj.get(k, '') for k in matter.KEYS},
     }
     ms_parsed = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
@@ -2581,8 +2609,13 @@ def project_generate(pid):
     if fmt in ('pdf', 'both'):
         out_name = f'{base}-{stamp}.pdf'
         try:
-            build_result = engine.build_pdf(ms_parsed, preset, os.path.join(OUT_DIR, out_name), meta)
+            build_result = engine.build_pdf(ms_parsed, preset,
+                                            os.path.join(OUT_DIR, out_name), meta,
+                                            press=meta['press'])
             page_count   = build_result['page_count']
+            if meta['press'] and build_result.get('press_error'):
+                flash('This book has colour in it, so it was built the normal way: '
+                      + build_result['press_error'])
         except Exception as exc:
             logging.error('PDF build failed: %s', traceback.format_exc())
             flash(f'PDF build failed: {exc}')
@@ -2607,12 +2640,13 @@ def project_generate(pid):
 
     spec      = print_spec(page_count, preset) if page_count else None
     preflight = _preflight(build_result, preset, page_count) if build_result else None
+    press     = _press_report(out_name, build_result)
     chapters  = len(ms_parsed['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
                            meta=meta, preset=preset, preset_id=proj['preset'],
                            chapters=chapters, ms_path='', ms_type=ms_type,
                            cover_path=cover_path, from_project=pid, fmt=fmt,
-                           spec=spec, preflight=preflight,
+                           spec=spec, preflight=preflight, press=press,
                            epub_preflight=_epub_preflight(epub_name))
 
 

@@ -244,6 +244,10 @@
               <option value="both" {{ 'selected' if proj.get('format','pdf')=='both' }}>PDF + EPUB</option>
             </select></div>
         </div>
+        <div class="check" style="margin-top:6px">
+          <input type="checkbox" id="press" name="press" {{ 'checked' if proj.get('press') }}>
+          <label for="press">Press-ready interior — single-ink black, trim box declared,
+            no links or cover page</label></div>
       </div>
     </fieldset>
 

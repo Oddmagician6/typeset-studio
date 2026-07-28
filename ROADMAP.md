@@ -32,6 +32,7 @@ test_footnotes.py Footnote placement: builds books and measures where the notes 
 test_import.py    .docx import fidelity: builds real Word files and looks for the words.
 test_chapter_art.py Chapter-opening art: geometry, then a real PDF and EPUB.
 test_wrap.py      Print-wrap arithmetic: paperback, case-laminate and jacket geometry, measured.
+test_press.py     Press-ready interiors: colour, boxes and annotations, read back off the PDF.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -1483,6 +1484,49 @@ straddles a fold; it was confirmed to fail against the old code before being kep
 Tests now 61 checks, covering all three geometries, the flap copy landing on the right flap, the
 no-double-blurb rule, and every binding downloading under its own name. Guided proof eyeballed.
 
+**62. Press-ready interiors — and the PDF/X-1a answer** *(Tier-5D; the spike the roadmap asked
+for, then what the spike made possible)*
+**The spike, first, because it settles a question that kept coming back.** Measured, not guessed
+(the first survey was wrong — a regex over *compressed* streams counts binary noise; PyMuPDF's
+`read_contents()` is the honest read). What ReportLab 5 can and can't assert:
+- `Canvas(enforceColorSpace='cmyk')` — **converts every grey to K-only and raises on anything
+  chromatic**. It is a converter for greys and a validator for the rest, which is exactly the
+  shape our interiors need: they are black and grey throughout, so nothing is approximated.
+- `trimBox` / `bleedBox` / `artBox` / `cropBox` — constructor arguments, written per page. ✓
+- XMP metadata — `Catalog.Metadata` is supported. ✓
+- **OutputIntent — not supported.** `PDFCatalog.__NoDefault__` is a fixed key list and silently
+  drops the entry; it can be forced through by appending to that class attribute (verified
+  working), i.e. only by patching a library internal.
+- **DocInfo `GTS_PDFXVersion` — not supported.** `PDFInfo` has fixed fields and ignores extras.
+- Transparency is still emitted (`setFillAlpha` works), and image XObjects stay **DeviceRGB**.
+**Conclusion: certified PDF/X-1a is not a flag, it's a project** — an embedded CMYK ICC profile
+(licensing + a binary in the repo), colour-managed image conversion, transparency flattening on
+covers, and two ReportLab monkey-patches. And it buys nothing today: KDP and IngramSpark both
+accept our PDFs. **Recorded as decided, not deferred.**
+**What shipped instead** — the part that is real, exact and free of all that:
+- `engine._press_canvasmaker` + `build_pdf(..., press=True)`: K-only black (an RGB black is what
+  makes a POD printer lay four inks under body type), TrimBox/BleedBox declared, link annotations
+  dropped (the words survive), and the cover page left out — both retailers want it as its own
+  file, and a designed cover is the one chromatic thing in the book. `BookDoc.build` routes
+  **every** pass through the press canvas, measuring passes included, so a refused colour surfaces
+  on the first build rather than after the footnote pass has laid the book out.
+- A **fallback that tells the truth**: a book with real colour builds the ordinary way and reports
+  `press_error`, which `app` flashes. A book that builds in RGB beats a book that doesn't build.
+- `engine.press_check(path)`: six rows measured off the finished file (colour, illustrations,
+  transparency, annotations, trim box, output intent) shown as a **Press check** card — only after
+  a press build, since on an ordinary one every row would read as a failure when the file is in
+  fact exactly what the retailers want. The output-intent row states the PDF/X-1a limit in plain
+  words rather than implying the file is certified.
+- `app.py`: a `press` meta flag through compose → result → **saved projects** → regenerate;
+  `templates/generate.html` + `project_edit.html` + `result.html`.
+- `test_press.py` (36 checks): an ordinary build still RGB with its links; a press build with no
+  RGB left, CMYK present, trim box declared, links gone, **pagination and page count unchanged**,
+  words intact; the cover rule; the fallback path (forced by injecting a chromatic body colour);
+  every press-check row on press, ordinary and illustrated books; and the app end. Page proof
+  eyeballed — identical to the RGB build.
+**Not done, deliberately:** the ICC output intent and CMYK image conversion (see the conclusion),
+and spread balancing, which the scan already said to note rather than schedule.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1756,9 +1800,14 @@ comments, tracked changes.
 - ~~**Designed covers in EPUB.**~~ — **SHIPPED (feature #43)**, the first Tier-5 item: page 1 of
   the designed cover is rasterised to a 2560px JPEG and handed to `epub.py` as the cover image, and
   the OPF now also carries the legacy `<meta name="cover">` pointer that Kindle tooling wants.
-- **PDF/X-1a.** Vellum advertises press-standard PDF/X-1a; we emit stock RGB ReportLab PDF. KDP
-  accepts ours, IngramSpark is fussier. Worth a spike on what ReportLab can actually assert
-  (output intent, no transparency, embedded profile) before promising it.
+- ~~**PDF/X-1a.**~~ — **SPIKED AND ANSWERED (feature #62).** ReportLab can assert K-only black,
+  the page boxes and XMP; it cannot assert an **output intent** (the catalog key is dropped unless
+  a library internal is patched) and leaves images RGB and transparency unflattened. Certified
+  PDF/X-1a is therefore a project — ICC profile licensing, colour-managed images, flattening —
+  that buys nothing while both retailers accept our PDFs. What was worth having shipped instead:
+  a **press-ready interior** (single-ink black, trim box, no annotations, no cover page) and a
+  press-check card measured off the finished file. **Decided, not deferred** — reopen only if a
+  printer actually refuses a file.
 - ~~**Ebook device preview.**~~ — **SHIPPED (feature #53):** the built EPUB's own documents and
   stylesheet, reflowed in a sandboxed iframe at phone / e-reader / tablet widths.
 - **Spread balancing.** `engine.py:1526` sets `allowWidows=0, allowOrphans=0`, so widows/orphans
@@ -1829,10 +1878,11 @@ someone asks for it.
 ~~EPUB preflight (D)~~ #52 → ~~device preview (D)~~ #53 →
 ~~large print + trim presets (G)~~ #54 → ~~footnotes (A)~~ #55 → ~~ornament library (E)~~ #56 →
 ~~tables (A)~~ #57 → ~~the `.docx` follow-ups (C)~~ #58 → ~~chapter-heading art (E)~~ #59 →
-~~hardcover case wrap (G)~~ #60 → ~~dust jackets (G)~~ #61 →
-**what's left**: box sets (G, explicitly deferred), PDF/X-1a and spread balancing (D), and
-full-bleed interior pages (E, an imposition change — see the note there). Sections **A, B, C
-and F are clear**; E's only remaining item is that bleed work, and G's is box sets. Note this whole tier is *feature* work: per the strategy note below, **packaging still
+~~hardcover case wrap (G)~~ #60 → ~~dust jackets (G)~~ #61 → ~~PDF/X-1a, spiked (D)~~ #62 →
+**what's left**: box sets (G, explicitly deferred as needing a multi-manuscript build path),
+full-bleed interior pages (E, an imposition change — see the note there), and spread balancing
+(D, which the scan says to note rather than schedule). Sections **A, B, C, D and F are now
+clear** of anything scheduled. Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 
 ### ◻ Strategy notes (context for prioritising, not committed work)

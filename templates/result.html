@@ -141,6 +141,24 @@
     </div>
     {% endif %}
 
+    {% if press %}
+    <div class="preflight">
+      <div class="head">
+        <span class="head-label">Press check</span>
+        <span class="badge badge-ok">Press-ready</span>
+      </div>
+      <ul>
+        {% for c in press %}
+        <li>
+          <span class="icon {{ 'ok' if c.ok else 'warn' }}">{{ '✓' if c.ok else '✗' }}</span>
+          <span class="chk-label {{ 'ok' if c.ok else 'warn' }}">{{ c.label }}</span>
+          <span class="chk-detail">{{ c.detail }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
     {% if epub_preflight %}
     {% set eissues = epub_preflight | selectattr('ok', 'equalto', false) | list %}
     <div class="preflight">
@@ -197,6 +215,7 @@
           <input type="hidden" name="fmt"               value="{{ fmt }}">
           <input type="hidden" name="include_toc"      value="{{ '1' if meta.get('include_toc') else '' }}">
           <input type="hidden" name="smartquotes"      value="{{ '1' if meta.smartquotes else '' }}">
+          <input type="hidden" name="press"            value="{{ '1' if meta.press else '' }}">
           {% for k in matter_keys %}
           <input type="hidden" name="{{ k }}" value="{{ meta.get(k,'') }}">
           {% endfor %}

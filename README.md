@@ -455,6 +455,33 @@ require. Before uploading, still confirm per platform:
 - **Inside (spine) margin** is generous enough for the page count (longer books need more).
 - The cover is a **separate** file — build it in the Cover Studio (below), or bring your own.
 
+### Press-ready interiors
+
+Tick **Press-ready interior** on the compose page and the PDF is built for a printing
+press rather than a screen:
+
+- **Black is one ink.** An ordinary PDF sets black as RGB, and a printer turns that into
+  all four inks — which is why POD body text can come back muddy and slightly out of
+  register. A press build sets every black and grey as **K only**. The conversion is exact,
+  not an approximation: book interiors are black and grey throughout.
+- **The trim box is declared**, so a prepress check knows where the page ends.
+- **Links come out.** The words stay; the clickable annotation goes, because it does
+  nothing on paper and the print standards disallow it inside the trim box.
+- **The cover page is left out** — KDP and IngramSpark both want the cover as its own file.
+
+If a book genuinely contains colour, the press build can't express it: the file is built
+the ordinary way instead and the page tells you why. Nothing is silently converted.
+
+After a press build the result page adds a **Press check** card, measured off the finished
+file: colour, illustrations, transparency, annotations, trim box.
+
+**On PDF/X-1a.** This is a press-*friendly* PDF, not a certified PDF/X-1a. The standard
+also requires an embedded CMYK **output intent** — an ICC profile with its own licensing —
+and CMYK illustrations, which would mean converting your images with a colour profile
+rather than for you. KDP and IngramSpark both accept the file as it is; if a printer
+insists on certified PDF/X-1a, hand them this PDF and let their prepress convert it, which
+is a one-click job at their end.
+
 ### The print wrap — paperback or hardcover
 
 In the **Cover Studio**, the *Print wrap* section exports one flat cover PDF: back, spine
