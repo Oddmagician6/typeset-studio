@@ -446,7 +446,8 @@
       <fieldset>
         <legend>Print wrap · back + spine + front</legend>
         <div class="fs-body">
-          <p class="hint" style="margin:2px 0 0">A single flat cover PDF for print-on-demand.
+          <p class="hint" style="margin:2px 0 0">A single flat cover PDF for print-on-demand —
+            a perfect-bound paperback, or a case-laminate hardcover with its turn-in and hinges.
             The spine width is computed from the page count and paper. Not saved into the
             template — set it here when you export.</p>
           <div class="row">
@@ -458,7 +459,19 @@
                 {% endfor %}
               </select>
               <span class="hint" id="wrap-retailer-note"></span></div>
+            <div class="field"><label>Binding</label>
+              <span class="hint">what the press is making</span>
+              <select name="wrap_binding" id="wrap-binding">
+                <option value="paperback">Paperback — perfect bound</option>
+                <option value="hardcover">Hardcover — case laminate</option>
+              </select></div>
           </div>
+          <div class="row" id="wrap-hardcover" hidden>
+            {{ nf('Wrap (turn-in)', 'wrap_turnin', 0.625, 'inches · glued round the boards') }}
+            {{ nf('Hinge', 'wrap_hinge', 0.375, 'inches · each side of the spine') }}
+            {{ nf('Board allowance', 'wrap_board', 0.06, 'inches · added to the spine') }}
+          </div>
+          <p class="hint" id="wrap-hardcover-note" hidden style="margin:-4px 0 6px"></p>
           <div class="row">
             <div class="field wide"><label>From a book</label>
               <span class="hint">fill trim, page count, title &amp; author from a saved project</span>
@@ -608,16 +621,32 @@
           : ('spine text at ' + r.spine_text_min + '+ pages');
         retailerNote.textContent = r.note + ' — ' + status;
       }
+      // -- Print wrap: paperback vs case-laminate hardcover
+      var bindingSel = document.getElementById('wrap-binding');
+      var hardRow    = document.getElementById('wrap-hardcover');
+      var hardNote   = document.getElementById('wrap-hardcover-note');
+      function updateBinding(){
+        if (!bindingSel) return;
+        var hard = bindingSel.value === 'hardcover';
+        hardRow.hidden = !hard;
+        hardNote.hidden = !hard;
+        var r = retailerData[retailerSel && retailerSel.value];
+        hardNote.textContent = hard && r ? (r.hardcover_note || '') : '';
+      }
+      if (bindingSel) bindingSel.addEventListener('change', updateBinding);
+
       if (retailerSel){
         retailerSel.addEventListener('change', function(){
           var r = retailerData[retailerSel.value];
           if (r) setField('wrap_bleed', r.bleed);
           updateRetailerNote();
+          updateBinding();
         });
         var pagesEl0 = form.querySelector('[name=wrap_pages]');
         if (pagesEl0) pagesEl0.addEventListener('input', updateRetailerNote);
         updateRetailerNote();
       }
+      updateBinding();
 
       // -- Print wrap: on-demand preview + PDF download
       var wstatus = document.getElementById('wrap-status');
@@ -629,7 +658,9 @@
           var json = await res.json();
           if (json.ok) {
             img.src = json.image; img.style.display = 'block'; ph.style.display = 'none';
-            wstatus.textContent = json.info;
+            // the retailer's own limits, if this book is outside them
+            wstatus.textContent = json.info
+              + ((json.warnings || []).length ? '  ⚠ ' + json.warnings.join('  ') : '');
           } else {
             wstatus.textContent = json.error || 'Wrap preview failed.';
           }
@@ -644,7 +675,8 @@
           var url  = URL.createObjectURL(blob);
           var a    = document.createElement('a');
           var nm   = (document.querySelector('[name=name]').value || 'cover');
-          a.href = url; a.download = nm.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-wrap.pdf';
+          var kind = (bindingSel && bindingSel.value === 'hardcover') ? '-case-wrap' : '-wrap';
+          a.href = url; a.download = nm.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + kind + '.pdf';
           document.body.appendChild(a); a.click(); a.remove();
           URL.revokeObjectURL(url);
           wstatus.textContent = 'Downloaded.';

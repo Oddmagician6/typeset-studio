@@ -453,7 +453,33 @@ require. Before uploading, still confirm per platform:
 
 - **Trim size** matches the book you set up on the platform.
 - **Inside (spine) margin** is generous enough for the page count (longer books need more).
-- Cover is a **separate** file (this tool sets interiors only).
+- The cover is a **separate** file — build it in the Cover Studio (below), or bring your own.
+
+### The print wrap — paperback or hardcover
+
+In the **Cover Studio**, the *Print wrap* section exports one flat cover PDF: back, spine
+and front in a single page, sized for the printer. Pick the **binding**:
+
+- **Paperback (perfect bound)** — bleed + back + spine + front + bleed. The spine comes
+  from the page count and paper, so build the interior first and pull the page count in
+  with **From a book**.
+- **Hardcover (case laminate)** — the same three panels plus two allowances the press
+  needs: the **wrap** (turn-in), 0.625" glued around the boards, and a **hinge** each side
+  of the spine, 0.375", where the case bends open. The spine also carries a **board
+  allowance** on top of the paper. So the page is
+  `wrap + bleed + back + hinge + spine + hinge + front + bleed + wrap` across and
+  `wrap + bleed + trim + bleed + wrap` down — a 200-page 6×9 comes out at 14.76 × 10.5".
+
+Nothing that must be seen may sit in the turn-in or the hinge: the turn-in disappears
+around the board, and printed detail in the hinge cracks as the cover flexes. Tick
+**Proof guides** to see them — magenta for panels and folds, blue for the turn-in — and
+untick it before you upload.
+
+All three allowances are editable, because printers differ. The defaults are the numbers
+KDP and IngramSpark publish; **always confirm against the retailer's own downloadable
+cover template** for your trim. KDP's hardcover programme is narrower than its paperback
+one — 75–550 pages, white paper, and five trims — and the wrap preview says so if the
+book you've set up falls outside it.
 
 ---
 

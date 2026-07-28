@@ -31,6 +31,7 @@ test_epub.py      EPUB self-check tests: builds one good file, then breaks it el
 test_footnotes.py Footnote placement: builds books and measures where the notes landed.
 test_import.py    .docx import fidelity: builds real Word files and looks for the words.
 test_chapter_art.py Chapter-opening art: geometry, then a real PDF and EPUB.
+test_wrap.py      Print-wrap arithmetic: paperback and case-laminate geometry, measured.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -458,7 +459,7 @@ reusing `_PAPER`), routes `/cover/wrap` (returns the wrap PDF as a download) and
 wrap fieldset (trim, page count, paper, bleed, proof-guides toggle, back-cover blurb) with
 Preview-wrap and Download-wrap-PDF buttons. New meta key `cover_blurb`. The wrap is a separate
 deliverable (the interior PDF is unchanged); page count comes from the interior build shown on
-the result page.
+the result page. Paperback-only until **#60** added the case-laminate hardcover.
 
 **19. In-app manuscript editor — Phase A (Markdown authoring)**
 A project-integrated writing surface, so a book can be drafted start to finish in the app.
@@ -1413,6 +1414,39 @@ which means changing `BookDoc`'s page size and every margin/frame/folio calculat
 it. That is imposition work with its own re-verification checklist, not a figure attribute; drawing
 to the trim edge without the allowance would be a print-incorrect promise. Recorded in Tier 5E.
 
+**60. Hardcover case-laminate wrap** *(Tier-5G; `build_cover_wrap` was paperback-only)*
+The wrap exporter now makes either binding. A **case laminate** is the same three panels
+with two allowances the press needs, laid out by the retailers' published formula —
+`wrap + bleed + back + hinge + spine + hinge + front + bleed + wrap` across,
+`wrap + bleed + trim + bleed + wrap` down:
+- **wrap** (turn-in, 0.625") is glued around the boards, so nothing that must be seen goes in it;
+- **hinge** (0.375" each side of the spine) is where the case bends — printed detail there cracks.
+  It is modelled as a *gap*, not a panel: the painters are handed their own rectangles, so type
+  stays out of the crease without any painter knowing hardcovers exist;
+- the spine also carries a **board allowance** (0.06") on top of `pages × ppi`.
+Verified against KDP's worked example — a 200-page white-paper 6×9 comes out at exactly
+14.76 × 10.5" — and pinned in the tests. A paperback passes neither allowance, so both collapse
+to zero and the geometry is **identical to before** (also pinned: 12.75 × 9.25 for the fixture).
+- `engine.py`: `build_cover_wrap` takes `binding`/`wrap`/`hinge` and returns them; `_paint_wrap_guides`
+  now draws every fold (four on a case, two on a paperback, de-duplicated when allowances are zero)
+  plus a second, blue turn-in rectangle — a different kind of boundary from a trim line, drawn as one.
+- `app.py`: `HARDCOVER` (the shared documented allowances), `_KDP_HARDCOVER_TRIMS`/`_PAGES`,
+  `hardcover_warnings()` (advisory only — KDP publishes limits worth checking; other retailers get
+  their note and no invented precision), a `hardcover_note` per retailer, the board allowance folded
+  into the spine, and the wrap PDF named `-case-wrap.pdf`.
+- `templates/cover_editor.html`: a Binding selector, a hardcover row (wrap / hinge / board, hidden
+  until chosen), the retailer's hardcover note, and warnings appended to the preview's info line.
+- `test_wrap.py` (43 checks): both formulas, the **measured page box** of the real PDF, allowance
+  edge cases (wider hinge, zeroed, negative), spine-text rules under the new geometry, guides not
+  resizing the page, the form's spine maths, every warning branch, and the editor end-to-end
+  (selector renders, both previews, an over-length book warned, the PDF downloading under its new
+  name). Guided proofs of both bindings eyeballed.
+**Not done: the dust jacket.** It is a *different* deliverable, not a flag on this one — panels sized
+to the boards rather than the trim, two flaps (3–3.5"), and flap **copy** that doesn't exist in the
+model yet (the blurb moves to the front flap; the back flap wants an author bio). Jackets are also
+IngramSpark-only among the retailers we preset, and their allowances vary more. Worth doing next in
+this area, with the flap-content model decided first.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1727,8 +1761,11 @@ someone asks for it.
 
 **G. Editions & scale — real, but heavier and lower-frequency**
 
-- **Hardcover case-wrap / dust jacket.** `build_cover_wrap` is paperback-only; hardcover needs
-  hinge gaps, board overhang and wrap-around bleed. A natural extension of `WRAP_RETAILERS` (#24).
+- ~~**Hardcover case-wrap.**~~ — **SHIPPED (feature #60):** a `binding` choice on the wrap export
+  adds the turn-in, the two hinge channels and the board allowance in the spine, to the retailers'
+  published formula; a paperback is unchanged. **Remaining: the dust jacket** — panels sized to the
+  boards, two flaps, and flap copy the model doesn't carry yet (see #60). Decide the flap-content
+  model before building it.
 - ~~**Large-print edition**~~ — **SHIPPED (feature #54):** a *Large print* action on every style
   card derives one, following the RNIB/NAVH rules.
 - ~~**Trim-size presets**~~ — **SHIPPED (feature #54):** thirteen standard trims in the style
@@ -1757,7 +1794,8 @@ someone asks for it.
 ~~EPUB preflight (D)~~ #52 → ~~device preview (D)~~ #53 →
 ~~large print + trim presets (G)~~ #54 → ~~footnotes (A)~~ #55 → ~~ornament library (E)~~ #56 →
 ~~tables (A)~~ #57 → ~~the `.docx` follow-ups (C)~~ #58 → ~~chapter-heading art (E)~~ #59 →
-**what's left**: hardcover wrap and box sets (G), PDF/X-1a and spread balancing (D), and
+~~hardcover case wrap (G)~~ #60 →
+**what's left**: the dust jacket and box sets (G), PDF/X-1a and spread balancing (D), and
 full-bleed interior pages (E, an imposition change — see the note there). Sections **A, B, C
 and F are clear**; E's only remaining item is that bleed work. Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.

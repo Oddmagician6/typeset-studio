@@ -171,18 +171,39 @@ WRAP_RETAILERS = {
         'label': 'Amazon KDP', 'bleed': 0.125, 'spine_text_min': 100,
         'note': 'KDP allows spine text at 100+ pages · 0.125" bleed. '
                 'Confirm spine width with KDP’s cover template for your trim.',
+        'hardcover_note': 'KDP case laminate: 0.625" wrap, 0.375" hinge each side of the '
+                          'spine, white paper only, 75–550 pages, and five trims '
+                          '(5.5×8.5, 6×9, 6.14×9.21, 7×10, 8.25×11).',
     },
     'ingramspark': {
         'label': 'IngramSpark', 'bleed': 0.125, 'spine_text_min': 48,
         'note': 'IngramSpark perfect-bound spine text from ~48 pages · 0.125" bleed. '
                 'Download IngramSpark’s cover template to confirm the spine.',
+        'hardcover_note': 'IngramSpark case laminate takes the same 0.625" (16 mm) wrap; '
+                          'part of it is covered by the end sheets. Generate their cover '
+                          'template to confirm the hinge for your trim.',
     },
     'generic': {
         'label': 'Generic / other POD', 'bleed': 0.125, 'spine_text_min': 80,
         'note': 'General POD defaults · 0.125" bleed. Verify bleed, spine, and safe '
                 'margins against your printer’s template.',
+        'hardcover_note': 'Case-laminate defaults (0.625" wrap, 0.375" hinge). Hardcover '
+                          'allowances vary more between printers than paperback ones — '
+                          'check yours before ordering a proof.',
     },
 }
+
+# Case-laminate allowances, shared because both retailers document the same
+# numbers: the turn-in glued around the boards, the crease each side of the
+# spine, and the board thickness a hardcover spine carries on top of the paper.
+# Every one of them is editable on the form — this is the starting point, not a
+# promise about a particular printer.
+HARDCOVER = {'wrap': 0.625, 'hinge': 0.375, 'board': 0.06}
+
+# KDP's hardcover programme is narrower than its paperback one; the wrap builds
+# either way, but a book outside these is one KDP will refuse.
+_KDP_HARDCOVER_TRIMS = [(5.5, 8.5), (6.0, 9.0), (6.14, 9.21), (7.0, 10.0), (8.25, 11.0)]
+_KDP_HARDCOVER_PAGES = (75, 550)
 
 
 def _min_inside(pages, table):
@@ -1438,6 +1459,30 @@ def _save_back_image(f):
     return tmp
 
 
+def hardcover_warnings(retailer, trim_w, trim_h, pages, paper):
+    """What a retailer will refuse about this hardcover, in plain sentences.
+
+    Advisory only — the wrap still builds, because a printer other than the one
+    picked may well accept it. Only KDP publishes limits narrow enough to be
+    worth checking; the others get their note and no false precision.
+    """
+    if retailer != 'kdp':
+        return []
+    out = []
+    lo, hi = _KDP_HARDCOVER_PAGES
+    if pages and not (lo <= pages <= hi):
+        out.append(f'KDP hardcovers run {lo}–{hi} pages; this book is {pages}.')
+    if not any(abs(trim_w - w) < 0.01 and abs(trim_h - h) < 0.01
+               for w, h in _KDP_HARDCOVER_TRIMS):
+        sizes = ', '.join(f'{w:g}×{h:g}' for w, h in _KDP_HARDCOVER_TRIMS)
+        out.append(f'KDP hardcovers come in {sizes}" only; this is '
+                   f'{trim_w:g}×{trim_h:g}".')
+    if paper != 'white':
+        out.append('KDP prints hardcovers on white paper only — the spine here '
+                   'was worked out from a different stock.')
+    return out
+
+
 def _wrap_from_form(form, out_path, back_image=None):
     """Build a full print wrap (back + spine + front + bleed) from the cover editor form."""
     tpl = parse_cover_form(form)
@@ -1449,15 +1494,26 @@ def _wrap_from_form(form, out_path, back_image=None):
         pages = 200
     paper = form.get('wrap_paper', 'white')
     ppi = _PAPER.get(paper, _PAPER['white'])['ppi']
-    rc = WRAP_RETAILERS.get(form.get('wrap_retailer', 'kdp'), WRAP_RETAILERS['kdp'])
+    retailer = form.get('wrap_retailer', 'kdp')
+    rc = WRAP_RETAILERS.get(retailer, WRAP_RETAILERS['kdp'])
+    hard = form.get('wrap_binding', 'paperback') == 'hardcover'
+    trim_w = _f(form, 'wrap_trim_w', 6.0)
+    trim_h = _f(form, 'wrap_trim_h', 9.0)
+    # a case spine carries the boards as well as the paper
+    spine_w = pages * ppi + (_f(form, 'wrap_board', HARDCOVER['board']) if hard else 0.0)
     dims = {
-        'trim_w': _f(form, 'wrap_trim_w', 6.0),
-        'trim_h': _f(form, 'wrap_trim_h', 9.0),
-        'spine_w': pages * ppi,
+        'trim_w': trim_w,
+        'trim_h': trim_h,
+        'spine_w': spine_w,
         'bleed':  _f(form, 'wrap_bleed', rc['bleed']),
         'pages':  pages,
         'spine_text_min': rc['spine_text_min'],
+        'binding': 'hardcover' if hard else 'paperback',
+        'wrap':   _f(form, 'wrap_turnin', HARDCOVER['wrap']),
+        'hinge':  _f(form, 'wrap_hinge', HARDCOVER['hinge']),
     }
+    dims['warnings'] = (hardcover_warnings(retailer, trim_w, trim_h, pages, paper)
+                        if hard else [])
     meta = {
         'title':  form.get('prev_title', ''),
         'author': form.get('prev_author', ''),
@@ -1493,7 +1549,8 @@ def cover_wrap():
                     os.remove(p)
                 except OSError:
                     pass
-    name = slugify(request.form.get('name', 'cover')) + '-wrap.pdf'
+    kind = ('-case-wrap' if request.form.get('wrap_binding') == 'hardcover' else '-wrap')
+    name = slugify(request.form.get('name', 'cover')) + kind + '.pdf'
     return Response(data, mimetype='application/pdf',
                     headers={'Content-Disposition': f'attachment; filename="{name}"'})
 
@@ -1515,9 +1572,12 @@ def cover_wrap_preview():
         b64 = base64.b64encode(pix.tobytes('png')).decode()
         doc.close()
         spine_txt = 'spine text on' if res.get('spine_text') else 'spine text off (too few pages)'
-        info = (f"{dims['trim_w']:g}×{dims['trim_h']:g}\" · spine {res['spine_w']:g}\" · "
+        kind = ('case laminate · %g" wrap · %g" hinge'
+                % (res['wrap'], res['hinge'])) if res['binding'] == 'hardcover' else 'paperback'
+        info = (f"{dims['trim_w']:g}×{dims['trim_h']:g}\" {kind} · spine {res['spine_w']:g}\" · "
                 f"full {res['wrap_w']:g}×{res['wrap_h']:g}\" · {spine_txt}")
-        return jsonify({'ok': True, 'image': f'data:image/png;base64,{b64}', 'info': info})
+        return jsonify({'ok': True, 'image': f'data:image/png;base64,{b64}', 'info': info,
+                        'warnings': dims.get('warnings', [])})
     except Exception as exc:
         logging.error('wrap preview failed: %s', traceback.format_exc())
         return jsonify({'ok': False, 'error': str(exc)})

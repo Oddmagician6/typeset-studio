@@ -1140,17 +1140,31 @@ def _paint_spine(canv, tpl, cf, meta, x0, y0, w, h, draw_text=True):
     canv.restoreState()
 
 
-def _paint_wrap_guides(canv, W, H, bl, tw, sp, th):
-    """Dashed proof guides at the trim box and the two spine folds (not for final print)."""
+def _paint_wrap_guides(canv, W, H, edge, tw, sp, th, hinge=0.0, wrap=0.0):
+    """Dashed proof guides for the folds and the zones art must not rely on.
+
+    Magenta marks the panel/trim box and every fold the press makes — for a
+    paperback the two spine folds, for a case laminate the four (hinge and
+    spine). A second, paler rectangle marks the **turn-in**: on a hardcover
+    everything outside it is glued around the board and will never be seen, so
+    it is a different kind of boundary from a trim line and is drawn as one.
+    Proof only — never send a guided PDF to print.
+    """
     canv.saveState()
-    canv.setStrokeColorRGB(0.85, 0.2, 0.5)
     canv.setLineWidth(0.5)
     canv.setDash(4, 3)
-    xs = [bl, bl + tw, bl + tw + sp, bl + tw + sp + tw]   # left trim, fold, fold, right trim
-    for x in xs:
+    if wrap:
+        canv.setStrokeColorRGB(0.25, 0.55, 0.85)
+        canv.rect(wrap, wrap, W - 2 * wrap, H - 2 * wrap, stroke=1, fill=0)
+    canv.setStrokeColorRGB(0.85, 0.2, 0.5)
+    # panel edges and every fold, left to right
+    xs = [edge, edge + tw, edge + tw + hinge,
+          edge + tw + hinge + sp, edge + tw + 2 * hinge + sp,
+          edge + 2 * tw + 2 * hinge + sp]
+    for x in sorted(set(round(v, 4) for v in xs)):
         canv.line(x, 0, x, H)
-    canv.line(0, bl, W, bl)
-    canv.line(0, bl + th, W, bl + th)
+    canv.line(0, edge, W, edge)
+    canv.line(0, edge + th, W, edge + th)
     canv.restoreState()
 
 
@@ -1159,6 +1173,19 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
 
     dims: {'trim_w','trim_h','spine_w','bleed'} in inches, plus optional
     'pages' and 'spine_text_min' (retailer rule for when spine text is allowed).
+
+    A **case laminate** hardcover (`binding: 'hardcover'`) is the same three
+    panels with two more allowances, and is laid out by the retailers' own
+    formula — `wrap + bleed + back + hinge + spine + hinge + front + bleed +
+    wrap` across, `wrap + bleed + trim + bleed + wrap` down:
+      * `wrap`  — the turn-in glued around the boards (0.625" at both KDP and
+        IngramSpark). Nothing that must be seen may sit in it.
+      * `hinge` — the channel each side of the spine where the case bends.
+        It is a *gap*, not a panel: the panel painters are handed their own
+        rectangles, so type stays out of the crease without knowing about it.
+    A paperback passes neither, making both zero and the geometry identical to
+    what it was before hardcover existed.
+
     Returns the finished wrap dimensions (inches) and whether spine text was drawn.
     """
     from reportlab.pdfgen import canvas as _canvas
@@ -1166,27 +1193,33 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
     th = dims['trim_h'] * inch
     sp = max(dims.get('spine_w', 0.0), 0.0) * inch
     bl = dims.get('bleed', 0.125) * inch
+    hard = dims.get('binding', 'paperback') == 'hardcover'
+    wrap = max(dims.get('wrap', 0.625) * inch, 0.0) if hard else 0.0
+    hinge = max(dims.get('hinge', 0.375) * inch, 0.0) if hard else 0.0
     pages = dims.get('pages')
     smin = dims.get('spine_text_min', 0) or 0
     draw_spine = (pages is None or pages >= smin) and sp >= 0.10 * inch
-    W = 2 * tw + sp + 2 * bl
-    H = th + 2 * bl
+    edge = wrap + bl                       # outer allowance before a panel starts
+    W = 2 * edge + 2 * tw + 2 * hinge + sp
+    H = 2 * edge + th
     c = _canvas.Canvas(out_path, pagesize=(W, H))
     pal = tpl.get('palette', {})
     _paint_gradient(c, pal, 0, 0, W, H)
-    back_x = bl
-    spine_x = bl + tw
-    front_x = bl + tw + sp
-    _paint_back_panel(c, tpl, cf, meta, back_x, bl, tw, th)
-    _paint_spine(c, tpl, cf, meta, spine_x, bl, sp, th, draw_text=draw_spine)
-    _paint_background(c, tpl, front_x, bl, tw, th)
-    _paint_cover_front(c, tpl, cf, meta, front_x, bl, tw, th)
+    back_x = edge
+    spine_x = edge + tw + hinge
+    front_x = spine_x + sp + hinge
+    _paint_back_panel(c, tpl, cf, meta, back_x, edge, tw, th)
+    _paint_spine(c, tpl, cf, meta, spine_x, edge, sp, th, draw_text=draw_spine)
+    _paint_background(c, tpl, front_x, edge, tw, th)
+    _paint_cover_front(c, tpl, cf, meta, front_x, edge, tw, th)
     if guides:
-        _paint_wrap_guides(c, W, H, bl, tw, sp, th)
+        _paint_wrap_guides(c, W, H, edge, tw, sp, th, hinge=hinge, wrap=wrap)
     c.showPage()
     c.save()
     return {'wrap_w': round(W / inch, 3), 'wrap_h': round(H / inch, 3),
-            'spine_w': round(sp / inch, 4), 'spine_text': bool(draw_spine)}
+            'spine_w': round(sp / inch, 4), 'spine_text': bool(draw_spine),
+            'binding': 'hardcover' if hard else 'paperback',
+            'wrap': round(wrap / inch, 4), 'hinge': round(hinge / inch, 4)}
 
 
 # ---------------------------------------------------------------- fonts
