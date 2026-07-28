@@ -317,6 +317,11 @@ DEFAULTS = {
                 'title_size': 18.0, 'after_title': 0.45,
                 'open_style': 'smallcaps_leadin', 'leadin_words': 4,
                 'dropcap_lines': 3},
+    # An illustration printed on every chapter opener: a filename in figures/
+    # (or an absolute path). '' — the default — means no art, so every style
+    # written before this feature opens exactly as it did.
+    'chapter_art': {'image': '', 'position': 'above', 'width': 0.32,
+                    'align': 'center', 'gap': 0.16, 'max_height': 1.6},
     'part_divider': {'show_number': True, 'number_format': 'Part {n}',
                      'number_size': 13.0, 'title_size': 26.0, 'sink': 0.38},
     'document_block': {'frame': 'ruled', 'indent': 0.25, 'font_size': 0,
@@ -642,6 +647,14 @@ def parse_preset_form(form):
             'leadin_words': int(_f(form, 'c_leadin_words', 4)),
             'dropcap_lines': int(_f(form, 'c_dropcap_lines', 3)),
         },
+        'chapter_art': {
+            'image':      form.get('ca_image', '').strip(),
+            'position':   form.get('ca_position', 'above'),
+            'width':      _f(form, 'ca_width', 0.32),
+            'align':      form.get('ca_align', 'center'),
+            'gap':        _f(form, 'ca_gap', 0.16),
+            'max_height': _f(form, 'ca_max_height', 1.6),
+        },
         'part_divider': {
             'show_number':   'pd_show_number' in form,
             'number_format':  form.get('pd_number_format', 'Part {n}') or 'Part {n}',
@@ -938,14 +951,14 @@ def ornament_tiles():
 def editor_new():
     return render_template('editor.html', pid=None, p=DEFAULTS, is_new=True,
                            fonts=list_fonts(), trim_presets=TRIM_PRESETS,
-                           ornaments=ornament_tiles())
+                           ornaments=ornament_tiles(), figures=list_figures())
 
 
 @app.route('/editor/<pid>')
 def editor(pid):
     return render_template('editor.html', pid=pid, p=load_preset(pid), is_new=False,
                            fonts=list_fonts(), trim_presets=TRIM_PRESETS,
-                           ornaments=ornament_tiles())
+                           ornaments=ornament_tiles(), figures=list_figures())
 
 
 @app.route('/save', methods=['POST'])

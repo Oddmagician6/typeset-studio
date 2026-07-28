@@ -2305,6 +2305,52 @@ def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
     return [Spacer(1, space), KeepTogether([img] + caption), Spacer(1, space)]
 
 
+def chapter_art_src(preset):
+    """The image a style prints on every chapter opener, or ''.
+
+    Read off the preset in one place because three callers need the same
+    answer: the PDF opener, the EPUB (which must also *package* the file), and
+    the style card. A style that names a file no longer on disk still returns
+    it — the renderer draws its placeholder, so a lost illustration shows up in
+    the proof instead of disappearing.
+    """
+    return (preset.get('chapter_art', {}).get('image', '') or '').strip()
+
+
+def chapter_art_position(preset):
+    """'above' (over the chapter number) or 'below' (under the title)."""
+    pos = (preset.get('chapter_art', {}).get('position', 'above') or 'above').lower()
+    return 'below' if pos == 'below' else 'above'
+
+
+def _chapter_art(preset, avail_w, text_h):
+    """The chapter-opener illustration as flowables, gap included, or [].
+
+    Sized like a figure — a fraction of the text column, the height following
+    from the aspect — and then clamped twice: by the style's own `max_height`
+    (inches) and by half the text height, so a mis-sized file can crowd the
+    opener but can never push the chapter title off its own page. The gap sits
+    between the art and the heading, so which side it goes on follows the
+    position.
+    """
+    ca  = preset.get('chapter_art', {})
+    src = chapter_art_src(preset)
+    if not src:
+        return []
+    frac  = max(0.05, min(float(ca.get('width', 0.32) or 0.32), 1.0))
+    max_h = min(float(ca.get('max_height', 1.6) or 1.6) * inch, text_h * 0.5)
+    path  = _figure_asset_path(src)
+    box_w = avail_w * frac
+    w, h  = _figure_size(path, box_w, max_h) if path else (box_w, box_w * 0.35)
+    align = (ca.get('align', 'center') or 'center').lower()
+    gap   = float(ca.get('gap', 0.16) or 0.0) * inch
+    art   = FigureImage(path, w, h, avail_w, align=align, label=src)
+    if not gap:
+        return [art]
+    return [Spacer(1, gap), art] if chapter_art_position(preset) == 'below' \
+        else [art, Spacer(1, gap)]
+
+
 _ALIGN_MAP = {'left': TA_LEFT, 'center': TA_CENTER, 'centre': TA_CENTER,
               'right': TA_RIGHT}
 
@@ -3067,6 +3113,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
 
         story.append(TocMarker(idx, ch.get('title'), ch.get('part')))
         story.append(Spacer(1, c['sink'] * inch))
+        # chapter-opening art: over the number, or under the title/byline
+        art = _chapter_art(preset, avail_w, text_h)
+        art_pos = chapter_art_position(preset)
+        if art and art_pos == 'above':
+            story.extend(art)
         # Destinations for in-book links: `[see](#chapter-2)` or the title's slug.
         anchors = ''.join(f'<a name="{a}"/>' for a in _ms_anchors(ch, idx))
         if c.get('show_number', True) and _numbers[idx - 1] is not None:
@@ -3082,6 +3133,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         if ch.get('byline'):
             story.append(Spacer(1, 0.12 * inch))
             story.append(Paragraph(_ms_inline(ch['byline'], sq), st['chap_byline']))
+        if art and art_pos == 'below':
+            story.extend(art)
         story.append(Spacer(1, c['after_title'] * inch))
         opened = False
         flush_next = False  # paragraph right after scene/subhead: no indent

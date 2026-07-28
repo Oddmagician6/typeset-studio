@@ -352,6 +352,29 @@ fraction of the text width — `0.25` is a quarter of the column. Leave it at `0
 use the ornament's own. Height always follows the width, so an ornament can never
 squash or stretch.
 
+### Chapter-opening art
+
+A style can print one illustration at the top of **every** chapter — a rule, a crest,
+a small drawing — from the editor's **Chapter openings** section:
+
+- **Image** — anything in your figure library (upload it on the **Figures** page; a
+  transparent PNG sits best on the page). *None* means plain openings, which is what
+  every style does until you choose one.
+- **Position** — above the chapter number, or below the title.
+- **Width** — a fraction of the text width; `0.32` is about a third of the column.
+  The height follows the picture's own proportions, so it can never squash or stretch.
+- **Space** — inches between the art and the heading.
+- **Maximum height** — inches; a tall picture is scaled down to fit rather than
+  crowding the page. The art can never take more than half the text height.
+
+The art is a *style* setting, so it repeats on every chapter and no chapter carries
+markup for it. Placed above the number, it pushes the heading down by its own height —
+if you want the title to stay where it was, take the same amount off the **sink**. Art
+does not appear on part-divider pages. If the file goes missing, the PDF prints a
+labelled placeholder box (so you see it in the proof) and the ebook simply opens
+without it. In the ebook the picture is stored once and marked decorative, so a
+screen reader doesn't announce it at the head of every chapter.
+
 The three starting styles:
 
 - **Classic Literary (6×9)** — warm, traditional novel interior; a good default.

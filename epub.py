@@ -176,6 +176,9 @@ p.chapter-byline {
   color: #444;
   margin: -1em 0 1.6em;
 }
+p.chapter-art { text-align: center; text-indent: 0; margin: 0 0 1em; }
+p.chapter-art-below { margin: 1em 0 1.6em; }
+p.chapter-art img { max-width: 100%; height: auto; }
 p { margin: 0; text-indent: 1.5em; }
 p.no-indent { text-indent: 0; }
 h2 {
@@ -528,14 +531,49 @@ def _scene_orn_html(preset, oid):
             f'style="width:{pct:.1f}%"/></p>')
 
 
-def _chapter_xhtml(idx, chapter, preset, figures=None, number=None):
+def chapter_art_src(preset):
+    """The image a style prints on every chapter opener, or ''.
+
+    Read locally rather than imported from `engine` — this module stays
+    stdlib-only and engine-free (see the note on the imports above); the same
+    two lines live in `engine.chapter_art_src` / `chapter_art_position`.
+    """
+    return (preset.get('chapter_art', {}).get('image', '') or '').strip()
+
+
+def chapter_art_position(preset):
+    """'above' (over the chapter number) or 'below' (under the title)."""
+    pos = (preset.get('chapter_art', {}).get('position', 'above') or 'above').lower()
+    return 'below' if pos == 'below' else 'above'
+
+
+def _chapter_art_html(preset, href, position):
+    """The chapter-opening illustration as a paragraph-wrapped `<img>`.
+
+    Decorative by definition — the same mark opens every chapter — so it takes
+    an empty `alt` and `role="presentation"`, which is what a screen reader
+    wants: silence, not "chapter ornament" forty times over. Width is a
+    percentage of the text so it reflows with the reader's page.
+    """
+    ca   = preset.get('chapter_art', {})
+    frac = max(0.05, min(float(ca.get('width', 0.32) or 0.32), 1.0))
+    cls  = 'chapter-art' + (' chapter-art-below' if position == 'below' else '')
+    return (f'  <p class="{cls}"><img src="{html.escape(href)}" alt="" '
+            f'role="presentation" style="width:{frac * 100:.1f}%"/></p>')
+
+
+def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href=''):
     c          = preset.get('chapter', {})
     show_num   = c.get('show_number', True)
     num_fmt    = c.get('number_format', 'Chapter {n}')
     scene_glyph = preset.get('scene_break', {}).get('glyph', '* * *')
     scene_orn   = scene_ornament(preset)
+    art_pos     = chapter_art_position(preset)
 
     lines = ['<div class="chapter">']
+
+    if art_href and art_pos == 'above':
+        lines.append(_chapter_art_html(preset, art_href, 'above'))
 
     if show_num and number is not None:
         lines.append(f'  <h1 class="chapter-num">{num_fmt.format(n=number)}</h1>')
@@ -545,6 +583,9 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None):
 
     if chapter.get('byline'):
         lines.append(f'  <p class="chapter-byline">{_markup_to_html(chapter["byline"])}</p>')
+
+    if art_href and art_pos == 'below':
+        lines.append(_chapter_art_html(preset, art_href, 'below'))
 
     opened         = False
     no_indent_next = False
@@ -787,6 +828,12 @@ def check(path):
                               if el.getAttribute('id')}
             for img in dom.getElementsByTagName('img'):
                 imgs += 1
+                # a decorative image (the chapter ornament) is *supposed* to
+                # have an empty alt — announcing it at every chapter is noise,
+                # so an explicit role="presentation" answers the check
+                if (img.getAttribute('role') == 'presentation'
+                        or img.getAttribute('aria-hidden') == 'true'):
+                    continue
                 if not (img.getAttribute('alt') or '').strip():
                     no_alt.append(img.getAttribute('src') or '?')
         add('Content documents', not broken,
@@ -982,13 +1029,30 @@ _FIG_MIME = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
              '.gif': 'image/gif', '.svg': 'image/svg+xml'}
 
 
-def _collect_figures(chapters):
+def _collect_figures(chapters, extra=()):
     """Find every ~~~ figure src="…" that resolves to a real file.
 
     Returns {src: {'href', 'path', 'id', 'mime'}} — one entry per distinct src,
-    so the same illustration used twice is stored once.
+    so the same illustration used twice is stored once. `extra` carries srcs
+    that aren't figure blocks (the style's chapter-opening art) through the
+    same resolve-and-manifest path; used as a chapter ornament it is stored
+    once and referenced from every chapter.
     """
     found = {}
+
+    def add(src):
+        src = (src or '').strip()
+        if not src or src in found:
+            return
+        path = src if os.path.isabs(src) else os.path.join(FIGURE_DIR, src)
+        if not os.path.exists(path):
+            return                                # _figure_html writes a note
+        ext = os.path.splitext(path)[1].lower()
+        n = len(found) + 1
+        found[src] = {'path': path, 'href': f'images/fig{n:03d}{ext}',
+                      'id': f'fig{n:03d}',
+                      'mime': _FIG_MIME.get(ext, 'image/png')}
+
     for ch in chapters:
         for block in ch.get('blocks', []):
             if block[0] != 'doc_block' or len(block) < 3:
@@ -996,17 +1060,9 @@ def _collect_figures(chapters):
             m = block[2]
             if m.get('_type') != 'figure':
                 continue
-            src = (m.get('src', '') or '').strip()
-            if not src or src in found:
-                continue
-            path = src if os.path.isabs(src) else os.path.join(FIGURE_DIR, src)
-            if not os.path.exists(path):
-                continue                          # _figure_html writes a note
-            ext = os.path.splitext(path)[1].lower()
-            n = len(found) + 1
-            found[src] = {'path': path, 'href': f'images/fig{n:03d}{ext}',
-                          'id': f'fig{n:03d}',
-                          'mime': _FIG_MIME.get(ext, 'image/png')}
+            add(m.get('src', ''))
+    for src in extra:
+        add(src)
     return found
 
 
@@ -1017,8 +1073,12 @@ def build_epub(manuscript, preset, out_path, meta):
     modified = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     chapters = _apply_note_markers(manuscript['chapters'])
     has_notes = any(ch.get('notes') for ch in chapters)
-    figures  = _collect_figures(chapters)
+    art_src  = chapter_art_src(preset)
+    figures  = _collect_figures(chapters, extra=[art_src] if art_src else [])
     fig_href = {src: f['href'] for src, f in figures.items()}
+    # '' when the style names a file that isn't there — the ebook simply opens
+    # without the ornament, where the PDF proof draws its placeholder box
+    art_href = fig_href.get(art_src, '')
 
     # anchor -> chapter file, so `[see](#slug)` resolves across the spine
     _ANCHORS.clear()
@@ -1150,7 +1210,8 @@ def build_epub(manuscript, preset, out_path, meta):
                 current_part_num = ch_part_num
             zf.writestr(f'OEBPS/chapter{idx:03d}.xhtml',
                         _chapter_xhtml(idx, ch, preset, figures=fig_href,
-                                       number=_numbers[idx - 1]))
+                                       number=_numbers[idx - 1],
+                                       art_href=art_href))
 
         if has_notes:
             zf.writestr('OEBPS/endnotes.xhtml', _endnotes_xhtml(chapters, preset))

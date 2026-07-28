@@ -30,6 +30,7 @@ ornaments.py      The twelve bundled scene-break ornaments — one vector defini
 test_epub.py      EPUB self-check tests: builds one good file, then breaks it eleven ways.
 test_footnotes.py Footnote placement: builds books and measures where the notes landed.
 test_import.py    .docx import fidelity: builds real Word files and looks for the words.
+test_chapter_art.py Chapter-opening art: geometry, then a real PDF and EPUB.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -70,6 +71,10 @@ chapter:       {start, sink, show_number, number_format, number_size, title_size
                start: "recto" | "any"
                open_style: "none" | "raised_initial" | "smallcaps_leadin" | "dropcap"
                number_format uses "{n}", e.g. "Chapter {n}"
+chapter_art:   {image, position, width, align, gap, max_height}
+               image is a filename in figures/ (or an absolute path); '' = no art
+               position: "above" (over the number) | "below" (under the title)
+               width is a fraction of the text column; gap/max_height are inches
 part_divider:  {show_number, number_format, number_size, title_size, sink}
                sink is a 0–1 fraction of the text-area height
 scene_break:   {type, glyph, size, gap, image, ornament, ornament_width}
@@ -294,6 +299,12 @@ created, updated    ISO 8601 datetime strings
   `[missing image: …]` note (EPUB) with the caption intact; it is never silently dropped. Note a
   *typed* empty fence is deliberately kept by `parse_markdown` (a caption-less figure is the common
   case) while a plain empty `~~~` is still discarded.
+
+- **Chapter art is built fresh per chapter, and clamped twice.** `_chapter_art` is called inside
+  the chapter loop because appending *one* flowable instance to a story in several places is a
+  ReportLab hazard (wrap/draw mutate it). Its height is capped by the style's `max_height` **and**
+  by half the text height: a style is allowed to crowd an opener, never to push the chapter title
+  off the page it names. Art rides on chapter openers only — part dividers don't take it.
 
 - **Fonts:** `register_fonts` resolves bare filenames against `fonts/`, accepts absolute
   paths, and falls back to Times if a file is missing — so a build never hard-fails, but
@@ -1360,6 +1371,48 @@ openings, the documented limit from #49.
 **Not imported:** notes inside table cells (the cell path reads plain text), comments, tracked
 changes, and Word's own numbering restarts.
 
+**59. Chapter-opening art — one illustration at the head of every chapter** *(Tier-5E's last
+item; the roadmap called it "mostly a preset field" and that held)*
+A style can now name an image to print on every chapter opener — a rule, a crest, a small
+drawing. It is a **style** setting, not markup: no chapter carries anything for it, so one
+choice re-heads a whole book and swapping styles swaps the ornament.
+- `app.py`: a `chapter_art` preset section (`image`, `position`, `width`, `align`, `gap`,
+  `max_height`) in `DEFAULTS` + `parse_preset_form`; both editor routes now pass
+  `list_figures()`. `image: ''` is the default, so **every existing style opens byte-identically**
+  — the regression is pinned by a test that diffs the opener page's text against a pre-feature build.
+- `engine.py`: `chapter_art_src` / `chapter_art_position` (the readers) and `_chapter_art`, which
+  reuses the #46 figure plumbing — `_figure_asset_path`, `_figure_size` and the `FigureImage`
+  flowable, so a missing file draws the same labelled placeholder rather than vanishing. Sizing is
+  a fraction of the text column with the height following the aspect, then clamped twice: by the
+  style's `max_height` **and** by half the text height, so a mis-sized file can crowd an opener but
+  can never push the chapter title onto the next page. `_build_story` places it after the sink
+  (above the number) or after the title/byline (below), and the gap swaps sides with the position.
+  Flowables are rebuilt per chapter — one instance appended to a story twice is a ReportLab hazard.
+- `epub.py`: `_chapter_art_html` emits `<p class="chapter-art"><img … style="width:N%"/></p>` so it
+  reflows; `_collect_figures(chapters, extra=…)` now takes non-figure srcs through the same
+  resolve-and-manifest path, so the art is **stored once** and referenced from every chapter. The
+  image is marked `alt="" role="presentation"` — decorative is the truth, and announcing "chapter
+  ornament" forty times is noise — and the preflight's alt-text check was taught to honour that
+  (an explicit decorative role answers the check; a bare empty `alt` still fails it).
+- `templates/editor.html`: a Chapter-opening art block in the Chapter openings fieldset (library
+  picker that preserves an unknown/custom value, position, align, width, space, max height) with a
+  link to the Figures page. The #10 live preview and the #39 book preview pick it up unchanged.
+- `test_chapter_art.py` (41 checks): the two preset readers agreeing, form parsing, then geometry
+  (width, aspect, both clamps, gap ordering, missing file) and the artefacts — a PDF where the art
+  lands on **both** chapter openers and sits above the title (or below it, measured against the
+  title's rectangle), a missing image still building, an art-free build being unchanged; an EPUB
+  where the file is in the zip, manifested, shared by both chapters, decorative, percentage-width,
+  and passing preflight; and the app end (picker renders, a real editor save round-trips and
+  disturbs nothing else, the live preview builds). Proof pages for both positions eyeballed.
+**Not done:** *per-chapter* art (a different mark per chapter) — it needs either heading-parse
+surface or a new block type, and the style-level version is what the ask was. **Full-bleed interior
+pages**, the other half of the Tier-5E line, is *deliberately deferred*: `~~~ figure full="yes"`
+(#46) already gives a plate its own page within the margins, and a true bleed is not a block
+feature — KDP/IngramSpark want the **document** trimmed larger (trim + 0.125" on the outer edges),
+which means changing `BookDoc`'s page size and every margin/frame/folio calculation that hangs off
+it. That is imposition work with its own re-verification checklist, not a figure attribute; drawing
+to the trim edge without the allowance would be a print-incorrect promise. Recorded in Tier 5E.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1652,8 +1705,15 @@ comments, tracked changes.
   PDF, the EPUB and the editor's tile picker. Five shipped styles repointed at one. *(The plan
   said "public-domain/CC0 ornaments"; drawing them removed the licensing question, the resolution
   question and the PDF-vs-EPUB drift question at once.)*
-- **Chapter-heading art / full-bleed interior pages.** The heavier half of the same idea; after
-  the figure block exists (A), a chapter-opener image is mostly a preset field.
+- ~~**Chapter-heading art.**~~ — **SHIPPED (feature #59):** a `chapter_art` preset section prints
+  one illustration on every chapter opener, above the number or below the title, in both outputs.
+  It was indeed mostly a preset field, reusing #46's figure sizing/placeholder plumbing.
+  **Remaining: full-bleed interior pages** — *not* a block feature. `~~~ figure full="yes"` already
+  gives a plate its own page inside the margins; a real bleed needs the **document** built at
+  trim + 0.125" on the outer edges, i.e. `BookDoc`'s page size and every margin/frame/folio
+  calculation that hangs off it. Schedule it as imposition work (with the recto/verso re-verification
+  checklist in Conventions), or not at all — drawing to the trim edge without the allowance would be
+  a print-incorrect promise. **Tier 5E is otherwise clear.**
 
 **F. Element vocabulary — cheap breadth, especially for nonfiction**
 
@@ -1696,9 +1756,10 @@ someone asks for it.
 ~~links (B)~~ #49 → ~~endnotes (A)~~ #50 → ~~element vocabulary (F)~~ #51 →
 ~~EPUB preflight (D)~~ #52 → ~~device preview (D)~~ #53 →
 ~~large print + trim presets (G)~~ #54 → ~~footnotes (A)~~ #55 → ~~ornament library (E)~~ #56 →
-~~tables (A)~~ #57 → ~~the `.docx` follow-ups (C)~~ #58 →
-**what's left**: chapter-heading art (E), hardcover wrap and box sets (G), PDF/X-1a and spread
-balancing (D). Sections **A, B, C and F are now clear**; D and E have one item each. Note this whole tier is *feature* work: per the strategy note below, **packaging still
+~~tables (A)~~ #57 → ~~the `.docx` follow-ups (C)~~ #58 → ~~chapter-heading art (E)~~ #59 →
+**what's left**: hardcover wrap and box sets (G), PDF/X-1a and spread balancing (D), and
+full-bleed interior pages (E, an imposition change — see the note there). Sections **A, B, C
+and F are clear**; E's only remaining item is that bleed work. Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 
 ### ◻ Strategy notes (context for prioritising, not committed work)

@@ -184,6 +184,57 @@
             <div class="field num"><label>Drop-cap lines</label><span class="hint">letter depth</span>
               <input type="number" step="1" name="c_dropcap_lines" value="{{ p.chapter.dropcap_lines }}"></div>
           </div>
+
+          {% set ca = p.get('chapter_art', {}) %}
+          {% set ca_img = ca.get('image', '') %}
+          <div class="orn-block">
+            <div class="orn-head">
+              <span class="orn-lede">Chapter-opening art</span>
+              <span class="hint">an illustration printed at the top of every chapter —
+                a rule, a crest, a small drawing. Leave it at <em>None</em> for plain
+                openings.</span>
+            </div>
+            <div class="row">
+              <div class="field"><label>Image</label><span class="hint">from your figure library</span>
+                <select name="ca_image">
+                  <option value="">None — plain chapter openings</option>
+                  {% set figs = figures or [] %}
+                  {% if ca_img and ca_img not in figs %}
+                    <option value="{{ ca_img }}" selected>{{ ca_img }}</option>
+                  {% endif %}
+                  {% for f in figs %}
+                    <option value="{{ f }}" {{ 'selected' if ca_img == f }}>{{ f }}</option>
+                  {% endfor %}
+                </select></div>
+              <div class="field"><label>Position</label><span class="hint">relative to the heading</span>
+                <select name="ca_position">
+                  {% set cap = ca.get('position', 'above') %}
+                  <option value="above" {{ 'selected' if cap != 'below' }}>Above the chapter number</option>
+                  <option value="below" {{ 'selected' if cap == 'below' }}>Below the title</option>
+                </select></div>
+              <div class="field"><label>Align</label><span class="hint">across the text column</span>
+                <select name="ca_align">
+                  {% set caa = ca.get('align', 'center') %}
+                  <option value="center" {{ 'selected' if caa == 'center' }}>Centred</option>
+                  <option value="left"   {{ 'selected' if caa == 'left'   }}>Left</option>
+                  <option value="right"  {{ 'selected' if caa == 'right'  }}>Right</option>
+                </select></div>
+            </div>
+            <div class="row">
+              <div class="field num"><label>Width</label><span class="hint">fraction of the text width</span>
+                <input type="number" step="0.01" min="0.05" max="1"
+                       name="ca_width" value="{{ ca.get('width', 0.32) }}"></div>
+              <div class="field num"><label>Space</label><span class="hint">inches · between art and heading</span>
+                <input type="number" step="0.02" name="ca_gap" value="{{ ca.get('gap', 0.16) }}"></div>
+              <div class="field num"><label>Maximum height</label><span class="hint">inches · a tall image is scaled down</span>
+                <input type="number" step="0.1" min="0.1"
+                       name="ca_max_height" value="{{ ca.get('max_height', 1.6) }}"></div>
+            </div>
+            <p class="hint" style="margin-top:10px">Upload art on the
+              <a href="{{ url_for('figures') }}" target="_blank">Figures</a> page — the same
+              library the <code>~~~ figure</code> block draws from. A transparent PNG sits
+              best on the page.</p>
+          </div>
         </div>
       </fieldset>
 
