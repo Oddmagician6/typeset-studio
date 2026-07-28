@@ -53,11 +53,13 @@
     "dateline_style": "smallcaps"
   },
   "scene_break": {
-    "type": "glyph",
+    "type": "ornament",
     "glyph": "—  —  —",
     "size": 10.5,
     "gap": 9.0,
-    "image": ""
+    "image": "",
+    "ornament": "diamond-rule",
+    "ornament_width": 0.0
   },
   "running_head": {
     "show": true,

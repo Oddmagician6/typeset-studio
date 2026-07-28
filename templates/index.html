@@ -58,7 +58,7 @@
             <span class="k">Trim</span><span><b>{{ '%g'|format(p.trim.w) }}&times;{{ '%g'|format(p.trim.h) }}"</b></span>
             <span class="k">Body</span><span><b>{{ '%g'|format(p.body.size) }}/{{ '%g'|format(p.body.leading) }}</b> {{ p.font_family }}{% if p.body.justify %}, justified{% endif %}</span>
             <span class="k">Opener</span><span>{{ openlabel(p.chapter.open_style) }}{% if p.chapter.start=='recto' %}, recto{% endif %}</span>
-            <span class="k">Break</span><span>{{ p.scene_break.glyph }}</span>
+            <span class="k">Break</span><span>{{ scene_break_label(p) }}</span>
             <span class="k">Folio</span><span>{% if p.folio.show %}{{ p.folio.position }}{% else %}none{% endif %}</span>
           </div>
           <div class="actions">

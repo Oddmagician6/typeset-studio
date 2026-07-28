@@ -29,6 +29,26 @@
 
   .formbar{display:flex;gap:10px;align-items:center;padding:4px 0 0}
 
+  /* bundled scene-break ornaments */
+  .orn-block{margin-top:20px;padding-top:16px;border-top:1px solid var(--rule)}
+  .orn-head{display:flex;flex-direction:column;gap:3px;margin-bottom:12px}
+  .orn-lede{font-size:13px;font-weight:600}
+  .orn-head .hint{font-family:var(--mono);font-size:10.5px;color:var(--faint);line-height:1.5}
+  .orn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:10px}
+  .orn-tile{
+    display:flex;flex-direction:column;gap:5px;cursor:pointer;
+    border:1px solid var(--rule-strong);border-radius:3px;background:var(--surface-2);
+    padding:12px 12px 10px;
+  }
+  .orn-tile:hover{border-color:var(--muted)}
+  .orn-tile input{position:absolute;opacity:0;pointer-events:none}
+  .orn-tile:has(input:checked){border-color:var(--red);background:var(--surface);box-shadow:inset 0 0 0 1px var(--red)}
+  .orn-art{display:flex;align-items:center;justify-content:center;height:34px;color:var(--ink)}
+  .orn-art svg{width:100%;height:34px}
+  .orn-art.orn-none{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+  .orn-name{font-size:12.5px;font-weight:600}
+  .orn-note{font-family:var(--mono);font-size:10px;color:var(--faint);line-height:1.45}
+
   /* live spec card (signature) */
   .preview{position:sticky;top:22px}
   .preview .card{
@@ -175,7 +195,8 @@
               {% set sbt = p.scene_break.get('type', 'glyph') %}
               <select name="sb_type">
                 <option value="glyph" {{ 'selected' if sbt=='glyph' }}>Text glyph</option>
-                <option value="image" {{ 'selected' if sbt=='image' }}>Image ornament</option>
+                <option value="ornament" {{ 'selected' if sbt=='ornament' }}>Bundled ornament</option>
+                <option value="image" {{ 'selected' if sbt=='image' }}>Your own image</option>
               </select></div>
             <div class="field num"><label>Size</label><span class="hint">points · height for images</span>
               <input type="number" step="0.5" name="s_size" value="{{ p.scene_break.size }}"></div>
@@ -187,6 +208,38 @@
               <input type="text" id="f-glyph" name="s_glyph" value="{{ p.scene_break.glyph }}"></div>
             <div class="field"><label>Ornament image</label><span class="hint">filename in /fonts or full path · PNG/JPG</span>
               <input type="text" name="sb_image" value="{{ p.scene_break.get('image','') }}"></div>
+          </div>
+
+          {% set sel_orn = p.scene_break.get('ornament', '') %}
+          <div class="orn-block">
+            <div class="orn-head">
+              <span class="orn-lede">Bundled ornaments</span>
+              <span class="hint">drawn as vectors, so they stay crisp at any size and
+                print identically in the PDF and the ebook</span>
+            </div>
+            <div class="orn-grid">
+              <label class="orn-tile">
+                <input type="radio" name="sb_ornament" value="" {{ 'checked' if not sel_orn }}>
+                <span class="orn-art orn-none">none</span>
+                <span class="orn-name">No ornament</span>
+                <span class="orn-note">fall back to the glyph or image above</span>
+              </label>
+              {% for o in ornaments %}
+                <label class="orn-tile">
+                  <input type="radio" name="sb_ornament" value="{{ o.id }}"
+                         data-name="{{ o.name }}" {{ 'checked' if sel_orn == o.id }}>
+                  <span class="orn-art">{{ o.svg|safe }}</span>
+                  <span class="orn-name">{{ o.name }}</span>
+                  <span class="orn-note">{{ o.note }} · {{ (o.width * 100)|round|int }}% wide</span>
+                </label>
+              {% endfor %}
+            </div>
+            <div class="row">
+              <div class="field num"><label>Ornament width</label>
+                <span class="hint">fraction of the text width · 0 = the ornament’s own</span>
+                <input type="number" step="0.01" min="0" max="1"
+                       name="sb_ornament_width" value="{{ p.scene_break.get('ornament_width', 0.0) }}"></div>
+            </div>
           </div>
         </div>
       </fieldset>
@@ -561,6 +614,20 @@
     function num(id){var v=parseFloat(val(id));return isNaN(v)?'?':(''+ (Math.round(v*100)/100));}
     function openLabel(v){return {none:'plain',raised_initial:'raised initial',
       smallcaps_leadin:'small-caps lead-in',dropcap:'drop cap'}[v]||v;}
+    // mirrors app.scene_break_label(): the card names the ornament or the file,
+    // not the glyph, when the style is not using the glyph
+    function breakLabel(){
+      var t = document.querySelector('[name=sb_type]');
+      var kind = t ? t.value : 'glyph';
+      if (kind === 'ornament') {
+        var on = document.querySelector('[name=sb_ornament]:checked');
+        if (on && on.value) return on.getAttribute('data-name');
+      } else if (kind === 'image') {
+        var img = document.querySelector('[name=sb_image]');
+        if (img && img.value.trim()) return img.value.trim();
+      }
+      return val('f-glyph');
+    }
     function updatePreview(){
       document.getElementById('pv-name').textContent = val('f-name') || 'Untitled style';
       document.getElementById('pv-desc').textContent = val('f-desc') || '—';
@@ -571,7 +638,7 @@
         '</b> '+ (val('f-fam')||'—') + just;
       var start = document.getElementById('f-start').value=='recto' ? ', recto' : '';
       document.getElementById('pv-open').textContent = openLabel(document.getElementById('f-open').value)+start;
-      document.getElementById('pv-break').textContent = val('f-glyph') || '—';
+      document.getElementById('pv-break').textContent = breakLabel() || '—';
       var fo = document.getElementById('f-fo').checked
         ? document.getElementById('f-fopos').value : 'none';
       document.getElementById('pv-folio').textContent = fo;

@@ -287,6 +287,26 @@ You can back them up, copy them between machines, or hand a customer's style to 
 colleague by sending the single file. Drop a `.json` into `presets/` and it appears in
 the tool automatically.
 
+### Scene-break ornaments
+
+Between two scenes a book prints a small mark. A style can set that mark three ways,
+in the editor's **Scene breaks** section:
+
+- **Text glyph** — characters you type, e.g. `* * *`, `—  —  —`, `·  ·  ·`. Make sure
+  the style's font actually carries the character you pick.
+- **Bundled ornament** — one of **twelve drawn marks** that ship with the tool: swelled
+  rule, double rule, dotted rule, diamond rule, lozenge, three lozenges, six-point star,
+  asterism, wave, arabesque, ivy leaf and leaf pair. Click one in the picker; the tile
+  shows exactly what will print. They are **drawn, not photographed** — so they stay
+  sharp at any size, need no font, and come out identical in the PDF and the ebook.
+- **Your own image** — a PNG or JPG in the `fonts/` folder, for custom artwork.
+
+Each ornament has a width that suits it (a swelled rule runs nearly half the text
+width; a lozenge is a few millimetres). **Ornament width** overrides that as a
+fraction of the text width — `0.25` is a quarter of the column. Leave it at `0` to
+use the ornament's own. Height always follows the width, so an ornament can never
+squash or stretch.
+
 The three starting styles:
 
 - **Classic Literary (6×9)** — warm, traditional novel interior; a good default.
@@ -377,6 +397,7 @@ typeset_studio/
   app.py             the web app
   engine.py          the typesetting engine
   manuscript.py      reads .md / .docx into chapters
+  ornaments.py       the twelve drawn scene-break ornaments
   requirements.txt   what to install
   presets/           one .json per style  <- your per-customer styles live here
   fonts/             .ttf files used by styles

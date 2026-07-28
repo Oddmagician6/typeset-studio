@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 # the PDF), and `manuscript` supplies the link-anchor rule so `[see](#slug)`
 # resolves to the same chapter in both outputs.
 import matter as _matter
+import ornaments as _orn
 from manuscript import (chapter_anchors as _ms_anchors, LINK_RE as _LINK_RE,
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts)
@@ -188,6 +189,9 @@ p.scene-break {
   margin: 1.2em 0;
   color: #666;
 }
+/* a bundled vector ornament: the SVG carries its own aspect, so only the
+   width is set here and the height follows on any screen size */
+p.scene-break img.scene-orn { display: inline-block; height: auto; }
 .front { margin: 0 5%; text-align: center; }
 .front h1.main { font-size: 1.8em; margin: 3em 0 0.4em; }
 .front p.subtitle { font-size: 1.1em; font-style: italic; margin: 0.3em 0; }
@@ -421,11 +425,44 @@ def _figure_html(caption_paras, attrs, figures):
     return out
 
 
+SCENE_ORN_HREF = 'images/scene-break.svg'
+
+
+def scene_ornament(preset):
+    """The bundled ornament this style marks scene breaks with, or ''.
+
+    Returns '' for the glyph and image types, and for an id no longer in the
+    library — a style that names a retired ornament falls back to its glyph
+    rather than failing the build.
+    """
+    sb = preset.get('scene_break', {})
+    if sb.get('type') != 'ornament':
+        return ''
+    oid = (sb.get('ornament') or '').strip()
+    return oid if _orn.get(oid) else ''
+
+
+def _scene_orn_html(preset, oid):
+    """The scene break as an `<img>` at the ornament's own width.
+
+    An `<img>` pointing at an SVG file (rather than SVG inlined in the page)
+    keeps the content documents plain XHTML — no `properties="svg"` on the
+    manifest item — and one file serves every break in the book.
+    """
+    sb   = preset.get('scene_break', {})
+    frac = sb.get('ornament_width', 0.0) or _orn.get(oid)['width']
+    pct  = max(0.02, min(float(frac), 1.0)) * 100.0
+    return (f'  <p class="scene-break"><img class="scene-orn" '
+            f'src="{SCENE_ORN_HREF}" alt="Scene break" '
+            f'style="width:{pct:.1f}%"/></p>')
+
+
 def _chapter_xhtml(idx, chapter, preset, figures=None, number=None):
     c          = preset.get('chapter', {})
     show_num   = c.get('show_number', True)
     num_fmt    = c.get('number_format', 'Chapter {n}')
     scene_glyph = preset.get('scene_break', {}).get('glyph', '* * *')
+    scene_orn   = scene_ornament(preset)
 
     lines = ['<div class="chapter">']
 
@@ -445,7 +482,8 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None):
         kind = block[0]
         val  = block[1]
         if kind == 'scene':
-            lines.append(f'  <p class="scene-break">{scene_glyph}</p>')
+            lines.append(_scene_orn_html(preset, scene_orn) if scene_orn else
+                         f'  <p class="scene-break">{scene_glyph}</p>')
             no_indent_next = True
         elif kind == 'subhead':
             lines.append(f'  <h2>{_markup_to_html(val)}</h2>')
@@ -940,6 +978,16 @@ def build_epub(manuscript, preset, out_path, meta):
     for f in figures.values():
         manifest_items.append({'id': f['id'], 'href': f['href'], 'type': f['mime']})
 
+    # one SVG serves every scene break in the book; only ship it if the style
+    # asks for an ornament *and* the manuscript actually breaks a scene
+    scene_orn = scene_ornament(preset)
+    if scene_orn and not any(b[0] == 'scene'
+                             for ch in chapters for b in ch.get('blocks', [])):
+        scene_orn = ''
+    if scene_orn:
+        manifest_items.append({'id': 'scene-orn', 'href': SCENE_ORN_HREF,
+                               'type': 'image/svg+xml'})
+
     if has_front:
         manifest_items.append({'id': 'front', 'href': 'front.xhtml',
                                 'type': 'application/xhtml+xml'})
@@ -992,6 +1040,10 @@ def build_epub(manuscript, preset, out_path, meta):
                     _nav_xhtml(chapters, has_cover, has_front, preset, meta=meta,
                                has_notes=has_notes))
         zf.writestr('OEBPS/style.css', _style_css(preset))
+
+        if scene_orn:
+            zf.writestr(f'OEBPS/{SCENE_ORN_HREF}',
+                        _orn.svg(scene_orn, color='#666666', xml_decl=True))
 
         if has_cover:
             zf.write(cover_src, f'OEBPS/{cover_img_fn}')

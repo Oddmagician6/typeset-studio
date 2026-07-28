@@ -25,6 +25,8 @@ engine.py         The typesetting engine (ReportLab). Builds the PDF. Two-pass w
 manuscript.py     Parses Markdown / imports .docx → a chapters/blocks structure.
 epub.py           EPUB 3 builder — consumes the same parsed structure as engine.py.
 matter.py         The front/back-matter vocabulary — one table, read by app + engine + epub.
+ornaments.py      The twelve bundled scene-break ornaments — one vector definition each,
+                  walked by engine.py (ReportLab) and by svg() (EPUB + the editor picker).
 test_epub.py      EPUB self-check tests: builds one good file, then breaks it eleven ways.
 test_footnotes.py Footnote placement: builds books and measures where the notes landed.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
@@ -69,8 +71,11 @@ chapter:       {start, sink, show_number, number_format, number_size, title_size
                number_format uses "{n}", e.g. "Chapter {n}"
 part_divider:  {show_number, number_format, number_size, title_size, sink}
                sink is a 0–1 fraction of the text-area height
-scene_break:   {type, glyph, size, gap, image}
-               type: "glyph" | "image"; image is a filename in fonts/ or absolute path
+scene_break:   {type, glyph, size, gap, image, ornament, ornament_width}
+               type: "glyph" | "ornament" | "image"
+               image is a filename in fonts/ or an absolute path
+               ornament is an id from ornaments.DEFS; ornament_width is a fraction of
+               the text column (0 = the ornament's own recommended width)
 document_block:{frame, indent, font_size, first_indent, space_around,
                header_size, dateline_style}
                frame: "none" | "ruled" | "box"
@@ -239,6 +244,14 @@ created, updated    ISO 8601 datetime strings
     via a text object's `setCharSpace` — the canvas has no `setCharSpace` in this ReportLab).
   Designed covers reach the EPUB as a rasterised page-1 JPEG (feature #43; `epub.py` itself is
   still image-only) and are persisted in saved projects (feature #29).
+
+- **An ornament is sized by width, not by point size.** `scene_break.size` is a height
+  in points, which is the right handle for a glyph or an image but the wrong one for a
+  mark whose aspect is fixed and extreme — a swelled rule is 34× wider than it is tall,
+  so an 11pt *height* would run it four inches off the page. Ornaments therefore take
+  `ornament_width`, a fraction of the text column (`0` = the ornament's own recommended
+  fraction, per `ornaments.DEFS`), and the height follows from the aspect. `SceneBreak`
+  reserves that computed height in `wrap()`, so the flowable measures what it draws.
 
 - **Scene-break glyphs must exist in the body font.** The bundled book serifs lack most ornaments.
   Presets ship with font-safe marks (`* * *`, em-dashes, middots, bullets) — all seven bundled
@@ -1164,6 +1177,60 @@ overflow, footnotes together with a TOC (which shifts every page number), per-ch
 endnote mode untouched, and a book with no notes paginating identically either way — plus rendered
 proofs eyeballed, and every note confirmed to sit on its reference's page. All prior suites pass.
 
+**56. Ornament library — twelve drawn scene-break marks** *(Tier-5E; the "best perceived-
+quality-per-hour in the whole list" item, and the last cheap one left)*
+`SceneBreak` had supported an image ornament since #9, but the repo shipped **zero artwork**,
+so every book in every style got typed characters — `* * *`, an em dash, three middots. Vellum
+ships flourishes; we shipped an empty hook.
+- **Drawn, not photographed.** `ornaments.py` defines each mark **once**, as a list of
+  primitives (`poly` / `dot` / `line` / `fill` / `stroke` paths with cubic béziers) in a
+  normalised box — x runs 0 → `aspect`, y runs 0 → 1, origin bottom-left, with line widths and
+  radii in box-height units so they scale with everything else. `engine._draw_ornament` walks
+  that list with ReportLab canvas calls; `ornaments.svg()` walks the **same** list to emit SVG.
+  One definition means the mark in the paperback and the mark in the ebook cannot drift apart —
+  and there is no raster artwork to license, ship at N resolutions, or re-render.
+  Stdlib-only (`math`) and importing nothing from the project, like `matter.py`.
+- **The twelve:** swelled rule, double rule (thick over thin), dotted rule, diamond rule,
+  lozenge, three lozenges, six-point star, asterism, wave, arabesque, ivy leaf (hedera), leaf
+  pair. Rules first (quiet, genre-neutral), then geometric, then floral. Symmetric ones are
+  built from one hand-drawn half via `_xf(ops, flip_at=…, dx=…)`, so the two sides can't drift.
+- **Sized by width, not point size** — see the gotcha above. Each ornament carries its own
+  recommended fraction of the text column (0.026 for a lozenge, 0.46 for a double rule);
+  `scene_break.ornament_width` overrides it and is clamped to the column.
+- `epub.py`: one `images/scene-break.svg` serves every break in the book, referenced by an
+  `<img>` at a percentage width. An `<img>` to an SVG **file** rather than SVG inlined in the
+  page keeps the content documents plain XHTML — no `properties="svg"` on the manifest item —
+  and it reflows: the ornament narrows with the measure on a phone. Only shipped when the style
+  asks for one **and** the manuscript actually breaks a scene. `alt="Scene break"`, so #52's
+  preflight passes rather than being exempted.
+- `app.py`: the three-place preset rule (`DEFAULTS`, `parse_preset_form`, `editor.html`), plus
+  `ornament_tiles()` (SVG previews for the picker, from the same definitions) and
+  `scene_break_label()` — the spec cards on `/` and in the editor now name the ornament instead
+  of showing a glyph the book won't print. Also fixed on the way: `/generate/epub-preview`
+  inlined SVG as `data:image/svg` (no `+xml`), which no browser renders.
+- `templates/editor.html`: a tile picker in the Scene breaks fieldset — each tile *is* the
+  ornament, rendered as inline SVG in `currentColor`, with its note and width. Selection is
+  CSS-only via `:has(input:checked)`, matching #34's cover gallery.
+- **Five shipped styles repointed**: Classic Literary → swelled rule · Gothic/Horror → diamond
+  rule · Fantasy (Epic) → arabesque · Romance → wave · SF & Fantasy → three lozenges. Thriller,
+  SF (Clean), Mass Market and Modern Clean keep their bare marks **on purpose** — those styles
+  are meant to be plain, and the old glyph stays in the file as the fallback either way.
+Verified: a contact sheet of all twelve at real book size, eyeballed and then re-drawn twice
+(the asterism's stars collided, the double rule's gap was too tight, the leaf pair too cramped);
+real books built through `engine.build_pdf` for every ornament with the mark measured in a column
+of prose; a 40-check pass (`ornaments.py` invariants incl. **every primitive proven inside its own
+box**, SVG parsing as XML for all twelve, the op-count matching between the two renderers, engine
+fallback for a retired id, `SceneBreak` reserving the drawn height, the picker rendering all
+twelve tiles, a real editor save round-tripping the choice with nothing else in the style
+disturbed, and the live style preview building); an EPUB whose #52 preflight is **all clear**
+across nine checks with the SVG manifested and in the zip; a glyph style still emitting
+`<p class="scene-break">* * *</p>` and **no** SVG; and a live browser pass — the picker highlights
+one tile, the spec card renames itself, and the ebook preview shows the swelled rule reflowing
+narrower on the phone width, console clean. `test_doc_model.py` / `test_epub.py` /
+`test_footnotes.py` all still pass.
+**Not done:** chapter-heading art and full-bleed interior pages (the heavier half of Tier-5E);
+ornaments are black only (a book interior is); no per-ornament colour or rotation.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1448,10 +1515,11 @@ still open from #30: no `.docx` **poem** import.
 - ~~**One typeface for nine styles.**~~ — **SHIPPED (feature #44):** six OFL families (EB Garamond,
   Vollkorn, Alegreya, Crimson Pro, Lora, Spectral) bundled and the presets repointed, one considered
   face per genre style, with sizes re-set by characters-per-line. ~4.8 MB added.
-- **Ornament / flourish library.** `SceneBreak` supports an image ornament (#9) but the repo
-  ships **zero artwork**, so every book gets `* * *` or an em dash. Vellum ships flourishes,
-  custom ornaments, custom backgrounds, full-bleed interior pages and chapter-heading images. A
-  dozen bundled public-domain/CC0 ornaments + a picker in `editor.html` is data-plus-template.
+- ~~**Ornament / flourish library.**~~ — **SHIPPED (feature #56):** twelve ornaments, drawn as
+  **vectors** in a new `ornaments.py` rather than bundled as artwork, so one definition feeds the
+  PDF, the EPUB and the editor's tile picker. Five shipped styles repointed at one. *(The plan
+  said "public-domain/CC0 ornaments"; drawing them removed the licensing question, the resolution
+  question and the PDF-vs-EPUB drift question at once.)*
 - **Chapter-heading art / full-bleed interior pages.** The heavier half of the same idea; after
   the figure block exists (A), a chapter-opener image is mostly a preset field.
 
@@ -1495,9 +1563,10 @@ someone asks for it.
 ~~figures/images incl. `.docx` (A + C)~~ #46/#47 → ~~lists / block quote / alignment (A)~~ #48 →
 ~~links (B)~~ #49 → ~~endnotes (A)~~ #50 → ~~element vocabulary (F)~~ #51 →
 ~~EPUB preflight (D)~~ #52 → ~~device preview (D)~~ #53 →
-~~large print + trim presets (G)~~ #54 → **what's left**: hardcover wrap and box sets (G),
-PDF/X-1a and spread balancing (D), an ornament library (E) → endnotes (A) → EPUB preflight + device preview (D) →
-large print + trim presets (G) → footnotes (A, last). Note this whole tier is *feature* work: per the strategy note below, **packaging still
+~~large print + trim presets (G)~~ #54 → ~~footnotes (A)~~ #55 → ~~ornament library (E)~~ #56 →
+**what's left**: tables (A), hardcover wrap and box sets (G), PDF/X-1a and spread balancing (D),
+chapter-heading art (E), and the `.docx` follow-ups in (C) — Word footnotes, link addresses, poem
+import. Note this whole tier is *feature* work: per the strategy note below, **packaging still
 grows who uses the app more than any of it**.
 
 ### ◻ Strategy notes (context for prioritising, not committed work)

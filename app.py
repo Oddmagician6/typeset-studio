@@ -36,6 +36,7 @@ import epub
 import manuscript
 import checker
 import matter
+import ornaments
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IS_FROZEN = getattr(sys, 'frozen', False)
@@ -345,7 +346,11 @@ DEFAULTS = {
                  'group_gap': 12.0, 'marker_scale': 0.62,
                  'foot_gap': 10.0, 'foot_rule': True, 'foot_rule_width': 0.3,
                  'foot_max_height': 0.4},
-    'scene_break': {'type': 'glyph', 'glyph': '* * *', 'size': 11.0, 'gap': 9.0, 'image': ''},
+    # type: glyph (typed characters) | ornament (a bundled vector mark) | image
+    # (your own artwork). `ornament_width` is a fraction of the text column;
+    # 0 means "use the ornament's own recommended width" — see ornaments.py.
+    'scene_break': {'type': 'glyph', 'glyph': '* * *', 'size': 11.0, 'gap': 9.0,
+                    'image': '', 'ornament': '', 'ornament_width': 0.0},
     'running_head': {'show': True, 'caps': True, 'size': 8.5, 'gap': 0.28},
     'folio': {'show': True, 'position': 'outer', 'size': 9.5, 'gap': 0.42,
               'hide_on_opener': True},
@@ -710,6 +715,8 @@ def parse_preset_form(form):
             'size':  _f(form, 's_size', 11.0),
             'gap':   _f(form, 's_gap', 9.0),
             'image': form.get('sb_image', '').strip(),
+            'ornament': (form.get('sb_ornament', '') or '').strip(),
+            'ornament_width': _f(form, 'sb_ornament_width', 0.0),
         },
         'running_head': {'show': 'rh_show' in form, 'caps': 'rh_caps' in form,
                          'size': _f(form, 'rh_size', 8.5), 'gap': _f(form, 'rh_gap', 0.28)},
@@ -865,7 +872,22 @@ def _inject_cover_templates():
             # the front/back matter vocabulary, so the forms build themselves
             'matter_front': matter.FRONT,
             'matter_back': matter.BACK,
-            'matter_keys': matter.KEYS}
+            'matter_keys': matter.KEYS,
+            'scene_break_label': scene_break_label}
+
+
+def scene_break_label(preset):
+    """How a style's scene break reads on a spec card: the ornament's name, the
+    image filename, or the glyph itself."""
+    sb = preset.get('scene_break', {}) or {}
+    kind = sb.get('type', 'glyph')
+    if kind == 'ornament':
+        d = ornaments.get(sb.get('ornament', ''))
+        if d:
+            return d['name']
+    elif kind == 'image' and sb.get('image', '').strip():
+        return os.path.basename(sb['image'].strip())
+    return sb.get('glyph', '* * *')
 
 
 @app.route('/favicon.ico')
@@ -879,16 +901,28 @@ def index():
     return render_template('index.html', presets=list_presets())
 
 
+def ornament_tiles():
+    """The bundled ornaments with a ready-to-drop-in SVG preview each, for the
+    style editor's picker. Drawn from the same definitions the PDF uses, so a
+    tile cannot promise a mark the book won't print."""
+    return [{'id': d['id'], 'name': d['name'], 'note': d['note'],
+             'width': d['width'],
+             'svg': ornaments.svg(d['id'], color='currentColor')}
+            for d in ornaments.DEFS]
+
+
 @app.route('/editor/new')
 def editor_new():
     return render_template('editor.html', pid=None, p=DEFAULTS, is_new=True,
-                           fonts=list_fonts(), trim_presets=TRIM_PRESETS)
+                           fonts=list_fonts(), trim_presets=TRIM_PRESETS,
+                           ornaments=ornament_tiles())
 
 
 @app.route('/editor/<pid>')
 def editor(pid):
     return render_template('editor.html', pid=pid, p=load_preset(pid), is_new=False,
-                           fonts=list_fonts(), trim_presets=TRIM_PRESETS)
+                           fonts=list_fonts(), trim_presets=TRIM_PRESETS,
+                           ornaments=ornament_tiles())
 
 
 @app.route('/save', methods=['POST'])
@@ -2008,7 +2042,8 @@ def generate_epub_preview():
                     if name not in zf.namelist():
                         return m.group(0)
                     ext = os.path.splitext(name)[1].lower().lstrip('.')
-                    mime = 'image/jpeg' if ext in ('jpg', 'jpeg') else f'image/{ext}'
+                    mime = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+                            'svg': 'image/svg+xml'}.get(ext, f'image/{ext}')
                     b64 = base64.b64encode(zf.read(name)).decode()
                     return f'src="data:{mime};base64,{b64}"'
                 return _IMG_SRC_RE.sub(sub, html)

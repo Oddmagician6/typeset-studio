@@ -26,6 +26,7 @@ except ImportError:
     _HAVE_PYPHEN = False
 
 import matter as _matter
+import ornaments as _orn
 from manuscript import (_inline as _ms_inline, chapter_anchors as _ms_anchors,
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts)
@@ -1234,18 +1235,86 @@ def register_fonts(preset):
 
 
 # ---------------------------------------------------------------- flowables
+def _draw_ornament(canv, oid, x0, y0, w, h):
+    """Paint a bundled vector ornament into the box (x0, y0, w, h).
+
+    Walks the same primitive list `ornaments.svg()` walks, so the mark in the
+    PDF and the one in the EPUB come from one definition. The box maps the
+    ornament's own coordinates (x 0→aspect, y 0→1) with a single uniform
+    scale, which is why line widths and radii can be given in box-height units.
+    """
+    d = _orn.get(oid)
+    if not d:
+        return False
+    s = h  # uniform: the ornament box is `aspect` wide by 1 tall
+    def P(x, y):
+        return (x0 + x * s, y0 + y * s)
+
+    canv.saveState()
+    canv.setFillColorRGB(0, 0, 0)
+    canv.setStrokeColorRGB(0, 0, 0)
+    canv.setLineCap(1)
+    canv.setLineJoin(1)
+    for op in d['ops']:
+        kind = op[0]
+        if kind == 'poly':
+            p = canv.beginPath()
+            p.moveTo(*P(*op[1][0]))
+            for pt in op[1][1:]:
+                p.lineTo(*P(*pt))
+            p.close()
+            canv.drawPath(p, fill=1, stroke=0)
+        elif kind == 'dot':
+            canv.circle(*P(op[1], op[2]), op[3] * s, fill=1, stroke=0)
+        elif kind == 'line':
+            canv.setLineWidth(op[5] * s)
+            canv.line(*P(op[1], op[2]), *P(op[3], op[4]))
+        else:  # fill / stroke path
+            p = canv.beginPath()
+            for seg in op[1]:
+                if seg[0] == 'm':
+                    p.moveTo(*P(seg[1], seg[2]))
+                elif seg[0] == 'l':
+                    p.lineTo(*P(seg[1], seg[2]))
+                elif seg[0] == 'c':
+                    p.curveTo(*P(seg[1], seg[2]), *P(seg[3], seg[4]), *P(seg[5], seg[6]))
+                else:
+                    p.close()
+            if kind == 'fill':
+                canv.drawPath(p, fill=1, stroke=0)
+            else:
+                canv.setLineWidth(op[2] * s)
+                canv.drawPath(p, fill=0, stroke=1)
+    canv.restoreState()
+    return True
+
+
 class SceneBreak(Flowable):
-    def __init__(self, glyph, font, size, gap, image_path=None):
+    def __init__(self, glyph, font, size, gap, image_path=None,
+                 ornament=None, ornament_width=0.0):
         super().__init__()
         self.glyph, self.font, self.size, self.gap = glyph, font, size, gap
         self.image_path = image_path
+        self.ornament = ornament
+        self.ornament_width = ornament_width
+        self.orn_size = (0.0, 0.0)
 
     def wrap(self, w, h):
         self.width = w
-        self.height = self.gap * 2 + self.size
+        mark_h = self.size
+        if self.ornament:
+            self.orn_size = _orn.size(self.ornament, w, self.ornament_width)
+            if self.orn_size[1]:
+                mark_h = self.orn_size[1]
+        self.height = self.gap * 2 + mark_h
         return (w, self.height)
 
     def draw(self):
+        if self.ornament and self.orn_size[1]:
+            ow, oh = self.orn_size
+            if _draw_ornament(self.canv, self.ornament,
+                              (self.width - ow) / 2.0, self.gap, ow, oh):
+                return
         if self.image_path and os.path.exists(self.image_path):
             try:
                 from reportlab.lib.utils import ImageReader
@@ -2838,8 +2907,10 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 if sb.get('type') == 'image' and sb.get('image', '').strip():
                     raw_img = sb['image'].strip()
                     img_path = raw_img if os.path.isabs(raw_img) else os.path.join(FONT_DIR, raw_img)
+                orn = sb.get('ornament', '') if sb.get('type') == 'ornament' else ''
                 story.append(SceneBreak(glyph, head_font, sb['size'], sb['gap'],
-                                        image_path=img_path))
+                                        image_path=img_path, ornament=orn,
+                                        ornament_width=sb.get('ornament_width', 0.0)))
                 flush_next = True
             elif kind == 'subhead':
                 story.append(Paragraph(val, st['subhead']))
