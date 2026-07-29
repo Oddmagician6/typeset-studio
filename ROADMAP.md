@@ -1620,6 +1620,13 @@ draft / Set-a-book / Save-as-project flow with Set-a-book + Browse-styles CTAs) 
 template). Verified: empty Projects seen live (project JSONs temporarily moved aside, then restored);
 all three empty branches render.
 
+**Releases.** `CHANGELOG.md` is the user-facing record; this file is the engineering one.
+**1.2.0** (28 Jul 2026) covers features **#43–#62** — the whole Tier-5 content cluster, `.docx`
+fidelity, the type and ornament work, the EPUB checks, and the hardcover / jacket / press-ready
+print work. **1.1.0** (24 Jul 2026) covered the WYSIWYG editor, poetry and anthologies, the cover
+design families and gallery, and the discoverability pass (#24–#42). The version lives **only** in
+`typeset-studio.iss`; bump it there and the installer and its filename follow.
+
 **Build / version tooling.** Bumped to **1.1.0** in `typeset-studio.iss` — the single source of truth,
 driving `AppVersion` and the installer's `OutputBaseFilename`. `make-installer.bat` now parses that
 version from the `.iss` (via `findstr`) instead of hardcoding it in its status message, so the message

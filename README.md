@@ -9,6 +9,8 @@ book's interior (trim, margins, body type, chapter openings, scene breaks, runni
 heads, page numbers, fonts). You build a style once, then **duplicate it per customer**
 and tweak only what that book needs.
 
+Current version **1.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what's new.
+
 ---
 
 ## Running it (Windows)
