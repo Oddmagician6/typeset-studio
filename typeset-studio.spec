@@ -25,7 +25,6 @@ Notes
 """
 
 import os
-import re
 import sys
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
@@ -33,12 +32,11 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 IS_WIN = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 
-# The version lives in typeset-studio.iss and nowhere else; make-installer.bat
-# reads it the same way. A Mac bundle carries it in its Info.plist, so read it
-# here too rather than adding a second place to forget to bump.
+# The version lives in the VERSION file and nowhere else; the .iss, the
+# installer script and the running app all read it. A Mac bundle carries it in
+# its Info.plist, so read it here too.
 try:
-    _iss = open('typeset-studio.iss', encoding='utf-8').read()
-    APP_VERSION = re.search(r'#define AppVersion "([^"]+)"', _iss).group(1)
+    APP_VERSION = open('VERSION', encoding='utf-8').read().strip() or '0.0.0'
 except Exception:
     APP_VERSION = '0.0.0'
 
@@ -50,6 +48,7 @@ datas = [
     ('covers', 'covers'),
     ('fonts', 'fonts'),
     ('app.ico', '.'),
+    ('VERSION', '.'),        # the About page reports the build it is running
 ]
 datas += collect_data_files('pyphen')       # hyphenation dictionaries
 datas += collect_data_files('reportlab')    # bundled fonts / encodings

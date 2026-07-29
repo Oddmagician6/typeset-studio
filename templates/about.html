@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}About · Typeset Studio{% endblock %}
+
+{% block style %}
+  .about{max-width:760px}
+  .vcard{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+    padding:20px 24px;margin-bottom:20px}
+  .vcard .vnum{font-family:var(--serif);font-size:34px;font-weight:600;line-height:1}
+  .vcard .vlab{font-family:var(--mono);font-size:10px;text-transform:uppercase;
+    letter-spacing:.2em;color:var(--faint);margin:0 0 6px}
+  .vcard .newer{margin-top:14px;padding:12px 14px;border-radius:2px;
+    background:var(--surface-2);border:1px solid var(--rule-strong);font-size:14px}
+  .vcard .uptodate{margin-top:12px;color:var(--muted);font-size:13.5px}
+  .upd{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:20px 24px}
+  .upd h2{font-family:var(--serif);font-size:19px;margin:0 0 8px}
+  .upd p{font-size:14px;color:var(--muted);margin:0 0 12px;max-width:62ch}
+  .upd .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+  .upd form{display:inline}
+  .upd .state{font-family:var(--mono);font-size:11px;text-transform:uppercase;
+    letter-spacing:.14em;padding:2px 8px;border-radius:2px}
+  .upd .on{background:#e6f4e6;color:#2a7a2a}
+  .upd .off{background:var(--surface-2);color:var(--muted)}
+  .upd ul{font-size:13.5px;color:var(--muted);margin:10px 0 0;padding-left:20px;max-width:62ch}
+  .upd li{margin:3px 0}
+  .upd code{font-family:var(--mono);font-size:12px;background:var(--surface-2);
+    border:1px solid var(--rule);border-radius:2px;padding:1px 5px;word-break:break-all}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">About</div>
+    <h1>Typeset Studio</h1>
+    <p>A tool for setting print-ready book interiors, run on your own machine.</p>
+  </div>
+
+  <div class="about">
+    <div class="vcard">
+      <p class="vlab">Installed version</p>
+      <div class="vnum">{{ version }}</div>
+      {% if update and update.newer %}
+        <div class="newer">
+          <b>Version {{ update.version }} is available.</b>
+          <a href="{{ update.url }}" target="_blank" rel="noopener noreferrer">See what changed
+            and download it</a>. Your styles, covers, fonts and projects stay where they are —
+          installing over the top keeps them.
+        </div>
+      {% elif update %}
+        <p class="uptodate">This is the latest release.</p>
+      {% endif %}
+    </div>
+
+    <div class="upd">
+      <h2>Checking for new versions</h2>
+      <p>Typeset Studio can look once a day to see whether a newer release exists, and tell
+        you here. It never installs anything by itself — you download and run the installer
+        when you choose to.</p>
+      <p>The check is <b>{{ 'on' if checks_on else 'off' }}</b>
+        {%- if not checks_on %}, which is the default: this app talks to nobody unless you
+        ask it to{% endif %}.</p>
+      <ul>
+        <li>It sends a plain request to <code>{{ feed }}</code> and reads the version number.</li>
+        <li>Nothing about you, your books or your usage is sent — there is no account, no
+          identifier and no telemetry anywhere in this app.</li>
+        <li>If you are offline, or the feed can't be reached, nothing happens and nothing
+          is reported.</li>
+      </ul>
+      <div class="row">
+        <span class="state {{ 'on' if checks_on else 'off' }}">{{ 'On' if checks_on else 'Off' }}</span>
+        <form method="post" action="{{ url_for('about_updates') }}">
+          <input type="hidden" name="update_check" value="{{ '' if checks_on else '1' }}">
+          <button class="btn" type="submit">{{ 'Turn checking off' if checks_on else 'Turn checking on' }}</button>
+        </form>
+        <form method="post" action="{{ url_for('about_check') }}">
+          <button class="btn" type="submit">Check now</button>
+        </form>
+        <a class="btn" href="{{ page }}" target="_blank" rel="noopener noreferrer">Releases page</a>
+      </div>
+    </div>
+  </div>
+{% endblock %}

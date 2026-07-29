@@ -21,6 +21,7 @@ as **projects** for one-click regeneration.
 
 ```
 app.py            Flask routes + preset/project CRUD + form parsing. Entry point (port 5050).
+VERSION           The one place the version lives — app, .iss and make-installer.bat all read it.
 engine.py         The typesetting engine (ReportLab). Builds the PDF. Two-pass when TOC enabled.
 manuscript.py     Parses Markdown / imports .docx → a chapters/blocks structure.
 epub.py           EPUB 3 builder — consumes the same parsed structure as engine.py.
@@ -34,6 +35,7 @@ test_chapter_art.py Chapter-opening art: geometry, then a real PDF and EPUB.
 test_wrap.py      Print-wrap arithmetic: paperback, case-laminate and jacket geometry, measured.
 test_press.py     Press-ready interiors: colour, boxes and annotations, read back off the PDF.
 test_history.py   Manuscript safety: atomic writes, snapshots, thinning, restore and undo.
+test_update.py    The version check: consent, caching, and every way a feed can misbehave.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -1562,6 +1564,37 @@ the thinning buckets and the cap, path traversal in a stamp, and the full editor
 mistake, restore, undo the restore, replace by upload. Driven end to end in Chrome as well:
 restore swaps the text, the word count follows, the new row reads *before going back*, and an
 autosave during a pending confirm no longer cancels it.
+
+**64. An About page, and an opt-in update check** *(asked for as "an auto updater/update
+checker"; the checker is the half worth building today)*
+**Why not an auto-updater.** It downloads and runs an installer — the same shape as malware —
+and the installer is **not code-signed**, so there is no signature to verify against: the update
+channel would be a remote-code-execution path into users' machines if it were ever tampered with.
+A PyInstaller onedir app also cannot replace its own files while running on Windows, so it would
+have to shell out and exit, bringing elevation, rollback and partial-update recovery with it.
+**Sign first, auto-update second.** A checker carries none of that: it reads a version string and
+shows a link; the user installs deliberately, which also keeps the SmartScreen warning a one-time,
+understood step rather than a mysterious background download.
+- **The app now knows its own version.** A single `VERSION` file is read by `app._read_version()`
+  (bundled by the `.spec`), by the `.iss` (`FileRead(FileOpen("VERSION"))`) and by
+  `make-installer.bat` — so a build can't call itself one thing while About calls it another. This
+  was a prerequisite: the frozen app previously had no idea what it was.
+- **`check_for_update()`** is off unless switched on (`UPDATE_CHECK_DEFAULT = False` — this app's
+  promise is that it runs on your machine and talks to nobody; a version check is still a network
+  call, so it is the user's to allow). At most once a day, cached in `settings.json`; **Check now**
+  counts as an explicit ask and runs regardless. Every failure — offline, rate-limited, garbage
+  JSON, a private repo — is silence. A non-`https` link from the feed is replaced with the known
+  releases page rather than handed to the UI.
+- `templates/about.html`: version, an update banner when there is one, and the toggle — with the
+  exact URL it would call and a plain statement that nothing about the user is sent. A quiet
+  version line in the footer (`base.html`) links to it and flags an available release.
+- `test_update.py` (39 checks), all with an **injected fetcher — no test makes a real request**:
+  `1.10 > 1.9` (the classic string-compare bug), consent (nothing fetched while off), the daily
+  cache, six malformed/hostile feeds each resolving to silence, the scheme guard, the toggle
+  forgetting what it learned, the footer badge appearing only when warranted, a page render never
+  waiting on the network, and all three build files reading `VERSION`.
+**If you'd rather not use GitHub**, point `UPDATE_FEED` at a static JSON file of your own
+(`{"version": "1.3.0", "url": "…"}`) — the reader accepts either shape.
 
 ### ✓ Tier 2 — shipped
 

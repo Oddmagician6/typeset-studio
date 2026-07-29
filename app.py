@@ -14,6 +14,7 @@ import json
 import base64
 import shutil
 import logging
+import time
 import tempfile
 import threading
 import traceback
@@ -91,6 +92,118 @@ PROJECT_THUMB_DIR = os.path.join(OUT_DIR, '_project_thumbs')  # cached project c
 for d in (PRESET_DIR, COVER_DIR, COVER_ASSET_DIR, FONT_DIR, FIGURE_DIR, OUT_DIR, UPLOAD_DIR,
           PROJECT_DIR, PROJECT_MS_DIR, HISTORY_DIR, COVER_THUMB_DIR, PROJECT_THUMB_DIR):
     os.makedirs(d, exist_ok=True)
+
+
+def _read_version():
+    """This build's version, from the VERSION file the installer also reads.
+
+    One file, three readers — app, `.iss`, `make-installer.bat` — so a release
+    cannot ship calling itself something the installer disagrees with.
+    """
+    for base in (HERE, DATA_DIR):
+        try:
+            v = open(os.path.join(base, 'VERSION'), encoding='utf-8').read().strip()
+            if v:
+                return v
+        except OSError:
+            continue
+    try:
+        return open(resource_path('VERSION'), encoding='utf-8').read().strip()
+    except OSError:
+        return '0.0.0'
+
+
+APP_VERSION = _read_version()
+
+# Where a new release announces itself. GitHub's API needs no key for a public
+# repo and returns the tag and the release page; point this at a JSON file of
+# your own ({"version": "1.3.0", "url": "…"}) if you'd rather not use GitHub.
+UPDATE_FEED = 'https://api.github.com/repos/Oddmagician6/typeset-studio/releases/latest'
+UPDATE_PAGE = 'https://github.com/Oddmagician6/typeset-studio/releases/latest'
+# Off unless asked for. This app's promise is that it runs on your machine and
+# talks to nobody; a version check is still a network call, so it is the user's
+# to switch on. Flip this to True to make new installs check by default.
+UPDATE_CHECK_DEFAULT = False
+UPDATE_INTERVAL = 86400          # at most one check a day
+SETTINGS_PATH = os.path.join(DATA_DIR, 'settings.json')
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_PATH, encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def save_settings(data):
+    _atomic_write_text(SETTINGS_PATH, json.dumps(data, indent=2))
+
+
+def update_checks_on():
+    return bool(load_settings().get('update_check', UPDATE_CHECK_DEFAULT))
+
+
+def _version_tuple(v):
+    """'v1.10.2' -> (1, 10, 2). Numeric parts only, so 1.10 sorts above 1.9."""
+    parts = re.findall(r'\d+', (v or '').strip().lstrip('vV'))
+    return tuple(int(p) for p in parts[:4]) or (0,)
+
+
+def is_newer(candidate, current=None):
+    return _version_tuple(candidate) > _version_tuple(current or APP_VERSION)
+
+
+def _fetch_json(url, timeout=6):
+    """Read a small JSON document. Any failure is a None, never an exception."""
+    import urllib.request
+    req = urllib.request.Request(url, headers={
+        'User-Agent': f'TypesetStudio/{APP_VERSION}',   # GitHub requires one
+        'Accept': 'application/vnd.github+json',
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        if getattr(resp, 'status', 200) != 200:
+            return None
+        return json.loads(resp.read(200_000).decode('utf-8', 'replace'))
+
+
+def check_for_update(force=False, fetch=None):
+    """Ask whether a newer release exists. Returns the cached answer, or None.
+
+    Nothing is sent but the request itself — no identifiers, no usage, no
+    telemetry. Refuses to run unless the user turned checking on (a `force`
+    from the Check-now button counts as asking), and at most once a day
+    otherwise. Every failure — offline, rate-limited, garbage JSON, a private
+    repo — is silence: an update check must never be something that breaks
+    the app you are trying to use.
+    """
+    if not (force or update_checks_on()):
+        return None
+    settings = load_settings()
+    now = time.time()
+    if not force and now - float(settings.get('update_checked_at') or 0) < UPDATE_INTERVAL:
+        cached = settings.get('update_latest')
+        return {'version': cached, 'url': settings.get('update_url') or UPDATE_PAGE,
+                'newer': bool(cached and is_newer(cached))} if cached else None
+    try:
+        data = (fetch or _fetch_json)(UPDATE_FEED)
+    except Exception:
+        data = None
+    if not isinstance(data, dict):
+        return None
+    latest = str(data.get('tag_name') or data.get('version') or '').strip()
+    if not re.match(r'^v?\d+(\.\d+)*$', latest):
+        return None                        # not a version we can reason about
+    url = str(data.get('html_url') or data.get('url') or UPDATE_PAGE)
+    if not url.startswith('https://'):
+        url = UPDATE_PAGE                  # never hand the UI an arbitrary scheme
+    settings.update({'update_checked_at': now, 'update_latest': latest,
+                     'update_url': url})
+    save_settings(settings)
+    return {'version': latest, 'url': url, 'newer': is_newer(latest)}
 
 
 def _seed_defaults():
@@ -957,6 +1070,9 @@ def _inject_cover_templates():
             'matter_front': matter.FRONT,
             'matter_back': matter.BACK,
             'matter_keys': matter.KEYS,
+            'app_version': APP_VERSION,
+            # a cached answer only — no page render ever waits on the network
+            'update_info': (check_for_update() if update_checks_on() else None),
             'scene_break_label': scene_break_label}
 
 
@@ -972,6 +1088,44 @@ def scene_break_label(preset):
     elif kind == 'image' and sb.get('image', '').strip():
         return os.path.basename(sb['image'].strip())
     return sb.get('glyph', '* * *')
+
+
+@app.route('/about')
+def about():
+    settings = load_settings()
+    return render_template('about.html', version=APP_VERSION,
+                           checks_on=update_checks_on(),
+                           update=check_for_update(),
+                           checked_at=settings.get('update_checked_at'),
+                           feed=UPDATE_FEED, page=UPDATE_PAGE)
+
+
+@app.route('/about/updates', methods=['POST'])
+def about_updates():
+    """Turn the version check on or off. Off also forgets what it learned."""
+    settings = load_settings()
+    on = request.form.get('update_check') == '1'
+    settings['update_check'] = on
+    if not on:
+        for k in ('update_checked_at', 'update_latest', 'update_url'):
+            settings.pop(k, None)
+    save_settings(settings)
+    flash('Update checks are on. Typeset Studio will look once a day.' if on else
+          'Update checks are off. Nothing leaves this machine.')
+    return redirect(url_for('about'))
+
+
+@app.route('/about/check', methods=['POST'])
+def about_check():
+    """Check now — an explicit ask, so it runs even when daily checks are off."""
+    info = check_for_update(force=True)
+    if not info:
+        flash('Could not reach the update feed just now. Nothing else changed.')
+    elif info.get('newer'):
+        flash(f'Version {info["version"]} is available — you have {APP_VERSION}.')
+    else:
+        flash(f'You are up to date ({APP_VERSION}).')
+    return redirect(url_for('about'))
 
 
 @app.route('/favicon.ico')

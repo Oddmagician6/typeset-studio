@@ -136,6 +136,11 @@
   .sitefoot .foot-note{margin:0;color:var(--muted);font-size:13px;max-width:56ch}
   .sitefoot .foot-note b{color:var(--ink);font-weight:600}
   .sitefoot .foot-links{display:flex;gap:10px;flex-wrap:wrap}
+  .sitefoot .foot-ver{font-family:var(--mono);font-size:11px;color:var(--faint);
+    text-decoration:none;letter-spacing:.06em}
+  .sitefoot .foot-ver:hover{color:var(--red-deep)}
+  .sitefoot .foot-upd{font-family:var(--mono);font-size:11px;color:var(--red);
+    text-decoration:none;letter-spacing:.06em;font-weight:600}
   .donate-pp{border-color:#0070ba;color:#0a7cc6}
   .donate-pp:hover{background:#0070ba;border-color:#0070ba;color:#fff}
   .donate-pt{border-color:#e0533f;color:#e0533f}
@@ -227,7 +232,9 @@
   <footer class="sitefoot">
     <div class="inner">
       <p class="foot-note"><b>Typeset&nbsp;Studio is free.</b> If it saved you the cost of typesetting,
-        cover design, or formatting, a little support keeps it growing.</p>
+        cover design, or formatting, a little support keeps it growing.<br>
+        <a class="foot-ver" href="{{ url_for('about') }}">Version {{ app_version }}</a>{% if update_info and update_info.newer %}
+          · <a class="foot-upd" href="{{ url_for('about') }}">{{ update_info.version }} is available</a>{% endif %}</p>
       <div class="foot-links">
         <a class="btn btn-sm donate-pp" href="https://www.paypal.com/ncp/payment/KFGXTDRA7YPKW"
            target="_blank" rel="noopener noreferrer">♥ Donate via PayPal</a>

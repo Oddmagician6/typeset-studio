@@ -9,7 +9,15 @@ book's interior (trim, margins, body type, chapter openings, scene breaks, runni
 heads, page numbers, fonts). You build a style once, then **duplicate it per customer**
 and tweak only what that book needs.
 
-Current version **1.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what's new.
+Current version **1.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what's new. The **About**
+page (linked in the footer) shows the version you're running.
+
+**On the network:** Typeset Studio works entirely offline and sends nothing anywhere. The
+one exception is optional and **off by default** — on the About page you can switch on a
+once-a-day check for new releases, which reads a version number from the project's releases
+feed and tells you if there's a newer one. No account, no identifier, no telemetry; it never
+installs anything by itself; and if you're offline it fails quietly. Turning it off again
+also forgets what it learned.
 
 ---
 

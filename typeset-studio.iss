@@ -20,7 +20,10 @@
 ;   uninstalling never deletes someone's books.
 
 #define AppName "Typeset Studio"
-#define AppVersion "1.2.0"
+; The version lives in the VERSION file, which the app itself and
+; make-installer.bat also read — so a build can never call itself one thing
+; while the About page calls it another. Bump it there, nowhere else.
+#define AppVersion Trim(FileRead(FileOpen("VERSION")))
 #define AppPublisher "Ashforge Studio"
 #define AppExe "Typeset Studio.exe"
 

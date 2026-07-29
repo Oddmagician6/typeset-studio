@@ -6,6 +6,18 @@ and its filename; `ROADMAP.md` has the engineering record behind every line here
 
 ---
 
+## Unreleased
+
+- **Your words are kept.** Saves in the manuscript editor are now all-or-nothing, so an
+  interrupted save can't leave an empty file, and every few minutes of writing is copied
+  into the project's history. A **History** panel lists the versions; restoring one keeps
+  what you have first, so going back is itself undoable.
+- **An About page**, with the version you're running and an optional check for new
+  releases — **off by default**, because this app talks to nobody unless you ask it to.
+  It never installs anything itself; it tells you, and you download when you choose.
+
+---
+
 ## 1.2.0 — 28 July 2026
 
 The release that finished the book. Everything a manuscript can contain now has a

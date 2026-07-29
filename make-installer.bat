@@ -2,9 +2,10 @@
 setlocal
 cd /d "%~dp0"
 
-rem Read the version straight from the .iss so this script never goes stale.
+rem Read the version from VERSION -- the one file the app and the .iss
+rem also read, so a build cannot disagree with itself about what it is.
 set "APPVERSION=unknown"
-for /f "tokens=3" %%V in ('findstr /b /c:"#define AppVersion" "typeset-studio.iss"') do set "APPVERSION=%%~V"
+if exist "VERSION" set /p APPVERSION=<VERSION
 
 if not exist "dist\Typeset Studio\Typeset Studio.exe" goto NOBUILD
 

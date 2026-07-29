@@ -31,3 +31,6 @@ dist/
 
 # Inno Setup output (the .iss is tracked; the built Setup.exe is not)
 dist_installer/
+
+# per-user preferences (update-check toggle and its cache) - not project content
+settings.json
