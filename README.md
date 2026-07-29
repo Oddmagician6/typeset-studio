@@ -73,6 +73,26 @@ type it.
 
 Composed files are saved in the `out/` folder as well, named by title and timestamp.
 
+### Writing in the app, and getting your words back
+
+A project can be written in the app (**Write** on a project card), which means the file
+on your machine may be the only copy of the book. Two things guard it.
+
+**Saves are all-or-nothing.** The text is written to a temporary file and swapped into
+place, so a crash, a full disk or a closed lid mid-save leaves the previous version
+whole. A plain save empties the file first — that's the moment work disappears.
+
+**Earlier versions are kept for you.** Every few minutes of writing, the draft is copied
+into the project's history; the **History** panel in the editor lists them with the time
+and word count. **Restore** puts one back — the button asks once before it does — and
+because restoring first keeps whatever you have now, going back is itself undoable.
+Uploading a manuscript over a project's draft keeps the old draft the same way.
+
+History thins as it ages: everything from the last hour, then one an hour for a day,
+then one a day. You get the last few minutes in detail and last Tuesday at all, without
+a folder that grows forever. It lives in `projects/history/<project>/` — plain Markdown
+files you can open, copy or back up like any others.
+
 ### Blank pages and front matter
 
 On the *Set a book* page you control the pages before your story:

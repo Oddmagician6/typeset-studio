@@ -33,6 +33,7 @@ test_import.py    .docx import fidelity: builds real Word files and looks for th
 test_chapter_art.py Chapter-opening art: geometry, then a real PDF and EPUB.
 test_wrap.py      Print-wrap arithmetic: paperback, case-laminate and jacket geometry, measured.
 test_press.py     Press-ready interiors: colour, boxes and annotations, read back off the PDF.
+test_history.py   Manuscript safety: atomic writes, snapshots, thinning, restore and undo.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -48,6 +49,7 @@ out/              Composed PDFs / EPUBs land here (also served for download).
 uploads/          User-uploaded manuscripts / cover art (created at runtime).
 projects/         One .json per saved project.
 projects/manuscripts/   Stored manuscript + cover copies (one per project).
+projects/history/       Kept versions of each project's draft (feature #63).
 ```
 
 Data flow for a compose:
@@ -1527,6 +1529,40 @@ accept our PDFs. **Recorded as decided, not deferred.**
 **Not done, deliberately:** the ICC output intent and CMYK image conversion (see the conclusion),
 and spread balancing, which the scan already said to note rather than schedule.
 
+**63. Manuscript safety — atomic saves and version history** *(the Tier-4 obligation the editor
+took on: "autosave + backups + no data loss". The last open promise in the backlog)*
+A book written in the app exists only as that one file, and #57 already proved the risk is real —
+an autosave bug mangled a project silently. Two guarantees now stand behind it:
+- **Saves are all-or-nothing.** `app._atomic_write_text` writes a temp file in the same folder,
+  `fsync`s, then `os.replace`s — atomic on Windows and POSIX. A plain `open(path, 'w')` truncates
+  *first*, so a crash, a full disk or a killed process between that and the write leaves an empty
+  manuscript. Used by the autosave, the restore, and the snapshots themselves.
+- **Earlier versions are kept.** `snapshot_manuscript()` copies the draft into
+  `projects/history/<pid>/<stamp>-<reason>.md`, skipping text identical to the newest snapshot and
+  changes inside `SNAPSHOT_GAP` (180 s) — autosave fires every few seconds of typing, and a
+  snapshot per keystroke-pause is noise, not history. `force=True` for the two moments that matter:
+  before a restore, and before an uploaded manuscript replaces a draft.
+- **Thinning** (`_thin_snapshots`): everything from the last hour, one an hour for a day, one a day
+  beyond, capped at 40. The last few minutes in detail and last Tuesday at all.
+- **Restore is undoable**, which is the property that makes it safe to offer: it snapshots what you
+  have before replacing it, so the "mistake" is one click from coming back.
+- Routes `GET /project/<pid>/history`, `GET …/history/<stamp>`, `POST …/history/<stamp>/restore`;
+  a **History** panel in `templates/manuscript_editor.html` (time, word count, reason tag) with a
+  two-step in-place confirm rather than a `confirm()` dialog.
+**Two bugs found while testing, both fixed:**
+- **Stamps could collide.** Two snapshots in the same second (an autosave and the forced copy before
+  a restore) both answered to one stamp, so a restore could hand back the wrong text. The stamp now
+  steps forward a second until it is free; a test asserts every kept version has its own.
+- **The panel repainted over a half-made decision.** Autosave refreshes the list, which rebuilt the
+  rows and reset a Restore waiting on "Sure?". It now repaints only when the list actually changed —
+  caught by driving the real editor in Chrome, not by the Python tests.
+`test_history.py` (39 checks) covers the destructive cases first: a failed write leaving the old
+text whole (`os.replace` monkey-patched to raise), no temp files left behind, dedupe and interval,
+the thinning buckets and the cap, path traversal in a stamp, and the full editor flow — write,
+mistake, restore, undo the restore, replace by upload. Driven end to end in Chrome as well:
+restore swaps the text, the word count follows, the new row reads *before going back*, and an
+autosave during a pending confirm no longer cancels it.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1725,9 +1761,9 @@ smart-quote interplay). A few hours; it surfaces the real pain and tells us whet
 build (schema, two-way serialization, rewired toolbar/outline/find, Node bundling) is worth it.
 Only commit to the heavy build if the spike round-trips cleanly.
 
-**New obligation once people author in-app:** autosave + backups + no data loss — a higher
-bar than a tool that only transforms files the user already has stored elsewhere. Keep
-`.docx` import as the on-ramp for existing manuscripts.
+~~**New obligation once people author in-app:** autosave + backups + no data loss~~ — **MET
+(feature #63).** Saves are atomic and every few minutes of writing is kept, with a History
+panel that restores. Keep `.docx` import as the on-ramp for existing manuscripts.
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 

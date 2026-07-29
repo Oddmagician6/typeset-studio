@@ -100,6 +100,19 @@
   .outline a.ol-sub{padding-left:26px;color:var(--muted)}
   .outline a.ol-scene{padding-left:26px;color:var(--muted);font-size:12px}
   .outline .ol-empty{font-size:12.5px;color:var(--muted);padding:2px}
+  .history{max-height:30vh;overflow:auto;display:flex;flex-direction:column;gap:2px}
+  .history .snap{display:flex;align-items:baseline;gap:6px;padding:4px 6px;border-radius:2px;
+    font-size:12.5px;border-bottom:1px solid var(--rule)}
+  .history .snap:last-child{border-bottom:none}
+  .history .snap:hover{background:var(--surface-2)}
+  .history .when{flex:1 1 auto;color:var(--ink)}
+  .history .words{color:var(--muted);font-family:var(--mono);font-size:11px}
+  .history .snap button{font-family:var(--sans);font-size:11px;background:none;cursor:pointer;
+    border:1px solid var(--rule-strong);border-radius:2px;padding:1px 6px;color:var(--muted)}
+  .history .snap button:hover{color:var(--red-deep);border-color:var(--red)}
+  .history .snap button.armed{color:#fff;background:var(--red);border-color:var(--red)}
+  .history .hi-empty{font-size:12.5px;color:var(--muted);padding:2px}
+  .history .tag{font-family:var(--mono);font-size:10px;color:var(--faint);text-transform:uppercase}
   /* --- WYSIWYG (rich) surface: a view over the same content, synced to #ms --- */
   .mode-toggle{font-weight:700}
   .mode-toggle.on{border-color:var(--red)!important;color:var(--red-deep)!important}
@@ -276,6 +289,12 @@
         <div id="outline" class="outline"></div>
       </div>
       <div class="pvbox">
+        <p class="label">History</p>
+        <p class="hint" style="margin:-4px 0 8px">Kept automatically as you write.
+          Going back keeps what you have now, so it can be undone.</p>
+        <div id="history" class="history"></div>
+      </div>
+      <div class="pvbox">
         <p class="label">Page preview</p>
         <button type="button" id="pv-btn" class="btn btn-sm" style="margin-bottom:10px">Preview pages</button>
         <div id="pv-imgs"></div>
@@ -389,9 +408,85 @@
           var fd = new FormData(); fd.append('text', ta.value);
           var r = await fetch(SAVE_URL, {method:'POST', body:fd});
           var j = await r.json();
-          if (j.ok){ status('Saved ' + j.saved_at); document.getElementById('st-ch').textContent = j.chapters; }
+          if (j.ok){
+            status('Saved ' + j.saved_at);
+            document.getElementById('st-ch').textContent = j.chapters;
+            loadHistory();           // a save may have kept a new version
+          }
           else status('Save failed');
         } catch(e){ status('Save failed'); }
+      }
+
+      // -- history: the versions kept behind this draft
+      var HIST_URL = "{{ url_for('project_history', pid=pid) }}";
+      var histBox = document.getElementById('history');
+
+      var histShown = '';
+      function renderHistory(snaps, force){
+        // Autosave refreshes this list; repainting it when nothing has changed
+        // would throw away a half-made decision (a Restore waiting on "Sure?")
+        // and flicker the panel under the reader's eyes.
+        var key = (snaps || []).map(function(s){ return s.stamp; }).join(',');
+        if (!force && key === histShown) return;
+        histShown = key;
+        histBox.innerHTML = '';
+        if (!snaps || !snaps.length){
+          var e = document.createElement('p');
+          e.className = 'hi-empty';
+          e.textContent = 'No earlier versions yet — one is kept every few minutes as you write.';
+          histBox.appendChild(e);
+          return;
+        }
+        snaps.forEach(function(s){
+          var row = document.createElement('div'); row.className = 'snap';
+          var when = document.createElement('span'); when.className = 'when';
+          when.textContent = s.when;
+          if (s.reason !== 'edit'){
+            var tag = document.createElement('span'); tag.className = 'tag';
+            tag.textContent = ' ' + (s.reason === 'restore' ? 'before going back' : s.reason);
+            when.appendChild(tag);
+          }
+          var words = document.createElement('span'); words.className = 'words';
+          words.textContent = s.words.toLocaleString() + 'w';
+          // two-step, in place: a browser confirm() would block the page
+          var btn = document.createElement('button');
+          btn.type = 'button'; btn.textContent = 'Restore';
+          var armed = null;
+          btn.addEventListener('click', async function(){
+            if (!armed){
+              btn.textContent = 'Sure?'; btn.classList.add('armed');
+              // long enough to read the row you are about to go back to
+              armed = setTimeout(function(){
+                armed = null; btn.textContent = 'Restore'; btn.classList.remove('armed');
+              }, 6000);
+              return;
+            }
+            clearTimeout(armed); armed = null;
+            btn.textContent = 'Restoring…';
+            try {
+              var r = await fetch(HIST_URL + '/' + s.stamp + '/restore', {method: 'POST'});
+              var j = await r.json();
+              if (!j.ok){ status(j.error || 'Restore failed'); return; }
+              clearTimeout(timer); dirty = false;      // don't autosave over it
+              ta.value = j.text;
+              if (richMode) renderRich();     // repaint the rich surface too
+              updateStats(); buildOutline(); scheduleHighlight();
+              document.getElementById('st-ch').textContent = j.chapters;
+              status('Went back to ' + s.when);
+              renderHistory(j.snapshots, true);
+            } catch(e){ status('Restore failed'); }
+          });
+          row.appendChild(when); row.appendChild(words); row.appendChild(btn);
+          histBox.appendChild(row);
+        });
+      }
+
+      async function loadHistory(){
+        try {
+          var r = await fetch(HIST_URL);
+          var j = await r.json();
+          if (j.ok) renderHistory(j.snapshots);
+        } catch(e){ /* the panel is a convenience; the files are the safety */ }
       }
 
       function changed(){
@@ -850,6 +945,7 @@
       if (wantRich) enterRich();
 
       buildOutline();   // initial chapter list
+      loadHistory();    // versions kept behind this draft
     })();
   </script>
 {% endblock %}

@@ -19,7 +19,7 @@ import threading
 import traceback
 import webbrowser
 import contextlib
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Verbose in development; quiet in a frozen/installed build (the packaged app
 # shows a console window, so keep it to warnings/errors there).
@@ -85,10 +85,11 @@ OUT_DIR       = os.path.join(DATA_DIR, 'out')
 UPLOAD_DIR    = os.path.join(DATA_DIR, 'uploads')
 PROJECT_DIR   = os.path.join(DATA_DIR, 'projects')
 PROJECT_MS_DIR = os.path.join(PROJECT_DIR, 'manuscripts')
+HISTORY_DIR   = os.path.join(PROJECT_DIR, 'history')   # one folder per project
 COVER_THUMB_DIR = os.path.join(OUT_DIR, '_cover_thumbs')   # cached gallery-picker tiles
 PROJECT_THUMB_DIR = os.path.join(OUT_DIR, '_project_thumbs')  # cached project cards (page 1 of last PDF)
 for d in (PRESET_DIR, COVER_DIR, COVER_ASSET_DIR, FONT_DIR, FIGURE_DIR, OUT_DIR, UPLOAD_DIR,
-          PROJECT_DIR, PROJECT_MS_DIR, COVER_THUMB_DIR, PROJECT_THUMB_DIR):
+          PROJECT_DIR, PROJECT_MS_DIR, HISTORY_DIR, COVER_THUMB_DIR, PROJECT_THUMB_DIR):
     os.makedirs(d, exist_ok=True)
 
 
@@ -2310,6 +2311,10 @@ def project_edit(pid):
             fn  = secure_filename(up.filename)
             ext = os.path.splitext(fn)[1]
             dest = os.path.join(PROJECT_MS_DIR, pid + ext)
+            # the draft about to be replaced is the one most worth keeping — an
+            # upload here overwrites work that may exist nowhere else
+            snapshot_manuscript(pid, _project_manuscript_text(proj, report_import=False),
+                                reason='replaced', force=True)
             up.save(dest)
             # Remove old file if extension changed
             old = proj.get('manuscript_file', '')
@@ -2375,8 +2380,13 @@ STARTER_DRAFT = ("# Chapter One\n\n"
                  "scene break with `* * *` on its own line.\n")
 
 
-def _project_manuscript_text(proj):
-    """Return a project's manuscript as editable Markdown text ('' if none)."""
+def _project_manuscript_text(proj, report_import=True):
+    """Return a project's manuscript as editable Markdown text ('' if none).
+
+    `report_import=False` for the internal readers (snapshotting before a
+    destructive change): they want the text, not a flashed import summary the
+    user never asked for.
+    """
     ms_type = proj.get('manuscript_type', 'file')
     ms_file = proj.get('manuscript_file', '')
     if ms_type == 'sample':
@@ -2391,7 +2401,8 @@ def _project_manuscript_text(proj):
                 try:
                     rep = {}
                     text = manuscript.import_docx(path, report=rep)
-                    _flash_import(rep)     # only route calling this renders a page
+                    if report_import:
+                        _flash_import(rep)   # the page-rendering callers only
                     return text
                 except Exception:
                     return ''
@@ -2420,6 +2431,161 @@ def _norm_newlines(text):
     """LF only. Manuscripts are stored as the writer's own source, so a stray
     CR is corruption, not formatting — and it compounds on every save."""
     return (text or '').replace('\r\r\n', '\n').replace('\r\n', '\n').replace('\r', '\n')
+
+
+# ------------------------------------------------------- manuscript safety
+# Once a book can be written *in* the app, the file on disk is the only copy of
+# someone's work, and this is the code standing between them and losing it.
+SNAPSHOT_GAP   = 180     # seconds between autosave snapshots of the same project
+HISTORY_KEEP   = 40      # hard cap on snapshots per project
+_SNAP_RE = re.compile(r'^(\d{8}-\d{6})-(\w+)\.md$')
+
+
+def _atomic_write_text(path, text):
+    """Write a file so that an interrupted write cannot destroy the old one.
+
+    A plain `open(path, 'w')` truncates first: a crash, a full disk or a killed
+    process between that and the write leaves an empty manuscript. Writing a
+    temporary file in the same folder and then `os.replace`-ing it is atomic on
+    both Windows and POSIX — after it, the file is either wholly the old text or
+    wholly the new one.
+    """
+    folder = os.path.dirname(os.path.abspath(path)) or '.'
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8', newline='') as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())      # the bytes, not just the buffer
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _history_folder(pid):
+    return os.path.join(HISTORY_DIR, secure_filename(pid))
+
+
+def list_snapshots(pid):
+    """Every kept snapshot of a project's manuscript, newest first."""
+    folder = _history_folder(pid)
+    out = []
+    for fn in os.listdir(folder) if os.path.isdir(folder) else []:
+        m = _SNAP_RE.match(fn)
+        if not m:
+            continue
+        stamp, reason = m.group(1), m.group(2)
+        path = os.path.join(folder, fn)
+        try:
+            text = open(path, encoding='utf-8', errors='replace').read()
+        except OSError:
+            continue
+        when = datetime.strptime(stamp, '%Y%m%d-%H%M%S')
+        out.append({'stamp': stamp, 'reason': reason,
+                    'when': when.strftime('%d %b %Y, %H:%M'),
+                    'iso': when.isoformat(timespec='seconds'),
+                    'words': _wordcount(text), 'chars': len(text)})
+    out.sort(key=lambda s: s['stamp'], reverse=True)
+    return out
+
+
+def _thin_snapshots(pid):
+    """Keep recent history dense and old history sparse.
+
+    Everything from the last hour, then one an hour for a day, then one a day —
+    and never more than HISTORY_KEEP files. A writer wants the last few minutes
+    in detail and last Tuesday at all; keeping every autosave forever would do
+    neither well.
+    """
+    folder = _history_folder(pid)
+    snaps = sorted((s['stamp'] for s in list_snapshots(pid)), reverse=True)
+    now = datetime.now()
+    keep, seen = [], set()
+    for stamp in snaps:
+        when = datetime.strptime(stamp, '%Y%m%d-%H%M%S')
+        age = (now - when).total_seconds()
+        if age <= 3600:
+            bucket = ('minute', stamp)                    # keep them all
+        elif age <= 86400:
+            bucket = ('hour', when.strftime('%Y%m%d-%H'))
+        else:
+            bucket = ('day', when.strftime('%Y%m%d'))
+        if bucket in seen:
+            continue
+        seen.add(bucket)
+        keep.append(stamp)
+    keep = set(keep[:HISTORY_KEEP])
+    for fn in os.listdir(folder) if os.path.isdir(folder) else []:
+        m = _SNAP_RE.match(fn)
+        if m and m.group(1) not in keep:
+            try:
+                os.remove(os.path.join(folder, fn))
+            except OSError:
+                pass
+
+
+def snapshot_manuscript(pid, text, reason='edit', force=False):
+    """Keep a copy of this text in the project's history. Returns its stamp or ''.
+
+    Skipped when the text is identical to the newest snapshot (nothing happened)
+    or when that snapshot is younger than SNAPSHOT_GAP — autosave fires every few
+    seconds of typing, and a snapshot per keystroke-pause is noise, not history.
+    `force` overrides the interval for the moments that matter: just before a
+    restore, or before a manuscript is replaced wholesale.
+    """
+    text = _norm_newlines(text)
+    if not text.strip():
+        return ''                       # never snapshot an empty editor
+    folder = _history_folder(pid)
+    os.makedirs(folder, exist_ok=True)
+    existing = list_snapshots(pid)
+    if existing:
+        newest = existing[0]
+        prev_path = os.path.join(folder, f'{newest["stamp"]}-{newest["reason"]}.md')
+        try:
+            if open(prev_path, encoding='utf-8', errors='replace').read() == text:
+                return ''
+        except OSError:
+            pass
+        if not force:
+            age = (datetime.now()
+                   - datetime.strptime(newest['stamp'], '%Y%m%d-%H%M%S')).total_seconds()
+            if age < SNAPSHOT_GAP:
+                return ''
+    # The stamp is the identity a restore is asked for by, so it has to be
+    # unique: two snapshots in the same second (an autosave and a forced copy
+    # before a restore) would otherwise both answer to it, and a restore could
+    # hand back the wrong one. Step forward a second until it is free.
+    taken = {s['stamp'] for s in existing}
+    when = datetime.now()
+    while when.strftime('%Y%m%d-%H%M%S') in taken:
+        when += timedelta(seconds=1)
+    stamp = when.strftime('%Y%m%d-%H%M%S')
+    reason = re.sub(r'\W+', '', reason) or 'edit'
+    _atomic_write_text(os.path.join(folder, f'{stamp}-{reason}.md'), text)
+    _thin_snapshots(pid)
+    return stamp
+
+
+def read_snapshot(pid, stamp):
+    """The text of one snapshot, or None if there is no such snapshot."""
+    if not re.fullmatch(r'\d{8}-\d{6}', stamp or ''):
+        return None
+    folder = _history_folder(pid)
+    for fn in os.listdir(folder) if os.path.isdir(folder) else []:
+        m = _SNAP_RE.match(fn)
+        if m and m.group(1) == stamp:
+            try:
+                return open(os.path.join(folder, fn), encoding='utf-8',
+                            errors='replace').read()
+            except OSError:
+                return None
+    return None
 
 
 @app.route('/project/new-draft', methods=['POST'])
@@ -2465,9 +2631,8 @@ def project_write_save(pid):
     # grew the file another carriage return. Both halves are fixed here.
     text = _norm_newlines(request.form.get('text', ''))
     new_file = pid + '.md'
-    with open(os.path.join(PROJECT_MS_DIR, new_file), 'w',
-              encoding='utf-8', newline='') as f:
-        f.write(text)
+    _atomic_write_text(os.path.join(PROJECT_MS_DIR, new_file), text)
+    snapshot_manuscript(pid, text)
     old = proj.get('manuscript_file', '')
     if old and old != new_file:
         old_path = os.path.join(PROJECT_MS_DIR, old)
@@ -2483,6 +2648,49 @@ def project_write_save(pid):
     parsed = manuscript.parse_markdown(text, smartquotes=False)
     return jsonify({'ok': True, 'saved_at': datetime.now().strftime('%H:%M:%S'),
                     'words': _wordcount(text), 'chapters': len(parsed['chapters'])})
+
+
+@app.route('/project/<pid>/history')
+def project_history(pid):
+    """The kept versions of this project's manuscript, newest first."""
+    load_project(pid)                     # 404s for an unknown project
+    return jsonify({'ok': True, 'snapshots': list_snapshots(pid)})
+
+
+@app.route('/project/<pid>/history/<stamp>')
+def project_history_read(pid, stamp):
+    """One version's text, for reading before deciding to go back to it."""
+    load_project(pid)
+    text = read_snapshot(pid, stamp)
+    if text is None:
+        return jsonify({'ok': False, 'error': 'That version is no longer kept.'}), 404
+    return jsonify({'ok': True, 'text': text, 'words': _wordcount(text)})
+
+
+@app.route('/project/<pid>/history/<stamp>/restore', methods=['POST'])
+def project_history_restore(pid, stamp):
+    """Put an older version back — after keeping the current one.
+
+    Restoring is itself a change that could be the mistake, so the text being
+    replaced is snapshotted first (forced past the interval). Going back is
+    always undoable by restoring the snapshot this just made.
+    """
+    proj = load_project(pid)
+    text = read_snapshot(pid, stamp)
+    if text is None:
+        return jsonify({'ok': False, 'error': 'That version is no longer kept.'}), 404
+    current = _project_manuscript_text(proj, report_import=False)
+    snapshot_manuscript(pid, current, reason='restore', force=True)
+    new_file = pid + '.md'
+    _atomic_write_text(os.path.join(PROJECT_MS_DIR, new_file), text)
+    proj['manuscript_file'] = new_file
+    proj['manuscript_type'] = 'markdown'
+    proj['updated'] = datetime.now().isoformat(timespec='seconds')
+    save_project_file(pid, proj)
+    parsed = manuscript.parse_markdown(text, smartquotes=False)
+    return jsonify({'ok': True, 'text': text, 'words': _wordcount(text),
+                    'chapters': len(parsed['chapters']),
+                    'snapshots': list_snapshots(pid)})
 
 
 @app.route('/project/<pid>/write/preview', methods=['POST'])
