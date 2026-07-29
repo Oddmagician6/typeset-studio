@@ -1585,6 +1585,16 @@ understood step rather than a mysterious background download.
   counts as an explicit ask and runs regardless. Every failure — offline, rate-limited, garbage
   JSON, a private repo — is silence. A non-`https` link from the feed is replaced with the known
   releases page rather than handed to the UI.
+- **The feed is a shared repo, and that shapes the reader.** Releases are published on the public
+  site repo (`Oddmagician6/Ashforge-Studio-LLC`), which carries **several products**, tagged by
+  name — `typeset-studio-v1.1.0`, not `v1.1.0`. So `_pick_release()` reads the whole release
+  **list** and keeps only tags matching `UPDATE_TAG_RE`, taking the highest: asking GitHub for
+  `releases/latest` would have reported a Beholders Gazette release as a new Typeset Studio, and
+  the first version regex (`^v?\d+…$`) would have rejected the real tags outright and reported
+  nothing forever. Drafts and pre-releases are skipped. A bare `v1.2.0` tag and a hand-written
+  `{"version": …, "url": …}` both still parse, so moving the releases later changes one constant.
+  Verified against the live feed: two releases found, `1.1.0` picked, correctly *not* newer than
+  the running 1.2.0.
 - `templates/about.html`: version, an update banner when there is one, and the toggle — with the
   exact URL it would call and a plain statement that nothing about the user is sent. A quiet
   version line in the footer (`base.html`) links to it and flags an available release.
@@ -1593,8 +1603,11 @@ understood step rather than a mysterious background download.
   cache, six malformed/hostile feeds each resolving to silence, the scheme guard, the toggle
   forgetting what it learned, the footer badge appearing only when warranted, a page render never
   waiting on the network, and all three build files reading `VERSION`.
-**If you'd rather not use GitHub**, point `UPDATE_FEED` at a static JSON file of your own
-(`{"version": "1.3.0", "url": "…"}`) — the reader accepts either shape.
+**Release checklist, so the check keeps working:** bump `VERSION`, build, and publish the
+release on the site repo tagged **`typeset-studio-v<version>`**. A tag in any other shape is
+invisible to the check (by design — it is how another product's release stays another product's
+release). **If you'd rather not use GitHub**, point `UPDATE_FEED` at a static JSON file of your
+own (`{"version": "1.3.0", "url": "…"}`) — the reader accepts that shape too.
 
 ### ✓ Tier 2 — shipped
 

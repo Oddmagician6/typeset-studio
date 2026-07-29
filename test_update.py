@@ -74,8 +74,9 @@ try:
     reset(update_check=True)
     f = feed({'tag_name': 'v9.9.9', 'html_url': 'https://example.com/r'})
     info = A.check_for_update(fetch=f)
+    # the tag is reported as a bare version — 'v' and any product prefix stripped
     check('once on, a newer release is reported',
-          info and info['newer'] and info['version'] == 'v9.9.9', info)
+          info and info['newer'] and info['version'] == '9.9.9', info)
     check('with the release page to go to', info['url'] == 'https://example.com/r')
 
     # ------------------------------------------------------------ the cache
@@ -83,7 +84,7 @@ try:
     f2 = feed({'tag_name': 'v9.9.9', 'html_url': 'https://example.com/r'})
     again = A.check_for_update(fetch=f2)
     check('a second check inside the day is answered from the cache',
-          not f2.calls and again and again['version'] == 'v9.9.9', f2.calls)
+          not f2.calls and again and again['version'] == '9.9.9', (f2.calls, again))
     check('forcing it asks anyway',
           A.check_for_update(force=True, fetch=f2) and len(f2.calls) == 1)
     s = A.load_settings()
@@ -92,6 +93,68 @@ try:
     f3 = feed({'tag_name': 'v9.9.9', 'html_url': 'https://example.com/r'})
     A.check_for_update(fetch=f3)
     check('a day later it asks again', len(f3.calls) == 1)
+
+    # ------------------------------------------------------------ a shared repo
+    # Releases live on the studio's site repo, which carries several products and
+    # tags them by name: `typeset-studio-v1.2.0`, not `v1.2.0`.
+    print('picking our release out of a shared repo')
+    reset(update_check=True)
+    LIST = [
+        {'tag_name': 'beholders-gazette-v4.0.0', 'html_url': 'https://example.com/bg4'},
+        {'tag_name': 'typeset-studio-v1.3.0', 'html_url': 'https://example.com/ts130'},
+        {'tag_name': 'typeset-studio-v1.1.0', 'html_url': 'https://example.com/ts110'},
+    ]
+    got = A.check_for_update(fetch=feed(LIST))
+    check("another product's newer release is not ours",
+          got and got['version'] == '1.3.0', got)
+    check('and the link is to our release', got['url'] == 'https://example.com/ts130')
+
+    reset(update_check=True)
+    got = A.check_for_update(fetch=feed([
+        {'tag_name': 'typeset-studio-v1.9.0', 'html_url': 'https://example.com/a'},
+        {'tag_name': 'typeset-studio-v1.10.0', 'html_url': 'https://example.com/b'},
+    ]))
+    check('the highest version wins, not the first listed',
+          got and got['version'] == '1.10.0', got)
+
+    reset(update_check=True)
+    got = A.check_for_update(fetch=feed([
+        {'tag_name': 'typeset-studio-v2.0.0', 'prerelease': True,
+         'html_url': 'https://example.com/beta'},
+        {'tag_name': 'typeset-studio-v1.3.0', 'html_url': 'https://example.com/real'},
+    ]))
+    check('a pre-release is not offered', got and got['version'] == '1.3.0', got)
+
+    reset(update_check=True)
+    got = A.check_for_update(fetch=feed([
+        {'tag_name': 'typeset-studio-v2.0.0', 'draft': True,
+         'html_url': 'https://example.com/draft'},
+        {'tag_name': 'typeset-studio-v1.3.0', 'html_url': 'https://example.com/real'},
+    ]))
+    check('nor is a draft', got and got['version'] == '1.3.0', got)
+
+    reset(update_check=True)
+    check('a repo with nothing of ours in it reports nothing',
+          A.check_for_update(fetch=feed([
+              {'tag_name': 'beholders-gazette-v4.0.0', 'html_url': 'https://example.com/bg'},
+          ])) is None)
+
+    reset(update_check=True)
+    got = A.check_for_update(fetch=feed({'tag_name': 'v1.3.0',
+                                         'html_url': 'https://example.com/plain'}))
+    check('a plain v-tag still works, for a repo dedicated to this app',
+          got and got['version'] == '1.3.0', got)
+
+    reset(update_check=True)
+    got = A.check_for_update(fetch=feed({'version': '1.4.0', 'url': 'https://example.com/json'}))
+    check('and so does a hand-written version file',
+          got and got['version'] == '1.4.0' and got['url'] == 'https://example.com/json', got)
+
+    check('the shipped feed points at the repo the releases are actually in',
+          'Ashforge-Studio-LLC' in A.UPDATE_FEED and 'Ashforge-Studio-LLC' in A.UPDATE_PAGE,
+          A.UPDATE_FEED)
+    check('and the real tag format parses',
+          A.UPDATE_TAG_RE.match('typeset-studio-v1.1.0').group(1) == '1.1.0')
 
     # ------------------------------------------------------------ bad feeds
     print('when the feed misbehaves')

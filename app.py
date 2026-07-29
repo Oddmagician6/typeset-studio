@@ -115,11 +115,18 @@ def _read_version():
 
 APP_VERSION = _read_version()
 
-# Where a new release announces itself. GitHub's API needs no key for a public
-# repo and returns the tag and the release page; point this at a JSON file of
-# your own ({"version": "1.3.0", "url": "…"}) if you'd rather not use GitHub.
-UPDATE_FEED = 'https://api.github.com/repos/Oddmagician6/typeset-studio/releases/latest'
-UPDATE_PAGE = 'https://github.com/Oddmagician6/typeset-studio/releases/latest'
+# Where a new release announces itself. Releases are published on the studio's
+# public site repo, which carries *several* products — so this reads the whole
+# release list and keeps only the ones tagged for this app, rather than asking
+# for "latest" and being told about somebody else's release. GitHub's API needs
+# no key for a public repo. Point this at a JSON file of your own
+# ({"version": "1.3.0", "url": "…"}) if you'd rather not use GitHub at all.
+UPDATE_FEED = ('https://api.github.com/repos/Oddmagician6/Ashforge-Studio-LLC'
+               '/releases?per_page=30')
+UPDATE_PAGE = 'https://github.com/Oddmagician6/Ashforge-Studio-LLC/releases'
+# Tags look like `typeset-studio-v1.2.0`; a bare `v1.2.0` is accepted too, so a
+# repo dedicated to this app alone would work without changing anything.
+UPDATE_TAG_RE = re.compile(r'^(?:typeset[-_ ]?studio[-_ ]?)?v?(\d+(?:\.\d+)*)$', re.I)
 # Off unless asked for. This app's promise is that it runs on your machine and
 # talks to nobody; a version check is still a network call, so it is the user's
 # to switch on. Flip this to True to make new installs check by default.
@@ -170,6 +177,35 @@ def _fetch_json(url, timeout=6):
         return json.loads(resp.read(200_000).decode('utf-8', 'replace'))
 
 
+def _pick_release(data):
+    """(version, url) for the newest release *of this app*, or None.
+
+    Accepts what GitHub returns for a release list, a single release, or a
+    hand-written `{"version": …, "url": …}`. The filtering matters because the
+    releases live alongside other Ashforge products: asking for "latest" would
+    happily report a Beholders Gazette release as a new Typeset Studio. A tag
+    that doesn't parse is skipped rather than guessed at, drafts and
+    pre-releases are ignored, and a link that isn't https is replaced with the
+    releases page rather than handed to the UI.
+    """
+    entries = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
+    best = None
+    for item in entries:
+        if not isinstance(item, dict) or item.get('draft') or item.get('prerelease'):
+            continue
+        tag = str(item.get('tag_name') or item.get('version') or '').strip()
+        m = UPDATE_TAG_RE.match(tag)
+        if not m:
+            continue
+        version = m.group(1)
+        url = str(item.get('html_url') or item.get('url') or UPDATE_PAGE)
+        if not url.startswith('https://'):
+            url = UPDATE_PAGE
+        if best is None or _version_tuple(version) > _version_tuple(best[0]):
+            best = (version, url)
+    return best
+
+
 def check_for_update(force=False, fetch=None):
     """Ask whether a newer release exists. Returns the cached answer, or None.
 
@@ -192,14 +228,10 @@ def check_for_update(force=False, fetch=None):
         data = (fetch or _fetch_json)(UPDATE_FEED)
     except Exception:
         data = None
-    if not isinstance(data, dict):
+    found = _pick_release(data)
+    if not found:
         return None
-    latest = str(data.get('tag_name') or data.get('version') or '').strip()
-    if not re.match(r'^v?\d+(\.\d+)*$', latest):
-        return None                        # not a version we can reason about
-    url = str(data.get('html_url') or data.get('url') or UPDATE_PAGE)
-    if not url.startswith('https://'):
-        url = UPDATE_PAGE                  # never hand the UI an arbitrary scheme
+    latest, url = found
     settings.update({'update_checked_at': now, 'update_latest': latest,
                      'update_url': url})
     save_settings(settings)
