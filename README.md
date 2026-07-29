@@ -23,7 +23,19 @@ Current version **1.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what's new.
 3. A browser tab opens at <http://127.0.0.1:5050>. Keep the little black window open
    while you work; close it to stop the tool.
 
-Running it any other way (Mac / manual):
+## Running it (macOS / Linux)
+
+1. Make sure **Python 3.10+** is installed (`brew install python`, or
+   `sudo apt install python3 python3-venv`).
+2. Run **`./run.sh`** from a terminal in this folder. As on Windows, the first run
+   makes a private workspace and installs what it needs; later runs start straight away.
+3. Open <http://127.0.0.1:5050>. Ctrl-C in the terminal stops it.
+
+Everything the app does is pure Python — the same PDFs and EPUBs come out on every
+platform. The one difference is the packaged build: the Windows installer exists, and
+macOS and Linux are run-from-source for now.
+
+Or by hand, on any platform:
 
 ```
 python -m venv .venv

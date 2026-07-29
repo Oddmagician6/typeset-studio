@@ -17,9 +17,30 @@ Notes
 * anthropic is an optional lazy import (continuity checker tier-2). It is
   excluded to drop a large dependency chain (httpx/pydantic); the app degrades
   gracefully with a "not installed" note if a user sets an API key.
+* PyInstaller cannot cross-compile: a Windows build must be made on Windows, a
+  .app on a Mac, a Linux build on Linux. The platform branches below are so the
+  same spec *runs* on all three rather than stopping on a Windows-only detail —
+  the Windows path is the one that has actually been built and shipped; the mac
+  and Linux paths have not, and want a real build day (see ROADMAP).
 """
 
+import os
+import re
+import sys
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+IS_WIN = sys.platform == 'win32'
+IS_MAC = sys.platform == 'darwin'
+
+# The version lives in typeset-studio.iss and nowhere else; make-installer.bat
+# reads it the same way. A Mac bundle carries it in its Info.plist, so read it
+# here too rather than adding a second place to forget to bump.
+try:
+    _iss = open('typeset-studio.iss', encoding='utf-8').read()
+    APP_VERSION = re.search(r'#define AppVersion "([^"]+)"', _iss).group(1)
+except Exception:
+    APP_VERSION = '0.0.0'
 
 datas = [
     ('templates', 'templates'),
@@ -66,7 +87,12 @@ exe = EXE(
     upx=False,
     console=False,           # windowed app — the pywebview window is the whole UI, no console box
     disable_windowed_traceback=False,
-    icon='app.ico',
+    # .ico is a Windows format: PyInstaller wants .icns on a Mac and ignores the
+    # icon on Linux, so naming it unconditionally would fail a Mac build on a
+    # detail that has nothing to do with the app. Drop an app.icns beside app.ico
+    # to give the Mac build its icon.
+    icon=('app.ico' if IS_WIN else
+          ('app.icns' if IS_MAC and os.path.exists('app.icns') else None)),
 )
 
 coll = COLLECT(
@@ -77,3 +103,18 @@ coll = COLLECT(
     upx=False,
     name='Typeset Studio',
 )
+
+if IS_MAC:
+    # A Mac wants a .app bundle, not a bare folder of binaries — this is what
+    # `hdiutil` then wraps into a .dmg. Untested: it needs a Mac to run on.
+    app = BUNDLE(
+        coll,
+        name='Typeset Studio.app',
+        icon='app.icns' if os.path.exists('app.icns') else None,
+        bundle_identifier='com.ashforge.typesetstudio',
+        info_plist={
+            'NSHighResolutionCapable': True,
+            'CFBundleShortVersionString': APP_VERSION,
+            'CFBundleVersion': APP_VERSION,
+        },
+    )

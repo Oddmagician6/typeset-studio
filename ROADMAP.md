@@ -1942,8 +1942,33 @@ deps*, not the app logic.
 
   *Recommended sequence if pursued: Linux + macOS desktop builds first (cheap — code already
   anticipates them); for mobile, host rather than build native; reserve a native Android app only
-  if offline / app-store presence is specifically needed. A quick audit for lingering Windows-only
-  assumptions (paths, `.bat` launchers) would de-risk the Linux/Mac builds.*
+  if offline / app-store presence is specifically needed.*
+
+**Cross-platform audit — done 2026-07-28 (after v1.2.0).** The audit the line above asked for.
+Findings, in the order they were checked:
+- **Application code is portable.** No `os.startfile`, `winreg`, `shell=True`, or drive letters;
+  the only subprocess is `java -jar epubcheck`, guarded by `shutil.which('java')`. Verified by an
+  AST pass, not a grep: **every text-mode `open()` in the app already names an encoding**, which is
+  the classic Windows→Linux break (cp1252 vs UTF-8 defaults). Every `.docx` / extension test
+  case-folds. `_user_data_root()` already branches for all three OSes.
+- **Ran the whole app under a legacy locale** (`cp1252`, UTF-8 mode off): every page renders and a
+  book with curly quotes and an em dash in its title composes to PDF + EPUB. The encoding direction
+  is safe both ways.
+- **Case sensitivity** — the trap Windows hides: a script now checks every bundled style, cover and
+  sample reference (font files, scene-break images, chapter art, cover fonts, backgrounds, emblems)
+  against the actual filenames. **All exact**; nothing relies on a case-insensitive filesystem.
+- **The gaps were all in the shell around the app**, and are now closed: `run.sh` (the POSIX twin of
+  `run.bat` — finds a 3.10+ interpreter, makes the venv, names the Debian `python3-venv` package
+  when that is what's missing), `*.sh text eol=lf` in `.gitattributes` (a CRLF shell script fails on
+  Linux with `\r: command not found`, which reads as corruption), a platform-branched `.spec`
+  (a `.ico` is a Windows format — naming it unconditionally fails a Mac build on a detail unrelated
+  to the app; plus a `BUNDLE` step for a `.app`, and the version read from the `.iss` so the
+  Info.plist can't go stale), and a README section for macOS/Linux.
+- **Left for build day, because they need the machine:** running PyInstaller on each OS (no
+  cross-compile), an `app.icns` for the Mac icon, Apple signing/notarisation, packaging Linux as
+  tarball/AppImage/`.deb` in place of Inno Setup, and confirming `pywebview` finds a WebKit backend
+  (if it doesn't, the browser fallback already carries the app). The `BUNDLE` block is **untested** —
+  it has never run on a Mac.
 
 **Step 5 shipped** (`app.py`, `requirements.txt`, `.spec`): the packaged app opens in a native
 desktop window (pywebview / Edge WebView2) instead of a browser tab; closing it quits. Entry

@@ -2,3 +2,8 @@
 # line endings (multi-line blocks, goto/labels), and Inno Setup expects CRLF too.
 *.bat text eol=crlf
 *.iss text eol=crlf
+
+# ...and the reverse for the POSIX launcher: a shell script with CRLF endings
+# fails on Linux and macOS with "\r: command not found", which reads as a
+# corrupt script rather than a line-ending problem.
+*.sh text eol=lf
