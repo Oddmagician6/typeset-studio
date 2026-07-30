@@ -1,0 +1,608 @@
+<title>Typeset Studio — Reel (9:16)</title>
+
+<style>
+/* ───────────────────────────────────────────────────────────────
+   9:16 cut for Facebook / Instagram Reels. Same palette and type
+   stacks as the 16:9 reel (both inherit the app's own system from
+   templates/base.html) but a wholly different composition: single
+   column, stacked art under caption, phone-scale type.
+   ─────────────────────────────────────────────────────────────── */
+:root{
+  --st-ink:#0d0b0f;
+  --st-ground:#1a1719;
+  --st-surface:#221e20;
+  --st-paper:#f2efe6;
+  --st-muted:#8a8179;
+  --st-faint:#5b544e;
+  --st-ember:#b12a1d;
+  --st-ember-lit:#d8452f;
+  --st-gold:#c9a227;
+  --st-rule:#332d30;
+  --st-green:#5f9e6a;
+
+  --pg-bg:#e9e5dc;
+  --pg-panel:#f6f3ec;
+  --pg-ink:#1b1a18;
+  --pg-muted:#6c665b;
+  --pg-rule:#cdc7ba;
+  --pg-accent:#8f2014;
+
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+  --mono:"Consolas","SF Mono","Cascadia Mono",Menlo,"Liberation Mono",monospace;
+  --sans:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{--pg-bg:#100e11;--pg-panel:#191619;--pg-ink:#ece7de;--pg-muted:#948c82;--pg-rule:#2c2629;--pg-accent:#d8452f;}
+}
+:root[data-theme="dark"]{--pg-bg:#100e11;--pg-panel:#191619;--pg-ink:#ece7de;--pg-muted:#948c82;--pg-rule:#2c2629;--pg-accent:#d8452f;}
+:root[data-theme="light"]{--pg-bg:#e9e5dc;--pg-panel:#f6f3ec;--pg-ink:#1b1a18;--pg-muted:#6c665b;--pg-rule:#cdc7ba;--pg-accent:#8f2014;}
+
+*{box-sizing:border-box;}
+body{margin:0;background:var(--pg-bg);color:var(--pg-ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;}
+
+.wrap{
+  max-width:900px;margin:0 auto;
+  padding:clamp(16px,3vw,36px) clamp(14px,3vw,24px) 56px;
+  display:flex;flex-direction:column;gap:clamp(14px,2vw,22px);
+}
+.masthead{display:flex;justify-content:space-between;align-items:baseline;gap:14px;flex-wrap:wrap;}
+.masthead h1{font-family:var(--serif);font-size:clamp(18px,2vw,23px);font-weight:600;margin:0;}
+.masthead h1 em{font-style:normal;color:var(--pg-accent);}
+.slug{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--pg-muted);font-variant-numeric:tabular-nums;}
+
+/* the stage sits centred and height-capped so the whole 9:16 frame is
+   visible on a desktop screen without scrolling */
+.stagewrap{display:flex;justify-content:center;}
+.stage{
+  position:relative;
+  aspect-ratio:9/16;
+  height:min(78vh,760px);
+  background:var(--st-ink);
+  color:var(--st-paper);
+  overflow:hidden;
+  container-type:size;
+  border-radius:3px;
+  box-shadow:0 40px 90px -50px rgba(0,0,0,.85),0 0 0 1px rgba(255,255,255,.05);
+  isolation:isolate;
+  user-select:none;
+}
+
+/* ── render mode: the page becomes exactly one 1080x1920 frame ── */
+body.render{background:#000;padding:0;}
+body.render .wrap{max-width:none;margin:0;padding:0;gap:0;}
+body.render .masthead,body.render .controls,body.render .colophon,body.render .foot,body.render .stagewrap>.hint{display:none!important;}
+body.render .stagewrap{display:block;}
+body.render .stage{
+  width:1080px;height:1920px;
+  border-radius:0;box-shadow:none;
+  aspect-ratio:auto;
+}
+
+.grain{
+  position:absolute;inset:0;z-index:60;pointer-events:none;opacity:.045;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.vig{
+  position:absolute;inset:0;z-index:59;pointer-events:none;
+  background:radial-gradient(110% 70% at 50% 42%,transparent 55%,rgba(0,0,0,.6) 100%);
+}
+
+/* progress hairline, inside the top safe area. Driven by the playhead,
+   so it is exact in every rendered frame. */
+.prog{position:absolute;left:6cqw;right:6cqw;top:5.6cqh;height:2px;background:rgba(255,255,255,.1);z-index:57;}
+.prog i{position:absolute;inset:0 auto 0 0;width:0;background:var(--st-ember-lit);}
+
+.stage-slug{
+  position:absolute;top:3.1cqh;left:6cqw;z-index:57;
+  font-family:var(--mono);font-size:2cqw;letter-spacing:.24em;text-transform:uppercase;color:var(--st-faint);
+}
+
+/* ── safe area ──────────────────────────────────────────────────
+   Instagram overlays its own chrome on a Reel: username, caption and
+   audio strip along the bottom, action buttons up the right edge. All
+   content stays inside this box so nothing important is covered.   */
+/* The overlay class and the body-level toggle must NOT share a name: a bare
+   .safe-guides rule would otherwise also match the <body> carrying the
+   toggle, and display:none on <body> blanks the whole page. */
+.safe-guides{position:absolute;inset:0;z-index:58;pointer-events:none;display:none;}
+body.show-guides .safe-guides{display:block;}
+.safe-guides i{position:absolute;border:1px dashed rgba(216,69,47,.5);}
+.safe-guides i.box{inset:9cqh 6cqw 17cqh 6cqw;}
+.safe-guides i.btns{top:34cqh;bottom:17cqh;right:6cqw;width:15cqw;border-color:rgba(201,162,39,.45);}
+
+/* The padding IS the safe area: bottom is deepest because Instagram
+   stacks username, caption and the audio strip there. Keep these three
+   values in step with .safe-guides i.box below. */
+.scene{
+  position:absolute;inset:0;
+  padding:9cqh 6cqw 17cqh;
+  opacity:0;
+  display:grid;
+  place-content:center;
+  justify-items:start;
+  z-index:1;
+}
+.scene.center{justify-items:center;text-align:center;}
+
+/* ── type roles, sized for a phone ─────────────────────────────── */
+.eyebrow{
+  font-family:var(--mono);font-size:2.4cqw;letter-spacing:.28em;text-transform:uppercase;
+  color:var(--st-ember-lit);margin:0 0 2.2cqh;
+}
+.eyebrow.gold{color:var(--st-gold);}
+.hook{
+  font-family:var(--serif);font-size:9.4cqw;line-height:1.05;font-weight:600;margin:0;
+  letter-spacing:-.02em;text-wrap:balance;
+}
+.line{
+  font-family:var(--serif);font-size:6.6cqw;line-height:1.12;font-weight:600;margin:0;
+  letter-spacing:-.015em;text-wrap:balance;
+}
+.sub{
+  font-family:var(--serif);font-size:3.5cqw;line-height:1.4;color:var(--st-muted);
+  margin:2.6cqh 0 0;font-style:italic;
+}
+.wordmark{
+  font-family:var(--serif);font-size:11cqw;font-weight:600;letter-spacing:-.025em;line-height:1;margin:0;
+}
+.wordmark em{font-style:normal;color:var(--st-ember-lit);}
+.rule-orn{display:flex;align-items:center;justify-content:center;gap:2cqw;margin:3cqh auto 0;width:56%;color:var(--st-gold);}
+.rule-orn::before,.rule-orn::after{content:"";height:1px;flex:1;background:currentColor;opacity:.55;}
+.rule-orn i{font-style:normal;font-size:2.2cqw;letter-spacing:.5em;}
+.kicker{
+  font-family:var(--mono);font-size:2.5cqw;letter-spacing:.34em;text-transform:uppercase;
+  color:var(--st-muted);margin:2.4cqh 0 0;
+}
+
+.specs{
+  display:flex;gap:2cqw;flex-wrap:wrap;margin:2.8cqh 0 0;
+  font-family:var(--mono);font-size:2.2cqw;letter-spacing:.1em;text-transform:uppercase;color:var(--st-muted);
+}
+.specs b{color:var(--st-paper);font-weight:600;}
+.specs span{border:1px solid var(--st-rule);padding:1.1cqw 1.7cqw;border-radius:1px;white-space:nowrap;}
+
+/* ── artwork ───────────────────────────────────────────────────── */
+/* Art widths are per scene: a portrait still plus a caption plus callout
+   lines has to total under the 74cqh of usable safe height, so the taller
+   the aspect the narrower it has to run. */
+.art{width:100%;margin:3.4cqh 0 0;}
+.art.narrow{width:74%;}
+.art.w66{width:66%;}
+.frame{border:1px solid var(--st-rule);border-radius:4px;overflow:hidden;background:var(--st-ground);box-shadow:0 30px 70px -40px rgba(0,0,0,.95);}
+.frame .bar{display:flex;align-items:center;gap:1.8cqw;padding:1.5cqw 2.2cqw;background:var(--st-surface);border-bottom:1px solid var(--st-rule);}
+.frame .dots{display:flex;gap:1cqw;}
+.frame .dots i{width:1.5cqw;height:1.5cqw;border-radius:50%;background:var(--st-faint);}
+.frame .addr{font-family:var(--mono);font-size:1.85cqw;color:var(--st-muted);letter-spacing:.05em;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.frame img{display:block;width:100%;height:auto;}
+
+.sheet{display:block;width:100%;height:auto;background:#fff;box-shadow:0 34px 74px -38px rgba(0,0,0,.95),0 0 0 1px rgba(255,255,255,.07);}
+.bookimg{display:block;width:100%;height:auto;box-shadow:0 44px 84px -36px rgba(0,0,0,.95),0 0 0 1px rgba(201,162,39,.22);}
+
+.wall{display:grid;grid-template-columns:repeat(4,1fr);gap:1.7cqw;width:100%;margin:3cqh 0 0;}
+.wall img{display:block;width:100%;height:auto;border-radius:1px;box-shadow:0 10px 22px -12px rgba(0,0,0,.9);}
+
+
+.checks{display:flex;flex-direction:column;gap:1.5cqh;margin:3cqh 0 0;width:100%;}
+.check{
+  display:grid;grid-template-columns:4cqw 1fr auto;gap:2cqw;align-items:baseline;
+  font-family:var(--mono);font-size:2.35cqw;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--st-muted);padding-bottom:1.4cqh;border-bottom:1px solid var(--st-rule);
+}
+.check .tick{color:var(--st-green);font-size:3.1cqw;line-height:1;}
+.check .what{color:var(--st-paper);}
+.check .val{font-variant-numeric:tabular-nums;}
+
+.price{font-family:var(--serif);font-size:10cqw;font-weight:600;line-height:1.04;margin:0;letter-spacing:-.022em;}
+.price em{font-style:normal;color:var(--st-ember-lit);}
+.url{font-family:var(--mono);font-size:2.85cqw;letter-spacing:.13em;color:var(--st-paper);margin:3.4cqh 0 0;}
+.freebar{
+  display:flex;gap:2cqw;justify-content:center;flex-wrap:wrap;margin:2.8cqh 0 0;
+  font-family:var(--mono);font-size:2.1cqw;letter-spacing:.12em;text-transform:uppercase;color:var(--st-muted);
+}
+.freebar span{border:1px solid var(--st-rule);padding:1.1cqw 1.7cqw;border-radius:1px;}
+
+/* ── controls (preview only) ───────────────────────────────────── */
+.controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:center;}
+.scrub{flex:1 1 200px;min-width:160px;height:26px;position:relative;cursor:pointer;border:0;background:none;padding:0;display:flex;align-items:center;}
+.scrub .track{position:relative;width:100%;height:3px;background:var(--pg-rule);overflow:hidden;}
+.scrub .fill{position:absolute;inset:0 auto 0 0;width:0;background:var(--pg-accent);}
+.scrub .marks{position:absolute;inset:0;pointer-events:none;}
+.scrub .marks i{position:absolute;top:0;width:1px;height:100%;background:var(--pg-bg);}
+.scrub:focus-visible{outline:2px solid var(--pg-accent);outline-offset:3px;}
+.btn{
+  font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;
+  padding:9px 13px;border:1px solid var(--pg-rule);background:var(--pg-panel);color:var(--pg-ink);
+  border-radius:2px;cursor:pointer;transition:border-color .15s,color .15s;
+}
+.btn:hover{border-color:var(--pg-accent);color:var(--pg-accent);}
+.btn:focus-visible{outline:2px solid var(--pg-accent);outline-offset:2px;}
+.btn.primary{background:var(--pg-accent);border-color:var(--pg-accent);color:#fff;}
+.btn.primary:hover{filter:brightness(1.12);color:#fff;}
+.btn[aria-pressed="true"]{border-color:var(--pg-accent);color:var(--pg-accent);}
+.tc{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--pg-muted);font-variant-numeric:tabular-nums;white-space:nowrap;}
+
+.colophon{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1px;background:var(--pg-rule);border:1px solid var(--pg-rule);border-radius:2px;overflow:hidden;}
+.colophon div{background:var(--pg-panel);padding:15px 17px;}
+.colophon dt{font-family:var(--mono);font-size:10px;letter-spacing:.17em;text-transform:uppercase;color:var(--pg-muted);margin:0 0 7px;}
+.colophon dd{margin:0;font-family:var(--serif);font-size:14.5px;line-height:1.45;}
+.foot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--pg-muted);border-top:1px solid var(--pg-rule);padding-top:13px;}
+.foot a{color:var(--pg-accent);text-decoration:none;}
+.foot a:hover{text-decoration:underline;}
+</style>
+
+<div class="wrap">
+
+  <div class="masthead">
+    <h1>Typeset <em>Studio</em> — reel</h1>
+    <div class="slug">9:16 · 1080×1920 · 27 sec</div>
+  </div>
+
+  <div class="stagewrap">
+    <div class="stage" id="stage" aria-label="Typeset Studio vertical reel">
+
+      <!-- 1 · hook. Has to land inside the first second and a half. -->
+      <section class="scene center" data-scene>
+        <div>
+          <p class="eyebrow" data-a="rise:0.15:0.7">Ashforge Studio</p>
+          <h2 class="hook" data-a="rise:0.3:0.8">You finished<br>the book.</h2>
+        </div>
+      </section>
+
+      <!-- 2 · turn + wordmark -->
+      <section class="scene center" data-scene>
+        <div>
+          <h2 class="line" data-a="rise:0.1:0.7">Now make it<br>look like one.</h2>
+          <div class="rule-orn" data-a="fade:0.5:0.8"><i>◆◆◆</i></div>
+          <p class="wordmark" data-a="rise:0.7:0.8">Typeset <em>Studio</em></p>
+        </div>
+      </section>
+
+      <!-- 3 · the manuscript -->
+      <section class="scene" data-scene>
+        <div>
+          <p class="eyebrow" data-a="rise:0.1:0.6">Your words</p>
+          <h2 class="line" data-a="rise:0.24:0.7">Write it here, or<br>bring your .docx.</h2>
+          <div class="art" data-a="rise:0.44:0.8">
+            <div class="frame">
+              <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="addr">127.0.0.1:5050/project/avenn/write</div></div>
+              <img data-src="__A_uiEditor__" data-a="drift:0:3.0" alt="The manuscript editor with live Markdown styling and a chapter outline">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4 · house styles -->
+      <section class="scene" data-scene>
+        <div>
+          <p class="eyebrow" data-a="rise:0.1:0.6">The house style</p>
+          <h2 class="line" data-a="rise:0.24:0.7">Pick how the<br>page is set.</h2>
+          <div class="art" data-a="rise:0.44:0.8">
+            <div class="frame">
+              <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="addr">127.0.0.1:5050</div></div>
+              <img data-src="__A_uiStyles__" data-a="drift:0:2.8" alt="The Styles page showing house-style spec cards">
+            </div>
+          </div>
+          <div class="specs" data-a="rise:0.7:0.7">
+            <span>Trim <b>6×9</b></span><span>Body <b>12/17</b></span><span>Opener <b>drop cap</b></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5 · cover studio -->
+      <section class="scene" data-scene>
+        <div>
+          <p class="eyebrow" data-a="rise:0.1:0.6">Cover studio</p>
+          <h2 class="line" data-a="rise:0.24:0.7">Design the cover<br>with a live preview.</h2>
+          <div class="art" data-a="rise:0.44:0.8">
+            <div class="frame">
+              <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="addr">127.0.0.1:5050/cover/fantasy-emerald</div></div>
+              <img data-src="__A_uiCoverStudio__" data-a="drift:0:3.0" alt="The cover editor with a live preview pane">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6 · the cover wall -->
+      <section class="scene center" data-scene>
+        <div style="width:100%">
+          <p class="eyebrow gold" data-a="rise:0.1:0.6">Twenty-four templates</p>
+          <h2 class="line" data-a="rise:0.24:0.7">Eight design families.</h2>
+          <div class="wall" id="wall"></div>
+        </div>
+      </section>
+
+      <!-- 7 · the set page. Portrait art is the whole point of vertical. -->
+      <section class="scene" data-scene>
+        <div>
+          <p class="eyebrow gold" data-a="rise:0.1:0.6">Then it sets the type</p>
+          <h2 class="line" data-a="rise:0.24:0.7">Every detail a<br>real book has.</h2>
+          <div class="art w66" data-a="rise:0.44:0.9">
+            <img class="sheet" data-src="__A_chapter1__" alt="A chapter-opening page with a drop cap">
+          </div>
+          <p class="kicker" data-a="rise:0.9:0.6">Drop cap · running heads · folios</p>
+        </div>
+      </section>
+
+      <!-- 8 · preflight -->
+      <section class="scene" data-scene>
+        <div style="width:100%">
+          <p class="eyebrow" data-a="rise:0.1:0.6">Before you upload</p>
+          <h2 class="line" data-a="rise:0.24:0.7">It checks the file<br>for you.</h2>
+          <div class="art" data-a="rise:0.44:0.8">
+            <div class="frame">
+              <div class="bar"><div class="dots"><i></i><i></i><i></i></div><div class="addr">127.0.0.1:5050 — composed</div></div>
+              <img data-src="__A_uiResult__" alt="Print spec and an all-clear preflight">
+            </div>
+          </div>
+          <div class="checks">
+            <div class="check" data-a="rise:0.8:0.5"><span class="tick">✓</span><span class="what">Fonts embedded</span><span class="val">&amp; subsetted</span></div>
+            <div class="check" data-a="rise:0.98:0.5"><span class="tick">✓</span><span class="what">Spine width</span><span class="val">0.133&quot;</span></div>
+            <div class="check" data-a="rise:1.16:0.5"><span class="tick">✓</span><span class="what">KDP &amp; Ingram margins</span><span class="val">0.375&quot;</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9 · the finished object -->
+      <section class="scene center" data-scene>
+        <div>
+          <p class="eyebrow gold" data-a="rise:0.1:0.6">Off the press</p>
+          <div class="art narrow" data-a="bookIn:0.25:1.1" style="margin-top:2.4cqh">
+            <img class="bookimg" data-src="__A_heroCover__" alt="The finished cover of The Gardens of Avenn">
+          </div>
+          <p class="kicker" data-a="rise:0.9:0.7">Interior PDF · Cover PDF · EPUB</p>
+        </div>
+      </section>
+
+      <!-- 10 · close -->
+      <section class="scene center" data-scene>
+        <div>
+          <h2 class="price" data-a="rise:0.1:0.8">Print-ready<br>books.<br><em>Free.</em></h2>
+          <p class="url" data-a="rise:0.55:0.7">ashforgestudio.com/typeset-studio</p>
+          <div class="freebar" data-a="rise:0.8:0.7">
+            <span>Runs on your machine</span><span>No account</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="safe-guides"><i class="box"></i><i class="btns"></i></div>
+      <div class="stage-slug">Typeset Studio</div>
+      <div class="prog"><i id="progFill"></i></div>
+      <div class="vig"></div>
+      <div class="grain"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn primary" id="play">Pause</button>
+    <button class="btn" id="prev">◀ Prev</button>
+    <button class="btn" id="next">Next ▶</button>
+    <button class="scrub" id="scrub" aria-label="Seek through the reel">
+      <span class="track"><span class="fill" id="fill"></span><span class="marks" id="marks"></span></span>
+    </button>
+    <span class="tc" id="tc">00:00 / 00:27</span>
+    <button class="btn" id="guidesBtn" aria-pressed="false">Safe area</button>
+  </div>
+
+  <dl class="colophon">
+    <div><dt>Cut for</dt><dd>Instagram &amp; Facebook Reels — 1080×1920, 27&nbsp;seconds, hook inside the first second.</dd></div>
+    <div><dt>Safe area</dt><dd>Press <b>Safe area</b> to see the box Instagram's own caption, audio strip and action buttons sit outside of.</dd></div>
+    <div><dt>Audio</dt><dd>Rendered silent on purpose. Add a trending track in the Instagram editor — in-app audio reaches further than baked-in music.</dd></div>
+  </dl>
+
+  <div class="foot">
+    <span>Ashforge Studio · Typeset Studio v1.2.0</span>
+    <span><a href="https://ashforgestudio.com/typeset-studio.html">ashforgestudio.com/typeset-studio</a></span>
+  </div>
+</div>
+
+<script>
+const A = __ASSETS__;
+
+/* ───────────────────────────────────────────────────────────────
+   Every moving thing is a paused Web Animation whose currentTime is
+   written from the playhead. Nothing runs on its own clock, so
+   render(t) is a pure function of t: frame 412 of a headless render
+   is pixel-identical to scrubbing to that instant by hand. CSS
+   animations could not give that guarantee.
+   ─────────────────────────────────────────────────────────────── */
+const KEYFRAMES = {
+  rise:   [{opacity:0, transform:'translateY(2.2cqh)'},{opacity:1, transform:'none'}],
+  fade:   [{opacity:0},{opacity:1}],
+  pop:    [{opacity:0, transform:'scale(.86) translateY(1.4cqh)'},{opacity:1, transform:'none'}],
+  drift:  [{transform:'scale(1.015)'},{transform:'scale(1.06)'}],
+  bookIn: [{opacity:0, transform:'translateY(3cqh) scale(.93)'},{opacity:1, transform:'none'}],
+};
+const EASE = {
+  rise:'cubic-bezier(.16,.8,.3,1)', fade:'ease',
+  pop:'cubic-bezier(.2,.85,.3,1)', drift:'linear',
+  bookIn:'cubic-bezier(.16,.8,.3,1)',
+};
+
+const params = new URLSearchParams(location.search);
+const RENDER = params.has('render');
+const FPS = +(params.get('fps') || 30);
+
+/* wire packed images */
+document.querySelectorAll("img[data-src^='__A_']").forEach(img => {
+  const key = img.getAttribute('data-src').slice(4, -2);
+  if (A[key]) img.src = A[key];
+});
+
+/* the cover wall, with a stagger written as a real animation delay */
+const wallEl = document.getElementById('wall');
+(A.wall || []).forEach((uri, i) => {
+  const im = document.createElement('img');
+  im.src = uri;
+  im.alt = '';
+  im.dataset.a = `pop:${(0.42 + i * 0.055).toFixed(3)}:0.5`;
+  wallEl.appendChild(im);
+});
+
+const DUR   = [2.8, 2.4, 3.0, 2.8, 3.0, 2.8, 3.0, 2.0, 2.6, 2.6];
+const XF    = 0.4;                        /* cross-dissolve, seconds */
+const scenes = [...document.querySelectorAll('[data-scene]')];
+const TOTAL = DUR.reduce((a, b) => a + b, 0);
+const START = DUR.reduce((acc, d) => (acc.push(acc[acc.length - 1] + d), acc), [0]);
+
+/* one animation list per scene */
+const ANIMS = scenes.map(sc =>
+  [...sc.querySelectorAll('[data-a]')].map(el => {
+    const [kind, delay, dur] = el.dataset.a.split(':');
+    const a = el.animate(KEYFRAMES[kind], {
+      duration: +dur * 1000,
+      delay: +delay * 1000,
+      fill: 'both',
+      easing: EASE[kind],
+    });
+    a.pause();
+    return a;
+  })
+);
+
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const fmt = s => '00:' + String(Math.floor(clamp(s, 0, TOTAL))).padStart(2, '0');
+
+function sceneAt(time){
+  for (let i = DUR.length - 1; i >= 0; i--) if (time >= START[i]) return i;
+  return 0;
+}
+function setAnims(i, localSec){
+  const ms = Math.max(0, localSec * 1000);
+  for (const a of ANIMS[i]) a.currentTime = ms;
+}
+
+function render(t){
+  t = clamp(t, 0, TOTAL - 1e-4);
+  const i = sceneAt(t);
+  const local = t - START[i];
+
+  for (let k = 0; k < scenes.length; k++){
+    const s = scenes[k];
+    if (k === i){
+      s.style.opacity = clamp(local / XF, 0, 1);
+      s.style.zIndex = 3;
+    } else if (k === i - 1 && local < XF){
+      s.style.opacity = 1;      /* outgoing scene holds underneath */
+      s.style.zIndex = 2;
+    } else {
+      s.style.opacity = 0;
+      s.style.zIndex = 1;
+    }
+  }
+  setAnims(i, local);
+  /* freeze the outgoing scene at its final pose while it dissolves out */
+  if (i > 0 && local < XF) setAnims(i - 1, DUR[i - 1]);
+
+  $('progFill').style.width = (t / TOTAL * 100) + '%';
+  if (!RENDER){
+    $('fill').style.width = (t / TOTAL * 100) + '%';
+    $('tc').textContent = fmt(t) + ' / ' + fmt(TOTAL);
+  }
+}
+
+/* ── the headless-render contract ───────────────────────────────
+   render_frames.py awaits ready, then calls seek(t) once per frame. */
+window.__reel = {
+  total: TOTAL,
+  fps: FPS,
+  frames: Math.round(TOTAL * FPS),
+  width: 1080,
+  height: 1920,
+  seek: t => render(t),
+  seekFrame: n => render(n / FPS),
+  /* Only the headless renderer needs to wait for this - it must not shoot
+     frame 0 before the fonts and images are in. The preview player never
+     awaits it: an environment where document.fonts.ready or decode() never
+     settles must still play, not sit on a black frame forever. Hence the
+     timeout, so even the renderer cannot hang indefinitely. */
+  ready: Promise.race([
+    (async () => {
+      const imgs = [...document.querySelectorAll('img')];
+      await Promise.all(imgs.map(i => i.decode ? i.decode().catch(() => {}) : null));
+      if (document.fonts && document.fonts.ready) await document.fonts.ready;
+      return true;
+    })(),
+    new Promise(r => setTimeout(() => r('timeout'), 15000)),
+  ]),
+};
+
+if (RENDER){
+  document.body.classList.add('render');
+  render(0);
+} else {
+  /* ── preview player ── */
+  START.slice(1, -1).forEach(s => {
+    const i = document.createElement('i');
+    i.style.left = (s / TOTAL * 100) + '%';
+    $('marks').appendChild(i);
+  });
+
+  let t = 0, playing = true, last = null;
+  const setPlaying = p => { playing = p; $('play').textContent = p ? 'Pause' : 'Play'; };
+
+  /* Schedule the next frame FIRST: if render() ever throws, the loop has to
+     survive it rather than stopping dead on a black frame. The first error is
+     surfaced in the timecode, since a sandboxed iframe gives no console. */
+  /* Schedule the next frame FIRST so a throw inside render() cannot kill the
+     loop and leave a black frame. Any error is surfaced in the timecode,
+     because a published page runs in a sandboxed iframe with no console.
+
+     Note: the browser suspends rAF entirely while the tab or window is off
+     screen, then resumes with a timestamp far in the future. Clamping the step
+     means the reel picks up where it left off rather than jumping several
+     scenes ahead. */
+  const MAX_STEP = 0.1;               /* seconds; ~3 frames at 30fps */
+  let errShown = false;
+  function frame(ts){
+    requestAnimationFrame(frame);
+    try {
+      if (last === null) last = ts;
+      const dt = Math.min((ts - last) / 1000, MAX_STEP);
+      last = ts;
+      if (playing){
+        t += dt;
+        if (t >= TOTAL) t -= TOTAL;
+        render(t);
+      }
+    } catch (err){
+      if (!errShown){
+        errShown = true;
+        $('tc').textContent = 'ERR ' + (err && err.message ? err.message : err);
+      }
+    }
+  }
+  const seek = time => { t = ((time % TOTAL) + TOTAL) % TOTAL; render(t); };
+
+  $('play').addEventListener('click', () => setPlaying(!playing));
+  $('prev').addEventListener('click', () => {
+    const i = sceneAt(t);
+    seek(START[t - START[i] < 0.5 ? Math.max(0, i - 1) : i]);
+  });
+  $('next').addEventListener('click', () => seek(START[(sceneAt(t) + 1) % DUR.length]));
+  $('scrub').addEventListener('click', e => {
+    const r = e.currentTarget.getBoundingClientRect();
+    seek(((e.clientX - r.left) / r.width) * TOTAL);
+  });
+  $('scrub').addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight'){ e.preventDefault(); seek(t + 1); }
+    if (e.key === 'ArrowLeft'){ e.preventDefault(); seek(t - 1); }
+  });
+  $('guidesBtn').addEventListener('click', e => {
+    const on = document.body.classList.toggle('show-guides');
+    e.currentTarget.setAttribute('aria-pressed', String(on));
+  });
+  addEventListener('keydown', e => {
+    if (e.code === 'Space' && !['BUTTON','A','INPUT'].includes(document.activeElement.tagName)){
+      e.preventDefault(); setPlaying(!playing);
+    }
+  });
+
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) setPlaying(false);
+  if (params.has('guides')) document.body.classList.add('show-guides');
+
+  /* start immediately - see the note on __reel.ready above */
+  render(0);
+  requestAnimationFrame(frame);
+}
+</script>
