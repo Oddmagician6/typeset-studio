@@ -16,15 +16,20 @@ import argparse
 import os
 import shutil
 import sys
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# The frame cache defaults OUTSIDE the repo: a 27s reel is ~800 PNGs / 300 MB,
+# and this working copy sits inside a OneDrive folder that would dutifully sync
+# every one of them.
+FRAMES = os.path.join(tempfile.gettempdir(), "typeset-reel-frames")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default="typeset-studio-reel-9x16.html")
-    ap.add_argument("--out", default="frames")
+    ap.add_argument("--out", default=FRAMES)
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--w", type=int, default=1080)
     ap.add_argument("--h", type=int, default=1920)

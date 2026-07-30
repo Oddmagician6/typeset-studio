@@ -30,9 +30,17 @@ py -m venv .venv-video
 Open a **new terminal** afterwards so `ffmpeg` is on `PATH`. Then:
 
 ```
-.\.venv-video\Scripts\python.exe promo\render_frames.py      # 810 PNGs, ~2 min
-python promo\encode.py                                       # -> mp4
+.venv-video\Scripts\python.exe promo\render_frames.py     # 810 PNGs, ~3 min
+python promo\encode.py                                    # -> promo\*.mp4
 ```
+
+The PNGs go to `%TEMP%\typeset-reel-frames`, deliberately **outside** the repo:
+they run to ~430 MB, and this working copy sits in a OneDrive folder that would
+otherwise sync every one of them. The encoded MP4 lands in `promo/` and is
+gitignored — it rebuilds from the tracked sources in about three minutes.
+
+Known-good output: 27.00s, 1080×1920, H.264 High @ L4.1, yuv420p, 30 fps,
+silent AAC, ~2.2 MB.
 
 Spot-check a single beat without rendering all 810 frames:
 

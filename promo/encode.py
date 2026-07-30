@@ -17,13 +17,16 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# must match render_frames.py, which keeps its PNGs out of the OneDrive-synced repo
+FRAMES = os.path.join(tempfile.gettempdir(), "typeset-reel-frames")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--frames", default="frames")
+    ap.add_argument("--frames", default=FRAMES)
     ap.add_argument("--out", default="typeset-studio-reel-9x16.mp4")
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--crf", type=int, default=19, help="lower is better quality")

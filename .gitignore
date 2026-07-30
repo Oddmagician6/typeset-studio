@@ -34,3 +34,8 @@ dist_installer/
 
 # per-user preferences (update-check toggle and its cache) - not project content
 settings.json
+
+# rendered reels (the HTML reels and their sources are tracked; the encoded
+# video is a build output - promo/README.md regenerates it in about 3 minutes)
+promo/*.mp4
+promo/frames/
