@@ -98,7 +98,7 @@
               <td>KDP minimum</td>
               {% if spec.kdp_min is none %}
                 <td class="{{ 'warn' if spec.page_count < 24 else '' }}">
-                  {{ '&lt; 24 pages (KDP min)' if spec.page_count < 24 else '&gt; 828 pages (KDP max)' }}
+                  {{ '< 24 pages (KDP min)' if spec.page_count < 24 else '> 828 pages (KDP max)' }}
                 </td>
               {% else %}
                 <td class="{{ 'ok' if spec.kdp_ok else 'warn' }}">
