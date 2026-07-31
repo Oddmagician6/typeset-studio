@@ -9,7 +9,7 @@ book's interior (trim, margins, body type, chapter openings, scene breaks, runni
 heads, page numbers, fonts). You build a style once, then **duplicate it per customer**
 and tweak only what that book needs.
 
-Current version **1.2.0** — see [CHANGELOG.md](CHANGELOG.md) for what's new. The **About**
+Current version **1.2.1** — see [CHANGELOG.md](CHANGELOG.md) for what's new. The **About**
 page (linked in the footer) shows the version you're running.
 
 **On the network:** Typeset Studio works entirely offline and sends nothing anywhere. The

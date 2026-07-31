@@ -1,12 +1,18 @@
 # Changelog
 
 What changed in each release, in the words of someone using the app rather than
-building it. The version lives in `typeset-studio.iss` and drives both the installer
-and its filename; `ROADMAP.md` has the engineering record behind every line here.
+building it. The version lives in the `VERSION` file — the app, the `.iss` and the
+build script all read it, so the installer and its filename can never disagree with
+what the About page reports; `ROADMAP.md` has the engineering record behind every
+line here.
 
 ---
 
 ## Unreleased
+
+---
+
+## 1.2.1 — 30 July 2026
 
 - **Your words are kept.** Saves in the manuscript editor are now all-or-nothing, so an
   interrupted save can't leave an empty file, and every few minutes of writing is copied
@@ -15,6 +21,29 @@ and its filename; `ROADMAP.md` has the engineering record behind every line here
 - **An About page**, with the version you're running and an optional check for new
   releases — **off by default**, because this app talks to nobody unless you ask it to.
   It never installs anything itself; it tells you, and you download when you choose.
+
+### Fixed
+
+- **`***bold italic***` no longer stops the build.** Writing a word in bold *and* italic
+  produced a PDF that refused to build at all, and an EPUB shops would reject. It sets
+  correctly now, in print and ebook alike — as does `___bold italic___`.
+- **A stray asterisk is just an asterisk.** A lone `*` earlier in a paragraph — a
+  multiplication, a footnote mark typed by hand — could pair up with the emphasis later
+  in the same paragraph and take the whole build down with it. It stays literal now.
+- **Bold *and* italic survives a save in the editor.** Marking a phrase both bold and
+  italic in the manuscript editor quietly lost the italic the next time the file was
+  opened. Both are kept.
+- **A mistyped in-book link no longer costs you the book.** `[see](#chapter-12)` in a
+  ten-chapter book — or a link made from a chapter title you later renamed — used to
+  stop the PDF with an error that named neither the link nor the chapter. The book now
+  builds, the words stay put, and the preflight panel lists every link that points
+  nowhere so you can fix it.
+- **Every line of a `~~~` block is typeset.** In a quote, poem or table, only the last
+  line to need rewriting kept the change — notes and links on the lines above it were
+  dropped.
+- **Re-opening a manuscript no longer nudges the text.** Certain runs of asterisks and
+  underscores were re-saved slightly differently each time the editor round-tripped
+  them. What you wrote is what comes back.
 
 ---
 
