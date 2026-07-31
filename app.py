@@ -3168,6 +3168,43 @@ def _want_window():
         return False
 
 
+def _enable_context_menu(window=None):
+    """Give the desktop window its right-click menu back.
+
+    pywebview ties WebView2's default context menu to its own debug flag, so an
+    installed build shipped with no context menu at all: right-clicking a word
+    the spell checker had underlined offered nothing, and neither did
+    right-clicking anything else. The menu is the whole of what is turned back
+    on — devtools, the browser accelerator keys and the status bar stay off,
+    which is why this reaches for the one setting rather than passing
+    `debug=True` to `webview.start()`.
+
+    Windows only, and it reads pywebview's internals to get there, so every step
+    is guarded: if the shape of it changes the window still opens, just without
+    a context menu again.
+
+    `loaded` fires on a worker thread and CoreWebView2 may only be touched on the
+    UI thread, so the change is marshalled across with `Invoke` — reaching for it
+    directly raises, and the exception would be swallowed into a silent no-op.
+    """
+    try:
+        from webview.platforms.winforms import BrowserView
+        from System import Func, Object
+    except Exception:
+        return                                  # not the Windows/WebView2 backend
+
+    def _turn_on(view):
+        view.CoreWebView2.Settings.AreDefaultContextMenusEnabled = True
+        return True
+
+    for inst in list(getattr(BrowserView, 'instances', {}).values()):
+        try:
+            view = inst.browser.webview
+            view.Invoke(Func[Object](lambda v=view: _turn_on(v)))
+        except Exception:
+            logging.debug('could not enable the webview context menu', exc_info=True)
+
+
 if __name__ == '__main__':
     if _want_window():
         # native window: serve in a background thread, show the app in an OS
@@ -3178,8 +3215,10 @@ if __name__ == '__main__':
         threading.Thread(target=_serve, args=(port,), daemon=True).start()
         try:
             import webview
-            webview.create_window('Typeset Studio', url,
-                                  width=1180, height=820, min_size=(900, 640))
+            win = webview.create_window('Typeset Studio', url,
+                                        width=1180, height=820, min_size=(900, 640))
+            # the WebView2 control only exists once the first page has loaded
+            win.events.loaded += _enable_context_menu
             webview.start()
         except Exception:
             logging.exception('Native window failed; opening in the browser instead.')
