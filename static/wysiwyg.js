@@ -224,6 +224,17 @@
     return el.style && el.style.fontStyle === 'italic';
   }
 
+  // Anything a writing-aid extension (Grammarly, LanguageTool, ProWritingAid)
+  // draws into the editor. They render their underlines and cards by injecting
+  // custom elements — always hyphenated, per the custom-element rules — and
+  // mark their own UI uneditable. The editor emits neither, so both are foreign
+  // by definition: any text inside one is the extension talking, not the book,
+  // and reading it back saved the suggestion into the manuscript.
+  function isForeignEl(el) {
+    return (el.tagName || '').indexOf('-') !== -1
+        || el.getAttribute('contenteditable') === 'false';
+  }
+
   function collectRuns(node, bold, italic, runs, link) {
     node.childNodes.forEach(function (child) {
       if (child.nodeType === 3) {                       // text
@@ -231,6 +242,7 @@
                                     link: link || '' });
       } else if (child.nodeType === 1) {                // element
         if (child.tagName === 'BR') return;             // soft breaks -> ignored
+        if (isForeignEl(child)) return;                 // an extension's own overlay
         var href = link || '';
         if (child.tagName === 'A' && child.getAttribute('href'))
           href = child.getAttribute('href');
@@ -322,6 +334,7 @@
   function read(root) {
     var blocks = [];
     Array.prototype.forEach.call(root.children, function (el) {
+      if (isForeignEl(el)) return;          // an extension's overlay, not a block
       // skip stray empty text-only wrappers the browser may leave behind
       var b = readBlockEl(el);
       if (b.type === 'para' || b.type === 'subhead') {
