@@ -12,6 +12,29 @@ line here.
 
 ---
 
+## 1.2.2 — 31 July 2026
+
+A repair release for Word import. Everything here is about a manuscript arriving
+from Word looking like the manuscript you wrote.
+
+### Fixed
+
+- **Your Word paragraphs stay your Word paragraphs.** Text that merely *looked* like
+  the app's own markup was being read as markup: a line beginning `~~~` opened a block
+  and pulled the rest of the document into it, a line beginning `# ` became a chapter
+  you never wrote, a literal `*hello*` came back italic, and `file_name_here` came back
+  with the middle in italics. Imported text is now treated as words.
+- **A bold chapter heading no longer prints its asterisks.** A Word Heading 1 with bold
+  applied gave a chapter titled `**Chapter One**`, asterisks and all, on the printed
+  page.
+- **Bold *and* italic survives the import.** A Word phrase marked both came through as
+  bold only.
+- **A table inside a table is no longer lost.** A Word table with another nested inside
+  it was dropped whole and without a word about it — not even a line in the import
+  summary. Its contents now come through.
+
+---
+
 ## 1.2.1 — 30 July 2026
 
 - **Your words are kept.** Saves in the manuscript editor are now all-or-nothing, so an
