@@ -136,6 +136,163 @@ def _para_texts(md):
     return [b[1] for c in parsed["chapters"] for b in c["blocks"] if b[0] == "para"]
 
 
+def test_bold_italic():
+    """***both*** is one span, and survives the round trip.
+
+    Left to the ** and * passes separately it came out cross-nested --
+    `<b><i>x</b></i>` -- which is not well-formed: ReportLab's parser aborts the
+    whole PDF build on it, and the EPUB's XHTML is invalid. The model carries it
+    as one run with both flags, so the editor cannot silently drop the italic.
+    """
+    print("\n[bold-italic]")
+    _check("*** renders as one nested span",
+           _para_texts("She was ***utterly certain*** of it.")
+           == ["She was <b><i>utterly certain</i></b> of it."])
+    _check("___ renders as one nested span",
+           _para_texts("She was ___utterly certain___ of it.")
+           == ["She was <b><i>utterly certain</i></b> of it."])
+    _check("two *** spans on a line stay nested",
+           _para_texts("***a*** and ***b***")
+           == ["<b><i>a</i></b> and <b><i>b</i></b>"])
+    _check("plain ** and * are unaffected",
+           _para_texts("**b** and *i*") == ["<b>b</b> and <i>i</i>"])
+    _check("emphasis nested inside bold still works",
+           _para_texts("**bold with *ital* inside**")
+           == ["<b>bold with <i>ital</i> inside</b>"])
+
+    # the markup ReportLab is handed must actually parse
+    from reportlab.platypus import Paragraph
+    from reportlab.lib.styles import getSampleStyleSheet
+    style = getSampleStyleSheet()["Normal"]
+    ok = True
+    for src in ("***bold italic***", "___bold italic___", "***a*** and ***b***"):
+        try:
+            Paragraph(manuscript._inline(src), style).wrap(400, 400)
+        except Exception:
+            ok = False
+    _check("ReportLab parses the emitted markup", ok)
+
+    # a run the WYSIWYG editor can produce (B *and* I) must not lose the italic
+    both = [{"type": "para", "runs": [{"text": "utterly certain", "bold": True,
+                                       "italic": True, "link": ""}]}]
+    md = doc_model.to_markdown(both)
+    _check("bold+italic run serializes to ***", md.strip() == "***utterly certain***")
+    _check("bold+italic run survives the round trip",
+           doc_model.from_markdown(md) == both, _diff(doc_model.from_markdown(md), both))
+
+
+def test_emphasis_never_crosses_a_tag():
+    """A stray asterisk must not pair with one inside a later bold span.
+
+    `a*b **a *b* c**` used to come out `a<i>b <b>a *b</i> c</b>` -- cross-nested,
+    so the PDF build aborted and the EPUB's XHTML was invalid.
+    """
+    print("\n[emphasis vs tag boundaries]")
+    _check("stray * does not straddle a bold span",
+           _para_texts("a*b **a *b* c**") == ["a*b <b>a <i>b</i> c</b>"])
+    _check("emphasis inside the bold span still applies",
+           _para_texts("5 * 3 **a *b* c**") == ["5 * 3 <b>a <i>b</i> c</b>"])
+
+    from reportlab.platypus import Paragraph
+    from reportlab.lib.styles import getSampleStyleSheet
+    style = getSampleStyleSheet()["Normal"]
+    bad = []
+    for src in ("a*b **a *b* c**", "a*b *c* d", "** — *** x *** a*b",
+                "***bold ital*** _u_ ** a*b 5 * 3 **a *b* c**"):
+        try:
+            Paragraph(manuscript._inline(src), style).wrap(400, 400)
+        except Exception:
+            bad.append(src)
+    _check("ReportLab parses every stray-marker case", not bad, f"crashed on {bad}")
+
+
+def test_doc_block_rewrites_all_lines():
+    """Every line of a doc_block survives a rewrite, not just the last.
+
+    The setter used to rebuild the block from the copy captured when the walk
+    started, so with two lines to change the first change was thrown away. Both
+    builders use this to turn `<note …/>` into their own superscript.
+    """
+    print("\n[doc_block rewrites]")
+    chapters = [{"title": "C", "blocks": [
+        ("doc_block", [("para", "one"), ("para", "two"), ("para", "three")],
+         {"_type": "quote"}),
+        ("para", "tail")]}]
+    out = manuscript.map_block_texts(chapters, lambda t, ch: t.upper())
+    _check("every line of the block is rewritten",
+           out[0]["blocks"][0][1] == [("para", "ONE"), ("para", "TWO"), ("para", "THREE")],
+           str(out[0]["blocks"][0][1]))
+    _check("the block's attrs survive", out[0]["blocks"][0][2] == {"_type": "quote"})
+    _check("ordinary blocks still rewrite", out[0]["blocks"][1] == ("para", "TAIL"))
+    _check("the caller's chapters are untouched",
+           chapters[0]["blocks"][0][1] == [("para", "one"), ("para", "two"),
+                                           ("para", "three")])
+
+
+def test_dead_inbook_links():
+    """A link to an anchor the book hasn't got is reported, not fatal.
+
+    ReportLab treats an unresolved internal destination as fatal, so one stale
+    `#anchor` cost the whole PDF. The EPUB has always reported these in preflight.
+    """
+    print("\n[dead in-book links]")
+    import tempfile
+    import app as _app
+
+    meta = {"title": "T", "author": "A", "year": "2026", "publisher": "P",
+            "front_matter": "none", "right_hand_starts": False,
+            "smartquotes": True, "include_toc": False}
+
+    def build(md):
+        ms = manuscript.parse_markdown(md)
+        fd, path = tempfile.mkstemp(suffix=".pdf")
+        os.close(fd)
+        try:
+            return engine.build_pdf(ms, _app.DEFAULTS, path, dict(meta)), ms
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    res, _ = build("# The Plateau\n\nOpening plain para.\n\nSee [a](#chapter-1).\n")
+    _check("a live anchor is left alone", res["dead_links"] == [])
+
+    res, ms = build("# The Plateau\n\nOpening plain para.\n\n"
+                    "See [go there](#the-old-title).\n")
+    _check("a stale anchor builds anyway", res["dead_links"] == ["#the-old-title"],
+           str(res["dead_links"]))
+    _check("and is reported in preflight",
+           any(c["label"] == "In-book links" and not c["ok"]
+               for c in _app._preflight(res, _app.DEFAULTS, 0)))
+    _check("the manuscript itself is not edited",
+           "#the-old-title" in str(ms["chapters"][0]["blocks"]))
+
+    res, _ = build("# C\n\nOpening plain para.\n\nSee [a](https://x.test/a_b).\n")
+    _check("an external link is never touched", res["dead_links"] == [])
+
+    res, _ = build("# C\n\nOpening plain para.\n\nA line with a note.^[the note]\n")
+    _check("footnote links are not unlinked", res["dead_links"] == [])
+
+    res, _ = build("# C\n\nOpening plain para.\n\n~~~ table\n| a | [t](#nope) |\n~~~\n")
+    _check("a dead link inside a block is caught", res["dead_links"] == ["#nope"],
+           str(res["dead_links"]))
+
+
+def test_run_boundary_escapes():
+    """Runs are escaped as a line, not one at a time.
+
+    `_escape_plain` asks whether a run survives a parse on its own, which is not
+    enough: a plain "*" next to an italic "*y*" concatenates to "**y*" and
+    re-reads as bold, so the model drifted on re-open.
+    """
+    print("\n[run-boundary escapes]")
+    for md in ("*_y_", "*x* * *y*", "a * *b*", "***_y_"):
+        b1 = doc_model.from_markdown(md)
+        b2 = doc_model.from_markdown(doc_model.to_markdown(b1))
+        _check(f"{md!r}: model stability", b1 == b2, _diff(b1, b2))
+
+
 def test_engine_escapes():
     """The backward-compatible escape support added to manuscript (step 2)."""
     print("\n[engine escapes]")
@@ -732,6 +889,11 @@ if __name__ == "__main__":
     test_roundtrips()
     test_adversarial()
     test_engine_escapes()
+    test_bold_italic()
+    test_emphasis_never_crosses_a_tag()
+    test_doc_block_rewrites_all_lines()
+    test_dead_inbook_links()
+    test_run_boundary_escapes()
     test_poems()
     test_bylines()
     test_figures()

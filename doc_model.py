@@ -53,8 +53,11 @@ import re
 import manuscript
 
 
-# Bold before italic, mirroring manuscript._inline's substitution order. Emphasis
-# is non-nesting in this convention, so a flat run list is faithful.
+# Bold-italic, then bold, then italic — mirroring manuscript._inline's
+# substitution order. Emphasis does not nest arbitrarily in this convention, so a
+# flat run list is faithful; the one combination that exists, ***bold italic***,
+# is carried on a single run with both flags set.
+_BOLDITAL_RE = re.compile(r'\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*|___(?!\s)(.+?)(?<!\s)___')
 _BOLD_RE = re.compile(r'\*\*(.+?)\*\*')
 _ITALIC_STAR = re.compile(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)')
 _ITALIC_UNDER = re.compile(r'_(?!\s)(.+?)(?<!\s)_')
@@ -149,21 +152,37 @@ def _parse_inline(text, smartquotes=True):
 def _emphasis_runs(text):
     """Split one link-free stretch into bold/italic runs."""
     runs = []
-    # Pass 1: carve out bold spans.
-    segments = []                                        # (is_bold, str)
+    # Pass 0: carve out bold-italic spans, so the ** pass below cannot claim the
+    # first two stars of a *** marker and strand the third as literal text.
+    outer = []                                           # (is_bothemph, str)
     pos = 0
-    for m in _BOLD_RE.finditer(text):
+    for m in _BOLDITAL_RE.finditer(text):
         if m.start() > pos:
-            segments.append((False, text[pos:m.start()]))
-        segments.append((True, m.group(1)))
+            outer.append((False, text[pos:m.start()]))
+        outer.append((True, m.group(1) if m.group(1) is not None else m.group(2)))
         pos = m.end()
     if pos < len(text):
-        segments.append((False, text[pos:]))
+        outer.append((False, text[pos:]))
+
+    # Pass 1: carve out bold spans in what is left.
+    segments = []                                        # (is_bold, is_italic, str)
+    for both, chunk in outer:
+        if both:
+            segments.append((True, True, chunk))
+            continue
+        pos = 0
+        for m in _BOLD_RE.finditer(chunk):
+            if m.start() > pos:
+                segments.append((False, False, chunk[pos:m.start()]))
+            segments.append((True, False, m.group(1)))
+            pos = m.end()
+        if pos < len(chunk):
+            segments.append((False, False, chunk[pos:]))
 
     # Pass 2: carve out italics within each non-bold segment.
-    for is_bold, seg in segments:
+    for is_bold, is_ital, seg in segments:
         if is_bold:
-            runs.append(_run(seg, bold=True))
+            runs.append(_run(seg, bold=True, italic=is_ital))
             continue
         for is_italic, chunk in _split_italics(seg):
             if chunk:
@@ -217,6 +236,8 @@ def _coalesce(runs):
 
 
 def _emph_md(r):
+    if r["bold"] and r["italic"]:
+        return f"***{_escape_all(r['text'])}***"
     if r["bold"]:
         return f"**{_escape_all(r['text'])}**"
     if r["italic"]:
@@ -224,28 +245,47 @@ def _emph_md(r):
     return _escape_plain(r["text"])
 
 
-def _runs_to_md(runs):
-    """Serialize runs back to Markdown. _italic_ normalizes to *italic*.
-
-    Consecutive runs sharing a link are wrapped in one `[…](target)`, so a link
-    whose text is partly bold round-trips as a single link rather than two.
-    """
+def _emit_runs(runs, force_escape=False):
     parts = []
     i = 0
     while i < len(runs):
         link = runs[i].get("link", "")
         if not link:
-            parts.append(_emph_md(runs[i]))
+            parts.append(_escape_all(runs[i]["text"]) if force_escape
+                         and not (runs[i]["bold"] or runs[i]["italic"])
+                         else _emph_md(runs[i]))
             i += 1
             continue
         j = i
         inner = []
         while j < len(runs) and runs[j].get("link", "") == link:
-            inner.append(_emph_md(runs[j]))
+            inner.append(_escape_all(runs[j]["text"]) if force_escape
+                         and not (runs[j]["bold"] or runs[j]["italic"])
+                         else _emph_md(runs[j]))
             j += 1
         parts.append(f"[{''.join(inner)}]({link})")
         i = j
     return "".join(parts)
+
+
+def _runs_to_md(runs):
+    """Serialize runs back to Markdown. _italic_ normalizes to *italic*.
+
+    Consecutive runs sharing a link are wrapped in one `[…](target)`, so a link
+    whose text is partly bold round-trips as a single link rather than two.
+
+    `_escape_plain` asks whether a run survives a parse *on its own*, which is
+    not enough: two runs can each be safe alone and still collide once joined —
+    a plain "*" followed by an italic "*y*" concatenates to "**y*", which
+    re-reads as bold. So the assembled line is checked as a whole, and if it no
+    longer parses back to the runs we started with, it is re-emitted with every
+    plain run fully escaped.
+    """
+    md = _emit_runs(runs)
+    want = _coalesce([dict(r) for r in runs])
+    if _parse_inline(md, smartquotes=False) != want:
+        md = _emit_runs(runs, force_escape=True)
+    return md
 
 
 def _block_collision(line):

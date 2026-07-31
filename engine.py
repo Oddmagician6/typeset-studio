@@ -3585,6 +3585,39 @@ def _press_canvasmaker(pw, ph):
     return PressCanvas
 
 
+_INBOOK_LINK_RE = re.compile(r'<a href="#([^"]*)">(.*?)</a>', re.S)
+
+
+def _resolve_inbook_links(chapters):
+    """Unlink `#anchor` links this book has no destination for.
+
+    ReportLab treats an unresolved internal destination as fatal, so one typo'd
+    or stale anchor — a `#chapter-12` in a ten-chapter book, a title slug left
+    behind when the chapter was renamed — cost the writer the whole PDF, with an
+    error naming neither the link nor the chapter. The EPUB has always reported
+    these in preflight instead of failing; the PDF now agrees. The link text
+    stays put, only the link is dropped, and every dead target is returned so
+    preflight can name it.
+
+    Note references are still `<note …/>` markers at this point and are turned
+    into links later, so they are never seen — and never unlinked — here.
+    """
+    known = set()
+    for idx, ch in enumerate(chapters, 1):
+        known.update(_ms_anchors(ch, idx))
+    dead = []
+
+    def fix(text, _ch):
+        def repl(m):
+            if m.group(1) in known:
+                return m.group(0)
+            dead.append('#' + m.group(1))
+            return m.group(2)
+        return _INBOOK_LINK_RE.sub(repl, text)
+
+    return _ms_map_texts(chapters, fix), dead
+
+
 def build_pdf(manuscript, preset, out_path, meta, press=False):
     """Build the interior. `press=True` asks for the press-ready variant.
 
@@ -3609,6 +3642,11 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
     fonts = register_fonts(preset)
     st = _styles(preset, fonts)
     head_font = fonts['regular']
+
+    # A copy, not an edit in place: app.py parses once and builds both outputs
+    # from the same structure, and the EPUB resolves its own links.
+    fixed_chapters, dead_links = _resolve_inbook_links(manuscript['chapters'])
+    manuscript = dict(manuscript, chapters=fixed_chapters)
 
     cover = None
     cover_path = None            # temp image path to clean up (image mode only)
@@ -3743,6 +3781,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
     return {
         'page_count':     page_count,
         'notes_unplaced': len(unplaced_notes),
+        'dead_links':     dead_links,
         'font_family':    fonts['family'],
         'font_fallback':  fonts['fallback'],
         'font_details':   fonts['details'],

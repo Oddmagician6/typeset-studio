@@ -143,6 +143,21 @@ def _smarten(text):
     return text
 
 
+# The emphasis tags already emitted; a later pass must stay inside them.
+_EMPH_TAG_RE = re.compile(r'</?[bi]>')
+
+
+def _sub_between_tags(pattern, repl, text):
+    """Apply an emphasis substitution to the stretches between <b>/<i> tags."""
+    out, pos = [], 0
+    for m in _EMPH_TAG_RE.finditer(text):
+        out.append(re.sub(pattern, repl, text[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(re.sub(pattern, repl, text[pos:]))
+    return ''.join(out)
+
+
 def _inline(text, smartquotes=True):
     """Escape XML, then re-introduce ReportLab markup for *italic* / **bold**.
 
@@ -170,9 +185,21 @@ def _inline(text, smartquotes=True):
     # how to draw it.
     text = NOTE_REF_RE.sub(lambda m: f'<note id="{m.group(1)}"/>', text)
 
+    # Bold-italic first, and as one span. Left to the ** and * passes below it
+    # comes out cross-nested (`<b><i>x</b></i>`), which is not well-formed: it
+    # aborts the whole PDF build in ReportLab's parser, and makes the EPUB's
+    # XHTML invalid. Matching the triple marker up front keeps the tags nested.
+    text = re.sub(r'\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*', r'<b><i>\1</i></b>', text)
+    text = re.sub(r'___(?!\s)(.+?)(?<!\s)___', r'<b><i>\1</i></b>', text)
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-    text = re.sub(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<i>\1</i>', text)
-    text = re.sub(r'_(?!\s)(.+?)(?<!\s)_', r'<i>\1</i>', text)
+    # The italic passes run on text that already carries <b>…</b>, and an
+    # unpaired asterisk earlier in the line would otherwise pair with one inside
+    # a bold span — `a*b **a *b* c**` giving `a<i>b <b>a *b</i> c</b>`. Emphasis
+    # is applied between the emphasis tags, never across them, so a span cannot
+    # straddle a boundary. Note and link markers are left inside the segments, so
+    # italics containing a note still work.
+    text = _sub_between_tags(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<i>\1</i>', text)
+    text = _sub_between_tags(r'_(?!\s)(.+?)(?<!\s)_', r'<i>\1</i>', text)
 
     if targets:
         # the link text keeps whatever emphasis it was given
@@ -197,12 +224,17 @@ def _walk_block_texts(blocks):
                 blocks[i] = (block[0], new)
             yield _set, block[1]
         elif kind == 'doc_block':
-            for j, (_k, _t) in enumerate(block[1]):
-                def _set(new, i=i, j=j, block=block):
-                    inner = list(block[1])
+            for j in range(len(block[1])):
+                # Read the block back out of `blocks` rather than closing over the
+                # one captured at the start: a doc_block with two lines to rewrite
+                # would otherwise have each setter rebuild from the original, so
+                # every change but the last was silently dropped.
+                def _set(new, i=i, j=j):
+                    cur = blocks[i]
+                    inner = list(cur[1])
                     inner[j] = (inner[j][0], new)
-                    blocks[i] = (block[0], inner) + tuple(block[2:])
-                yield _set, _t
+                    blocks[i] = (cur[0], inner) + tuple(cur[2:])
+                yield _set, blocks[i][1][j][1]
 
 
 def map_block_texts(chapters, fn):

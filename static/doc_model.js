@@ -55,7 +55,9 @@
     return { title: titleLine.trim() || null, byline: null };
   }
 
-  // ---- inline emphasis patterns (mirror doc_model.py; bold before italic) --
+  // ---- inline emphasis patterns (mirror doc_model.py; bold-italic, then bold,
+  // then italic). ***both*** is one run carrying both flags.
+  var BOLDITAL_RE     = /\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*|___(?!\s)(.+?)(?<!\s)___/g;
   var BOLD_RE         = /\*\*(.+?)\*\*/g;
   var ITALIC_STAR_RE  = /(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)/g;
   var ITALIC_UNDER_RE = /_(?!\s)(.+?)(?<!\s)_/g;
@@ -103,7 +105,8 @@
     var out = [], pos = 0;
     eachMatch(re, str, function (m) {
       if (m.index > pos) out.push({ hit: false, text: str.slice(pos, m.index) });
-      out.push({ hit: true, text: m[1] });
+      // m[2] is the second alternative's group (BOLDITAL_RE's ___ form)
+      out.push({ hit: true, text: m[1] !== undefined ? m[1] : m[2] });
       pos = m.index + m[0].length;
     });
     if (pos < str.length) out.push({ hit: false, text: str.slice(pos) });
@@ -135,10 +138,15 @@
 
   function emphasisRuns(text) {
     var runs = [];
-    splitBySpans(text, BOLD_RE).forEach(function (seg) {
-      if (seg.hit) { runs.push(run(seg.text, true, false)); return; }
-      splitItalics(seg.text).forEach(function (it) {
-        if (it.text) runs.push(run(it.text, false, it.italic));
+    // ***both*** is carved out first, so the ** pass cannot claim the first two
+    // stars of a *** marker and strand the third as literal text.
+    splitBySpans(text, BOLDITAL_RE).forEach(function (outer) {
+      if (outer.hit) { runs.push(run(outer.text, true, true)); return; }
+      splitBySpans(outer.text, BOLD_RE).forEach(function (seg) {
+        if (seg.hit) { runs.push(run(seg.text, true, false)); return; }
+        splitItalics(seg.text).forEach(function (it) {
+          if (it.text) runs.push(run(it.text, false, it.italic));
+        });
       });
     });
     runs = coalesce(runs);
@@ -161,23 +169,38 @@
   }
 
   function emphMd(r) {
+    if (r.bold && r.italic) return '***' + escapeAll(r.text) + '***';
     if (r.bold)   return '**' + escapeAll(r.text) + '**';
     if (r.italic) return '*' + escapeAll(r.text) + '*';
     return escapePlain(r.text);
   }
 
-  function runsToMd(runs) {
+  function emitRuns(runs, forceEscape) {
+    function one(r) {
+      return (forceEscape && !r.bold && !r.italic) ? escapeAll(r.text) : emphMd(r);
+    }
     var parts = [], i = 0;
     while (i < runs.length) {
       var link = runs[i].link || '';
-      if (!link) { parts.push(emphMd(runs[i])); i++; continue; }
+      if (!link) { parts.push(one(runs[i])); i++; continue; }
       var inner = [];                       // one [..](..) per run of the same link
       while (i < runs.length && (runs[i].link || '') === link) {
-        inner.push(emphMd(runs[i])); i++;
+        inner.push(one(runs[i])); i++;
       }
       parts.push('[' + inner.join('') + '](' + link + ')');
     }
     return parts.join('');
+  }
+
+  // escapePlain only asks whether a run survives a parse on its own, which is not
+  // enough: a plain "*" next to an italic "*y*" joins into "**y*" and re-reads as
+  // bold. Check the assembled line, and re-emit fully escaped if it drifted.
+  function runsToMd(runs) {
+    var md = emitRuns(runs, false);
+    if (!sameRuns(parseInline(md), coalesce(runs.map(function (r) {
+      return { text: r.text, bold: r.bold, italic: r.italic, link: r.link || '' };
+    })))) md = emitRuns(runs, true);
+    return md;
   }
 
   function sameRuns(a, b) {

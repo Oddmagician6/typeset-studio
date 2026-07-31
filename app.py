@@ -387,6 +387,17 @@ def _preflight(build_result, preset, page_count):
                               if build_result.get('fonts_embedded')
                               else 'Standard PDF fonts not embedded — platforms may reject')})
 
+    dead = build_result.get('dead_links') or []
+    if dead:
+        shown = ', '.join(sorted(set(dead))[:4])
+        more = len(set(dead)) - 4
+        checks.append({
+            'label': 'In-book links', 'ok': False,
+            'detail': (f'{len(dead)} link(s) point nowhere and were left as plain '
+                       f'text: {shown}' + (f' (+{more} more)' if more > 0 else '') +
+                       ' — check the anchor spelling, or the chapter title it was '
+                       'made from')})
+
     missing = build_result.get('notes_unplaced', 0)
     if missing:
         checks.append({
