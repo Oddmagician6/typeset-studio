@@ -14,11 +14,16 @@ line here.
 
 ## 1.2.2 — 31 July 2026
 
-A repair release for Word import. Everything here is about a manuscript arriving
-from Word looking like the manuscript you wrote.
+A repair release, mostly for Word import: a manuscript arriving from Word now
+looks like the manuscript you wrote. The desktop window also gets its right-click
+menu back.
 
 ### Fixed
 
+- **Right-click works again in the desktop app.** The window had no context menu at
+  all, so a misspelled word couldn't be corrected from the spell checker's
+  suggestions — and cut, copy and paste were missing from it too. (The app in a
+  browser tab was never affected.)
 - **Your Word paragraphs stay your Word paragraphs.** Text that merely *looked* like
   the app's own markup was being read as markup: a line beginning `~~~` opened a block
   and pulled the rest of the document into it, a line beginning `# ` became a chapter
