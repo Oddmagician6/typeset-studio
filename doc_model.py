@@ -289,15 +289,12 @@ def _runs_to_md(runs):
 
 
 def _block_collision(line):
-    """True if a paragraph line would be mistaken for a structural block."""
-    return bool(
-        manuscript.CHAPTER_RE.match(line)
-        or manuscript.UNNUMBERED_RE.match(line)
-        or manuscript.SUBHEAD_RE.match(line)
-        or manuscript.PART_RE.match(line)
-        or manuscript.DOCBLOCK_RE.match(line)
-        or manuscript.SCENE_BREAK_RE.match(line)
-    )
+    """True if a paragraph line would be mistaken for a structural block.
+
+    The predicate is a fact about the grammar, so it lives with the grammar; the
+    Word importer asks the same question before emitting a line of body text.
+    """
+    return manuscript.block_collision(line)
 
 
 # ---------------------------------------------------------------------------

@@ -315,5 +315,124 @@ finally:
     manuscript.FIGURE_DIR = _saved_figdir
     shutil.rmtree(tmp, ignore_errors=True)
 
+# ---------------------------------------------------------------------------
+# Word prose is prose, not Markdown.
+#
+# Everything above checks that a feature survives the trip. These check the
+# opposite failure: text that was never markup arriving as markup. A Word
+# paragraph beginning "#" opened a new chapter, one beginning "~~~" swallowed
+# the rest of the document into a block, and a writer's literal *stars* and
+# file_name came back italicised.
+# ---------------------------------------------------------------------------
+print('\n[word prose is not markdown]')
+_tmp2 = tempfile.mkdtemp()
+try:
+    def _imported(build):
+        path = os.path.join(_tmp2, 'p.docx')
+        d = Document()
+        build(d)
+        d.save(path)
+        rep = {}
+        md = manuscript.import_docx(path, report=rep)
+        return md, rep, manuscript.parse_markdown(md)
+
+    def _blocks(parsed):
+        return [b for c in parsed['chapters'] for b in c['blocks']]
+
+    def _markers(d):
+        d.add_heading('Real Chapter', level=1)
+        d.add_paragraph('Ordinary opening line.')
+        d.add_paragraph('#1 bestseller, said the blurb')
+        d.add_paragraph('~~~ and this looked like a fence')
+        d.add_paragraph('=== and this like a part divider')
+        d.add_paragraph('She said *hello* with literal asterisks')
+        d.add_paragraph('The file_name_here has underscores')
+
+    md, rep, parsed = _imported(_markers)
+    check('a line starting "#" does not open a chapter',
+          len(parsed['chapters']) == 1, [c['title'] for c in parsed['chapters']])
+    texts = [b[1] for b in _blocks(parsed) if b[0] == 'para']
+    check('the "#" line stays body text',
+          any(t.startswith('#1 bestseller') for t in texts), texts)
+    check('a "~~~" line does not open a block',
+          all(b[0] != 'doc_block' for b in _blocks(parsed)), _blocks(parsed))
+    check('a "===" line stays body text',
+          any(t.startswith('=== and this') for t in texts), texts)
+    check('literal asterisks are not italicised',
+          any('*hello*' in t and '<i>' not in t for t in texts), texts)
+    check('an underscored word is not italicised',
+          any('file_name_here' in t for t in texts), texts)
+
+    def _bold_heading(d):
+        h = d.add_heading('', level=1)
+        r = h.add_run('A Bold Title')
+        r.bold = True
+        d.add_paragraph('Body.')
+
+    md, rep, parsed = _imported(_bold_heading)
+    check('a bolded Word heading gives a clean title',
+          parsed['chapters'][0]['title'] == 'A Bold Title',
+          repr(parsed['chapters'][0]['title']))
+
+    def _bold_italic(d):
+        d.add_heading('C', level=1)
+        d.add_paragraph('Opening line.')
+        p = d.add_paragraph()
+        r = p.add_run('utterly certain')
+        r.bold = True
+        r.italic = True
+
+    md, rep, parsed = _imported(_bold_italic)
+    check('a bold+italic Word run keeps both',
+          any('<b><i>utterly certain</i></b>' in b[1]
+              for b in _blocks(parsed) if b[0] == 'para'),
+          [b[1] for b in _blocks(parsed)])
+
+    def _scene(d):
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        d.add_heading('C', level=1)
+        d.add_paragraph('Before.')
+        sb = d.add_paragraph('* * *')
+        sb.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        d.add_paragraph('After.')
+
+    md, rep, parsed = _imported(_scene)
+    check('a scene break still imports as a scene break',
+          any(b[0] == 'scene' for b in _blocks(parsed)), _blocks(parsed))
+
+    def _nested(d):
+        d.add_heading('C', level=1)
+        d.add_paragraph('Body.')
+        t = d.add_table(rows=1, cols=2)
+        t.cell(0, 0).text = 'outer'
+        inner = t.cell(0, 1).add_table(rows=1, cols=2)
+        inner.cell(0, 0).text = 'INNER-ONE'
+        inner.cell(0, 1).text = 'INNER-TWO'
+
+    md, rep, parsed = _imported(_nested)
+    check('a nested table is not dropped', rep.get('tables') == 1, rep)
+    check('and its words reach the book',
+          'INNER-ONE' in md and 'INNER-TWO' in md, md)
+
+    def _markup_cells(d):
+        d.add_heading('C', level=1)
+        d.add_paragraph('Body.')
+        t = d.add_table(rows=2, cols=2)
+        t.cell(0, 0).text = 'Name'
+        t.cell(0, 1).text = 'Note'
+        t.cell(1, 0).text = 'file_name'
+        t.cell(1, 1).text = '*starred*'
+
+    md, rep, parsed = _imported(_markup_cells)
+    cell_text = ' '.join(line[1]
+                         for block in _blocks(parsed) if block[0] == 'doc_block'
+                         for line in block[1])
+    check('the table block carries the cells', 'Name' in cell_text, cell_text)
+    check('markup characters in a cell stay literal',
+          'file_name' in cell_text and '*starred*' in cell_text
+          and '<i>' not in cell_text, cell_text)
+finally:
+    shutil.rmtree(_tmp2, ignore_errors=True)
+
 print('\n' + ('ALL PASS' if not fails else f'FAILED ({len(fails)}): ' + ', '.join(fails)))
 sys.exit(1 if fails else 0)

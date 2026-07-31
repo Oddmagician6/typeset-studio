@@ -567,14 +567,63 @@ def _slug(name):
     return slugify(name) or 'image'
 
 
-def _emph(runs):
-    """Word runs -> Markdown emphasis, mirroring the old importer's rules."""
+def _escape_literal(text):
+    r"""Escape the characters this convention reads as markup.
+
+    Word text is prose, not Markdown: a writer who typed ``*hello*`` or
+    ``file_name`` meant the characters, and without this they come back as
+    emphasis in the typeset book. Mirrors ``doc_model``'s escape layer, which
+    does the same job for text arriving from the editor.
+    """
+    return (text.replace('\\', '\\\\')
+                .replace('*', r'\*')
+                .replace('_', r'\_')
+                .replace('[', r'\['))
+
+
+def block_collision(line):
+    """True if a paragraph line would be misread as a structural block.
+
+    Lives here because it is a fact about this module's own grammar; both the
+    Word importer and the editor's round-trip layer ask it before emitting a
+    line of body text.
+    """
+    return bool(
+        CHAPTER_RE.match(line)
+        or UNNUMBERED_RE.match(line)
+        or SUBHEAD_RE.match(line)
+        or PART_RE.match(line)
+        or DOCBLOCK_RE.match(line)
+        or SCENE_BREAK_RE.match(line)
+    )
+
+
+def _guard(line):
+    r"""Backslash a body line that would otherwise be read as a block marker."""
+    return '\\' + line if block_collision(line) else line
+
+
+def _emph(runs, plain=False):
+    """Word runs -> Markdown emphasis, mirroring the old importer's rules.
+
+    `plain` returns the words with no markers and no escapes — what a heading
+    wants, since the engine stores chapter and part titles raw and would print
+    any marker as the character it is.
+    """
     out = []
     for r in runs:
         t = r.text
         if not t:
             continue
-        if r.bold:
+        if plain:
+            out.append(t)
+            continue
+        t = _escape_literal(t)
+        # bold *and* italic is one span: emitting `**t**` here dropped the
+        # italic on the way in, before anything downstream could keep it
+        if r.bold and r.italic:
+            t = f'***{t}***'
+        elif r.bold:
             t = f'**{t}**'
         elif r.italic:
             t = f'*{t}*'
@@ -654,7 +703,7 @@ def _run_note_refs(run):
     return found
 
 
-def _para_md(p, report, notes=None):
+def _para_md(p, report, notes=None, plain=False):
     """Paragraph text with emphasis, links and note references.
 
     ``Paragraph.runs`` skips runs nested in a ``w:hyperlink``, so the old
@@ -665,28 +714,32 @@ def _para_md(p, report, notes=None):
     `notes` is the note context from ``import_docx``; pass None to skip note
     handling entirely (the table-cell path does).
     """
+    def _fallback(text):
+        return text if plain else _escape_literal(text)
+
     try:
         parts = list(p.iter_inner_content())
     except AttributeError:                       # older python-docx
-        return _emph(p.runs) or p.text
+        return _emph(p.runs, plain) or _fallback(p.text)
 
     chunks = []
     for item in parts:
         if hasattr(item, 'address'):             # Hyperlink
-            text = _emph(item.runs)
-            md = _link_md(text, getattr(item, 'address', ''))
+            text = _emph(item.runs, plain)
+            md = None if plain else _link_md(text, getattr(item, 'address', ''))
             if md:
                 report['links_kept'] += 1
                 chunks.append(md)
             else:
-                report['links'] += 1
+                if not plain:
+                    report['links'] += 1
                 chunks.append(text)
             continue
-        chunks.append(_emph([item]))
+        chunks.append(_emph([item], plain))
         if notes is not None:
             for ref in _run_note_refs(item):
                 chunks.append(_note_ref(ref, notes, report))
-    return ''.join(chunks) or p.text
+    return ''.join(chunks) or _fallback(p.text)
 
 
 def _note_ref(ref, notes, report):
@@ -755,6 +808,22 @@ def _para_images(p, stem, report):
     return found
 
 
+def _cell_text(cell):
+    """Every word in a cell, including any table nested inside it.
+
+    `_Cell.text` reads the cell's paragraphs only, so a cell holding a nested
+    table read as empty — and a table whose rows all read empty was dropped
+    whole, without even a line in the import summary. Nesting has no equivalent
+    in a `~~~ table`, so the inner rows are flattened into the cell rather than
+    lost; the words reach the book, which is what the writer cares about.
+    """
+    parts = [p.text for p in cell.paragraphs]
+    for inner in getattr(cell, 'tables', []):
+        for row in inner.rows:
+            parts.extend(_cell_text(c) for c in row.cells)
+    return ' '.join(' '.join(parts).split())
+
+
 def _table_md(tbl, report):
     """A Word table -> a `~~~ table` block, one line per row.
 
@@ -764,7 +833,7 @@ def _table_md(tbl, report):
     """
     rows = []
     for row in tbl.rows:
-        cells = [' '.join(c.text.split()).replace('|', '/') for c in row.cells]
+        cells = [_escape_literal(_cell_text(c)).replace('|', '/') for c in row.cells]
         # a merged row repeats the same cell object; collapse the repeats
         dedup = [c for i, c in enumerate(cells) if i == 0 or c != cells[i - 1]]
         if any(dedup):
@@ -903,8 +972,13 @@ def import_docx(path, report=None):
         # keep the manual line breaks for now; each branch below decides whether
         # they mean anything (verse, an address block) or should be collapsed
         raw = _para_md(p, rep, notes).strip()
-        lines = [ln.strip() for ln in raw.split('\n') if ln.strip()]
-        text = _one_line(raw)
+        # `_escape_literal` has already neutralised * _ [ ; a line that *starts*
+        # with #, ##, ===, ~~~ or a scene break is still structure, and a Word
+        # paragraph beginning "#1 bestseller" would open a new chapter. Guard the
+        # line, and take structural decisions from the untouched Word text.
+        plain_text = _one_line(p.text)
+        lines = [_guard(ln.strip()) for ln in raw.split('\n') if ln.strip()]
+        text = _guard(_one_line(raw))
 
         images = _para_images(p, stem, rep)
         if images:
@@ -929,7 +1003,9 @@ def import_docx(path, report=None):
             flush_all()
             flush_notes()                     # the outgoing chapter's notes
             rep['chapters'] += 1
-            out.extend(['', '# ' + text, ''])
+            # titles are stored raw by the engine, so a bolded Word heading must
+            # arrive as words: `# **Title**` printed the asterisks
+            out.extend(['', '# ' + _one_line(_para_md(p, rep, None, plain=True)), ''])
             continue
         if style.startswith('heading'):
             flush_all()
@@ -938,7 +1014,7 @@ def import_docx(path, report=None):
             continue
         if not text:
             continue
-        if SCENE_BREAK_RE.match(text):
+        if SCENE_BREAK_RE.match(plain_text):
             flush_all()
             out.extend(['', '* * *', ''])
             continue
