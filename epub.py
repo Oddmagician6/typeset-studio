@@ -67,7 +67,7 @@ def _endnotes_xhtml(chapters, preset):
             continue
         if em.get('group_by_chapter', True):
             label = ch.get('title') or f'Chapter {i}'
-            body.append(f'  <h2 class="note-group">{_markup_to_html(label)}</h2>')
+            body.append(f'  <h2 class="note-group">{_text_to_html(label)}</h2>')
         for note in notes:
             text = _markup_to_html(note['text']) if note['text'] \
                 else '<em>[no note text]</em>'
@@ -108,12 +108,48 @@ def _markup_to_html(text):
     return _resolve_anchors(text)
 
 
+def _text_to_html(text):
+    """Escape a raw plain-text string for XHTML: a title, a byline, a heading.
+
+    Block text reaches this module already escaped, because it came through
+    `manuscript._inline`. Titles do not: a chapter or part title, the book's own
+    title, subtitle and author, the matter-page headings and the number formats
+    out of the preset are all carried as plain text and emitted directly. So a
+    bare `&` in "Salt & Ash" — an ordinary title, and an ordinary co-author line —
+    made every page carrying it malformed, which the validator rejects and a
+    strict reader refuses to open. The PDF was unaffected; only the ebook.
+
+    Not to be confused with `_markup_to_html`, which takes text that is already
+    escaped and only renames its tags.
+    """
+    return html.escape(text or '', quote=False)
+
+
+_EMPH_TAG_RE = re.compile(r'</?(?:strong|em)>')
+
+
+def _sub_between_emph(pattern, repl, text):
+    """Apply an emphasis substitution to the stretches between the tags emitted so far.
+
+    Mirrors manuscript._sub_between_tags: an unpaired marker earlier in the line
+    would otherwise pair with one inside a span already emitted, producing tags
+    that cross — which is not well-formed XHTML.
+    """
+    out, pos = [], 0
+    for m in _EMPH_TAG_RE.finditer(text):
+        out.append(re.sub(pattern, repl, text[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(re.sub(pattern, repl, text[pos:]))
+    return ''.join(out)
+
+
 def _md_emph_to_html(text):
     """Escape XML, then convert Markdown links and emphasis to HTML.
 
-    Mirrors manuscript._inline (links carved out first, then bold before italic)
-    for the places that render **raw author text** — the matter pages and the
-    contributors list — rather than already-parsed manuscript blocks. The PDF
+    Mirrors manuscript._inline (links carved out first, then bold-italic, bold,
+    italic) for the places that render **raw author text** — the matter pages and
+    the contributors list — rather than already-parsed manuscript blocks. The PDF
     runs the same text through `_ms_inline`, so without this the ebook showed
     literal asterisks and dropped every link on the Also By page.
     """
@@ -126,9 +162,16 @@ def _md_emph_to_html(text):
         return f'\x00{len(targets) - 1}\x00{m.group(1)}\x01'
 
     text = _LINK_RE.sub(_stash, text)
+    # Bold-italic first, and as one span — the same reason manuscript._inline
+    # does. Left to the ** and * passes below, ***x*** comes out cross-nested
+    # (<strong><em>x</strong></em>): not well-formed XHTML, so the page fails
+    # epubcheck and strict readers refuse it. ___x___ needs the same pass or its
+    # underscores survive into the text as literals.
+    text = re.sub(r'\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*', r'<strong><em>\1</em></strong>', text)
+    text = re.sub(r'___(?!\s)(.+?)(?<!\s)___', r'<strong><em>\1</em></strong>', text)
     text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
-    text = re.sub(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<em>\1</em>', text)
-    text = re.sub(r'_(?!\s)(.+?)(?<!\s)_', r'<em>\1</em>', text)
+    text = _sub_between_emph(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<em>\1</em>', text)
+    text = _sub_between_emph(r'_(?!\s)(.+?)(?<!\s)_', r'<em>\1</em>', text)
     if targets:
         text = re.sub(
             r'\x00(\d+)\x00(.*?)\x01',
@@ -286,7 +329,7 @@ def _xhtml(title, body_content, css_href='style.css'):
         '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">\n'
         '<head>\n'
         '  <meta charset="UTF-8"/>\n'
-        f'  <title>{title}</title>\n'
+        f'  <title>{_text_to_html(title)}</title>\n'
         f'  <link rel="stylesheet" type="text/css" href="{css_href}"/>\n'
         '</head>\n'
         '<body>\n'
@@ -323,12 +366,15 @@ def _toc_page_xhtml(chapters, preset):
         ch_part_num = ch_part['number'] if ch_part else None
         if ch_part_num is not None and ch_part_num != current_part_num:
             part_label = ch_part.get('title') or pd_fmt.format(n=ch_part_num)
-            body += f'    <li class="toc-part"><a href="part{ch_part_num:03d}.xhtml">{part_label}</a></li>\n'
+            body += ('    <li class="toc-part">'
+                     f'<a href="part{ch_part_num:03d}.xhtml">'
+                     f'{_text_to_html(part_label)}</a></li>\n')
             current_part_num = ch_part_num
         label = ch.get('title') or (num_fmt.format(n=_nums[idx - 1])
                                    if show_num and _nums[idx - 1] else f'Section {idx}')
         indent = ' class="toc-indent"' if ch_part_num is not None else ''
-        body += f'    <li{indent}><a href="chapter{idx:03d}.xhtml">{label}</a></li>\n'
+        body += (f'    <li{indent}><a href="chapter{idx:03d}.xhtml">'
+                 f'{_text_to_html(label)}</a></li>\n')
     body += '  </ul>\n</div>\n'
     return _xhtml('Contents', body)
 
@@ -339,9 +385,10 @@ def _part_xhtml(part_num, title, preset):
     num_fmt  = pd.get('number_format', 'Part {n}')
     body = '<div class="part-page">\n'
     if show_num:
-        body += f'  <p class="part-num">{num_fmt.format(n=part_num)}</p>\n'
+        body += ('  <p class="part-num">'
+                 f'{_text_to_html(num_fmt.format(n=part_num))}</p>\n')
     if title:
-        body += f'  <h1 class="part-title">{title}</h1>\n'
+        body += f'  <h1 class="part-title">{_text_to_html(title)}</h1>\n'
     body += '</div>\n'
     return _xhtml(title or f'Part {part_num}', body)
 
@@ -361,19 +408,20 @@ def _front_xhtml(meta):
     subtitle = meta.get('subtitle', '')
     author   = meta.get('author', '')
     cp_text  = meta.get('copyright') or _default_copyright(meta)
-    cp_html  = cp_text.replace('\n', '<br/>')
+    # escaped before the breaks go in, or the <br/> would be escaped too
+    cp_html  = _text_to_html(cp_text).replace('\n', '<br/>')
 
     body = '<div class="front">\n'
 
     if level == 'full':
-        body += f'  <h1 class="main">{title}</h1>\n'
+        body += f'  <h1 class="main">{_text_to_html(title)}</h1>\n'
         body += '  <hr style="margin: 2em auto; width: 30%"/>\n'
 
     if level in ('full', 'title'):
-        body += f'  <h1 class="main">{title}</h1>\n'
+        body += f'  <h1 class="main">{_text_to_html(title)}</h1>\n'
         if subtitle:
-            body += f'  <p class="subtitle">{subtitle}</p>\n'
-        body += f'  <p class="author">{author}</p>\n'
+            body += f'  <p class="subtitle">{_text_to_html(subtitle)}</p>\n'
+        body += f'  <p class="author">{_text_to_html(author)}</p>\n'
 
     body += '</div>\n'
 
@@ -388,7 +436,7 @@ def _matter_xhtml(heading, text, css_class):
     blocks = [b.strip() for b in text.replace('\r\n', '\n').split('\n\n') if b.strip()]
     body   = f'<div class="{css_class}">\n'
     if heading:
-        body += f'  <h1 class="matter-head">{heading}</h1>\n'
+        body += f'  <h1 class="matter-head">{_text_to_html(heading)}</h1>\n'
     _attr_markers = ('—', '–', '--', '-')
     for i, b in enumerate(blocks):
         cls = ''
@@ -576,13 +624,16 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
         lines.append(_chapter_art_html(preset, art_href, 'above'))
 
     if show_num and number is not None:
-        lines.append(f'  <h1 class="chapter-num">{num_fmt.format(n=number)}</h1>')
+        lines.append('  <h1 class="chapter-num">'
+                     f'{_text_to_html(num_fmt.format(n=number))}</h1>')
 
     if chapter.get('title'):
-        lines.append(f'  <h1 class="chapter-title">{_markup_to_html(chapter["title"])}</h1>')
+        lines.append('  <h1 class="chapter-title">'
+                     f'{_text_to_html(chapter["title"])}</h1>')
 
     if chapter.get('byline'):
-        lines.append(f'  <p class="chapter-byline">{_markup_to_html(chapter["byline"])}</p>')
+        lines.append('  <p class="chapter-byline">'
+                     f'{_text_to_html(chapter["byline"])}</p>')
 
     if art_href and art_pos == 'below':
         lines.append(_chapter_art_html(preset, art_href, 'below'))
@@ -595,7 +646,7 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
         val  = block[1]
         if kind == 'scene':
             lines.append(_scene_orn_html(preset, scene_orn) if scene_orn else
-                         f'  <p class="scene-break">{scene_glyph}</p>')
+                         f'  <p class="scene-break">{_text_to_html(scene_glyph)}</p>')
             no_indent_next = True
         elif kind == 'subhead':
             lines.append(f'  <h2>{_markup_to_html(val)}</h2>')
@@ -936,10 +987,10 @@ def _content_opf(uid, meta, manifest_items, spine_items, modified):
         ' unique-identifier="uid" xml:lang="en">\n'
         '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
         f'    <dc:identifier id="uid">{uid}</dc:identifier>\n'
-        f'    <dc:title>{title}</dc:title>\n'
-        f'    <dc:creator>{author}</dc:creator>\n'
+        f'    <dc:title>{_text_to_html(title)}</dc:title>\n'
+        f'    <dc:creator>{_text_to_html(author)}</dc:creator>\n'
         '    <dc:language>en</dc:language>\n'
-        f'    <dc:date>{year}</dc:date>\n'
+        f'    <dc:date>{_text_to_html(year)}</dc:date>\n'
         f'    <meta property="dcterms:modified">{modified}</meta>\n'
         + _a11y_meta(manifest_items) +
         cover_meta_xml +
@@ -995,7 +1046,8 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
                     _matter.heading(_sec, author) or _sec['key'].title()))
 
     items = '\n'.join(
-        f'      <li><a href="{href}">{label}</a></li>' for href, label in toc
+        f'      <li><a href="{href}">{_text_to_html(label)}</a></li>'
+        for href, label in toc
     )
     body = (
         '<nav epub:type="toc" id="toc">\n'

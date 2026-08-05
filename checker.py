@@ -18,10 +18,17 @@ import collections
 
 _TAG_RE = re.compile(r'<[^>]+>')
 
+# Two markers stand for a gap between words rather than for formatting: the line
+# break between verses, and the divider between table cells. Stripping them like
+# a <b> tag runs the words either side together — "Ada|Lovelace" becomes
+# "AdaLovelace", which then reads as a brand-new capitalised name to the variant
+# check and reaches the LLM summary in that state.
+_GAP_RE = re.compile(r'<br\s*/?>|' + re.escape('<cell/>'))
+
 
 def _plain(markup: str) -> str:
     """Strip ReportLab XML tags and unescape HTML entities to get plain text."""
-    return html.unescape(_TAG_RE.sub('', markup))
+    return html.unescape(_TAG_RE.sub('', _GAP_RE.sub(' ', markup)))
 
 
 def _chapter_paras(chapter: dict) -> list:
@@ -86,7 +93,14 @@ def _check_duplicate_titles(parsed: dict) -> list:
 def _check_thin_chapters(parsed: dict) -> list:
     issues = []
     for ch_idx, ch in enumerate(parsed['chapters']):
-        if not any(b[0] == 'para' for b in ch['blocks']):
+        # A chapter's text can live entirely inside a document block — a poem, a
+        # letter, a table — and in a collection of verse every chapter does.
+        # Counting only loose paragraphs called all of them empty.
+        has_text = any(
+            b[0] == 'para'
+            or (b[0] == 'doc_block' and any((sub[1] or '').strip() for sub in b[1]))
+            for b in ch['blocks'])
+        if not has_text:
             issues.append({
                 'label':    f'Empty chapter: {_loc(ch_idx, ch)}',
                 'severity': 'warn',

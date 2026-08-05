@@ -3054,12 +3054,23 @@ def _endnotes_page(chapters, fonts, st, preset):
     return out
 
 
-def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
-    """Flowables for one front/back matter page. Caller handles page breaks."""
+def _matter_page(heading, text, fonts, st, smartquotes, style='body', unlink=None):
+    """Flowables for one front/back matter page. Caller handles page breaks.
+
+    `unlink` drops in-book links with no destination, exactly as the chapters get
+    (see `_resolve_inbook_links`). Matter carries these links too — an Also By
+    page listing `[The Salt Road](#the-salt-road)` is the common case — and an
+    anchor left stale by a renamed chapter is fatal to ReportLab, so it has to be
+    caught here as well or the whole PDF dies on the front matter.
+    """
     # Split on blank lines into raw paragraph strings
     blocks = [' '.join(l.strip() for l in b.split('\n') if l.strip()).strip()
               for b in text.replace('\r\n', '\n').split('\n\n')]
     blocks = [b for b in blocks if b]
+
+    def _md(s):
+        markup = _ms_inline(s, smartquotes)
+        return unlink(markup) if unlink else markup
 
     out = [BlankMarker()]
 
@@ -3069,7 +3080,7 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
                            alignment=TA_CENTER, firstLineIndent=0)
         out.append(Spacer(1, 2.2 * inch))
         for b in blocks:
-            out.append(Paragraph(_ms_inline(b, smartquotes), s))
+            out.append(Paragraph(_md(b), s))
 
     elif style == 'epigraph':
         s_q = ParagraphStyle('epiq', fontName=fonts['regular'],
@@ -3090,7 +3101,7 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
             nxt = blocks[i + 1] if i + 1 < len(blocks) else ''
             # last block, or the one before another block's source line
             is_attr = any(b.startswith(m) for m in _attr)
-            out.append(Paragraph(_ms_inline(b, smartquotes), s_a if is_attr else s_q))
+            out.append(Paragraph(_md(b), s_a if is_attr else s_q))
             if heading and is_attr and nxt:
                 out.append(Spacer(1, 8))          # breathing room between quotes
 
@@ -3103,7 +3114,7 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
             out.append(Paragraph(heading, st['chap_title']))
             out.append(Spacer(1, 0.4 * inch))
         for b in blocks:
-            out.append(Paragraph(_ms_inline(b, smartquotes), s))
+            out.append(Paragraph(_md(b), s))
 
     elif style == 'contributors':
         # One contributor per blank-line-separated block. The name (text before an
@@ -3123,7 +3134,7 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
             md = '**' + name.strip() + '**'
             if bio.strip():
                 md += ' — ' + bio.strip()
-            out.append(Paragraph(_ms_inline(md, smartquotes), s))
+            out.append(Paragraph(_md(md), s))
 
     else:  # body: acknowledgments, about_author
         out.append(Spacer(1, 1.0 * inch))
@@ -3132,14 +3143,14 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body'):
             out.append(Spacer(1, 0.4 * inch))
         s_first = ParagraphStyle('mb1', parent=st['body'], firstLineIndent=0)
         for i, b in enumerate(blocks):
-            out.append(Paragraph(_ms_inline(b, smartquotes), s_first if i == 0 else st['body']))
+            out.append(Paragraph(_md(b), s_first if i == 0 else st['body']))
 
     return out
 
 
 def _build_story(manuscript, preset, meta, fonts, st, head_font,
                  has_cover=False, avail_w=0, hyph=None, toc_flowables=None,
-                 fn_measure=False, fn_probe=None):
+                 fn_measure=False, fn_probe=None, matter_unlink=None):
     glyph = preset['scene_break']['glyph']
     story = []
     # note markers are neutral in the parsed model; make them superscripts before
@@ -3216,7 +3227,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         _fm_first = False
         story.extend(_matter_page(_matter.heading(_sec, meta.get('author', '')),
                                   meta[_sec['key']].strip(),
-                                  fonts, st, sq, _sec['style']))
+                                  fonts, st, sq, _sec['style'],
+                                  unlink=matter_unlink))
 
     # ---- body ----
     c  = preset['chapter']
@@ -3342,7 +3354,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         _bm_first = False
         story.extend(_matter_page(_matter.heading(_sec, _author),
                                   meta[_sec['key']].strip(),
-                                  fonts, st, sq, _sec['style']))
+                                  fonts, st, sq, _sec['style'],
+                                  unlink=matter_unlink))
 
     return story
 
@@ -3588,6 +3601,28 @@ def _press_canvasmaker(pw, ph):
 _INBOOK_LINK_RE = re.compile(r'<a href="#([^"]*)">(.*?)</a>', re.S)
 
 
+def _inbook_anchors(chapters):
+    """Every `#anchor` this book plants a destination for."""
+    known = set()
+    for idx, ch in enumerate(chapters, 1):
+        known.update(_ms_anchors(ch, idx))
+    return known
+
+
+def _unlink_dead(text, known, dead):
+    """Drop the `<a href="#…">` wrapper wherever `#…` is not a known anchor.
+
+    The link text stays put; only the link goes. Every dead target is recorded
+    in `dead` so preflight can name it.
+    """
+    def repl(m):
+        if m.group(1) in known:
+            return m.group(0)
+        dead.append('#' + m.group(1))
+        return m.group(2)
+    return _INBOOK_LINK_RE.sub(repl, text)
+
+
 def _resolve_inbook_links(chapters):
     """Unlink `#anchor` links this book has no destination for.
 
@@ -3599,21 +3634,18 @@ def _resolve_inbook_links(chapters):
     stays put, only the link is dropped, and every dead target is returned so
     preflight can name it.
 
+    Matter pages carry the same links (an Also By page pointing at its chapters
+    is the usual case) and are unlinked the same way — see `_matter_page` — so a
+    renamed chapter can't kill the build from the front matter either.
+
     Note references are still `<note …/>` markers at this point and are turned
     into links later, so they are never seen — and never unlinked — here.
     """
-    known = set()
-    for idx, ch in enumerate(chapters, 1):
-        known.update(_ms_anchors(ch, idx))
+    known = _inbook_anchors(chapters)
     dead = []
 
     def fix(text, _ch):
-        def repl(m):
-            if m.group(1) in known:
-                return m.group(0)
-            dead.append('#' + m.group(1))
-            return m.group(2)
-        return _INBOOK_LINK_RE.sub(repl, text)
+        return _unlink_dead(text, known, dead)
 
     return _ms_map_texts(chapters, fix), dead
 
@@ -3647,6 +3679,18 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
     # from the same structure, and the EPUB resolves its own links.
     fixed_chapters, dead_links = _resolve_inbook_links(manuscript['chapters'])
     manuscript = dict(manuscript, chapters=fixed_chapters)
+
+    # Matter pages are rebuilt on every layout pass (footnote measuring, TOC),
+    # so their dead targets are collected in a set — a broken anchor is one
+    # broken anchor however many times the story gets built.
+    _known_anchors = _inbook_anchors(fixed_chapters)
+    _matter_dead = set()
+
+    def matter_unlink(markup):
+        found = []
+        out = _unlink_dead(markup, _known_anchors, found)
+        _matter_dead.update(found)
+        return out
 
     cover = None
     cover_path = None            # temp image path to clean up (image mode only)
@@ -3702,7 +3746,8 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
             story = _build_story(manuscript, preset, meta, fonts, st, head_font,
                                  has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
                                  fn_measure=True, fn_probe=probe,
-                                 toc_flowables=make_toc() if make_toc else None)
+                                 toc_flowables=make_toc() if make_toc else None,
+                                 matter_unlink=matter_unlink)
             d = _make_doc(tmp)
             d._fn_reserve, d._fn_assign = reserve, assign
             d.build(story)
@@ -3728,7 +3773,8 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
         fd, tmp = tempfile.mkstemp(suffix='.pdf')
         os.close(fd)
         story1 = _build_story(manuscript, preset, meta, fonts, st, head_font,
-                              has_cover=bool(cover), avail_w=avail_w, hyph=hyph)
+                              has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
+                              matter_unlink=matter_unlink)
         doc1 = _make_doc(tmp)
         doc1.build(story1)
         body_start = doc1._body_start or 1
@@ -3761,14 +3807,16 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
                                has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
                                toc_flowables=_build_toc(entries, body_start, avail_w,
                                                         preset, fonts, st,
-                                                        folio_offset=toc_pages))
+                                                        folio_offset=toc_pages),
+                               matter_unlink=matter_unlink)
         doc2 = _make_doc(out_path)
         doc2.build(story2)
         page_count = doc2.page
         unplaced_notes.extend(set(fn_flow) - doc2._fn_drawn)
     else:
         story = _build_story(manuscript, preset, meta, fonts, st, head_font,
-                             has_cover=bool(cover), avail_w=avail_w, hyph=hyph)
+                             has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
+                             matter_unlink=matter_unlink)
         doc = _make_doc(out_path)
         doc.build(story)
         page_count = doc.page
@@ -3781,7 +3829,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
     return {
         'page_count':     page_count,
         'notes_unplaced': len(unplaced_notes),
-        'dead_links':     dead_links,
+        'dead_links':     dead_links + sorted(_matter_dead),
         'font_family':    fonts['family'],
         'font_fallback':  fonts['fallback'],
         'font_details':   fonts['details'],

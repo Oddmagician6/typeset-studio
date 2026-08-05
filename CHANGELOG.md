@@ -10,6 +10,37 @@ line here.
 
 ## Unreleased
 
+### Fixed
+
+- **An "&" in a title no longer breaks the ebook.** A chapter called "Salt & Ash",
+  a book called "Sense & Sensibility", two authors credited as "Lovelace &
+  Babbage" — any ampersand (or `<`, `>`) in a title, subtitle, author, publisher,
+  part title or Also By entry made most of the EPUB's pages malformed: the
+  contents, the navigation, the chapter itself and the book's own metadata. Shops
+  reject a file like that, and a strict reader won't open it. Body text was never
+  affected, and neither was the PDF.
+- **A link on a front-matter page can no longer cost you the whole book.** An
+  "Also by this author" page (or a dedication, acknowledgements, contributors
+  note — any matter page) that linked to a chapter which had since been renamed
+  or removed stopped the PDF from building at all, with an error that named
+  neither the page nor the link. The link now quietly becomes plain text and the
+  broken target is listed in the build report, exactly as it already was for a
+  link inside a chapter.
+- **Bold italic on a front-matter page no longer breaks the ebook.** Writing
+  `***like this***` in a dedication or an Also By list produced an EPUB that
+  strict readers and the validator refuse — the page was malformed. `___like
+  this___` had a second problem: it printed its underscores instead of setting
+  the words bold italic. Both now match what the PDF has always done.
+- **A book of verse is no longer told every chapter is empty.** The continuity
+  check called any chapter "Empty" unless it had loose paragraphs, so a poem, a
+  letter, a table or a quotation standing as the whole chapter counted for
+  nothing — and a poetry collection was flagged from end to end. A chapter with
+  genuinely nothing in it is still reported.
+- **The continuity check reads verse and tables properly.** It was running the
+  words either side of a line break or a cell divider together, so "Ada |
+  Lovelace" was read as "AdaLovelace" — which could then be offered as a
+  misspelled character name, and was what got sent for the deeper analysis.
+
 ---
 
 ## 1.2.2 — 31 July 2026
