@@ -275,6 +275,20 @@ created, updated    ISO 8601 datetime strings
   `\*` / `\[` mechanism, which `doc_model` mirrors) cannot express it without teaching the
   round-trip model about cells — a new node type for a rare need in a low-priority block.
 
+- **The escape layer cannot express a literal `[^label]` either, so `\[^note]` comes back as a
+  real endnote.** Same shape as the `|` limit above, and worth knowing before touching
+  `_escape_plain`. `doc_model._parse_inline` understands links and emphasis but *not* note
+  references, so `\[^note]` (a literal bracket) and `[^note]` (a live reference) both land in
+  the model as the same plain-run text: the escape is destroyed at **parse** time, not lost on
+  the way out. `_escape_plain` then asks its one question — "does this text survive a parse
+  unchanged?" — gets "yes", and emits the run bare. A round trip through the structured editor
+  therefore turns the writer's deliberate `\[^note]` into a live endnote plus a phantom entry
+  on the Notes page. **Reasoning harder in `_escape_plain` cannot fix it**: from the run text
+  alone the two cases are identical, so the model has to learn about note references (a run
+  flag or a node type). Scheduled as **#64**. *Real endnote references are unaffected* —
+  verified across ten realistic paragraph shapes including refs inside bold and italic; only
+  the escaped form breaks, and no existing manuscript contains a backslash.
+
 - **Table column widths are measured against the face each cell is actually set in.**
   `_table_widths` takes the grid as `(plain text, font)` pairs because the header is bold
   (or uppercased for small caps) and measuring it in the body face is enough to break a
@@ -1810,6 +1824,35 @@ Only commit to the heavy build if the spike round-trips cleanly.
 ~~**New obligation once people author in-app:** autosave + backups + no data loss~~ — **MET
 (feature #63).** Saves are atomic and every few minutes of writing is kept, with a History
 panel that restores. Keep `.docx` import as the on-ramp for existing manuscripts.
+
+**64. Teach the document model about note references** *(small–medium; closes the last hole in
+the escape layer)*
+Found on a bug sweep (2026-08-05), and the one finding from it left unfixed because it needs a
+model change rather than a patch — see the `\[^note]` gotcha above for the mechanism. A writer
+who types a literal `\[^note]` gets a live endnote and a phantom Notes entry back, because
+`doc_model._parse_inline` collapses the escaped and unescaped forms into identical run text
+before `to_markdown` ever runs.
+- **The fix is where the information is lost, not where it is noticed.** `_parse_inline` has to
+  carry the distinction — either a `note` run field (mirroring how `link` was added in #49) or a
+  dedicated node — so `_runs_to_md` can emit `\[` for the literal and a bare `[^label]` for the
+  reference. Reasoning harder inside `_escape_plain` is a dead end: the two cases are
+  indistinguishable from the run text.
+- **Both copies of the layer**, per #49's lesson: `doc_model.py` *and* `static/doc_model.js`,
+  with the JS↔Python parity run over a corpus containing both forms. `static/wysiwyg.js` needs
+  to render a reference as something the writer can see and not accidentally split.
+- **Also worth doing here:** `manuscript._number_notes` walks only chapter blocks
+  (`_walk_block_texts`), never `note_defs`, so a `[^b]` cited inside a `[^a]: …` definition
+  keeps its un-numbered `<note id="b"/>` marker. Neither builder matches that (both want
+  `n="…"`), so **the reference is silently dropped** — the note prints as "See also for more."
+  with the marker simply gone. Verified: both outputs build and the EPUB stays valid, so it
+  fails quietly. That directly contradicts `_number_notes`' own stated rule — *"a silently
+  vanishing note is worse than an obvious one"* — which is why it belongs with this item. Rare
+  (a note citing a note), cheap to fold in while the numbering code is already open.
+- **Priority is genuinely low.** No existing manuscript contains a backslash, the escape syntax
+  is new, and ordinary endnote references round-trip correctly today. This is a correctness
+  loose end to close when the round-trip layer is next opened, not a reason to open it.
+*Prior art for the shape of the change: #49 added the `link` field across all three copies of
+the model and is the closest template.*
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 
