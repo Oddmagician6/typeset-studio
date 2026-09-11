@@ -35,8 +35,8 @@ python promo\encode.py                                    # -> promo\*.mp4
 ```
 
 The PNGs go to `%TEMP%\typeset-reel-frames`, deliberately **outside** the repo:
-they run to ~430 MB, and this working copy sits in a OneDrive folder that would
-otherwise sync every one of them. The encoded MP4 lands in `promo/` and is
+they run to ~430 MB, which is no fun to keep in a working copy - and worse in one
+that sits inside a synced cloud folder. The encoded MP4 lands in `promo/` and is
 gitignored — it rebuilds from the tracked sources in about three minutes.
 
 Known-good output: 27.00s, 1080×1920, H.264 High @ L4.1, yuv420p, 30 fps,
@@ -96,3 +96,7 @@ and a mis-decoded em dash shows up as `â€"`.
 Regenerating the stills themselves needs the app running at `127.0.0.1:5050`
 plus `render_assets.py`; see `pack_*.py` for the crop boxes, which are measured
 to the app's content box so the UI reads about twice as large as a raw capture.
+
+The raw UI captures are not tracked. `pack_assets.py`, `pack_vertical.py`, and
+`measure_content.py` read them from `promo/shots/`; set `TYPESET_PROMO_SHOTS` to
+point somewhere else. The filenames each script expects are listed at its top.

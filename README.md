@@ -1,5 +1,10 @@
 # Typeset Studio
 
+[![Licence: MIT](https://img.shields.io/badge/Licence-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776ab.svg)](https://www.python.org/downloads/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#running-it-windows)
+[![Offline](https://img.shields.io/badge/Runs-fully%20offline-2ea44f.svg)](#on-the-network)
+
 A small, private tool for setting print-ready book interiors. It runs on your own
 computer, opens in your browser, and turns a manuscript into a typeset 6×9 (or any
 trim) PDF with the fonts embedded — ready for KDP or IngramSpark.
@@ -12,12 +17,47 @@ and tweak only what that book needs.
 Current version **1.2.2** — see [CHANGELOG.md](CHANGELOG.md) for what's new. The **About**
 page (linked in the footer) shows the version you're running.
 
-**On the network:** Typeset Studio works entirely offline and sends nothing anywhere. The
-one exception is optional and **off by default** — on the About page you can switch on a
+### On the network
+
+Typeset Studio works entirely offline and sends nothing anywhere. The one exception is
+optional and **off by default** — on the About page you can switch on a
 once-a-day check for new releases, which reads a version number from the project's releases
 feed and tells you if there's a newer one. No account, no identifier, no telemetry; it never
 installs anything by itself; and if you're offline it fails quietly. Turning it off again
 also forgets what it learned.
+
+---
+
+## What it does
+
+- **Typesets a real book interior** — a manuscript in, an embedded-font PDF out, at any
+  trim KDP or IngramSpark accepts.
+- **Styles you reuse.** A style is the whole typographic recipe; duplicate it per customer
+  and change only what that book needs.
+- **Cover Studio** — 24 designed cover templates across 8 families, plus a print wrap
+  (paperback or hardcover) with spine width computed from your page count and paper stock.
+- **Write in the app** — a WYSIWYG editor over a plain-Markdown file, so your words stay
+  yours in a format you can read without this tool.
+- **EPUB as well as PDF**, from the same source.
+- **A preflight checker** that looks for the things print shops reject.
+- **Nothing leaves your machine.** No account, no telemetry, no cloud.
+
+![The Styles home page](docs/images/shot-styles.jpg)
+
+## Contents
+
+- [Running it](#running-it-windows) · [macOS / Linux](#running-it-macos--linux)
+- [Using it](#using-it) — [writing in the app](#writing-in-the-app-and-getting-your-words-back),
+  [markup](#manuscript-markup), [Word files](#word-files), [notes](#endnotes),
+  [links](#links), [lists & quotations](#lists-quotations-and-aligned-passages),
+  [tables](#tables), [illustrations](#illustrations)
+- [Building a style per customer](#building-a-style-per-customer) —
+  [ornaments](#scene-break-ornaments), [chapter art](#chapter-opening-art)
+- [Fonts](#fonts) · [Preview](#seeing-the-book-before-you-build-it) ·
+  [Checking the ebook](#checking-the-ebook)
+- [Handing off to print](#handing-off-to-print) —
+  [press-ready interiors](#press-ready-interiors), [the wrap](#the-print-wrap--paperback-or-hardcover)
+- [Contributing](#contributing) · [Licence](#licence) · [Folder map](#folder-map)
 
 ---
 
@@ -83,6 +123,8 @@ Composed files are saved in the `out/` folder as well, named by title and timest
 
 ### Writing in the app, and getting your words back
 
+![The manuscript editor](docs/images/shot-editor.jpg)
+
 A project can be written in the app (**Write** on a project card), which means the file
 on your machine may be the only copy of the book. Two things guard it.
 
@@ -114,6 +156,8 @@ On the *Set a book* page you control the pages before your story:
 The story always begins numbering at page 1, however much front matter you include.
 
 ### Cover art
+
+![Cover Studio](docs/images/shot-cover-studio.jpg)
 
 Optionally drop in a **cover image** (`.jpg`/`.png`). It becomes a full-bleed first page,
 cropped to your trim. Two ways to use it:
@@ -490,6 +534,8 @@ ours and always run.
 
 ## Handing off to print
 
+![The result page, with print spec and preflight](docs/images/shot-result.jpg)
+
 The interior PDF embeds and subsets its fonts, which is what KDP and IngramSpark
 require. Before uploading, still confirm per platform:
 
@@ -565,20 +611,62 @@ set up falls outside it. KDP doesn't print dust jackets at all; the preview says
 
 ---
 
+## Contributing
+
+Issues and pull requests are welcome. A few things worth knowing before you start:
+
+- **The tests are plain Python, no pytest.** Run a file directly — `python test_wrap.py` —
+  and it prints each check and ends with `ALL PASS`. Before opening a PR, run the lot:
+  `for f in test_*.py; do python "$f" || break; done` (PowerShell:
+  `Get-ChildItem test_*.py | ForEach-Object { python $_.Name }`).
+- **`ROADMAP.md` is the design record.** Numbered entries explain why things are the way
+  they are, including the ideas that were tried and rejected. Worth a look before proposing
+  a large change.
+- **Output must stay byte-stable.** Much of the suite asserts exact PDF/EPUB/Markdown
+  round-trips, so a change that shifts layout will show up as a failure — that's the point.
+  If the new output is correct, update the expectation in the same commit and say why.
+- **No new runtime dependencies** without a good reason. The install is deliberately small,
+  and the app has to keep working with no network.
+
+## Licence
+
+Typeset Studio's own code is **MIT**-licensed — see [`LICENSE`](LICENSE). Use it,
+change it, ship it, sell what you make with it.
+
+The bundled typefaces are **not** covered by that licence and never were: all seven
+are under the SIL Open Font Licence, with the texts kept in `fonts/licenses/`. The OFL
+is permissive about embedding fonts in a book you sell, which is the whole point of
+shipping them — but it travels with the font files, so keep those licence texts
+alongside them in anything you redistribute.
+
+---
+
 ## Folder map
 
 ```
 typeset_studio/
-  run.bat            double-click to start (Windows)
-  app.py             the web app
-  engine.py          the typesetting engine
+  run.bat / run.sh   double-click (Windows) or ./run.sh (macOS, Linux) to start
+  app.py             the web app - routes, project storage, cover templates
+  engine.py          the typesetting engine (PDF)
+  epub.py            the EPUB writer
   manuscript.py      reads .md / .docx into chapters
+  doc_model.py       the document model the WYSIWYG editor round-trips through
+  checker.py         the manuscript checker (tier 2 is optional, needs an API key)
+  matter.py          front and back matter
   ornaments.py       the twelve drawn scene-break ornaments
   requirements.txt   what to install
+  test_*.py          the suite - plain Python, run a file directly
   presets/           one .json per style  <- your per-customer styles live here
-  fonts/             .ttf files used by styles
-  figures/           illustrations placed with ~~~ figure src="…"
+  covers/            one .json per cover template (24 across 8 families)
+  fonts/             .ttf files used by styles, licences in fonts/licenses/
+  templates/         the app's HTML;  static/  its JS and images
+  docs/images/       screenshots used by this README
+  promo/             the advertising reels and the scripts that build them
   sample/            a sample manuscript for trying styles
+  figures/           illustrations placed with ~~~ figure src="…"
   out/               composed PDFs land here
   uploads/           manuscripts you upload (created on first use)
+  projects/          saved books - manuscript plus settings (created on first use)
 ```
+
+The last four are gitignored: they hold your content, not the program.

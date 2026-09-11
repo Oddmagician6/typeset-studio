@@ -12,7 +12,10 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "assets")
-SHOTS = r"C:\Users\senpa\AppData\Local\Temp\claude-chrome-screenshots-9wGSi1"
+# Raw UI captures live outside the repo - they are large and disposable.
+# Point TYPESET_PROMO_SHOTS at the directory holding them; it defaults to
+# promo/shots/ so a fresh clone has an obvious place to drop them.
+SHOTS = os.environ.get("TYPESET_PROMO_SHOTS", os.path.join(HERE, "shots"))
 
 # The app centres its content in a max-width container, so each capture is
 # mostly empty ground. Cropping to the measured content box (see

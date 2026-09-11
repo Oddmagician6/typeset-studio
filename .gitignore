@@ -39,3 +39,12 @@ settings.json
 # video is a build output - promo/README.md regenerates it in about 3 minutes)
 promo/*.mp4
 promo/frames/
+
+# raw promo screenshots (large, disposable; TYPESET_PROMO_SHOTS overrides the path)
+promo/shots/
+
+# local agent/editor settings - not project content
+.claude/settings.local.json
+
+# internal working notes that point at paths outside this repo
+SCREENSHOTS-FOR-WEBSITE.md
