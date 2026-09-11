@@ -1603,7 +1603,7 @@ def cover_preview():
         preset['trim'] = {'w': _f(form, 'prev_w', 6.0), 'h': _f(form, 'prev_h', 9.0)}
         meta = {
             'title':  form.get('prev_title', 'What the Monk Saw'),
-            'author': form.get('prev_author', 'Matthias Moore'),
+            'author': form.get('prev_author', 'Author Name'),
             'year': '2026', 'publisher': form.get('prev_studio', 'Edenfall Fiction'),
             'front_matter': 'none', 'right_hand_starts': False,
             'smartquotes': True,

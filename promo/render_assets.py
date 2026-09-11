@@ -7,8 +7,9 @@ import os
 import sys
 import tempfile
 
-REPO = r"C:\Users\senpa\OneDrive\Desktop\Ashforge\Games and Apps\typeset_studio"
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)          # promo/ sits one level under the repo root
+OUT = os.path.join(HERE, "assets")
 os.makedirs(OUT, exist_ok=True)
 sys.path.insert(0, REPO)
 os.chdir(REPO)

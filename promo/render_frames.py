@@ -21,8 +21,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # The frame cache defaults OUTSIDE the repo: a 27s reel is ~800 PNGs / 300 MB,
-# and this working copy sits inside a OneDrive folder that would dutifully sync
-# every one of them.
+# which no working copy wants - least of all one inside a synced cloud folder.
 FRAMES = os.path.join(tempfile.gettempdir(), "typeset-reel-frames")
 
 

@@ -20,7 +20,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# must match render_frames.py, which keeps its PNGs out of the OneDrive-synced repo
+# must match render_frames.py, which keeps its PNGs outside the repo
 FRAMES = os.path.join(tempfile.gettempdir(), "typeset-reel-frames")
 
 

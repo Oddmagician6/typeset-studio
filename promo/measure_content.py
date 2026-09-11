@@ -10,7 +10,11 @@ measurement ignores the nav rows and the last few columns.
 import os
 from PIL import Image
 
-SHOTS = r"C:\Users\senpa\AppData\Local\Temp\claude-chrome-screenshots-9wGSi1"
+HERE = os.path.dirname(os.path.abspath(__file__))
+# Raw UI captures live outside the repo - they are large and disposable.
+# Point TYPESET_PROMO_SHOTS at the directory holding them; it defaults to
+# promo/shots/ so a fresh clone has an obvious place to drop them.
+SHOTS = os.environ.get("TYPESET_PROMO_SHOTS", os.path.join(HERE, "shots"))
 FILES = {
     "uiStyles": "screenshot-1785373640325-0.jpg",
     "uiEditor": "screenshot-1785373679056-3.jpg",
