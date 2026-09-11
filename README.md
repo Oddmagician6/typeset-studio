@@ -30,17 +30,21 @@ also forgets what it learned.
 
 ## What it does
 
-- **Typesets a real book interior** — a manuscript in, an embedded-font PDF out, at any
-  trim KDP or IngramSpark accepts.
-- **Styles you reuse.** A style is the whole typographic recipe; duplicate it per customer
-  and change only what that book needs.
-- **Cover Studio** — 24 designed cover templates across 8 families, plus a print wrap
-  (paperback or hardcover) with spine width computed from your page count and paper stock.
-- **Write in the app** — a WYSIWYG editor over a plain-Markdown file, so your words stay
-  yours in a format you can read without this tool.
-- **EPUB as well as PDF**, from the same source.
-- **A preflight checker** that looks for the things print shops reject.
-- **Nothing leaves your machine.** No account, no telemetry, no cloud.
+You hand it a manuscript — Markdown, or a Word file — and it hands back a PDF with the
+fonts embedded, set at whatever trim you're printing at, ready to upload. The same source
+also produces an EPUB, so the ebook and the paperback come out of one file instead of two
+that slowly drift apart.
+
+Most of the work lives in a style: the trim, the margins, the body face, how a chapter
+opens, what a scene break looks like, what sits in the running heads. Build one for a kind
+of book and then reuse it — duplicate it per customer and change only what that book needs.
+
+Around that there's a cover designer (24 templates, and a print wrap that works the spine
+width out from your page count and paper stock), an editor for writing in the app without
+leaving Markdown behind, and a checker that looks for the things a print shop would send
+back.
+
+It runs on your own machine and sends nothing anywhere.
 
 ![The Styles home page](docs/images/shot-styles.jpg)
 

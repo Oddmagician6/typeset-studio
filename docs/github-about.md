@@ -3,9 +3,9 @@
 The repo's About panel has not changed since the repo was created. Paste these in at
 <https://github.com/Oddmagician6/typeset-studio> (the gear icon beside **About**).
 
-## Description  (350 char limit; this is 144)
+## Description  (350 char limit; this is 134)
 
-> Offline book-typesetting studio. Turns a manuscript into a print-ready PDF or EPUB with embedded fonts, reusable genre styles, and cover design.
+> Hand it a manuscript, get back a book you can print - PDF and EPUB, fonts embedded, covers and all. Runs offline, on your own machine.
 
 ## Website
 
@@ -33,8 +33,8 @@ ingramspark  python  flask  reportlab  markdown  offline-first  bookbinding
 The secrets sweep came back clean — no keys, tokens or credentials in the tree or in
 any historical diff. Remaining items, none of them blocking:
 
-- [ ] `"Matthias Moore"` is the default author in `app.py:1606` and
-      `templates/cover_editor.html:192`. Deliberate, or should it read `Author Name`?
+- [x] ~~`"Matthias Moore"` as the Cover Studio preview sample~~ - now `Author Name`, in
+      both `app.py` and `templates/cover_editor.html`.
 - [ ] Commit history carries `matthias.moore.pro@gmail.com`. Public on GitHub anyway;
       switching to the `@users.noreply.github.com` address would mean rewriting history.
 - [ ] `app.py:270` sets `app.secret_key = 'typeset-studio-local'`. Fine for a localhost-only
