@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% set active = 'styles' %}
+{% block title %}Cover specs · {{ preset.name }} · Typeset Studio{% endblock %}
+
+{% block style %}
+  .specs{max-width:900px;display:flex;flex-direction:column;gap:18px}
+  .panel{background:var(--surface);border:1px solid var(--rule);border-radius:3px;box-shadow:var(--shadow);overflow:hidden}
+  .panel .head{padding:12px 22px;border-bottom:1px solid var(--rule);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--red)}
+  .panel .inner{padding:14px 22px 18px}
+  .calc{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end}
+  .calc .field{display:flex;flex-direction:column;gap:4px;flex:1 1 150px}
+  .calc label{font-size:13px;font-weight:600}
+  .calc input,.calc select{font-family:var(--sans);font-size:14px;background:var(--surface-2);color:var(--ink);
+    border:1px solid var(--rule-strong);border-radius:2px;padding:8px 10px;width:100%}
+  .diagram{overflow-x:auto;background:var(--surface-2);border:1px solid var(--rule);border-radius:2px;padding:10px}
+  .diagram svg{display:block;width:100%;min-width:520px;height:auto}
+  .legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:10px;font-size:12.5px;color:var(--muted)}
+  .legend i{display:inline-block;width:14px;height:10px;vertical-align:-1px;margin-right:6px;border:1px solid var(--rule-strong)}
+  .measure{display:grid;grid-template-columns:auto 1fr;gap:6px 18px;font-size:14px}
+  .measure .k{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);padding-top:2px}
+  .measure b{font-family:var(--mono);font-weight:600}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:700px){.cols{grid-template-columns:1fr}}
+  .tbl-wrap{overflow-x:auto}
+  table.t{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:12.5px}
+  table.t th{text-align:left;font-weight:600;color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;padding:4px 8px 6px 0;border-bottom:1px solid var(--rule)}
+  table.t td{padding:4px 8px 4px 0;border-bottom:1px solid var(--rule)}
+  table.t td.n{text-align:right;white-space:nowrap}
+  table.t tr.cur td{color:var(--red);font-weight:600}
+  ol.steps{margin:0;padding-left:20px;font-size:14px;line-height:1.55}
+  ol.steps li{margin-bottom:6px}
+  .note{font-size:13px;color:var(--muted);margin:10px 0 0}
+  .warn{color:var(--red)}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+{% endblock %}
+
+{% block body %}
+  {% set W, H = g.wrap_w, g.wrap_h %}
+  {% set bars = {'paperback': 'Paperback', 'hardcover': 'Hardcover (case laminate)', 'jacket': 'Dust jacket'} %}
+  <div class="pagehead">
+    <div class="eyebrow">Cover specs · {{ preset.name }}</div>
+    <h1>Design your own wrap</h1>
+    <p>The exact dimensions for a {{ '%g'|format(g.trim_w) }}&times;{{ '%g'|format(g.trim_h) }}" book,
+       worked out the same way Typeset Studio builds its own wraps. Set your page count, then use
+       the measurements or download a blank template to design over.</p>
+  </div>
+
+  <div class="specs">
+    <div class="panel">
+      <div class="head">Your book</div>
+      <div class="inner">
+        <form class="calc" method="get" id="spec-form">
+          <div class="field"><label for="pages">Page count</label>
+            <input type="number" id="pages" name="pages" min="1" max="2000" value="{{ spec.pages }}"></div>
+          <div class="field"><label for="paper">Paper</label>
+            <select id="paper" name="paper">
+              {% for key, pp in papers.items() %}<option value="{{ key }}" {{ 'selected' if spec.paper == key }}>{{ pp.label }}</option>{% endfor %}
+            </select></div>
+          <div class="field"><label for="binding">Binding</label>
+            <select id="binding" name="binding">
+              {% for key, label in bars.items() %}<option value="{{ key }}" {{ 'selected' if spec.binding == key }}>{{ label }}</option>{% endfor %}
+            </select></div>
+          <div class="field"><label for="retailer">Printer</label>
+            <select id="retailer" name="retailer">
+              {% for rid, r in retailers.items() %}<option value="{{ rid }}" {{ 'selected' if spec.retailer == rid }}>{{ r.label }}</option>{% endfor %}
+            </select></div>
+          <noscript><button class="btn" type="submit">Update</button></noscript>
+        </form>
+        <p class="note">Use the page count of your <b>finished</b> interior — the spine width depends on it.
+          If the book changes length, come back and check again.</p>
+        {% for w in spec.dims.warnings %}<p class="note warn">{{ w }}</p>{% endfor %}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="head">Layout — {{ '%.4f'|format(W) }}&times;{{ '%.4f'|format(H) }}"</div>
+      <div class="inner">
+        <div class="diagram">
+          {% set S = safe %}
+          {% set y0 = g.edge %}
+          {% set ph = g.panel_h %}
+          {% set pw = g.panel_w %}
+          <svg viewBox="-0.1 -0.1 {{ W + 0.2 }} {{ H + 0.2 }}" role="img"
+               aria-label="Cover wrap layout: {{ '%.4f'|format(W) }} by {{ '%.4f'|format(H) }} inches"
+               font-family="Segoe UI, system-ui, sans-serif">
+            {% if g.wrap %}<rect x="0" y="0" width="{{ W }}" height="{{ H }}" fill="#dcebf8"/>{% endif %}
+            <rect x="{{ g.wrap }}" y="{{ g.wrap }}" width="{{ W - 2 * g.wrap }}" height="{{ H - 2 * g.wrap }}" fill="#fbe0e0"/>
+            <rect x="{{ g.edge }}" y="{{ y0 }}" width="{{ W - 2 * g.edge }}" height="{{ ph }}" fill="#ffffff"/>
+            {% if g.hinge %}
+              <rect x="{{ g.back_x + pw }}" y="{{ y0 }}" width="{{ g.hinge }}" height="{{ ph }}" fill="#e6e6e6"/>
+              <rect x="{{ g.spine_x + g.spine_w }}" y="{{ y0 }}" width="{{ g.hinge }}" height="{{ ph }}" fill="#e6e6e6"/>
+            {% endif %}
+            <g fill="none" stroke="#1a8c4d" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-dasharray="0.08 0.05">
+              {% set panels = [(g.back_x, pw), (g.front_x, pw)] %}
+              {% if g.flap %}{% set panels = panels + [(g.edge, g.flap), (g.front_x + pw, g.flap)] %}{% endif %}
+              {% for x, w in panels %}{% if w > 2 * S %}
+                <rect x="{{ x + S }}" y="{{ y0 + S }}" width="{{ w - 2 * S }}" height="{{ ph - 2 * S }}" vector-effect="non-scaling-stroke"/>
+              {% endif %}{% endfor %}
+              {% if g.spine_w > 2 * spine_safe %}
+                <rect x="{{ g.spine_x + spine_safe }}" y="{{ y0 + S }}" width="{{ g.spine_w - 2 * spine_safe }}" height="{{ ph - 2 * S }}" vector-effect="non-scaling-stroke"/>
+              {% endif %}
+            </g>
+            {% if pw >= barcode[0] + 2 * S %}
+              <rect x="{{ g.back_x + pw - S - barcode[0] }}" y="{{ H - y0 - S - barcode[1] }}" width="{{ barcode[0] }}" height="{{ barcode[1] }}"
+                    fill="#ffffff" stroke="#777" stroke-width="1" vector-effect="non-scaling-stroke"/>
+              <text x="{{ g.back_x + pw - S - barcode[0] / 2 }}" y="{{ H - y0 - S - barcode[1] / 2 + 0.07 }}" font-size="0.2" text-anchor="middle" fill="#666">Barcode area</text>
+            {% endif %}
+            <g stroke="#d6337f" stroke-width="1.2" vector-effect="non-scaling-stroke" stroke-dasharray="0.12 0.07">
+              {% for label, x in guides.x %}<line x1="{{ x }}" y1="0" x2="{{ x }}" y2="{{ H }}" vector-effect="non-scaling-stroke"/>{% endfor %}
+              <line x1="0" y1="{{ y0 }}" x2="{{ W }}" y2="{{ y0 }}" vector-effect="non-scaling-stroke"/>
+              <line x1="0" y1="{{ y0 + ph }}" x2="{{ W }}" y2="{{ y0 + ph }}" vector-effect="non-scaling-stroke"/>
+            </g>
+            <g fill="#555" text-anchor="middle" font-weight="600">
+              <text x="{{ g.back_x + pw / 2 }}" y="{{ y0 + ph / 2 }}" font-size="0.34">BACK COVER</text>
+              <text x="{{ g.front_x + pw / 2 }}" y="{{ y0 + ph / 2 }}" font-size="0.34">FRONT COVER</text>
+              {% if g.flap %}
+                <text x="{{ g.edge + g.flap / 2 }}" y="{{ y0 + ph / 2 }}" font-size="0.26">BACK FLAP</text>
+                <text x="{{ g.front_x + pw + g.flap / 2 }}" y="{{ y0 + ph / 2 }}" font-size="0.26">FRONT FLAP</text>
+              {% endif %}
+              {% if g.spine_w >= 0.2 %}
+                <text transform="translate({{ g.spine_x + g.spine_w / 2 }} {{ y0 + ph / 2 }}) rotate(90)" y="0.07" font-size="{{ [0.22, g.spine_w * 0.6]|min }}">SPINE</text>
+              {% endif %}
+            </g>
+          </svg>
+        </div>
+        <div class="legend">
+          <span><i style="background:#fbe0e0"></i>Bleed — trimmed off</span>
+          {% if g.wrap %}<span><i style="background:#dcebf8"></i>Turn-in — wraps round the boards</span>{% endif %}
+          {% if g.hinge %}<span><i style="background:#e6e6e6"></i>Hinge — keep type out</span>{% endif %}
+          <span><i style="background:transparent;border:1.5px dashed #1a8c4d"></i>Safe area</span>
+          <span><i style="background:transparent;border:1.5px dashed #d6337f"></i>Trim &amp; fold lines</span>
+        </div>
+        <div class="actions">
+          <a class="btn btn-primary"
+             href="{{ url_for('style_cover_specs_template', pid=pid, pages=spec.pages, paper=spec.paper, binding=spec.binding, retailer=spec.retailer) }}">Download blank template (PDF)</a>
+          <a class="btn" href="{{ url_for('index') }}">Back to styles</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="cols">
+      <div class="panel">
+        <div class="head">Measurements</div>
+        <div class="inner measure">
+          <span class="k">Full wrap</span><span><b>{{ '%.4f'|format(W) }} &times; {{ '%.4f'|format(H) }}"</b><br>
+            {{ '%.1f'|format(W * 25.4) }} &times; {{ '%.1f'|format(H * 25.4) }} mm · {{ px[0] }} &times; {{ px[1] }} px at {{ dpi }} dpi</span>
+          <span class="k">Each cover</span><span><b>{{ '%g'|format(pw) }} &times; {{ '%g'|format(g.panel_h) }}"</b>{% if g.board_ext %} (the board — trim plus {{ '%g'|format(g.board_ext) }}"){% endif %}</span>
+          <span class="k">Spine</span><span><b>{{ '%.4f'|format(g.spine_w) }}"</b>
+            {% if not g.spine_text %}<br><span class="warn">No spine text — {{ rc.label }} allows it from {{ rc.spine_text_min }} pages{% if g.spine_w < 0.1 %}, and it needs 0.1" to be readable{% endif %}</span>{% endif %}</span>
+          <span class="k">Bleed</span><span><b>{{ '%g'|format(g.bleed) }}"</b> past every outer trim</span>
+          {% if g.wrap %}<span class="k">Turn-in</span><span><b>{{ '%g'|format(g.wrap) }}"</b> beyond the bleed, all round</span>{% endif %}
+          {% if g.hinge %}<span class="k">Hinge</span><span><b>{{ '%g'|format(g.hinge) }}"</b> each side of the spine</span>{% endif %}
+          {% if g.flap %}<span class="k">Flaps</span><span><b>{{ '%g'|format(g.flap) }}"</b> each end</span>{% endif %}
+          <span class="k">Safe area</span><span><b>{{ '%g'|format(safe) }}"</b> inside every trim and fold · <b>{{ '%g'|format(spine_safe) }}"</b> each side on the spine</span>
+          <span class="k">Barcode</span><span><b>{{ '%g'|format(barcode[0]) }} &times; {{ '%g'|format(barcode[1]) }}"</b>, bottom-right of the back cover</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="head">Guide positions</div>
+        <div class="inner tbl-wrap">
+          <table class="t">
+            <tr><th>Vertical guide</th><th class="n">from left</th></tr>
+            {% for label, x in guides.x %}<tr><td>{{ label }}</td><td class="n">{{ '%.4f'|format(x) }}"</td></tr>{% endfor %}
+            <tr><th>Horizontal guide</th><th class="n">from bottom</th></tr>
+            {% for label, y in guides.y %}<tr><td>{{ label }}</td><td class="n">{{ '%.4f'|format(y) }}"</td></tr>{% endfor %}
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="head">How to build it</div>
+      <div class="inner">
+        <ol class="steps">
+          <li>Make a new document exactly <b>{{ '%.4f'|format(W) }} &times; {{ '%.4f'|format(H) }}"</b>
+            ({{ px[0] }} &times; {{ px[1] }} px at {{ dpi }} dpi). Keep every photo at least {{ dpi }} dpi at the size it prints.</li>
+          <li>Either add guides at the positions above, or place the <b>blank template</b> as the bottom
+            layer, lock it, and design on top.</li>
+          <li>Run background colour and art all the way to the outer edge — the pink bleed is cut off, so nothing there will survive.</li>
+          <li>Keep title, author, blurb and faces inside the green safe areas. The front cover is on the <b>right</b>, the back on the left.</li>
+          {% if g.spine_text %}
+          <li>Spine text reads top to bottom on most English-language books. Keep it inside the spine's safe area — a spine is rarely cut perfectly centred.</li>
+          {% else %}
+          <li>Leave the spine free of text: at {{ spec.pages }} pages it is too narrow for {{ rc.label }} to print any.</li>
+          {% endif %}
+          {% if g.wrap %}<li>The blue turn-in folds round the boards and is glued down — extend the art into it, but put nothing there you need to see.</li>{% endif %}
+          {% if g.hinge %}<li>Keep type out of the grey hinges; that is where the case bends.</li>{% endif %}
+          {% if g.flap %}<li>Flap copy goes inside the flaps' safe areas: a blurb on the front flap, an author note on the back.</li>{% endif %}
+          <li>Leave the barcode area plain. {% if spec.retailer == 'kdp' %}KDP prints an ISBN barcode there for you if your file doesn't carry one.{% else %}Place your ISBN barcode there, or leave room for your printer to add one.{% endif %}</li>
+          <li>Hide or delete the template layer, then export a single-page <b>PDF</b> with fonts embedded and no crop marks. PDF/X-1a is the safest choice if your app offers it.</li>
+          <li>Upload it as the <b>cover</b> file, separately from the interior. {{ rc.hardcover_note if spec.binding != 'paperback' else rc.note }}</li>
+        </ol>
+        <p class="note">Designing with one of Typeset Studio's cover templates instead? <b>Send to print</b> on a project builds the wrap to these same numbers automatically.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="head">Other page counts — {{ bars[spec.binding] }}, {{ papers[spec.paper].label }}</div>
+      <div class="inner tbl-wrap">
+        <table class="t">
+          <tr><th>Pages</th><th class="n">Spine</th><th class="n">Full wrap</th><th class="n">Spine text</th></tr>
+          {% for r in rows %}
+          <tr class="{{ 'cur' if r.pages == spec.pages }}">
+            <td><a href="?pages={{ r.pages }}&amp;paper={{ spec.paper }}&amp;binding={{ spec.binding }}&amp;retailer={{ spec.retailer }}">{{ r.pages }}</a></td>
+            <td class="n">{{ '%.4f'|format(r.spine_w) }}"</td>
+            <td class="n">{{ '%.4f'|format(r.wrap_w) }} &times; {{ '%.4f'|format(r.wrap_h) }}"</td>
+            <td class="n">{{ 'yes' if r.spine_text else 'no' }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var form = document.getElementById('spec-form');
+      var timer;
+      form.addEventListener('change', function () { form.submit(); });
+      form.pages.addEventListener('input', function () {
+        clearTimeout(timer);
+        timer = setTimeout(function () { if (form.pages.value) form.submit(); }, 700);
+      });
+    })();
+  </script>
+{% endblock %}

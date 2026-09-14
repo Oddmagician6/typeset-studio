@@ -1661,6 +1661,30 @@ edit to the book quietly left a wrap cut for a different spine.
   flagged but still built; refusals for a non-designed cover and a missing manuscript; the editor
   round-trips the settings.
 
+**68. Cover specs for every style — dimensions and a template for a custom wrap** *(asked for as
+"for custom wraps, add instructions/dimensions to each style … giving users that freedom")*
+Writers who commission a cover or design one in Canva/Affinity/Photoshop need the wrap's exact size
+before they start, and the size depends on the style's trim *and* on the page count, paper, binding
+and printer — so a fixed number per style would be wrong for most books.
+- **`engine.wrap_geometry(dims)`** is now the one place a wrap's layout is worked out (inches: size,
+  panel positions, spine, bleed, turn-in, hinge, flaps, spine-text rule). `build_cover_wrap` paints
+  from it, and so does everything below — a custom design gets the numbers a designed wrap would
+  have been built to. `wrap_pixels(g, dpi)` rounds up, so a pixel canvas never loses bleed.
+- **`GET /style/<pid>/cover-specs`** (`templates/cover_specs.html`), linked from every style card
+  (**Cover specs**) and the style editor's Trim fieldset: a calculator (pages, paper, binding,
+  printer; recomputed server-side through `_wrap_dims`, never duplicated in JS), a to-scale SVG
+  diagram, measurements in inches/mm/px, guide positions for a design app, step-by-step build
+  instructions that follow the binding and retailer, and a table of common page counts.
+- **`GET /style/<pid>/cover-specs/template.pdf`** → `engine.build_wrap_guide`: a blank full-size wrap
+  with shaded bleed and turn-in, grey hinges, dashed safe areas, the barcode reserve, fold lines and
+  a legend that says to hide it before export.
+- **Advisory zones** (`WRAP_SAFE` 0.25", `WRAP_SPINE_SAFE` 0.0625", `BARCODE` 2×1.2") are house
+  margins comfortably inside what KDP and IngramSpark ask for, not the retailers' own minimums; the
+  page still points at each printer's own template to confirm.
+- `test_cover_specs.py`: geometry equals `build_cover_wrap`'s output for all three bindings; guides
+  per binding; junk query args fall back; the page shows the size, pixels and spine; the template PDF
+  measures to the geometry and labels flaps on a jacket.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**

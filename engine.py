@@ -1267,25 +1267,15 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
     Returns the finished wrap dimensions (inches) and whether spine text was drawn.
     """
     from reportlab.pdfgen import canvas as _canvas
-    tw = dims['trim_w'] * inch
-    th = dims['trim_h'] * inch
-    sp = max(dims.get('spine_w', 0.0), 0.0) * inch
-    bl = dims.get('bleed', 0.125) * inch
-    binding = dims.get('binding', 'paperback')
-    hard = binding == 'hardcover'
-    jacket = binding == 'jacket'
-    wrap = max(dims.get('wrap', 0.625) * inch, 0.0) if hard else 0.0
-    hinge = max(dims.get('hinge', 0.375) * inch, 0.0) if (hard or jacket) else 0.0
-    flap = max(dims.get('flap', 3.5) * inch, 0.0) if jacket else 0.0
-    bext = max(dims.get('board_ext', 0.125) * inch, 0.0) if jacket else 0.0
-    pages = dims.get('pages')
-    smin = dims.get('spine_text_min', 0) or 0
-    draw_spine = (pages is None or pages >= smin) and sp >= 0.10 * inch
-    edge = wrap + bl                       # outer allowance before a panel starts
-    pw = tw + bext                         # panel width: the board, on a jacket
-    ph = th + 2 * bext                     # panel height, likewise
-    W = 2 * edge + 2 * flap + 2 * pw + 2 * hinge + sp
-    H = 2 * edge + ph
+    g = wrap_geometry(dims)
+    jacket = g['binding'] == 'jacket'
+    sp, bl = g['spine_w'] * inch, g['bleed'] * inch
+    wrap, hinge = g['wrap'] * inch, g['hinge'] * inch
+    flap = g['flap'] * inch
+    edge = g['edge'] * inch
+    pw, ph = g['panel_w'] * inch, g['panel_h'] * inch
+    W, H = g['wrap_w'] * inch, g['wrap_h'] * inch
+    draw_spine = g['spine_text']
     c = _canvas.Canvas(out_path, pagesize=(W, H))
     pal = tpl.get('palette', {})
     _paint_gradient(c, pal, 0, 0, W, H)
@@ -1315,11 +1305,172 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
         _paint_wrap_guides(c, W, H, folds, edge, ph, wrap=wrap)
     c.showPage()
     c.save()
-    return {'wrap_w': round(W / inch, 3), 'wrap_h': round(H / inch, 3),
-            'spine_w': round(sp / inch, 4), 'spine_text': bool(draw_spine),
-            'binding': binding if binding in ('hardcover', 'jacket') else 'paperback',
-            'wrap': round(wrap / inch, 4), 'hinge': round(hinge / inch, 4),
-            'flap': round(flap / inch, 4), 'panel_w': round(pw / inch, 4)}
+    return {'wrap_w': round(g['wrap_w'], 3), 'wrap_h': round(g['wrap_h'], 3),
+            'spine_w': round(g['spine_w'], 4), 'spine_text': bool(draw_spine),
+            'binding': g['binding'],
+            'wrap': round(g['wrap'], 4), 'hinge': round(g['hinge'], 4),
+            'flap': round(g['flap'], 4), 'panel_w': round(g['panel_w'], 4)}
+
+
+# Advisory zones for anyone designing a wrap by hand. Not retailer minimums —
+# a margin comfortably inside what KDP and IngramSpark ask for.
+WRAP_SAFE = 0.25          # inches inside every trim and fold for type and faces
+WRAP_SPINE_SAFE = 0.0625  # each side of the spine
+BARCODE = (2.0, 1.2)      # the back-cover barcode reserve, inches (w, h)
+
+
+def wrap_geometry(dims):
+    """Every measurement of a wrap, in inches — the one place its layout is worked out.
+
+    `build_cover_wrap` paints from it and the cover-specs page and blank guide
+    template report it, so a writer designing their own wrap is handed exactly
+    the numbers a designed wrap would have been built to. `dims` takes the same
+    keys as `build_cover_wrap`. Panels are measured from the left/bottom edge.
+    """
+    binding = dims.get('binding', 'paperback')
+    hard = binding == 'hardcover'
+    jacket = binding == 'jacket'
+    tw, th = dims['trim_w'], dims['trim_h']
+    sp = max(dims.get('spine_w', 0.0), 0.0)
+    bl = dims.get('bleed', 0.125)
+    wrap = max(dims.get('wrap', 0.625), 0.0) if hard else 0.0
+    hinge = max(dims.get('hinge', 0.375), 0.0) if (hard or jacket) else 0.0
+    flap = max(dims.get('flap', 3.5), 0.0) if jacket else 0.0
+    bext = max(dims.get('board_ext', 0.125), 0.0) if jacket else 0.0
+    pages = dims.get('pages')
+    smin = dims.get('spine_text_min', 0) or 0
+    edge = wrap + bl                       # outer allowance before a panel starts
+    pw = tw + bext                         # panel width: the board, on a jacket
+    ph = th + 2 * bext                     # panel height, likewise
+    back_x = edge + flap
+    spine_x = back_x + pw + hinge
+    return {
+        'binding': binding if binding in ('hardcover', 'jacket') else 'paperback',
+        'trim_w': tw, 'trim_h': th, 'spine_w': sp, 'bleed': bl, 'wrap': wrap,
+        'hinge': hinge, 'flap': flap, 'board_ext': bext, 'edge': edge,
+        'panel_w': pw, 'panel_h': ph,
+        'wrap_w': 2 * edge + 2 * flap + 2 * pw + 2 * hinge + sp,
+        'wrap_h': 2 * edge + ph,
+        'back_x': back_x, 'spine_x': spine_x, 'front_x': spine_x + sp + hinge,
+        'spine_text': (pages is None or pages >= smin) and sp >= 0.10,
+    }
+
+
+def wrap_pixels(g, dpi=300):
+    """Canvas size in pixels for a wrap at `dpi`, rounded up so no bleed is lost."""
+    import math
+    return (math.ceil(round(g['wrap_w'] * dpi, 6)), math.ceil(round(g['wrap_h'] * dpi, 6)))
+
+
+def build_wrap_guide(dims, out_path, caption=''):
+    """A blank, labelled wrap at full size — a template to design a custom cover over.
+
+    Shaded bleed (and turn-in on a case), grey hinges, dashed safe areas, the
+    barcode reserve, and the same magenta trim/fold lines as a proofed wrap.
+    Meant to sit as a locked bottom layer in a design app and be hidden before
+    export, which the legend on the back panel says. Returns `wrap_geometry`.
+    """
+    from reportlab.pdfgen import canvas as _canvas
+    g = wrap_geometry(dims)
+    I = inch
+    W, H = g['wrap_w'] * I, g['wrap_h'] * I
+    edge, wrap, hinge, flap = g['edge'] * I, g['wrap'] * I, g['hinge'] * I, g['flap'] * I
+    pw, ph, sp = g['panel_w'] * I, g['panel_h'] * I, g['spine_w'] * I
+    back_x, spine_x, front_x = g['back_x'] * I, g['spine_x'] * I, g['front_x'] * I
+    S, SS = WRAP_SAFE * I, WRAP_SPINE_SAFE * I
+    y0 = edge
+
+    c = _canvas.Canvas(out_path, pagesize=(W, H))
+    c.setTitle('Cover wrap template')
+    # zones, outermost first: turn-in, bleed, then the trimmed cover
+    if wrap:
+        c.setFillColorRGB(0.86, 0.92, 0.98)
+        c.rect(0, 0, W, H, stroke=0, fill=1)
+    c.setFillColorRGB(0.99, 0.88, 0.88)
+    c.rect(wrap, wrap, W - 2 * wrap, H - 2 * wrap, stroke=0, fill=1)
+    c.setFillColorRGB(1, 1, 1)
+    c.rect(edge, y0, W - 2 * edge, ph, stroke=0, fill=1)
+    if hinge:
+        c.setFillGray(0.9)
+        c.rect(back_x + pw, y0, hinge, ph, stroke=0, fill=1)
+        c.rect(spine_x + sp, y0, hinge, ph, stroke=0, fill=1)
+
+    c.saveState()
+    c.setStrokeColorRGB(0.1, 0.55, 0.3)
+    c.setLineWidth(0.6)
+    c.setDash(3, 2)
+    panels = [(back_x, pw), (front_x, pw)]
+    if flap:
+        panels += [(edge, flap), (front_x + pw, flap)]
+    for x, w in panels:
+        if w > 2 * S:
+            c.rect(x + S, y0 + S, w - 2 * S, ph - 2 * S, stroke=1, fill=0)
+    if sp > 2 * SS:
+        c.rect(spine_x + SS, y0 + S, sp - 2 * SS, ph - 2 * S, stroke=1, fill=0)
+    c.restoreState()
+
+    folds = [edge, edge + flap, back_x + pw, spine_x, spine_x + sp,
+             front_x, front_x + pw, front_x + pw + flap]
+    _paint_wrap_guides(c, W, H, folds, y0, ph, wrap=wrap)
+
+    bw, bh = BARCODE[0] * I, BARCODE[1] * I
+    if pw >= bw + 2 * S and ph >= bh + 2 * S:
+        bx, by = back_x + pw - S - bw, y0 + S
+        c.setStrokeGray(0.45)
+        c.setLineWidth(0.6)
+        c.setFillColorRGB(1, 1, 1)
+        c.rect(bx, by, bw, bh, stroke=1, fill=1)
+        c.setFillGray(0.35)
+        c.setFont('Helvetica', 8)
+        c.drawCentredString(bx + bw / 2, by + bh / 2 + 2, 'ISBN barcode area')
+        c.drawCentredString(bx + bw / 2, by + bh / 2 - 9,
+                            f'{BARCODE[0]:g}" x {BARCODE[1]:g}"')
+
+    def label(cx, big, small):
+        cy = y0 + ph * 0.5
+        c.setFillGray(0.3)
+        c.setFont('Helvetica-Bold', 14)
+        c.drawCentredString(cx, cy, big)
+        c.setFont('Helvetica', 9)
+        c.drawCentredString(cx, cy - 14, small)
+
+    size = f'{g["panel_w"]:g}" x {g["panel_h"]:g}"'
+    label(back_x + pw / 2, 'BACK COVER', size)
+    label(front_x + pw / 2, 'FRONT COVER', size)
+    if flap:
+        label(edge + flap / 2, 'BACK FLAP', f'{g["flap"]:g}" wide')
+        label(front_x + pw + flap / 2, 'FRONT FLAP', f'{g["flap"]:g}" wide')
+    if sp >= 0.2 * I:
+        c.saveState()
+        c.translate(spine_x + sp / 2, y0 + ph / 2)
+        c.rotate(90)
+        c.setFillGray(0.3)
+        c.setFont('Helvetica-Bold', min(10, sp * 0.45))
+        c.drawCentredString(0, -3, f'SPINE {g["spine_w"]:.4f}"')
+        c.restoreState()
+
+    px = wrap_pixels(g)
+    legend = [caption,
+              f'Full wrap {g["wrap_w"]:.4f}" x {g["wrap_h"]:.4f}"  ({px[0]} x {px[1]} px at 300 dpi)',
+              f'Spine {g["spine_w"]:.4f}"' + ('' if g['spine_text'] else ' - no spine text at this page count'),
+              'Pink: bleed - run background art to the edge; it is trimmed off']
+    if wrap:
+        legend.append('Blue: turn-in - glued around the boards, never seen')
+    if hinge:
+        legend.append('Grey: hinge - keep type out of the crease')
+    legend += [f'Green dashes: safe area - keep type and faces inside ({WRAP_SAFE:g}")',
+               'Magenta dashes: trim and fold lines',
+               'TEMPLATE ONLY - hide or delete this layer before you export']
+    c.setFillGray(0.25)
+    ly = y0 + ph - S - 12
+    lx = back_x + S + 6
+    for i, line in enumerate(l for l in legend if l):
+        c.setFont('Helvetica-Bold' if i == 0 else 'Helvetica', 8.5)
+        c.drawString(lx, ly, line)
+        ly -= 12
+    c.showPage()
+    c.save()
+    return g
 
 
 # ---------------------------------------------------------------- fonts

@@ -1869,6 +1869,99 @@ def cover_wrap_preview():
 
 
 # ------------------------------------------------------------- font manager
+# ------------------------------------------------------------ cover specs
+# For writers designing their own wrap elsewhere: the dimensions for a style's
+# trim, computed by the same `wrap_geometry` a designed wrap is built from.
+COVER_SPEC_PAGES = (100, 200, 300, 400, 500)
+COVER_DPI = 300
+_BINDINGS = ('paperback', 'hardcover', 'jacket')
+
+
+def _cover_spec(preset, args):
+    """Wrap geometry for a style's trim, from query args that may be missing or junk."""
+    try:
+        pages = min(max(int(args.get('pages', 200)), 1), 2000)
+    except (TypeError, ValueError):
+        pages = 200
+    retailer = args.get('retailer', 'kdp')
+    retailer = retailer if retailer in WRAP_RETAILERS else 'kdp'
+    binding = args.get('binding', 'paperback')
+    binding = binding if binding in _BINDINGS else 'paperback'
+    paper = args.get('paper', 'white')
+    paper = paper if paper in _PAPER else 'white'
+    dims = _wrap_dims({'wrap_retailer': retailer, 'wrap_binding': binding,
+                       'wrap_paper': paper, 'wrap_trim_w': preset['trim']['w'],
+                       'wrap_trim_h': preset['trim']['h']}, pages)
+    return {'pages': pages, 'retailer': retailer, 'binding': binding, 'paper': paper,
+            'dims': dims, 'geo': engine.wrap_geometry(dims)}
+
+
+def _wrap_guide_lines(g):
+    """Where to put guides in a design app: (label, inches from the left or bottom)."""
+    xs = []
+    if g['wrap']:
+        xs.append(('Turn-in ends', g['wrap']))
+    xs.append(('Left trim', g['edge']))
+    if g['flap']:
+        xs.append(('Fold: back flap | back cover', g['back_x']))
+    if g['hinge']:
+        xs += [('Back cover edge (hinge starts)', g['back_x'] + g['panel_w']),
+               ('Spine starts', g['spine_x']),
+               ('Spine ends', g['spine_x'] + g['spine_w']),
+               ('Front cover edge (hinge ends)', g['front_x'])]
+    else:
+        xs += [('Fold: back cover | spine', g['spine_x']),
+               ('Fold: spine | front cover', g['front_x'])]
+    if g['flap']:
+        xs.append(('Fold: front cover | front flap', g['front_x'] + g['panel_w']))
+    xs.append(('Right trim', g['wrap_w'] - g['edge']))
+    if g['wrap']:
+        xs.append(('Turn-in ends', g['wrap_w'] - g['wrap']))
+    ys = [('Bottom trim', g['edge']), ('Top trim', g['edge'] + g['panel_h'])]
+    if g['wrap']:
+        ys = [('Turn-in ends', g['wrap'])] + ys + [('Turn-in ends', g['wrap_h'] - g['wrap'])]
+    return {'x': xs, 'y': ys}
+
+
+@app.route('/style/<pid>/cover-specs')
+def style_cover_specs(pid):
+    preset = load_preset(pid)
+    spec = _cover_spec(preset, request.args)
+    rows = []
+    for n in COVER_SPEC_PAGES:
+        rg = _cover_spec(preset, {**request.args.to_dict(), 'pages': n})['geo']
+        rows.append({'pages': n, 'spine_w': rg['spine_w'], 'wrap_w': rg['wrap_w'],
+                     'wrap_h': rg['wrap_h'], 'spine_text': rg['spine_text']})
+    g = spec['geo']
+    return render_template('cover_specs.html', pid=pid, preset=preset, spec=spec, g=g,
+                           px=engine.wrap_pixels(g, COVER_DPI), dpi=COVER_DPI, rows=rows,
+                           guides=_wrap_guide_lines(g),
+                           rc=WRAP_RETAILERS[spec['retailer']], retailers=WRAP_RETAILERS,
+                           papers=_PAPER, safe=engine.WRAP_SAFE,
+                           spine_safe=engine.WRAP_SPINE_SAFE, barcode=engine.BARCODE)
+
+
+@app.route('/style/<pid>/cover-specs/template.pdf')
+def style_cover_specs_template(pid):
+    preset = load_preset(pid)
+    spec = _cover_spec(preset, request.args)
+    name = preset.get('name') or pid
+    caption = (f'{name} - {preset["trim"]["w"]:g}" x {preset["trim"]["h"]:g}" - '
+               f'{spec["pages"]} pages, {_PAPER[spec["paper"]]["label"]} - '
+               f'{WRAP_RETAILERS[spec["retailer"]]["label"]}')
+    fd, tmp = tempfile.mkstemp(suffix='.pdf')
+    os.close(fd)
+    try:
+        engine.build_wrap_guide(spec['dims'], tmp, caption=caption)
+        with open(tmp, 'rb') as f:
+            data = f.read()
+    finally:
+        os.remove(tmp)
+    fn = f'{slugify(name)}-{spec["binding"]}-{spec["pages"]}pp-cover-template.pdf'
+    return Response(data, mimetype='application/pdf',
+                    headers={'Content-Disposition': f'attachment; filename="{fn}"'})
+
+
 @app.route('/fonts')
 def fonts_page():
     items = [{'name': f, 'builtin': f in BUILTIN_FONTS} for f in list_fonts()]
