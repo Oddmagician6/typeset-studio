@@ -126,6 +126,16 @@ check('a press build drops it — a printer wants the cover as its own file',
       (press_pages, plain['page_count'], cover_pages))
 check('and still builds press-ready, not by falling back',
       res_c.get('press') is True and 'press_error' not in res_c, res_c)
+
+def cover_row(res):
+    return [c for c in A._preflight(res, preset, res['page_count'])
+            if c['label'] == 'Cover on page 1']
+check('preflight warns when a PDF still opens with its cover',
+      normal_cover.get('has_cover') is True and cover_row(normal_cover)
+      and not cover_row(normal_cover)[0]['ok'], normal_cover)
+check('but says nothing once the press build has dropped it',
+      res_c.get('has_cover') is False and not cover_row(res_c), res_c)
+check('nor for a book that never had one', not cover_row(plain), plain)
 check('the interior it wrote is still ink-only', read(PDF)['rgb'] == 0)
 
 # ---------------------------------------------------------------- the fallback

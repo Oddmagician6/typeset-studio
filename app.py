@@ -387,6 +387,14 @@ def _preflight(build_result, preset, page_count):
                               if build_result.get('fonts_embedded')
                               else 'Standard PDF fonts not embedded — platforms may reject')})
 
+    if build_result.get('has_cover'):
+        checks.append({
+            'label': 'Cover on page 1', 'ok': False,
+            'detail': ('This PDF opens with the cover — fine for reading on screen, '
+                       'but KDP and IngramSpark would print it as the first inside '
+                       'page. For a print upload, build press-ready (no cover) and '
+                       'send the cover as a separate wrap')})
+
     dead = build_result.get('dead_links') or []
     if dead:
         shown = ', '.join(sorted(set(dead))[:4])
@@ -1463,6 +1471,39 @@ def cover_thumb(cid):
 EPUB_COVER_H = 2560   # px; the long edge KDP asks for on an ebook cover
 
 
+def _designed_cover_jpeg(preset, meta, jpg_path):
+    """Rasterise a designed front cover to a JPEG `EPUB_COVER_H` px tall.
+
+    Typesets one cover page over a stub manuscript rather than the whole book.
+    Raises on any failure (no PyMuPDF/Pillow, a render error) — callers decide
+    whether a missing cover is fatal.
+    """
+    import fitz
+    from PIL import Image
+    pdf_fd, pdf_path = tempfile.mkstemp(suffix='.pdf')
+    os.close(pdf_fd)
+    try:
+        cover_meta = dict(meta)
+        cover_meta.update(front_matter='none', include_toc=False,
+                          right_hand_starts=False)
+        stub = manuscript.parse_markdown('# Cover\n\nCover.', smartquotes=False)
+        engine.build_pdf(stub, preset, pdf_path, cover_meta)
+
+        with fitz.open(pdf_path) as doc:
+            page = doc[0]
+            scale = EPUB_COVER_H / page.rect.height if page.rect.height else 1.0
+            png = page.get_pixmap(matrix=fitz.Matrix(scale, scale),
+                                  alpha=False).tobytes('png')
+        # JPEG, else a photographic-family cover makes a multi-megabyte ebook.
+        Image.open(io.BytesIO(png)).convert('RGB').save(
+            jpg_path, 'JPEG', quality=88, optimize=True)
+    finally:
+        try:
+            os.remove(pdf_path)
+        except OSError:
+            pass
+
+
 @contextlib.contextmanager
 def _epub_cover(preset, meta):
     """Yield a meta whose ``cover_image`` an EPUB build can use for a designed cover.
@@ -1488,27 +1529,11 @@ def _epub_cover(preset, meta):
         yield meta
         return
 
-    pdf_fd, pdf_path = tempfile.mkstemp(suffix='.pdf')
-    os.close(pdf_fd)
     jpg_fd, jpg_path = tempfile.mkstemp(suffix='.jpg')
     os.close(jpg_fd)
     try:
         try:
-            cover_meta = dict(meta)
-            cover_meta.update(front_matter='none', include_toc=False,
-                              right_hand_starts=False)
-            stub = manuscript.parse_markdown('# Cover\n\nCover.', smartquotes=False)
-            engine.build_pdf(stub, preset, pdf_path, cover_meta)
-
-            doc  = fitz.open(pdf_path)
-            page = doc[0]
-            scale = EPUB_COVER_H / page.rect.height if page.rect.height else 1.0
-            png = page.get_pixmap(matrix=fitz.Matrix(scale, scale),
-                                  alpha=False).tobytes('png')
-            doc.close()
-            # JPEG, else a photographic-family cover makes a multi-megabyte ebook.
-            Image.open(io.BytesIO(png)).convert('RGB').save(
-                jpg_path, 'JPEG', quality=88, optimize=True)
+            _designed_cover_jpeg(preset, meta, jpg_path)
             img_path = jpg_path
         except Exception:
             logging.exception('designed cover for EPUB failed; building without one')
@@ -1521,7 +1546,7 @@ def _epub_cover(preset, meta):
         else:
             yield meta
     finally:
-        for p in (pdf_path, jpg_path):
+        for p in (jpg_path,):
             try:
                 os.remove(p)
             except OSError:
@@ -1716,6 +1741,34 @@ def _wrap_from_form(form, out_path, back_image=None):
         pages = max(int(_f(form, 'wrap_pages', 200)), 0)
     except (TypeError, ValueError):
         pages = 200
+    dims = _wrap_dims(form, pages)
+    meta = {
+        'title':  form.get('prev_title', ''),
+        'author': form.get('prev_author', ''),
+        'publisher': form.get('prev_studio', ''),
+        'cover_collection': form.get('prev_collection', ''),
+        'cover_kicker':     form.get('prev_kicker', ''),
+        'cover_accent':     form.get('prev_accent', ''),
+        'cover_epigraph':   form.get('prev_epigraph', ''),
+        'cover_studio':     form.get('prev_studio', ''),
+        'cover_blurb':      form.get('wrap_blurb', ''),
+        'cover_jacket_blurb': form.get('wrap_flap_blurb', ''),
+        'cover_author_bio':   form.get('wrap_flap_bio', ''),
+        'cover_back_image':   back_image or '',
+        'cover_back_image_w': _f(form, 'wrap_back_w', 1.5),
+        'cover_back_image_y': _f(form, 'wrap_back_y', 0.4),
+    }
+    guides = form.get('wrap_guides') == '1'
+    res = engine.build_cover_wrap(tpl, cf, meta, dims, out_path, guides=guides)
+    return res, dims
+
+
+def _wrap_dims(form, pages):
+    """Wrap geometry (and the retailer's objections to it) from `wrap_*` fields.
+
+    Shared by the cover editor's wrap export and the print package, which feeds
+    it a plain dict built from the project — so a spine is worked out one way.
+    """
     paper = form.get('wrap_paper', 'white')
     ppi = _PAPER.get(paper, _PAPER['white'])['ppi']
     retailer = form.get('wrap_retailer', 'kdp')
@@ -1749,25 +1802,7 @@ def _wrap_from_form(form, out_path, back_image=None):
     if jacket and retailer == 'kdp':
         dims['warnings'].append('KDP does not print dust jackets — this file is for '
                                 'IngramSpark or another printer.')
-    meta = {
-        'title':  form.get('prev_title', ''),
-        'author': form.get('prev_author', ''),
-        'publisher': form.get('prev_studio', ''),
-        'cover_collection': form.get('prev_collection', ''),
-        'cover_kicker':     form.get('prev_kicker', ''),
-        'cover_accent':     form.get('prev_accent', ''),
-        'cover_epigraph':   form.get('prev_epigraph', ''),
-        'cover_studio':     form.get('prev_studio', ''),
-        'cover_blurb':      form.get('wrap_blurb', ''),
-        'cover_jacket_blurb': form.get('wrap_flap_blurb', ''),
-        'cover_author_bio':   form.get('wrap_flap_bio', ''),
-        'cover_back_image':   back_image or '',
-        'cover_back_image_w': _f(form, 'wrap_back_w', 1.5),
-        'cover_back_image_y': _f(form, 'wrap_back_y', 0.4),
-    }
-    guides = form.get('wrap_guides') == '1'
-    res = engine.build_cover_wrap(tpl, cf, meta, dims, out_path, guides=guides)
-    return res, dims
+    return dims
 
 
 @app.route('/cover/wrap', methods=['POST'])
@@ -2536,6 +2571,33 @@ def project_edit(pid):
                     os.remove(old_path)
             proj['cover_file'] = pid + '-cover' + ext
 
+        # Optional back-cover image for the print package's wrap
+        old_back = proj.get('print_back_file', '')
+        back = request.files.get('print_back_image')
+        new_back = ''
+        if back and back.filename:
+            ext = os.path.splitext(secure_filename(back.filename))[1].lower()
+            if ext in ('.jpg', '.jpeg', '.png'):
+                new_back = pid + '-back' + ext
+                back.save(os.path.join(PROJECT_MS_DIR, new_back))
+                proj['print_back_file'] = new_back
+        elif 'print_back_clear' in form:
+            proj['print_back_file'] = ''
+        if old_back and old_back != proj.get('print_back_file', ''):
+            old_path = os.path.join(PROJECT_MS_DIR, old_back)
+            if os.path.exists(old_path):
+                os.remove(old_path)
+
+        proj.update({
+            'print_retailer':   form.get('print_retailer', 'kdp'),
+            'print_binding':    form.get('print_binding', 'paperback'),
+            'print_paper':      form.get('print_paper', 'white'),
+            'print_blurb':      form.get('print_blurb', '').strip(),
+            'print_flap_blurb': form.get('print_flap_blurb', '').strip(),
+            'print_flap_bio':   form.get('print_flap_bio', '').strip(),
+            'print_back_w':     _f(form, 'print_back_w', 1.5),
+            'print_back_y':     _f(form, 'print_back_y', 0.4),
+        })
         proj.update({
             'name':             form.get('name', '').strip() or proj['name'],
             'preset':           form.get('preset', proj['preset']),
@@ -2566,7 +2628,8 @@ def project_edit(pid):
         flash('Project updated.')
         return redirect(url_for('projects'))
 
-    return render_template('project_edit.html', pid=pid, proj=proj, presets=presets)
+    return render_template('project_edit.html', pid=pid, proj=proj, presets=presets,
+                           wrap_retailers=WRAP_RETAILERS, papers=_PAPER)
 
 
 # ---------------------------------------------------------- manuscript editor
@@ -2944,63 +3007,11 @@ def project_generate(pid):
     preset = load_preset(proj['preset'])
 
     ms_type = proj.get('manuscript_type', 'file')
-    ms_file = proj.get('manuscript_file', '')
-    raw = None
-
-    if ms_type == 'sample':
-        raw = open(SAMPLE, encoding='utf-8').read()
-    elif ms_file:
-        ms_path = os.path.join(PROJECT_MS_DIR, ms_file)
-        if not os.path.exists(ms_path):
-            flash('Manuscript file not found — please replace it via Edit.')
-            return redirect(url_for('projects'))
-        if ms_file.lower().endswith('.docx'):
-            try:
-                raw = manuscript.import_docx(ms_path)
-            except Exception as exc:
-                logging.error('docx import failed: %s', traceback.format_exc())
-                flash(f'Could not read the Word file: {exc}')
-                return redirect(url_for('projects'))
-        else:
-            raw = open(ms_path, encoding='utf-8', errors='replace').read()
-
-    if not raw:
-        flash('No manuscript found for this project.')
+    raw, err = _project_source(proj)
+    if err:
+        flash(err)
         return redirect(url_for('projects'))
-
-    cover_path = ''
-    cover_file = proj.get('cover_file', '')
-    if cover_file:
-        cp = os.path.join(PROJECT_MS_DIR, cover_file)
-        if os.path.exists(cp):
-            cover_path = cp
-
-    cover_mode = proj.get('cover_mode', 'none')
-    meta = {
-        'title':            proj.get('title', ''),
-        'subtitle':         proj.get('subtitle', ''),
-        'author':           proj.get('author', ''),
-        'year':             proj.get('year', '') or str(datetime.now().year),
-        'publisher':        proj.get('publisher', ''),
-        'front_matter':     proj.get('front_matter', 'full'),
-        'right_hand_starts': proj.get('right_hand_starts', True),
-        'cover_image':   cover_path,
-        'cover_overlay': proj.get('cover_overlay', False),
-        'cover_color':   proj.get('cover_color', 'light'),
-        'cover_mode':       cover_mode,
-        'cover_template':   proj.get('cover_template', ''),
-        'cover_template_data': (load_cover_template(proj.get('cover_template', ''))
-                                if cover_mode == 'designed' else None),
-        'cover_collection': proj.get('cover_collection', ''),
-        'cover_kicker':     proj.get('cover_kicker', ''),
-        'cover_accent':     proj.get('cover_accent', ''),
-        'cover_epigraph':   proj.get('cover_epigraph', ''),
-        'cover_studio':     proj.get('cover_studio', ''),
-        'include_toc':   proj.get('include_toc', False),
-        'smartquotes':   proj.get('smartquotes', True),
-        'press':         proj.get('press', False),
-        **{k: proj.get(k, '') for k in matter.KEYS},
-    }
+    meta, cover_path = _project_meta(proj)
     ms_parsed = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     base  = slugify(meta['title'] or proj.get('name', 'book'))
@@ -3053,6 +3064,277 @@ def project_generate(pid):
                            cover_path=cover_path, from_project=pid, fmt=fmt,
                            spec=spec, preflight=preflight, press=press,
                            epub_preflight=_epub_preflight(epub_name))
+
+
+def _project_source(proj):
+    """A project's manuscript as Markdown: `(raw, '')`, or `('', reason)` if unreadable."""
+    ms_type = proj.get('manuscript_type', 'file')
+    ms_file = proj.get('manuscript_file', '')
+    raw = None
+
+    if ms_type == 'sample':
+        raw = open(SAMPLE, encoding='utf-8').read()
+    elif ms_file:
+        ms_path = os.path.join(PROJECT_MS_DIR, ms_file)
+        if not os.path.exists(ms_path):
+            return '', 'Manuscript file not found — please replace it via Edit.'
+        if ms_file.lower().endswith('.docx'):
+            try:
+                raw = manuscript.import_docx(ms_path)
+            except Exception as exc:
+                logging.error('docx import failed: %s', traceback.format_exc())
+                return '', f'Could not read the Word file: {exc}'
+        else:
+            raw = open(ms_path, encoding='utf-8', errors='replace').read()
+
+    if not raw:
+        return '', 'No manuscript found for this project.'
+    return raw, ''
+
+
+def _project_meta(proj):
+    """The build meta for a saved project, and the cover image path it points at."""
+    cover_path = ''
+    cover_file = proj.get('cover_file', '')
+    if cover_file:
+        cp = os.path.join(PROJECT_MS_DIR, cover_file)
+        if os.path.exists(cp):
+            cover_path = cp
+
+    cover_mode = proj.get('cover_mode', 'none')
+    meta = {
+        'title':            proj.get('title', ''),
+        'subtitle':         proj.get('subtitle', ''),
+        'author':           proj.get('author', ''),
+        'year':             proj.get('year', '') or str(datetime.now().year),
+        'publisher':        proj.get('publisher', ''),
+        'front_matter':     proj.get('front_matter', 'full'),
+        'right_hand_starts': proj.get('right_hand_starts', True),
+        'cover_image':   cover_path,
+        'cover_overlay': proj.get('cover_overlay', False),
+        'cover_color':   proj.get('cover_color', 'light'),
+        'cover_mode':       cover_mode,
+        'cover_template':   proj.get('cover_template', ''),
+        'cover_template_data': (load_cover_template(proj.get('cover_template', ''))
+                                if cover_mode == 'designed' else None),
+        'cover_collection': proj.get('cover_collection', ''),
+        'cover_kicker':     proj.get('cover_kicker', ''),
+        'cover_accent':     proj.get('cover_accent', ''),
+        'cover_epigraph':   proj.get('cover_epigraph', ''),
+        'cover_studio':     proj.get('cover_studio', ''),
+        'include_toc':   proj.get('include_toc', False),
+        'smartquotes':   proj.get('smartquotes', True),
+        'press':         proj.get('press', False),
+        **{k: proj.get(k, '') for k in matter.KEYS},
+    }
+    return meta, cover_path
+
+
+# ------------------------------------------------------------ send to print
+# What a project remembers for its print package. The wrap's own allowances
+# (turn-in, hinge, board, flap) stay at the house defaults; the cover editor's
+# wrap export is still the place to hand-tune them.
+PRINT_DEFAULTS = {
+    'print_retailer': 'kdp', 'print_binding': 'paperback', 'print_paper': 'white',
+    'print_blurb': '', 'print_flap_blurb': '', 'print_flap_bio': '',
+    'print_back_file': '', 'print_back_w': 1.5, 'print_back_y': 0.4,
+}
+_WRAP_SUFFIX = {'paperback': '-cover-wrap', 'hardcover': '-case-wrap', 'jacket': '-jacket'}
+
+
+class PrintPackageError(ValueError):
+    """A reason the package can't be built that the writer can fix in Edit."""
+
+
+def build_print_package(proj):
+    """Build everything a printer wants for a project and zip it into OUT_DIR.
+
+    The order is the point: the interior is set first, press-ready and without
+    its cover, and *its* page count sizes the spine — so the wrap can never be
+    cut for a different book than the one inside it. Checks are collected, not
+    enforced: a printer other than the one picked may accept what we flag.
+    """
+    p = {**PRINT_DEFAULTS, **{k: proj[k] for k in PRINT_DEFAULTS if k in proj}}
+    preset = load_preset(proj['preset'])
+    raw, err = _project_source(proj)
+    if err:
+        raise PrintPackageError(err)
+    meta, _ = _project_meta(proj)
+    tpl = meta.get('cover_template_data')
+    if meta.get('cover_mode') != 'designed' or not tpl:
+        raise PrintPackageError(
+            'Send to print needs a designed cover for now — pick a cover template '
+            'under Cover. (A wrap around uploaded cover art is on the roadmap.)')
+
+    ms = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
+    base = slugify(meta['title'] or proj.get('name', 'book'))
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    retailer = p['print_retailer'] if p['print_retailer'] in WRAP_RETAILERS else 'kdp'
+    binding = p['print_binding'] if p['print_binding'] in _WRAP_SUFFIX else 'paperback'
+    paper = p['print_paper'] if p['print_paper'] in _PAPER else 'white'
+
+    work = tempfile.mkdtemp()
+    try:
+        files = {}
+        interior = os.path.join(work, f'{base}-interior.pdf')
+        built = engine.build_pdf(ms, preset, interior, dict(meta), press=True)
+        pages = built['page_count']
+        files[os.path.basename(interior)] = interior
+
+        checks = _preflight(built, preset, pages)
+        if built.get('press_error'):
+            checks.insert(0, {
+                'label': 'Press-ready', 'ok': False,
+                'detail': ('This book has colour in it, so the interior was built as an '
+                           'ordinary RGB PDF: ' + built['press_error'])})
+        press = engine.press_check(interior) if built.get('press') else None
+
+        dims = _wrap_dims({'wrap_retailer': retailer, 'wrap_binding': binding,
+                           'wrap_paper': paper,
+                           'wrap_trim_w': preset['trim']['w'],
+                           'wrap_trim_h': preset['trim']['h']}, pages)
+        back = ''
+        if p['print_back_file']:
+            bp = os.path.join(PROJECT_MS_DIR, p['print_back_file'])
+            back = bp if os.path.exists(bp) else ''
+        wmeta = dict(meta,
+                     cover_blurb=p['print_blurb'],
+                     cover_jacket_blurb=p['print_flap_blurb'],
+                     cover_author_bio=p['print_flap_bio'],
+                     cover_back_image=back,
+                     cover_back_image_w=_f(p, 'print_back_w', 1.5),
+                     cover_back_image_y=_f(p, 'print_back_y', 0.4))
+        cf = engine._register_cover_fonts(tpl, engine.register_fonts(DEFAULTS))
+        wrap = os.path.join(work, base + _WRAP_SUFFIX[binding] + '.pdf')
+        wres = engine.build_cover_wrap(tpl, cf, wmeta, dims, wrap)
+        files[os.path.basename(wrap)] = wrap
+        for w in dims['warnings']:
+            checks.append({'label': 'Cover wrap', 'ok': False, 'detail': w})
+        if not wres['spine_text']:
+            checks.append({'label': 'Spine text', 'ok': True,
+                           'detail': (f'Left off — {pages} pages is under '
+                                      f'{WRAP_RETAILERS[retailer]["label"]}’s minimum of '
+                                      f'{WRAP_RETAILERS[retailer]["spine_text_min"]}')})
+
+        front = os.path.join(work, f'{base}-front-cover.jpg')
+        try:
+            _designed_cover_jpeg(preset, meta, front)
+            files[os.path.basename(front)] = front
+        except Exception as exc:
+            logging.exception('front cover JPG for the print package failed')
+            checks.append({'label': 'Front cover image', 'ok': False,
+                           'detail': (f'Could not render the store-listing JPG ({exc}) — '
+                                      'the interior and wrap are unaffected')})
+
+        info = {
+            'title': meta['title'] or proj.get('name', ''), 'author': meta['author'],
+            'retailer': retailer, 'retailer_label': WRAP_RETAILERS[retailer]['label'],
+            'binding': binding, 'paper_label': _PAPER[paper]['label'],
+            'trim_w': preset['trim']['w'], 'trim_h': preset['trim']['h'],
+            'pages': pages, 'wrap': wres, 'bleed': dims['bleed'],
+            'press_ready': bool(built.get('press')),
+            'checks': sorted(checks, key=lambda c: c['ok']), 'press': press,
+        }
+        spec = os.path.join(work, 'PRINT-SPEC.txt')
+        with open(spec, 'w', encoding='utf-8') as f:
+            f.write(_print_spec_text(info, sorted(files) + ['PRINT-SPEC.txt']))
+        files['PRINT-SPEC.txt'] = spec
+
+        import zipfile
+        folder = f'{base}-print'
+        zip_name = f'{folder}-{stamp}.zip'
+        with zipfile.ZipFile(os.path.join(OUT_DIR, zip_name), 'w',
+                             zipfile.ZIP_DEFLATED) as z:
+            for name, path in files.items():
+                z.write(path, f'{folder}/{name}')
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    info['zip_name'] = zip_name
+    info['files'] = sorted(files)
+    return info
+
+
+_BINDING_LABEL = {'paperback': 'Paperback (perfect bound)',
+                  'hardcover': 'Hardcover (case laminate)',
+                  'jacket': 'Dust jacket'}
+
+_UPLOAD_STEPS = {
+    'kdp': [
+        'In KDP, open the book’s Paperback (or Hardcover) Content page.',
+        'Manuscript: upload the interior PDF.',
+        'Book Cover: choose “Upload a cover you already have” and upload the wrap PDF.',
+        'Make sure the trim size and paper type in KDP match this sheet — the spine was '
+        'worked out from them.',
+        'Launch the Previewer, fix anything it flags, and order a proof copy before '
+        'you publish.',
+    ],
+    'ingramspark': [
+        'In IngramSpark, set up the print title with the trim, binding and paper on '
+        'this sheet.',
+        'Upload the interior PDF as the interior file and the wrap PDF as the cover file.',
+        'Generate IngramSpark’s cover template for this page count and check the spine '
+        'width against it.',
+        'Approve the eProof, then order a printed proof before release.',
+    ],
+    'generic': [
+        'Send the interior PDF and the wrap PDF as separate files.',
+        'Check the spine width and bleed against your printer’s own cover template for '
+        'this page count.',
+        'Order a printed proof before a full run.',
+    ],
+}
+
+
+def _print_spec_text(info, names):
+    """The plain-text sheet that travels in the package, for whoever uploads it."""
+    w = info['wrap']
+    lines = [
+        f'{info["title"]}' + (f' — {info["author"]}' if info['author'] else ''),
+        'Print package from Typeset Studio',
+        '',
+        'SPEC',
+        f'  Printer      {info["retailer_label"]}',
+        f'  Binding      {_BINDING_LABEL[info["binding"]]}',
+        f'  Trim         {info["trim_w"]:g} x {info["trim_h"]:g} in',
+        f'  Pages        {info["pages"]}',
+        f'  Paper        {info["paper_label"]}',
+        f'  Spine        {w["spine_w"]:.4f} in',
+        f'  Cover wrap   {w["wrap_w"]:g} x {w["wrap_h"]:g} in (bleed {info["bleed"]:g} in)',
+        f'  Spine text   {"yes" if w["spine_text"] else "no (too few pages)"}',
+        f'  Interior     {"press-ready (single-ink black, no cover)" if info["press_ready"] else "ordinary RGB — see checks"}',
+        '',
+        'FILES',
+    ]
+    lines += [f'  {n}' for n in names]
+    lines += ['', 'The front-cover JPG is for store listings and marketing; printers only '
+                  'need the two PDFs.' if any(n.endswith('.jpg') for n in names) else '']
+    rows = info['checks'] + (info['press'] or [])
+    issues = [c for c in rows if not c['ok']]
+    lines += ['', f'CHECKS ({len(issues)} to look at)' if issues else 'CHECKS (all clear)']
+    for c in rows:
+        lines.append(f'  [{"ok" if c["ok"] else "!!"}] {c["label"].strip()}: {c["detail"]}')
+    lines += ['', 'UPLOADING']
+    lines += [f'  {i}. {s}' for i, s in enumerate(_UPLOAD_STEPS[info['retailer']], 1)]
+    return '\n'.join(lines) + '\n'
+
+
+@app.route('/project/<pid>/print-package', methods=['POST'])
+def project_print_package(pid):
+    proj = load_project(pid)
+    try:
+        info = build_print_package(proj)
+    except PrintPackageError as exc:
+        flash(str(exc))
+        return redirect(url_for('project_edit', pid=pid))
+    except Exception as exc:
+        logging.error('print package failed: %s', traceback.format_exc())
+        flash(f'Print package failed: {exc}')
+        return redirect(url_for('projects'))
+    proj['last_page_count'] = info['pages']
+    proj['last_print_package'] = info['zip_name']
+    save_project_file(pid, proj)
+    return render_template('print_package.html', pid=pid, proj=proj, info=info)
 
 
 @app.route('/project/<pid>/continuity', methods=['POST'])

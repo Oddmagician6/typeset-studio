@@ -36,7 +36,8 @@ def check(name, cond, detail=''):
 PID = '_test_history_project'
 MS_PATH = os.path.join(A.PROJECT_MS_DIR, PID + '.md')
 HIST = A._history_folder(PID)
-PROJ_JSON = os.path.join(A.PROJECT_DIR, PID + '.json')
+# secure_filename strips the leading underscore, so that is the name on disk
+PROJ_JSON = os.path.join(A.PROJECT_DIR, A.secure_filename(PID) + '.json')
 
 DRAFT1 = '# One\n\nThe first draft of the chapter, which is the thing worth keeping.\n'
 DRAFT2 = DRAFT1 + '\nA second paragraph, added later.\n'
