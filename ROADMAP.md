@@ -221,7 +221,12 @@ cover_overlay, cover_color
 manuscript_file     filename inside projects/manuscripts/
 manuscript_type     "file" | "pasted" | "sample"
 cover_file          filename inside projects/manuscripts/ ('' if none)
-last_pdf, last_epub
+last_pdf, last_epub, last_page_count
+last_print_package  zip name inside out/ from Send to print (#65)
+print_retailer, print_binding, print_paper       kdp|ingramspark|generic, paperback|hardcover|jacket, white|cream|color
+print_blurb, print_flap_blurb, print_flap_bio    wrap copy
+print_back_file     back-cover image inside projects/manuscripts/ ('' if none)
+print_back_w, print_back_y                       its width (in) and height up the back panel (0–1)
 created, updated    ISO 8601 datetime strings
 ```
 
@@ -1623,6 +1628,39 @@ invisible to the check (by design — it is how another product's release stays 
 release). **If you'd rather not use GitHub**, point `UPDATE_FEED` at a static JSON file of your
 own (`{"version": "1.3.0", "url": "…"}`) — the reader accepts that shape too.
 
+**65. Send to print — the interior and its cover wrap as one package** *(asked for as "a send to
+print format that delivers the cover separate from the rest")*
+KDP and IngramSpark both take the interior and the cover as **two files**, and the spine width on
+the cover depends on the interior's page count. Before this the writer built the interior, read
+the page count off the result page, and typed it into the cover editor's wrap form — so any later
+edit to the book quietly left a wrap cut for a different spine.
+- **`build_print_package(proj)`** builds in the order that removes the mistake: the interior first,
+  **press-ready and coverless** (`build_pdf(..., press=True)`), then the wrap sized from *that*
+  page count, then a front-cover JPG for store listings (`_designed_cover_jpeg`, the same
+  rasteriser the EPUB cover uses), then `PRINT-SPEC.txt` — trim, pages, paper, spine, wrap size,
+  every check, and per-printer upload steps (`_UPLOAD_STEPS`). Zipped to
+  `out/<slug>-print-<stamp>.zip` as a `<slug>-print/` folder.
+- **Checks are flagged, never enforced**, the same stance as `hardcover_warnings`: interior
+  preflight, the press check, the wrap's retailer limits, and a plain row when a colour book fell
+  back to an RGB interior. Failures sort to the top of the page and the sheet.
+- **Project settings** (`PRINT_DEFAULTS`): printer, binding, paper, back blurb, flap copy, and a
+  back-cover image stored as `projects/manuscripts/<pid>-back.<ext>`, edited in a new **Print**
+  fieldset on the project editor. The wrap allowances (turn-in, hinge, board, flap) stay at the
+  house defaults; the cover editor's wrap export is still where to hand-tune them.
+- **Refactors that made it one code path, not two:** `_wrap_dims(form, pages)` out of
+  `_wrap_from_form` (the package feeds it a plain dict), `_designed_cover_jpeg` out of
+  `_epub_cover`, and `_project_source` / `_project_meta` out of `project_generate`.
+- **Designed covers only** — a project with an uploaded-image cover is sent back to Edit with the
+  reason. See #66. Projects only: a one-off build has nowhere to keep print settings.
+- Route `POST /project/<pid>/print-package` → `templates/print_package.html`; a **Send to print**
+  button on the projects page and on a project's result page. Also added: a preflight row,
+  **Cover on page 1**, when an ordinary (non-press) PDF still opens with its cover — the file a
+  printer would bind with the cover as its first inside page (`has_cover` on the build result).
+- `test_print_package.py`: the ZIP's contents; the interior matches a coverless build's page count;
+  the paperback and case wraps measure to the retailer formula at that count; KDP hardcover limits
+  flagged but still built; refusals for a non-designed cover and a missing manuscript; the editor
+  round-trips the settings.
+
 ### ✓ Tier 2 — shipped
 
 **5. Smart punctuation**
@@ -1853,6 +1891,27 @@ before `to_markdown` ever runs.
   loose end to close when the round-trip layer is next opened, not a reason to open it.
 *Prior art for the shape of the change: #49 added the `link` field across all three copies of
 the model and is the closest template.*
+
+**66. Send to print with an uploaded cover image** *(small–medium; the half #65 left out —
+details to be worked out)*
+#65 builds its wrap from a cover *template*, so a book whose cover is an uploaded image (cover
+mode `image`) is refused. Writers who commission cover art are exactly the ones heading to print.
+- **Open questions:** does the uploaded image become the front panel only, with a plain or
+  palette-coloured back and spine? Or can a writer upload a full wrap from their designer and have
+  it checked (page size against the computed wrap) rather than built?
+- **Resolution matters here** in a way it doesn't on screen: a front panel at 6×9" plus bleed wants
+  ~1875×2775 px for 300 dpi. Flag a too-small image rather than print it soft.
+- `build_cover_wrap` paints the front through `_paint_background` + `_paint_cover_front`; an image
+  front would slot in there. The title overlay option (`cover_overlay`) should carry over.
+
+**67. A full publish package — print and ebook together** *(small; extends #65 — details to be
+worked out)*
+#65 is print only. A "publish" package would add the EPUB (with its embedded cover) and the
+ebook-store cover JPG alongside the print files, so one click hands off every edition.
+- **Open questions:** one ZIP with `print/` and `ebook/` folders, or a choice on the button? Should
+  the EPUB preflight (and epubcheck, when installed) rows join the package's checks?
+- Store-listing cover sizes differ by shop (KDP wants 2560 px on the long edge, which
+  `EPUB_COVER_H` already matches); the spec sheet would need an ebook upload section per store.
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 

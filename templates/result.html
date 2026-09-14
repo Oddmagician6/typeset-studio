@@ -77,6 +77,12 @@
         {% if epub_name %}
           <a class="btn {{ 'btn-primary' if not out_name }}" href="{{ url_for('download', fn=epub_name) }}">Download EPUB</a>
         {% endif %}
+        {% if from_project %}
+          <form method="post" action="{{ url_for('project_print_package', pid=from_project) }}" style="margin:0">
+            <button class="btn" type="submit"
+                    title="Press-ready interior + cover wrap, zipped for the printer">Send to print</button>
+          </form>
+        {% endif %}
       </div>
     </div>
     {% if spec %}

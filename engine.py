@@ -3835,4 +3835,5 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
         'font_details':   fonts['details'],
         'fonts_embedded': not fonts['fallback'],
         'press':          bool(press),
+        'has_cover':      cover is not None,
     }
