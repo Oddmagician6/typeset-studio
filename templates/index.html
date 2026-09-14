@@ -64,6 +64,8 @@
           <div class="actions">
             <a class="btn btn-primary btn-sm" href="{{ url_for('generate') }}?preset={{ item.id }}">Set a book</a>
             <a class="btn btn-sm" href="{{ url_for('editor', pid=item.id) }}">Edit</a>
+            <a class="btn btn-sm" href="{{ url_for('style_cover_specs', pid=item.id) }}"
+               title="Wrap dimensions, guides and a blank template for designing your own cover">Cover specs</a>
             <form class="inline-form" method="post" action="{{ url_for('clone', pid=item.id) }}">
               <button class="btn btn-sm" type="submit">Duplicate</button>
             </form>

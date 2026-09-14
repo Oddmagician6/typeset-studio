@@ -123,6 +123,11 @@
             <div class="field num"><label>Outside</label><span class="hint">inches</span>
               <input type="number" step="0.05" name="m_outside" value="{{ p.margins.outside }}"></div>
           </div>
+          {% if not is_new %}
+          <p class="hint" style="margin:12px 0 0">Designing your own cover?
+            <a href="{{ url_for('style_cover_specs', pid=pid) }}">Cover specs for this trim</a>
+            — wrap dimensions and a blank template (uses the saved trim).</p>
+          {% endif %}
         </div>
       </fieldset>
 
