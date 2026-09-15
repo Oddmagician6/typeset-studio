@@ -269,6 +269,20 @@ manuscript.FIGURE_DIR = FIGURE_DIR    # where .docx images are extracted to
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 app.secret_key = 'typeset-studio-local'
 
+
+def issue_rows(rows):
+    """The check rows a writer still has something to do about.
+
+    A row that failed but carries `note` is describing the file, not faulting
+    it — the press check's output intent is false on every build we make. The
+    browser and the spec sheet in the package both count through here, so they
+    can never disagree about how many things are outstanding.
+    """
+    return [c for c in (rows or []) if not c['ok'] and not c.get('note')]
+
+
+app.jinja_env.filters['issues'] = issue_rows
+
 PREVIEW_SAMPLE = """\
 # The First Chapter
 
@@ -636,9 +650,13 @@ EMBLEM_SLOTS = ['top-center', 'top-left', 'top-right',
 COVER_PALETTE_KEYS = ['gold', 'teal', 'ink', 'muted']
 
 
+def _slug_or_blank(name):
+    """`slugify` without a default, for callers that supply their own."""
+    return re.sub(r'[^a-z0-9]+', '-', (name or '').lower()).strip('-')
+
+
 def slugify(name):
-    s = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
-    return s or 'style'
+    return _slug_or_blank(name) or 'style'
 
 
 def list_presets():
@@ -3260,7 +3278,11 @@ def build_print_package(proj):
             'under Cover. (A wrap around uploaded cover art is on the roadmap.)')
 
     ms = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
-    base = slugify(meta['title'] or proj.get('name', 'book'))
+    # slugify falls back to 'style', which is right for a preset and wrong on
+    # every file in a print package — a title with no ASCII in it (Тайга) would
+    # ship as style-interior.pdf. Fall through the project name to 'book'.
+    base = (_slug_or_blank(meta['title']) or _slug_or_blank(proj.get('name', ''))
+            or 'book')
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     retailer = p['print_retailer'] if p['print_retailer'] in WRAP_RETAILERS else 'kdp'
     binding = p['print_binding'] if p['print_binding'] in _WRAP_SUFFIX else 'paperback'
@@ -3288,7 +3310,10 @@ def build_print_package(proj):
                            'wrap_trim_h': preset['trim']['h']}, pages)
         back = ''
         if p['print_back_file']:
-            bp = os.path.join(PROJECT_MS_DIR, p['print_back_file'])
+            # a project file is editable by hand; this is the one print setting
+            # that becomes a path, so it is read as a bare filename
+            bp = os.path.join(PROJECT_MS_DIR,
+                              secure_filename(os.path.basename(p['print_back_file'])))
             back = bp if os.path.exists(bp) else ''
         wmeta = dict(meta,
                      cover_blurb=p['print_blurb'],
@@ -3400,13 +3425,15 @@ def _print_spec_text(info, names):
         'FILES',
     ]
     lines += [f'  {n}' for n in names]
-    lines += ['', 'The front-cover JPG is for store listings and marketing; printers only '
-                  'need the two PDFs.' if any(n.endswith('.jpg') for n in names) else '']
+    if any(n.endswith('.jpg') for n in names):
+        lines += ['', 'The front-cover JPG is for store listings and marketing; printers '
+                      'only need the two PDFs.']
     rows = info['checks'] + (info['press'] or [])
-    issues = [c for c in rows if not c['ok']]
+    issues = issue_rows(rows)
     lines += ['', f'CHECKS ({len(issues)} to look at)' if issues else 'CHECKS (all clear)']
     for c in rows:
-        lines.append(f'  [{"ok" if c["ok"] else "!!"}] {c["label"].strip()}: {c["detail"]}')
+        mark = 'ok' if c['ok'] else ('--' if c.get('note') else '!!')
+        lines.append(f'  [{mark}] {c["label"].strip()}: {c["detail"]}')
     lines += ['', 'UPLOADING']
     lines += [f'  {i}. {s}' for i, s in enumerate(_UPLOAD_STEPS[info['retailer']], 1)]
     return '\n'.join(lines) + '\n'

@@ -22,7 +22,7 @@
   .spec-card table{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:12px}
   .spec-card td{padding:2px 0}
   .spec-card td:last-child{text-align:right;font-weight:600}
-  .ok{color:#2a7a2a}.warn{color:var(--red)}
+  .ok{color:#2a7a2a}.warn{color:var(--red)}.note{color:var(--faint)}
   .preflight{margin-top:18px;background:var(--surface);border:1px solid var(--rule);border-radius:3px;box-shadow:var(--shadow);overflow:hidden}
   .preflight .head{padding:12px 24px;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:10px}
   .preflight .head-label{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--red)}
@@ -151,13 +151,19 @@
     <div class="preflight">
       <div class="head">
         <span class="head-label">Press check</span>
-        <span class="badge badge-ok">Press-ready</span>
+        {% set pissues = press | issues %}
+        {% if pissues %}
+          <span class="badge badge-warn">{{ pissues | length }} to look at</span>
+        {% else %}
+          <span class="badge badge-ok">Press-ready</span>
+        {% endif %}
       </div>
       <ul>
         {% for c in press %}
         <li>
-          <span class="icon {{ 'ok' if c.ok else 'warn' }}">{{ '✓' if c.ok else '✗' }}</span>
-          <span class="chk-label {{ 'ok' if c.ok else 'warn' }}">{{ c.label }}</span>
+          {% set tone = 'ok' if c.ok else ('note' if c.note else 'warn') %}
+          <span class="icon {{ tone }}">{{ '✓' if c.ok else ('·' if c.note else '✗') }}</span>
+          <span class="chk-label {{ tone }}">{{ c.label }}</span>
           <span class="chk-detail">{{ c.detail }}</span>
         </li>
         {% endfor %}

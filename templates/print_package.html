@@ -17,7 +17,7 @@
   .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:0 24px 22px}
   .more{margin-top:20px}
   .more a{font-size:14px}
-  .ok{color:#2a7a2a}.warn{color:var(--red)}
+  .ok{color:#2a7a2a}.warn{color:var(--red)}.note{color:var(--faint)}
   .preflight{margin-top:18px;background:var(--surface);border:1px solid var(--rule);border-radius:3px;box-shadow:var(--shadow);overflow:hidden}
   .preflight .head{padding:12px 24px;border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:10px}
   .preflight .head-label{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:var(--red)}
@@ -69,7 +69,7 @@
       </div>
     </div>
 
-    {% set issues = info.checks | selectattr('ok', 'equalto', false) | list %}
+    {% set issues = (info.checks + (info.press or [])) | issues %}
     <div class="preflight">
       <div class="head">
         <span class="head-label">Checks</span>
@@ -82,8 +82,9 @@
       <ul>
         {% for c in info.checks %}
         <li>
-          <span class="icon {{ 'ok' if c.ok else 'warn' }}">{{ '✓' if c.ok else '✗' }}</span>
-          <span class="chk-label {{ 'ok' if c.ok else 'warn' }}">{{ c.label }}</span>
+          {% set tone = 'ok' if c.ok else ('note' if c.note else 'warn') %}
+          <span class="icon {{ tone }}">{{ '✓' if c.ok else ('·' if c.note else '✗') }}</span>
+          <span class="chk-label {{ tone }}">{{ c.label }}</span>
           <span class="chk-detail">{{ c.detail }}</span>
         </li>
         {% endfor %}
@@ -91,16 +92,22 @@
     </div>
 
     {% if info.press %}
+    {% set pissues = info.press | issues %}
     <div class="preflight">
       <div class="head">
         <span class="head-label">Press check</span>
-        <span class="badge badge-ok">Press-ready</span>
+        {% if pissues %}
+          <span class="badge badge-warn">{{ pissues | length }} to look at</span>
+        {% else %}
+          <span class="badge badge-ok">Press-ready</span>
+        {% endif %}
       </div>
       <ul>
         {% for c in info.press %}
         <li>
-          <span class="icon {{ 'ok' if c.ok else 'warn' }}">{{ '✓' if c.ok else '✗' }}</span>
-          <span class="chk-label {{ 'ok' if c.ok else 'warn' }}">{{ c.label }}</span>
+          {% set tone = 'ok' if c.ok else ('note' if c.note else 'warn') %}
+          <span class="icon {{ tone }}">{{ '✓' if c.ok else ('·' if c.note else '✗') }}</span>
+          <span class="chk-label {{ tone }}">{{ c.label }}</span>
           <span class="chk-detail">{{ c.detail }}</span>
         </li>
         {% endfor %}

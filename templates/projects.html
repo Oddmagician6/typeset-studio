@@ -112,6 +112,9 @@
             {% if p.last_pdf %}
               <a class="btn btn-sm" href="{{ url_for('download', fn=p.last_pdf) }}">Last PDF</a>
             {% endif %}
+            {% if p.last_print_package %}
+              <a class="btn btn-sm" href="{{ url_for('download', fn=p.last_print_package) }}">Last package</a>
+            {% endif %}
             <span class="sep"></span>
             <form class="inline-form" method="post" action="{{ url_for('project_delete', pid=item.id) }}"
                   onsubmit="return confirm('Delete the project “{{ p.name }}”? This cannot be undone.');">
