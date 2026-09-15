@@ -3651,7 +3651,9 @@ def press_check(path):
     Measured off the file, not inferred from the build: the point of a press
     check is to describe the artefact that will actually be uploaded. Returns
     the same {label, ok, detail} rows the other preflight cards use, or None if
-    PyMuPDF isn't installed.
+    PyMuPDF isn't installed. A row may also carry `note: True`, meaning it is
+    descriptive rather than a fault to fix; counts of outstanding issues skip
+    those.
 
     The honest headline is in the last row: this is a **press-friendly** PDF,
     not a certified PDF/X-1a, because the standard also wants an embedded CMYK
@@ -3702,7 +3704,9 @@ def press_check(path):
         {'label': 'Trim box', 'ok': trimbox,
          'detail': ('Declared, so a prepress check knows where the page ends'
                     if trimbox else 'Not declared — printers fall back to the page box')},
-        {'label': 'Output intent', 'ok': False,
+        # `note`: true of every press build we make, and nothing the writer can
+        # act on - it states what this file is, so it is not counted as an issue
+        {'label': 'Output intent', 'ok': False, 'note': True,
          'detail': ('No embedded ICC profile, so this is press-friendly rather than '
                     'certified PDF/X-1a. KDP and IngramSpark both accept it as is.')},
     ]
@@ -3801,12 +3805,19 @@ def _resolve_inbook_links(chapters):
     return _ms_map_texts(chapters, fix), dead
 
 
+def _coverless(meta):
+    """The same book with no cover page, for any build bound for a printer."""
+    return dict(meta, cover_mode='none', cover_image='')
+
+
 def build_pdf(manuscript, preset, out_path, meta, press=False):
     """Build the interior. `press=True` asks for the press-ready variant.
 
     A press build that hits a colour it cannot express falls back to a normal
     one and says so in `press_error`, because a book that builds in RGB beats
-    a book that doesn't build.
+    a book that doesn't build. The fallback still leaves the cover out: only
+    the CMYK conversion failed, and a print interior wants a coverless block
+    either way — the page count it reports is what a spine gets cut from.
     """
     if not press:
         return _build_pdf(manuscript, preset, out_path, meta)
@@ -3815,7 +3826,7 @@ def build_pdf(manuscript, preset, out_path, meta, press=False):
     except ValueError as exc:
         if 'color' not in str(exc).lower():
             raise
-        res = _build_pdf(manuscript, preset, out_path, meta)
+        res = _build_pdf(manuscript, preset, out_path, _coverless(meta))
         res['press'] = False
         res['press_error'] = str(exc)
         return res
@@ -3849,7 +3860,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
         # A press interior carries no cover: KDP and IngramSpark both want the
         # cover as its own file, and a designed cover is chromatic by nature —
         # it would be the one thing in the book the CMYK canvas refused.
-        meta = dict(meta, cover_mode='none', cover_image='')
+        meta = _coverless(meta)
     if meta.get('cover_mode') == 'designed' and meta.get('cover_template_data'):
         ctpl = meta['cover_template_data']
         cover = {'mode': 'designed',

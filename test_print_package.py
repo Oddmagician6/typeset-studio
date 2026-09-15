@@ -6,7 +6,7 @@ measure the files — the interior carries no cover, and the wrap's width is the
 retailer formula evaluated at *that* interior's page count.
 """
 
-import sys, os, zipfile, tempfile
+import sys, os, re, zipfile, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -48,7 +48,7 @@ def cleanup():
         if os.path.exists(p):
             os.remove(p)
     for f in os.listdir(A.OUT_DIR):
-        if f.startswith('the-salt-road-print-') and f.endswith('.zip'):
+        if (f.startswith('the-salt-road-print-') or f.startswith('taiga-press-print-'))                 and f.endswith('.zip'):
             os.remove(os.path.join(A.OUT_DIR, f))
 
 
@@ -136,6 +136,59 @@ try:
           (ww, want_w))
     check('KDP’s hardcover limits are flagged, not enforced',
           'white paper only' in html and 'Download package' in html)
+
+    # --------------------------------------------------- the colour fallback
+    # A book the CMYK canvas refuses still has to come out coverless: the wrap
+    # in the same zip is cut from whatever page count the interior reports, so
+    # a cover page smuggled back in would thicken the spine by a leaf or two.
+    print('when the press build falls back to RGB')
+    real = engine._build_pdf
+
+    def refuse_colour(ms_, preset_, out_, meta_, press=False):
+        if press:
+            raise ValueError('cannot convert color to CMYK: chromatic')
+        return real(ms_, preset_, out_, meta_)
+
+    engine._build_pdf = refuse_colour
+    try:
+        r = send(dict(PROJ))
+        html = r.get_data(as_text=True)
+        fb = unpack(A.load_project(PID)['last_print_package'])
+        fb_pages, _, _ = pdf_info(fb['the-salt-road-interior.pdf'])
+    finally:
+        engine._build_pdf = real
+    check('the fallback interior still carries no cover', fb_pages == pages,
+          (fb_pages, pages))
+    _, fb_ww, _ = pdf_info(fb['the-salt-road-cover-wrap.pdf'])
+    check('so its wrap is the one the press-ready build would have had',
+          abs(fb_ww - (2 * 0.125 + 2 * tw + pages * A._PAPER['cream']['ppi'])) < 0.01,
+          fb_ww)
+    check('and the page says why it is RGB', 'Ordinary RGB' in html)
+
+    # ----------------------------------------------------------- the tallies
+    # The browser and the sheet inside the zip count the same rows, or a writer
+    # reads "all clear" on screen and "1 to look at" in the file they send on.
+    print('the checks add up the same way twice')
+    r = send(dict(PROJ))
+    html = r.get_data(as_text=True)
+    files = unpack(A.load_project(PID)['last_print_package'])
+    spec = files['PRINT-SPEC.txt'].decode('utf-8')
+    on_page = re.search(r'badge-warn">\s*(\d+) to look at', html)
+    in_spec = re.search(r'CHECKS \((\d+) to look at\)', spec)
+    check('the page and the spec sheet agree',
+          (on_page.group(1) if on_page else None) == (in_spec.group(1) if in_spec else None),
+          (html.count('badge-ok'), in_spec.group(0) if in_spec else 'all clear'))
+    check('the output intent reads as a note, not a fault',
+          '[--] Output intent' in spec
+          and int(in_spec.group(1)) == spec.count('[!!]'), in_spec.group(0))
+
+    # ------------------------------------------------------- what it is named
+    print('naming')
+    r = send(dict(PROJ, title='Тайга', name='Taiga Press'))
+    named = A.load_project(PID)['last_print_package']
+    check('a title with no ASCII in it falls back to the project name',
+          named.startswith('taiga-press-print-'), named)
+    os.remove(os.path.join(A.OUT_DIR, named))
 
     # ------------------------------------------------------------ refusals
     print('what it refuses')
