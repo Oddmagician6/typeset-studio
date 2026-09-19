@@ -493,13 +493,13 @@ def _press_report(pdf_name, build_result):
         return None
 
 
-def _epub_preflight(epub_name):
-    """Checks for a just-built EPUB, or None if this book didn't make one."""
-    if not epub_name:
-        return None
-    path = os.path.join(OUT_DIR, epub_name)
-    if not os.path.exists(path):
-        return None
+def _epub_checks(path):
+    """Our EPUB checks for a file anywhere on disk, plus epubcheck if installed.
+
+    Takes a path rather than a name in `OUT_DIR` because the publish package
+    (#67) builds its ebook in a temp folder and zips it — the same rows have to
+    reach the package page and `PUBLISH-SPEC.txt`.
+    """
     try:
         checks = epub.check(path)
     except Exception:
@@ -509,6 +509,30 @@ def _epub_preflight(epub_name):
     if extra:
         checks.append(extra)
     return checks
+
+
+def _epub_preflight(epub_name):
+    """Checks for a just-built EPUB, or None if this book didn't make one."""
+    if not epub_name:
+        return None
+    path = os.path.join(OUT_DIR, epub_name)
+    if not os.path.exists(path):
+        return None
+    return _epub_checks(path)
+
+
+def _cover_jpeg_size(path):
+    """(width, height) in pixels of a rendered cover JPEG, or None.
+
+    Only for the spec sheet: a store listing asks for pixels, and the number
+    depends on the style's trim, so it can't be stated once and reused.
+    """
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return im.size
+    except Exception:
+        return None
 
 
 def print_spec(page_count, preset):
@@ -3252,19 +3276,30 @@ PRINT_DEFAULTS = {
 }
 _WRAP_SUFFIX = {'paperback': '-cover-wrap', 'hardcover': '-case-wrap', 'jacket': '-jacket'}
 
+# The two shapes a handoff package comes in. 'print' is #65 — the two PDFs a
+# printer takes, flat in the folder. 'publish' (#67) adds the ebook edition and
+# sorts everything into print/ and ebook/, so the two uploads can't get mixed up.
+PACKAGE_SCOPES = ('print', 'publish')
+
 
 class PrintPackageError(ValueError):
     """A reason the package can't be built that the writer can fix in Edit."""
 
 
-def build_print_package(proj):
+def build_print_package(proj, scope='print'):
     """Build everything a printer wants for a project and zip it into OUT_DIR.
 
     The order is the point: the interior is set first, press-ready and without
     its cover, and *its* page count sizes the spine — so the wrap can never be
     cut for a different book than the one inside it. Checks are collected, not
     enforced: a printer other than the one picked may accept what we flag.
+
+    With ``scope='publish'`` the same build also emits the ebook edition (#67):
+    the EPUB and the store-listing cover JPG, in an ``ebook/`` folder beside
+    ``print/``. Both editions come out of the one parse and the one cover
+    rasterisation, so the paperback and the Kindle file cannot drift apart.
     """
+    publish = scope == 'publish'
     p = {**PRINT_DEFAULTS, **{k: proj[k] for k in PRINT_DEFAULTS if k in proj}}
     preset = load_preset(proj['preset'])
     raw, err = _project_source(proj)
@@ -3288,13 +3323,18 @@ def build_print_package(proj):
     binding = p['print_binding'] if p['print_binding'] in _WRAP_SUFFIX else 'paperback'
     paper = p['print_paper'] if p['print_paper'] in _PAPER else 'white'
 
+    # A publish package keeps the two editions in their own folders; a print
+    # package stays flat, which is what a printer's upload form expects.
+    pdir = 'print/' if publish else ''
+    edir = 'ebook/'
+
     work = tempfile.mkdtemp()
     try:
         files = {}
         interior = os.path.join(work, f'{base}-interior.pdf')
         built = engine.build_pdf(ms, preset, interior, dict(meta), press=True)
         pages = built['page_count']
-        files[os.path.basename(interior)] = interior
+        files[pdir + os.path.basename(interior)] = interior
 
         checks = _preflight(built, preset, pages)
         if built.get('press_error'):
@@ -3325,7 +3365,7 @@ def build_print_package(proj):
         cf = engine._register_cover_fonts(tpl, engine.register_fonts(DEFAULTS))
         wrap = os.path.join(work, base + _WRAP_SUFFIX[binding] + '.pdf')
         wres = engine.build_cover_wrap(tpl, cf, wmeta, dims, wrap)
-        files[os.path.basename(wrap)] = wrap
+        files[pdir + os.path.basename(wrap)] = wrap
         for w in dims['warnings']:
             checks.append({'label': 'Cover wrap', 'ok': False, 'detail': w})
         if not wres['spine_text']:
@@ -3334,17 +3374,47 @@ def build_print_package(proj):
                                       f'{WRAP_RETAILERS[retailer]["label"]}’s minimum of '
                                       f'{WRAP_RETAILERS[retailer]["spine_text_min"]}')})
 
-        front = os.path.join(work, f'{base}-front-cover.jpg')
+        # One rasterisation serves both editions: the file the writer uploads to
+        # a store listing is byte-for-byte the cover inside the EPUB.
+        front = os.path.join(work, f'{base}-cover.jpg' if publish
+                             else f'{base}-front-cover.jpg')
+        cover_jpg = ''
         try:
             _designed_cover_jpeg(preset, meta, front)
-            files[os.path.basename(front)] = front
+            cover_jpg = front
+            files[(edir if publish else '') + os.path.basename(front)] = front
         except Exception as exc:
             logging.exception('front cover JPG for the print package failed')
             checks.append({'label': 'Front cover image', 'ok': False,
                            'detail': (f'Could not render the store-listing JPG ({exc}) — '
                                       'the interior and wrap are unaffected')})
 
+        epub_checks = None
+        cover_px = _cover_jpeg_size(cover_jpg) if cover_jpg else None
+        if publish:
+            ebook = os.path.join(work, f'{base}.epub')
+            emeta = dict(meta, cover_image=cover_jpg) if cover_jpg else dict(meta)
+            try:
+                epub.build_epub(ms, preset, ebook, emeta)
+                files[edir + os.path.basename(ebook)] = ebook
+                epub_checks = _epub_checks(ebook)
+                if not cover_jpg:
+                    (epub_checks if epub_checks is not None else checks).append({
+                        'label': 'Ebook cover', 'ok': False,
+                        'detail': ('The cover image could not be rendered, so the EPUB '
+                                   'was built without one — shops want a cover')})
+            except Exception as exc:
+                logging.exception('EPUB for the publish package failed')
+                checks.insert(0, {
+                    'label': 'Ebook', 'ok': False,
+                    'detail': (f'The EPUB could not be built ({exc}) — the print files '
+                               'in this package are unaffected')})
+
         info = {
+            'scope': scope, 'publish': publish,
+            'epub': (sorted(epub_checks, key=lambda c: c['ok']) if epub_checks
+                     else epub_checks),
+            'cover_px': cover_px,
             'title': meta['title'] or proj.get('name', ''), 'author': meta['author'],
             'retailer': retailer, 'retailer_label': WRAP_RETAILERS[retailer]['label'],
             'binding': binding, 'paper_label': _PAPER[paper]['label'],
@@ -3353,13 +3423,14 @@ def build_print_package(proj):
             'press_ready': bool(built.get('press')),
             'checks': sorted(checks, key=lambda c: c['ok']), 'press': press,
         }
-        spec = os.path.join(work, 'PRINT-SPEC.txt')
+        spec_name = 'PUBLISH-SPEC.txt' if publish else 'PRINT-SPEC.txt'
+        spec = os.path.join(work, spec_name)
         with open(spec, 'w', encoding='utf-8') as f:
-            f.write(_print_spec_text(info, sorted(files) + ['PRINT-SPEC.txt']))
-        files['PRINT-SPEC.txt'] = spec
+            f.write(_print_spec_text(info, sorted(files) + [spec_name]))
+        files[spec_name] = spec
 
         import zipfile
-        folder = f'{base}-print'
+        folder = f'{base}-{scope}'
         zip_name = f'{folder}-{stamp}.zip'
         with zipfile.ZipFile(os.path.join(OUT_DIR, zip_name), 'w',
                              zipfile.ZIP_DEFLATED) as z:
@@ -3404,12 +3475,43 @@ _UPLOAD_STEPS = {
 }
 
 
+# Where the ebook half of a publish package goes. Keyed by the same retailer
+# setting as the print half: both shops sell print and ebooks, and a writer who
+# picked one for the paperback means the same one for the Kindle edition.
+_EBOOK_STEPS = {
+    'kdp': [
+        'In KDP, open the book’s Kindle eBook Content page (a separate listing '
+        'from the paperback, linked to it afterwards).',
+        'Manuscript: upload the EPUB. KDP converts it; do not upload the print PDF.',
+        'Kindle eBook Cover: choose “Upload a cover you already have” and upload '
+        'the cover JPG.',
+        'Use the Previewer to read a few chapters, the contents and the notes on a '
+        'phone-sized screen before you publish.',
+    ],
+    'ingramspark': [
+        'In IngramSpark, add an eBook format to the title (or set one up alongside '
+        'the print title so the two share metadata).',
+        'Upload the EPUB as the eBook file and the cover JPG as the eBook cover.',
+        'IngramSpark validates the EPUB on upload — the checks on this sheet are the '
+        'same ones, run before you got there.',
+        'Approve the eProof before release.',
+    ],
+    'generic': [
+        'The EPUB is a standard EPUB 3 file: Apple Books, Kobo, Google Play Books, '
+        'Draft2Digital and Smashwords all take it as it is.',
+        'Upload the cover JPG wherever the shop asks for a cover image.',
+        'Read a few chapters in a real reader app before release.',
+    ],
+}
+
+
 def _print_spec_text(info, names):
     """The plain-text sheet that travels in the package, for whoever uploads it."""
     w = info['wrap']
     lines = [
         f'{info["title"]}' + (f' — {info["author"]}' if info['author'] else ''),
-        'Print package from Typeset Studio',
+        ('Publish package from Typeset Studio' if info.get('publish')
+         else 'Print package from Typeset Studio'),
         '',
         'SPEC',
         f'  Printer      {info["retailer_label"]}',
@@ -3421,38 +3523,61 @@ def _print_spec_text(info, names):
         f'  Cover wrap   {w["wrap_w"]:g} x {w["wrap_h"]:g} in (bleed {info["bleed"]:g} in)',
         f'  Spine text   {"yes" if w["spine_text"] else "no (too few pages)"}',
         f'  Interior     {"press-ready (single-ink black, no cover)" if info["press_ready"] else "ordinary RGB — see checks"}',
-        '',
-        'FILES',
     ]
+    if info.get('publish'):
+        px = info.get('cover_px')
+        lines.append('  Ebook        EPUB 3, reflowable — one file for every shop')
+        lines.append(f'  Ebook cover  {px[0]}x{px[1]} px JPEG' if px else
+                     '  Ebook cover  not rendered — see checks')
+    lines += ['', 'FILES']
     lines += [f'  {n}' for n in names]
     if any(n.endswith('.jpg') for n in names):
-        lines += ['', 'The front-cover JPG is for store listings and marketing; printers '
-                      'only need the two PDFs.']
+        lines += ['', 'The cover JPG is the store-listing and marketing image, and it is '
+                      'the cover inside the EPUB as well; printers only need the two PDFs.'
+                  if info.get('publish') else
+                  'The front-cover JPG is for store listings and marketing; printers '
+                  'only need the two PDFs.']
     rows = info['checks'] + (info['press'] or [])
     issues = issue_rows(rows)
     lines += ['', f'CHECKS ({len(issues)} to look at)' if issues else 'CHECKS (all clear)']
     for c in rows:
         mark = 'ok' if c['ok'] else ('--' if c.get('note') else '!!')
         lines.append(f'  [{mark}] {c["label"].strip()}: {c["detail"]}')
-    lines += ['', 'UPLOADING']
+    if info.get('epub'):
+        eissues = issue_rows(info['epub'])
+        lines += ['', f'EBOOK CHECKS ({len(eissues)} to look at)' if eissues
+                  else 'EBOOK CHECKS (all clear)']
+        for c in info['epub']:
+            mark = 'ok' if c['ok'] else ('--' if c.get('note') else '!!')
+            lines.append(f'  [{mark}] {c["label"].strip()}: {c["detail"]}')
+    lines += ['', 'UPLOADING THE PRINT EDITION' if info.get('publish') else 'UPLOADING']
     lines += [f'  {i}. {s}' for i, s in enumerate(_UPLOAD_STEPS[info['retailer']], 1)]
+    if info.get('publish'):
+        lines += ['', 'UPLOADING THE EBOOK EDITION']
+        lines += [f'  {i}. {s}' for i, s in enumerate(_EBOOK_STEPS[info['retailer']], 1)]
     return '\n'.join(lines) + '\n'
 
 
 @app.route('/project/<pid>/print-package', methods=['POST'])
 def project_print_package(pid):
     proj = load_project(pid)
+    scope = request.form.get('scope', 'print')
+    if scope not in PACKAGE_SCOPES:
+        scope = 'print'
     try:
-        info = build_print_package(proj)
+        info = build_print_package(proj, scope)
     except PrintPackageError as exc:
         flash(str(exc))
         return redirect(url_for('project_edit', pid=pid))
     except Exception as exc:
         logging.error('print package failed: %s', traceback.format_exc())
-        flash(f'Print package failed: {exc}')
+        flash(f'{"Publish" if scope == "publish" else "Print"} package failed: {exc}')
         return redirect(url_for('projects'))
     proj['last_page_count'] = info['pages']
+    # One slot for "the last handoff package", whichever kind it was — the
+    # projects page offers it back as a download, and either kind supersedes.
     proj['last_print_package'] = info['zip_name']
+    proj['last_package_scope'] = scope
     save_project_file(pid, proj)
     return render_template('print_package.html', pid=pid, proj=proj, info=info)
 

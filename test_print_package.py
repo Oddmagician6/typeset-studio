@@ -4,9 +4,14 @@ The package exists to stop one mistake: a cover wrap cut for a different page
 count than the interior inside it. So these build a real project end to end and
 measure the files — the interior carries no cover, and the wrap's width is the
 retailer formula evaluated at *that* interior's page count.
+
+The publish package (#67) is the same build with the ebook edition added, so the
+checks there are the ones that could drift: that both editions came out of the
+one pass, that the cover in the EPUB is the JPG in the zip, and that the ebook's
+own checks reach the sheet a writer sends on.
 """
 
-import sys, os, re, zipfile, tempfile
+import sys, os, re, io, zipfile, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -48,13 +53,15 @@ def cleanup():
         if os.path.exists(p):
             os.remove(p)
     for f in os.listdir(A.OUT_DIR):
-        if (f.startswith('the-salt-road-print-') or f.startswith('taiga-press-print-'))                 and f.endswith('.zip'):
+        if (f.startswith('the-salt-road-print-') or f.startswith('taiga-press-print-')
+                or f.startswith('the-salt-road-publish-')) and f.endswith('.zip'):
             os.remove(os.path.join(A.OUT_DIR, f))
 
 
-def send(proj):
+def send(proj, scope='print'):
     A.save_project_file(PID, proj)
-    return client.post(f'/project/{PID}/print-package', follow_redirects=True)
+    return client.post(f'/project/{PID}/print-package', data={'scope': scope},
+                       follow_redirects=True)
 
 
 def unpack(zip_name):
@@ -190,6 +197,105 @@ try:
           named.startswith('taiga-press-print-'), named)
     os.remove(os.path.join(A.OUT_DIR, named))
 
+    # ------------------------------------------------------ publish package
+    # The point of the publish package is that one build makes both editions,
+    # so what is worth measuring is that they agree: the same manuscript, the
+    # same cover, and the print half unchanged from the print-only package.
+    print('a publish package')
+    r = send(dict(PROJ), 'publish')
+    html = r.get_data(as_text=True)
+    check('it builds', r.status_code == 200
+          and 'Ready for the printer and the shop' in html, r.status_code)
+    zip_name = A.load_project(PID).get('last_print_package', '')
+    check('and is named for what it is', '-publish-' in zip_name, zip_name)
+    check('the project remembers which kind it was',
+          A.load_project(PID).get('last_package_scope') == 'publish')
+    pub = unpack(zip_name)
+    check('the two editions are sorted into folders',
+          sorted(pub) == sorted(['print/the-salt-road-interior.pdf',
+                                 'print/the-salt-road-cover-wrap.pdf',
+                                 'ebook/the-salt-road.epub',
+                                 'ebook/the-salt-road-cover.jpg',
+                                 'PUBLISH-SPEC.txt']), sorted(pub))
+
+    pub_pages, _, _ = pdf_info(pub['print/the-salt-road-interior.pdf'])
+    check('the print half is the same interior as a print-only package',
+          pub_pages == pages, (pub_pages, pages))
+    _, pub_ww, _ = pdf_info(pub['print/the-salt-road-cover-wrap.pdf'])
+    check('cut to the same wrap',
+          abs(pub_ww - (2 * 0.125 + 2 * tw + pages * A._PAPER['cream']['ppi'])) < 0.01,
+          pub_ww)
+
+    # one rasterisation, two uses: a second render could differ, and then the
+    # shop listing and the file readers open would not be the same picture
+    with zipfile.ZipFile(io.BytesIO(pub['ebook/the-salt-road.epub'])) as ez:
+        names = ez.namelist()
+        inside = [n for n in names if n.lower().endswith(('.jpg', '.jpeg'))]
+        cover_bytes = ez.read(inside[0]) if inside else b''
+        opf = next((ez.read(n).decode('utf-8') for n in names if n.endswith('.opf')), '')
+    check('the ebook carries a cover', bool(inside), names)
+    check('and it is byte-for-byte the JPG in the zip',
+          cover_bytes == pub['ebook/the-salt-road-cover.jpg'],
+          (len(cover_bytes), len(pub['ebook/the-salt-road-cover.jpg'])))
+    check('declared the way Kindle tooling wants', 'name="cover"' in opf)
+    check('the book itself is in there',
+          sum(1 for n in names if n.endswith('.xhtml')) >= 2, names)
+
+    spec = pub['PUBLISH-SPEC.txt'].decode('utf-8')
+    check('the sheet covers both uploads',
+          'UPLOADING THE PRINT EDITION' in spec and 'UPLOADING THE EBOOK EDITION' in spec
+          and 'Kindle eBook Content page' in spec, spec[-400:])
+    check('and states the ebook cover in pixels',
+          re.search(r'Ebook cover\s+\d+x2560 px JPEG', spec) is not None,
+          [l for l in spec.splitlines() if 'Ebook' in l])
+    check('the ebook checks travel with it',
+          'EBOOK CHECKS' in spec and 'Accessibility metadata' in spec)
+
+    # the same tally rule as the print package: the page and the sheet count
+    # the same rows, ebook ones included
+    on_page = re.search(r'Ebook checks</span>\s*\n?\s*<span class="badge badge-(ok|warn)">'
+                        r'\s*(?:(\d+) to look at|All clear)', html)
+    in_spec = re.search(r'EBOOK CHECKS \((\d+) to look at\)', spec)
+    check('the ebook tallies agree on the page and in the sheet',
+          (on_page.group(2) if on_page else None) == (in_spec.group(1) if in_spec else None),
+          (on_page.group(0) if on_page else 'no card', in_spec.group(0) if in_spec else 'all clear'))
+
+    # forced, because a book we build ourselves passes every ebook check: the
+    # tally has to survive a failing row, which is the only time it is read
+    print('when an ebook check fails')
+    real_check = A.epub.check
+    A.epub.check = lambda path: [{'label': 'Spine', 'ok': False, 'detail': 'Invented fault'}]
+    try:
+        r = send(dict(PROJ), 'publish')
+        html = r.get_data(as_text=True)
+        spec = unpack(A.load_project(PID)['last_print_package'])['PUBLISH-SPEC.txt'].decode('utf-8')
+    finally:
+        A.epub.check = real_check
+    check('the page counts it', 'Ebook checks' in html and 'Invented fault' in html
+          and re.search(r'badge-warn">\s*1 to look at', html) is not None)
+    check('and the sheet counts the same one',
+          'EBOOK CHECKS (1 to look at)' in spec and '[!!] Spine: Invented fault' in spec,
+          [l for l in spec.splitlines() if 'EBOOK' in l])
+
+    print('a publish package whose ebook will not build')
+    real_epub = A.epub.build_epub
+
+    def refuse_epub(*a, **k):
+        raise ValueError('no ebook today')
+
+    A.epub.build_epub = refuse_epub
+    try:
+        r = send(dict(PROJ), 'publish')
+        html = r.get_data(as_text=True)
+        broke = unpack(A.load_project(PID)['last_print_package'])
+    finally:
+        A.epub.build_epub = real_epub
+    check('the print files still ship',
+          'print/the-salt-road-interior.pdf' in broke
+          and 'print/the-salt-road-cover-wrap.pdf' in broke, sorted(broke))
+    check('and the page says the ebook is the part that failed',
+          'no ebook today' in html and 'print files' in html)
+
     # ------------------------------------------------------------ refusals
     print('what it refuses')
     r = send(dict(PROJ, cover_mode='image'))
@@ -219,7 +325,8 @@ try:
           and saved.get('print_blurb') == 'Saved blurb.'
           and saved.get('print_back_w') == 2.0, saved)
     listing = client.get('/projects').get_data(as_text=True)
-    check('the projects page has the button', f'/project/{FILE_ID}/print-package' in listing)
+    check('the projects page has the buttons', f'/project/{FILE_ID}/print-package' in listing
+          and 'value="publish"' in listing)
 finally:
     cleanup()
 

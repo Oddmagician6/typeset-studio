@@ -78,9 +78,11 @@
           <a class="btn {{ 'btn-primary' if not out_name }}" href="{{ url_for('download', fn=epub_name) }}">Download EPUB</a>
         {% endif %}
         {% if from_project %}
-          <form method="post" action="{{ url_for('project_print_package', pid=from_project) }}" style="margin:0">
-            <button class="btn" type="submit"
+          <form method="post" action="{{ url_for('project_print_package', pid=from_project) }}" style="margin:0;display:flex;gap:10px">
+            <button class="btn" type="submit" name="scope" value="print"
                     title="Press-ready interior + cover wrap, zipped for the printer">Send to print</button>
+            <button class="btn" type="submit" name="scope" value="publish"
+                    title="The print files and the ebook edition together, in one zip">Send to publish</button>
           </form>
         {% endif %}
       </div>
