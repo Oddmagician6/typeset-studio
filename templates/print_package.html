@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set active = 'projects' %}
-{% block title %}Send to print · Typeset Studio{% endblock %}
+{% block title %}{{ 'Send to publish' if info.publish else 'Send to print' }} · Typeset Studio{% endblock %}
 
 {% block style %}
   .galley{max-width:620px}
@@ -14,6 +14,7 @@
   .ticket .recap b{color:var(--ink);font-weight:600}
   .ticket .files{margin:0;padding:0 24px 16px;list-style:none;font-family:var(--mono);font-size:12px;color:var(--muted)}
   .ticket .files li{padding:2px 0;overflow-wrap:anywhere}
+  .ticket .files li.nested{padding-left:14px}
   .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:0 24px 22px}
   .more{margin-top:20px}
   .more a{font-size:14px}
@@ -36,17 +37,27 @@
 {% block body %}
   {% set w = info.wrap %}
   <div class="pagehead">
-    <div class="eyebrow">Send to print</div>
-    <h1>Ready for the printer</h1>
-    <p>The interior and the cover wrap were built together, so the spine fits this exact page
-       count. Upload the two PDFs to {{ info.retailer_label }} as separate files —
-       <code>PRINT-SPEC.txt</code> in the package walks through it.</p>
+    {% if info.publish %}
+      <div class="eyebrow">Send to publish</div>
+      <h1>Ready for the printer and the shop</h1>
+      <p>Both editions were built from the same manuscript in one pass — the print files in
+         <code>print/</code>, the ebook in <code>ebook/</code>, and the one cover image serving
+         the store listing and the inside of the EPUB alike.
+         <code>PUBLISH-SPEC.txt</code> in the package walks through both uploads to
+         {{ info.retailer_label }}.</p>
+    {% else %}
+      <div class="eyebrow">Send to print</div>
+      <h1>Ready for the printer</h1>
+      <p>The interior and the cover wrap were built together, so the spine fits this exact page
+         count. Upload the two PDFs to {{ info.retailer_label }} as separate files —
+         <code>PRINT-SPEC.txt</code> in the package walks through it.</p>
+    {% endif %}
   </div>
 
   <div class="galley">
     <div class="ticket">
       <div class="top">
-        <div class="stamp">Print package</div>
+        <div class="stamp">{{ 'Publish package' if info.publish else 'Print package' }}</div>
         <h2>{{ info.title or 'Untitled' }}</h2>
         {% if info.author %}<div class="by">{{ info.author }}</div>{% endif %}
       </div>
@@ -59,9 +70,12 @@
         <span class="k">Spine</span><span>{{ '%.4f'|format(w.spine_w) }}"{% if not w.spine_text %} · no spine text{% endif %}</span>
         <span class="k">Wrap</span><span>{{ '%g'|format(w.wrap_w) }}&times;{{ '%g'|format(w.wrap_h) }}" incl. {{ '%g'|format(info.bleed) }}" bleed</span>
         <span class="k">Interior</span><span>{{ 'Press-ready, no cover' if info.press_ready else 'Ordinary RGB — see checks' }}</span>
+        {% if info.publish %}
+          <span class="k">Ebook</span><span>EPUB 3, reflowable{% if info.cover_px %} · cover {{ info.cover_px[0] }}&times;{{ info.cover_px[1] }} px{% endif %}</span>
+        {% endif %}
       </div>
       <ul class="files">
-        {% for f in info.files %}<li>{{ f }}</li>{% endfor %}
+        {% for f in info.files %}<li{% if '/' in f %} class="nested"{% endif %}>{{ f }}</li>{% endfor %}
       </ul>
       <div class="actions">
         <a class="btn btn-primary" href="{{ url_for('download', fn=info.zip_name) }}">Download package</a>
@@ -70,9 +84,10 @@
     </div>
 
     {% set issues = (info.checks + (info.press or [])) | issues %}
+    {% set eissues = (info.epub or []) | issues %}
     <div class="preflight">
       <div class="head">
-        <span class="head-label">Checks</span>
+        <span class="head-label">{{ 'Print checks' if info.publish else 'Checks' }}</span>
         {% if issues %}
           <span class="badge badge-warn">{{ issues | length }} to look at</span>
         {% else %}
@@ -104,6 +119,29 @@
       </div>
       <ul>
         {% for c in info.press %}
+        <li>
+          {% set tone = 'ok' if c.ok else ('note' if c.note else 'warn') %}
+          <span class="icon {{ tone }}">{{ '✓' if c.ok else ('·' if c.note else '✗') }}</span>
+          <span class="chk-label {{ tone }}">{{ c.label }}</span>
+          <span class="chk-detail">{{ c.detail }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    {% if info.epub %}
+    <div class="preflight">
+      <div class="head">
+        <span class="head-label">Ebook checks</span>
+        {% if eissues %}
+          <span class="badge badge-warn">{{ eissues | length }} to look at</span>
+        {% else %}
+          <span class="badge badge-ok">All clear</span>
+        {% endif %}
+      </div>
+      <ul>
+        {% for c in info.epub %}
         <li>
           {% set tone = 'ok' if c.ok else ('note' if c.note else 'warn') %}
           <span class="icon {{ tone }}">{{ '✓' if c.ok else ('·' if c.note else '✗') }}</span>

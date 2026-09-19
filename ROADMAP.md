@@ -1928,14 +1928,37 @@ mode `image`) is refused. Writers who commission cover art are exactly the ones 
 - `build_cover_wrap` paints the front through `_paint_background` + `_paint_cover_front`; an image
   front would slot in there. The title overlay option (`cover_overlay`) should carry over.
 
-**67. A full publish package — print and ebook together** *(small; extends #65 — details to be
-worked out)*
-#65 is print only. A "publish" package would add the EPUB (with its embedded cover) and the
-ebook-store cover JPG alongside the print files, so one click hands off every edition.
-- **Open questions:** one ZIP with `print/` and `ebook/` folders, or a choice on the button? Should
-  the EPUB preflight (and epubcheck, when installed) rows join the package's checks?
-- Store-listing cover sizes differ by shop (KDP wants 2560 px on the long edge, which
-  `EPUB_COVER_H` already matches); the spec sheet would need an ebook upload section per store.
+**67. A full publish package — print and ebook together** *(small; extends #65)* — **SHIPPED**
+#65 was print only. A **Send to publish** button beside **Send to print** now builds the same
+package with the ebook edition in it, so one click hands off every edition of the book.
+- **Both open questions answered the same way: one ZIP, and yes.** `build_print_package(proj,
+  scope)` takes `scope` ∈ `PACKAGE_SCOPES` (`print` | `publish`) rather than forking into a second
+  function — a publish package *is* a print package with more in it, and splitting them would have
+  been two code paths that could disagree about the spine. On `publish` the files sort into
+  `print/` and `ebook/` (a print package stays flat, which is what a printer’s upload form
+  expects), the zip and folder are named `<slug>-publish`, and the sheet becomes
+  `PUBLISH-SPEC.txt`. The EPUB’s own checks — `epub.check` plus real `epubcheck` when installed —
+  become a third card on the page and an `EBOOK CHECKS` block on the sheet, counted through
+  `issue_rows` like every other tally so the browser and the file can’t disagree.
+- **One rasterisation, two uses — the point of building both at once.** The cover JPG is rendered
+  once by `_designed_cover_jpeg` and then *both* shipped as `ebook/<slug>-cover.jpg` and handed to
+  `epub.build_epub` as `cover_image`, so the store listing and the file readers open are
+  byte-for-byte the same picture. That is why the publish path does **not** go through
+  `_epub_cover` (which renders its own temp copy): a second render is a second chance to differ.
+  `EPUB_COVER_H` already matches KDP’s 2560 px long edge; the actual pixel size depends on the
+  style’s trim, so the sheet and the page state it rather than quoting a constant.
+- **Refactors:** `_epub_checks(path)` out of `_epub_preflight` (the ebook is built in a temp folder
+  and zipped, so the rows have to come from a path, not a name in `OUT_DIR`); `_cover_jpeg_size`
+  for the spec line; `_EBOOK_STEPS` mirrors `_UPLOAD_STEPS`, keyed by the same retailer setting —
+  KDP and IngramSpark both sell ebooks, and the generic entry says the EPUB is store-neutral.
+- **Failure is per-half.** A broken EPUB build inserts a failed `Ebook` row and the print files
+  still ship; a cover that won’t render leaves the EPUB coverless with a row saying so. Same
+  stance as every other check here: flagged, never enforced.
+- **Still designed-covers-only**, since the wrap is; see #66.
+- `test_print_package.py` gained the publish half: the folder layout, that the print files match a
+  print-only package at the same page count, that the cover in the EPUB is the JPG in the zip, that
+  both upload sections and the ebook pixel size reach the sheet, that a forced ebook-check failure
+  tallies the same on the page and in the file, and that a refused EPUB build still ships print.
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 

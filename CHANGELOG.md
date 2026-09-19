@@ -10,6 +10,21 @@ line here.
 
 ## Unreleased
 
+### Added
+
+- **Send to publish — the whole book, both editions, in one download.** Send to
+  print hands a printer the interior and the cover wrap. Send to publish, the
+  button beside it, adds the ebook: the same manuscript comes out as a press-ready
+  paperback in a `print/` folder and an EPUB in an `ebook/` folder, with one cover
+  image that is both the picture on your shop listing and the cover readers see
+  when they open the file. Because both editions are built in the same pass, the
+  Kindle edition can no longer be a draft behind the paperback. `PUBLISH-SPEC.txt`
+  in the package walks through both uploads — the print one and the ebook one —
+  for whichever shop you picked, and the ebook’s own checks travel with it, so a
+  file a shop would reject is something you hear about before you get there. If
+  the ebook can’t be built for some reason, the print files still ship and the
+  page says which half failed.
+
 ### Fixed
 
 - **An "&" in a title no longer breaks the ebook.** A chapter called "Salt & Ash",

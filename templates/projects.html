@@ -102,8 +102,10 @@
               <button class="btn btn-sm" type="submit">Regenerate</button>
             </form>
             <form class="inline-form" method="post" action="{{ url_for('project_print_package', pid=item.id) }}">
-              <button class="btn btn-sm" type="submit"
+              <button class="btn btn-sm" type="submit" name="scope" value="print"
                       title="Press-ready interior + cover wrap, zipped for the printer">Send to print</button>
+              <button class="btn btn-sm" type="submit" name="scope" value="publish"
+                      title="The print files and the ebook edition together, in one zip">Send to publish</button>
             </form>
             <a class="btn btn-sm" href="{{ url_for('project_edit', pid=item.id) }}">Edit</a>
             <form class="inline-form" method="post" action="{{ url_for('project_continuity', pid=item.id) }}">
