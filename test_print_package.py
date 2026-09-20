@@ -34,6 +34,10 @@ def check(name, cond, detail=''):
 
 PID = '_test_print_package'
 MS_PATH = os.path.join(A.PROJECT_MS_DIR, PID + '.md')
+# Background art for a designed cover: the plate the template is drawn over, with
+# no title or author on it. It exists here to prove it never leaves as a cover.
+ART_NAME = '_test_print_package_art.png'
+ART_PATH = os.path.join(A.PROJECT_MS_DIR, ART_NAME)
 # secure_filename strips the leading underscore, so that is the id on disk and in links
 FILE_ID = A.secure_filename(PID)
 PROJ_JSON = os.path.join(A.PROJECT_DIR, FILE_ID + '.json')
@@ -49,7 +53,7 @@ PROJ = {'name': 'Print test', 'preset': 'classic-literary', 'title': 'The Salt R
 
 
 def cleanup():
-    for p in (MS_PATH, PROJ_JSON):
+    for p in (MS_PATH, PROJ_JSON, ART_PATH):
         if os.path.exists(p):
             os.remove(p)
     for f in os.listdir(A.OUT_DIR):
@@ -296,11 +300,74 @@ try:
     check('and the page says the ebook is the part that failed',
           'no ebook today' in html and 'print files' in html)
 
+    # a package that promises an edition it does not contain is worse than one
+    # that admits it shipped half: the sheet is what a writer works from
+    broke_spec = broke['PUBLISH-SPEC.txt'].decode('utf-8')
+    check('the sheet does not offer an ebook that is not in the zip',
+          'UPLOADING THE EBOOK EDITION' not in broke_spec
+          and 'EPUB 3, reflowable' not in broke_spec
+          and 'the cover inside the EPUB' not in broke_spec,
+          [l for l in broke_spec.splitlines() if 'EPUB' in l or 'EBOOK' in l])
+    check('and it walks through the one upload there is',
+          'UPLOADING' in broke_spec and 'UPLOADING THE' not in broke_spec
+          and 'upload the interior PDF' in broke_spec,
+          [l for l in broke_spec.splitlines() if 'UPLOAD' in l])
+    check('the page does not claim one either',
+          'EPUB 3, reflowable' not in html and 'Ready for the printer and the shop' not in html
+          and 'the ebook edition could not be built' in html.lower())
+
+    print('a publish package whose cover will not render')
+    with open(ART_PATH, 'wb') as f:
+        from PIL import Image
+        Image.new('RGB', (600, 900), (30, 60, 90)).save(f, 'PNG')
+    real_jpeg = A._designed_cover_jpeg
+
+    def refuse_cover(*a, **k):
+        raise RuntimeError('no cover today')
+
+    A._designed_cover_jpeg = refuse_cover
+    try:
+        r = send(dict(PROJ, cover_file=ART_NAME), 'publish')
+        html = r.get_data(as_text=True)
+        nocov = unpack(A.load_project(PID)['last_print_package'])
+    finally:
+        A._designed_cover_jpeg = real_jpeg
+    check('the ebook still ships', 'ebook/the-salt-road.epub' in nocov, sorted(nocov))
+    with zipfile.ZipFile(io.BytesIO(nocov['ebook/the-salt-road.epub'])) as ez:
+        pics = [n for n in ez.namelist() if n.lower().endswith(('.jpg', '.jpeg', '.png'))]
+    # the project's background plate carries no title: it is not a cover, and a
+    # row saying the ebook has none must not be contradicted by the file itself
+    check('without the cover art smuggled in as its cover', pics == [], pics)
+    check('and the row says so', 'was built without one' in html)
+    nocov_spec = nocov['PUBLISH-SPEC.txt'].decode('utf-8')
+    check('the sheet says so too', 'Ebook cover  not rendered' in nocov_spec,
+          [l for l in nocov_spec.splitlines() if 'Ebook' in l])
+
+    print('when the ebook cannot be checked at all')
+    A.epub.check = lambda path: (_ for _ in ()).throw(RuntimeError('checker down'))
+    try:
+        r = send(dict(PROJ), 'publish')
+        html = r.get_data(as_text=True)
+        spec = unpack(A.load_project(PID)['last_print_package'])['PUBLISH-SPEC.txt'].decode('utf-8')
+    finally:
+        A.epub.check = real_check
+    check('the card does not quietly disappear',
+          'Ebook checks' in html and 'nothing here vouches for it' in html
+          and re.search(r'badge-warn">\s*1 to look at', html) is not None)
+    check('and the sheet counts it as outstanding',
+          'EBOOK CHECKS (1 to look at)' in spec
+          and '[!!] Ebook checks:' in spec,
+          [l for l in spec.splitlines() if 'EBOOK' in l or 'Ebook checks' in l])
+
     # ------------------------------------------------------------ refusals
     print('what it refuses')
     r = send(dict(PROJ, cover_mode='image'))
     check('a book without a designed cover is sent back to Edit with the reason',
           'needs a designed cover' in r.get_data(as_text=True))
+    r = send(dict(PROJ, cover_mode='image'), 'publish')
+    check('and the reason names the button that was pressed',
+          'Send to publish needs a designed' in r.get_data(as_text=True),
+          [l for l in r.get_data(as_text=True).splitlines() if 'designed cover' in l])
     os.remove(MS_PATH)
     r = send(dict(PROJ))
     check('a missing manuscript is a message, not a crash',

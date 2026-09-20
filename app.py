@@ -3309,8 +3309,9 @@ def build_print_package(proj, scope='print'):
     tpl = meta.get('cover_template_data')
     if meta.get('cover_mode') != 'designed' or not tpl:
         raise PrintPackageError(
-            'Send to print needs a designed cover for now — pick a cover template '
-            'under Cover. (A wrap around uploaded cover art is on the roadmap.)')
+            f'{"Send to publish" if publish else "Send to print"} needs a designed '
+            'cover for now — pick a cover template under Cover. (A wrap around '
+            'uploaded cover art is on the roadmap.)')
 
     ms = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
     # slugify falls back to 'style', which is right for a preset and wrong on
@@ -3390,16 +3391,30 @@ def build_print_package(proj, scope='print'):
                                       'the interior and wrap are unaffected')})
 
         epub_checks = None
+        ebook_built = False
         cover_px = _cover_jpeg_size(cover_jpg) if cover_jpg else None
         if publish:
             ebook = os.path.join(work, f'{base}.epub')
-            emeta = dict(meta, cover_image=cover_jpg) if cover_jpg else dict(meta)
+            # Always the rendered JPG, and '' when it would not render — never the
+            # project's own cover art. That art is the *background plate* a designed
+            # cover is built over: no title, no author. Letting it through here would
+            # put a coverless-looking image on a shop listing under a row that says
+            # the ebook has no cover at all.
+            emeta = dict(meta, cover_image=cover_jpg)
             try:
                 epub.build_epub(ms, preset, ebook, emeta)
                 files[edir + os.path.basename(ebook)] = ebook
+                ebook_built = True
                 epub_checks = _epub_checks(ebook)
+                if epub_checks is None:
+                    # The ebook ships either way; what it must not do is ship with
+                    # the checks card simply missing, as if nothing were outstanding.
+                    epub_checks = [{
+                        'label': 'Ebook checks', 'ok': False,
+                        'detail': ('The ebook could not be checked — it is in this '
+                                   'package, but nothing here vouches for it')}]
                 if not cover_jpg:
-                    (epub_checks if epub_checks is not None else checks).append({
+                    epub_checks.append({
                         'label': 'Ebook cover', 'ok': False,
                         'detail': ('The cover image could not be rendered, so the EPUB '
                                    'was built without one — shops want a cover')})
@@ -3411,7 +3426,9 @@ def build_print_package(proj, scope='print'):
                                'in this package are unaffected')})
 
         info = {
-            'scope': scope, 'publish': publish,
+            # `publish` is what was asked for; `ebook` is what came out. Only the
+            # second may promise an ebook edition on the page or the sheet.
+            'scope': scope, 'publish': publish, 'ebook': ebook_built,
             'epub': (sorted(epub_checks, key=lambda c: c['ok']) if epub_checks
                      else epub_checks),
             'cover_px': cover_px,
@@ -3524,7 +3541,7 @@ def _print_spec_text(info, names):
         f'  Spine text   {"yes" if w["spine_text"] else "no (too few pages)"}',
         f'  Interior     {"press-ready (single-ink black, no cover)" if info["press_ready"] else "ordinary RGB — see checks"}',
     ]
-    if info.get('publish'):
+    if info.get('ebook'):
         px = info.get('cover_px')
         lines.append('  Ebook        EPUB 3, reflowable — one file for every shop')
         lines.append(f'  Ebook cover  {px[0]}x{px[1]} px JPEG' if px else
@@ -3534,7 +3551,7 @@ def _print_spec_text(info, names):
     if any(n.endswith('.jpg') for n in names):
         lines += ['', 'The cover JPG is the store-listing and marketing image, and it is '
                       'the cover inside the EPUB as well; printers only need the two PDFs.'
-                  if info.get('publish') else
+                  if info.get('ebook') else
                   'The front-cover JPG is for store listings and marketing; printers '
                   'only need the two PDFs.']
     rows = info['checks'] + (info['press'] or [])
@@ -3550,9 +3567,9 @@ def _print_spec_text(info, names):
         for c in info['epub']:
             mark = 'ok' if c['ok'] else ('--' if c.get('note') else '!!')
             lines.append(f'  [{mark}] {c["label"].strip()}: {c["detail"]}')
-    lines += ['', 'UPLOADING THE PRINT EDITION' if info.get('publish') else 'UPLOADING']
+    lines += ['', 'UPLOADING THE PRINT EDITION' if info.get('ebook') else 'UPLOADING']
     lines += [f'  {i}. {s}' for i, s in enumerate(_UPLOAD_STEPS[info['retailer']], 1)]
-    if info.get('publish'):
+    if info.get('ebook'):
         lines += ['', 'UPLOADING THE EBOOK EDITION']
         lines += [f'  {i}. {s}' for i, s in enumerate(_EBOOK_STEPS[info['retailer']], 1)]
     return '\n'.join(lines) + '\n'
