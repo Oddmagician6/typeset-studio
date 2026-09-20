@@ -1513,10 +1513,13 @@ def cover_thumb(cid):
 EPUB_COVER_H = 2560   # px; the long edge KDP asks for on an ebook cover
 
 
-def _designed_cover_jpeg(preset, meta, jpg_path):
-    """Rasterise a designed front cover to a JPEG `EPUB_COVER_H` px tall.
+def _cover_page_jpeg(preset, meta, jpg_path):
+    """Rasterise page 1 of a book's cover to a JPEG `EPUB_COVER_H` px tall.
 
-    Typesets one cover page over a stub manuscript rather than the whole book.
+    Whichever kind of cover the book has: a designed template, or uploaded art
+    with the title overlay the writer set. The rasterised page is the cover as
+    the book itself carries it, which is the only version worth sending to a
+    shop. Typesets one cover page over a stub manuscript rather than the whole book.
     Raises on any failure (no PyMuPDF/Pillow, a render error) — callers decide
     whether a missing cover is fatal.
     """
@@ -1575,7 +1578,7 @@ def _epub_cover(preset, meta):
     os.close(jpg_fd)
     try:
         try:
-            _designed_cover_jpeg(preset, meta, jpg_path)
+            _cover_page_jpeg(preset, meta, jpg_path)
             img_path = jpg_path
         except Exception:
             logging.exception('designed cover for EPUB failed; building without one')
@@ -3282,6 +3285,32 @@ _WRAP_SUFFIX = {'paperback': '-cover-wrap', 'hardcover': '-case-wrap', 'jacket':
 PACKAGE_SCOPES = ('print', 'publish')
 
 
+def _art_resolution_check(res, w_in, h_in):
+    """The check row for uploaded cover art at the size the wrap needs it.
+
+    Flagged, never enforced, like every other row here — a writer may know the
+    art is a placeholder, and a printer may take 250 dpi without complaint. But
+    it says the number, because "looks fine on screen" is exactly how soft
+    covers get printed.
+    """
+    size = f'{w_in:g}×{h_in:g}" front panel with bleed'
+    if not res:
+        return {'label': 'Cover art', 'ok': False,
+                'detail': (f'The cover art could not be measured — check it is at least '
+                           f'{int(round(w_in * 300))}×{int(round(h_in * 300))} px for the '
+                           f'{size}')}
+    px, need = res['px'], res['need']
+    if res['ok']:
+        return {'label': 'Cover art', 'ok': True,
+                'detail': (f'{px[0]}×{px[1]} px — {res["dpi"]} dpi across the {size} '
+                           f'(needs {need[0]}×{need[1]})')}
+    return {'label': 'Cover art', 'ok': False,
+            'detail': (f'{px[0]}×{px[1]} px is {res["dpi"]} dpi across the {size} — '
+                       f'{"well under" if res["soft"] else "under"} the {res["want_dpi"]} dpi '
+                       f'print wants, so it will print soft. '
+                       f'Ask for {need[0]}×{need[1]} px or larger.')}
+
+
 class PrintPackageError(ValueError):
     """A reason the package can't be built that the writer can fix in Edit."""
 
@@ -3307,11 +3336,17 @@ def build_print_package(proj, scope='print'):
         raise PrintPackageError(err)
     meta, _ = _project_meta(proj)
     tpl = meta.get('cover_template_data')
-    if meta.get('cover_mode') != 'designed' or not tpl:
+    # Two kinds of cover reach a printer. A designed one paints the front panel
+    # from its template; uploaded art *is* the front panel and the rest of the
+    # wrap is built around it (#66). A book with no cover at all has nothing to
+    # wrap the block in, and that is the only refusal left.
+    art = engine._front_art(meta)
+    if not art and (meta.get('cover_mode') != 'designed' or not tpl):
         raise PrintPackageError(
-            f'{"Send to publish" if publish else "Send to print"} needs a designed '
-            'cover for now — pick a cover template under Cover. (A wrap around '
-            'uploaded cover art is on the roadmap.)')
+            f'{"Send to publish" if publish else "Send to print"} needs a cover — '
+            'pick a cover template under Cover, or upload your own cover art.')
+    if art:
+        tpl = engine.image_wrap_template(art)
 
     ms = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
     # slugify falls back to 'style', which is right for a preset and wrong on
@@ -3369,6 +3404,16 @@ def build_print_package(proj, scope='print'):
         files[pdir + os.path.basename(wrap)] = wrap
         for w in dims['warnings']:
             checks.append({'label': 'Cover wrap', 'ok': False, 'detail': w})
+
+        # Uploaded art is the one thing in the package whose quality we cannot
+        # set: a file that looked crisp on screen can print soft, and the only
+        # place that shows is the printed copy. Measured against the rectangle
+        # the wrap actually asks it to fill, bleed included.
+        art_res = None
+        if art:
+            aw, ah = engine.front_art_size(engine.wrap_geometry(dims))
+            art_res = engine.image_cover_check(art, aw, ah)
+            checks.append(_art_resolution_check(art_res, aw, ah))
         if not wres['spine_text']:
             checks.append({'label': 'Spine text', 'ok': True,
                            'detail': (f'Left off — {pages} pages is under '
@@ -3381,7 +3426,7 @@ def build_print_package(proj, scope='print'):
                              else f'{base}-front-cover.jpg')
         cover_jpg = ''
         try:
-            _designed_cover_jpeg(preset, meta, front)
+            _cover_page_jpeg(preset, meta, front)
             cover_jpg = front
             files[(edir if publish else '') + os.path.basename(front)] = front
         except Exception as exc:
@@ -3396,10 +3441,14 @@ def build_print_package(proj, scope='print'):
         if publish:
             ebook = os.path.join(work, f'{base}.epub')
             # Always the rendered JPG, and '' when it would not render — never the
-            # project's own cover art. That art is the *background plate* a designed
-            # cover is built over: no title, no author. Letting it through here would
-            # put a coverless-looking image on a shop listing under a row that says
-            # the ebook has no cover at all.
+            # project's own cover art. On a designed cover that art is the
+            # *background plate* the template is drawn over: no title, no author.
+            # Letting it through here would put a coverless-looking image on a shop
+            # listing under a row that says the ebook has no cover at all. On an
+            # uploaded cover (#66) the raw file is closer to a cover, but it is
+            # still the one without the title overlay and uncropped to the trim —
+            # the rasterised page is the cover this book has, so it is the only
+            # thing that ships.
             emeta = dict(meta, cover_image=cover_jpg)
             try:
                 epub.build_epub(ms, preset, ebook, emeta)
@@ -3429,6 +3478,10 @@ def build_print_package(proj, scope='print'):
             # `publish` is what was asked for; `ebook` is what came out. Only the
             # second may promise an ebook edition on the page or the sheet.
             'scope': scope, 'publish': publish, 'ebook': ebook_built,
+            'cover_kind': 'image' if art else 'designed',
+            'cover_label': ('Uploaded art' if art
+                            else (tpl.get('name') or meta.get('cover_template') or 'Designed')),
+            'cover_art': art_res,
             'epub': (sorted(epub_checks, key=lambda c: c['ok']) if epub_checks
                      else epub_checks),
             'cover_px': cover_px,
@@ -3539,6 +3592,10 @@ def _print_spec_text(info, names):
         f'  Spine        {w["spine_w"]:.4f} in',
         f'  Cover wrap   {w["wrap_w"]:g} x {w["wrap_h"]:g} in (bleed {info["bleed"]:g} in)',
         f'  Spine text   {"yes" if w["spine_text"] else "no (too few pages)"}',
+        f'  Cover        {info.get("cover_label", "Designed")}'
+        + (f' ({info["cover_art"]["px"][0]}x{info["cover_art"]["px"][1]} px, '
+           f'{info["cover_art"]["dpi"]} dpi on the front panel)'
+           if info.get('cover_art') else ''),
         f'  Interior     {"press-ready (single-ink black, no cover)" if info["press_ready"] else "ordinary RGB — see checks"}',
     ]
     if info.get('ebook'):

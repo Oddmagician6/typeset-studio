@@ -1636,7 +1636,7 @@ the page count off the result page, and typed it into the cover editor's wrap fo
 edit to the book quietly left a wrap cut for a different spine.
 - **`build_print_package(proj)`** builds in the order that removes the mistake: the interior first,
   **press-ready and coverless** (`build_pdf(..., press=True)`), then the wrap sized from *that*
-  page count, then a front-cover JPG for store listings (`_designed_cover_jpeg`, the same
+  page count, then a front-cover JPG for store listings (`_cover_page_jpeg`, the same
   rasteriser the EPUB cover uses), then `PRINT-SPEC.txt` — trim, pages, paper, spine, wrap size,
   every check, and per-printer upload steps (`_UPLOAD_STEPS`). Zipped to
   `out/<slug>-print-<stamp>.zip` as a `<slug>-print/` folder.
@@ -1648,10 +1648,11 @@ edit to the book quietly left a wrap cut for a different spine.
   fieldset on the project editor. The wrap allowances (turn-in, hinge, board, flap) stay at the
   house defaults; the cover editor's wrap export is still where to hand-tune them.
 - **Refactors that made it one code path, not two:** `_wrap_dims(form, pages)` out of
-  `_wrap_from_form` (the package feeds it a plain dict), `_designed_cover_jpeg` out of
+  `_wrap_from_form` (the package feeds it a plain dict), `_cover_page_jpeg` out of
   `_epub_cover`, and `_project_source` / `_project_meta` out of `project_generate`.
-- **Designed covers only** — a project with an uploaded-image cover is sent back to Edit with the
-  reason. See #66. Projects only: a one-off build has nowhere to keep print settings.
+- **Designed covers only** at the time — a project with an uploaded-image cover was sent back to
+  Edit with the reason; **#66 lifted that**, and uploaded art is now the front panel. Projects
+  only: a one-off build has nowhere to keep print settings.
 - Route `POST /project/<pid>/print-package` → `templates/print_package.html`; a **Send to print**
   button on the projects page and on a project's result page. Also added: a preflight row,
   **Cover on page 1**, when an ordinary (non-press) PDF still opens with its cover — the file a
@@ -1916,17 +1917,51 @@ before `to_markdown` ever runs.
 *Prior art for the shape of the change: #49 added the `link` field across all three copies of
 the model and is the closest template.*
 
-**66. Send to print with an uploaded cover image** *(small–medium; the half #65 left out —
-details to be worked out)*
-#65 builds its wrap from a cover *template*, so a book whose cover is an uploaded image (cover
-mode `image`) is refused. Writers who commission cover art are exactly the ones heading to print.
-- **Open questions:** does the uploaded image become the front panel only, with a plain or
-  palette-coloured back and spine? Or can a writer upload a full wrap from their designer and have
-  it checked (page size against the computed wrap) rather than built?
-- **Resolution matters here** in a way it doesn't on screen: a front panel at 6×9" plus bleed wants
-  ~1875×2775 px for 300 dpi. Flag a too-small image rather than print it soft.
-- `build_cover_wrap` paints the front through `_paint_background` + `_paint_cover_front`; an image
-  front would slot in there. The title overlay option (`cover_overlay`) should carry over.
+**66. Send to print with an uploaded cover image** *(small–medium; the half #65 left out)* —
+**SHIPPED**
+#65 built its wrap from a cover *template*, so a book whose cover is an uploaded image (cover
+mode `image`) was refused — and writers who commission cover art are exactly the ones heading
+to print. The art is now the front panel, and the wrap is built around it.
+- **Both open questions answered: front panel only, and the checked-wrap idea belongs to #68.**
+  A writer with a full wrap from their designer is served by the cover-specs page and the blank
+  guide template (#68), which hand over the exact geometry to design to; a second "upload this
+  and I'll check it" path would have had to re-derive the same numbers from a PDF we did not
+  make. So the uploaded image becomes the front, and the back and spine are built as they
+  always were.
+- **The back and spine take their colour from the art** (`engine.image_wrap_template`): the
+  cover is averaged down to one colour, darkened twice over, and that is the palette the back
+  panel, spine and flaps are painted with. Deliberately dull — the back of a commissioned
+  cover should recede behind the blurb, and a saturated guess at "the cover's colour" is
+  something a writer would have to fix rather than ship. No Pillow, or a file that won't open:
+  a neutral slate, never a guess.
+- **Where the art stops is the whole design.** `_paint_image_front` cover-fits the image over
+  the front panel *plus every printed allowance outside it* — the bleed, and the turn-in on a
+  case — because art that stops at the trim prints a white sliver the moment the guillotine
+  wanders. A jacket stops at the fold instead: past it is the flap, which folds in behind the
+  cover and is not the front. `front_art_size(g)` is the one place that rectangle is worked
+  out, so the resolution a package checks is the resolution the wrap actually asks for.
+- **The title overlay carries over**, and is centred on the *trim*, not on the printed sheet —
+  a title centred on the bleed sits a bleed's width off-centre on the finished book. Page 1 of
+  the interior and the wrap's front panel now call the same `_paint_cover_overlay`, so the
+  cover in the book and the cover going to the printer cannot drift.
+- **Resolution is checked and flagged, never enforced** (`engine.image_cover_check`): a 6×9"
+  front plus bleed wants ~1875×2775 px, and cover-fit scales by the *larger* ratio, so the
+  effective dpi is set by the tighter dimension. The row states the pixels, the dpi across the
+  panel and what to ask the designer for; it tallies on the page and in the sheet like any
+  other check. This is the one thing about a commissioned cover that only shows up in print.
+- **The front-cover JPG is the rasterised cover page, not the upload** — `_cover_page_jpeg`
+  (renamed from `_designed_cover_jpeg`, which now describes what it does for both kinds of
+  cover). The raw file has no title overlay on it and is not cropped to the trim, so on a
+  publish package the ebook still ships the rendered page, exactly as a designed cover does.
+- **The only refusal left is a book with no cover at all**, and the message now names both
+  ways out ("pick a cover template under Cover, or upload your own cover art").
+- `test_print_package.py` gained the uploaded-art half: that the package holds the same four
+  files, that the wrap is the size a template's would have been at that page count, that the
+  front panel *is* the art by sampling the rendered PDF (front centre, the fore-edge and head
+  bleed, and the back panel, which must **not** be it), that the overlay reaches the wrap and
+  stops when it is switched off, that a 900×1350 px upload is flagged as soft and counted the
+  same on the page and in the sheet, and that the ebook in a publish package carries the
+  rendered cover rather than the upload.
 
 **67. A full publish package — print and ebook together** *(small; extends #65)* — **SHIPPED**
 #65 was print only. A **Send to publish** button beside **Send to print** now builds the same
@@ -1941,7 +1976,7 @@ package with the ebook edition in it, so one click hands off every edition of th
   become a third card on the page and an `EBOOK CHECKS` block on the sheet, counted through
   `issue_rows` like every other tally so the browser and the file can’t disagree.
 - **One rasterisation, two uses — the point of building both at once.** The cover JPG is rendered
-  once by `_designed_cover_jpeg` and then *both* shipped as `ebook/<slug>-cover.jpg` and handed to
+  once by `_cover_page_jpeg` and then *both* shipped as `ebook/<slug>-cover.jpg` and handed to
   `epub.build_epub` as `cover_image`, so the store listing and the file readers open are
   byte-for-byte the same picture. That is why the publish path does **not** go through
   `_epub_cover` (which renders its own temp copy): a second render is a second chance to differ.
@@ -1954,7 +1989,7 @@ package with the ebook edition in it, so one click hands off every edition of th
 - **Failure is per-half.** A broken EPUB build inserts a failed `Ebook` row and the print files
   still ship; a cover that won’t render leaves the EPUB coverless with a row saying so. Same
   stance as every other check here: flagged, never enforced.
-- **Still designed-covers-only**, since the wrap is; see #66.
+- **Was designed-covers-only**, since the wrap was; #66 lifted that for both packages alike.
 - `test_print_package.py` gained the publish half: the folder layout, that the print files match a
   print-only package at the same page count, that the cover in the EPUB is the JPG in the zip, that
   both upload sections and the ebook pixel size reach the sheet, that a forced ebook-check failure

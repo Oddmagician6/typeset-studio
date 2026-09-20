@@ -76,6 +76,7 @@
         <span class="k">Paper</span><span>{{ info.paper_label }}</span>
         <span class="k">Spine</span><span>{{ '%.4f'|format(w.spine_w) }}"{% if not w.spine_text %} · no spine text{% endif %}</span>
         <span class="k">Wrap</span><span>{{ '%g'|format(w.wrap_w) }}&times;{{ '%g'|format(w.wrap_h) }}" incl. {{ '%g'|format(info.bleed) }}" bleed</span>
+        <span class="k">Cover</span><span>{{ info.cover_label }}{% if info.cover_art %} · {{ info.cover_art.px[0] }}&times;{{ info.cover_art.px[1] }} px, {{ info.cover_art.dpi }} dpi on the front{% endif %}</span>
         <span class="k">Interior</span><span>{{ 'Press-ready, no cover' if info.press_ready else 'Ordinary RGB — see checks' }}</span>
         {% if info.ebook %}
           <span class="k">Ebook</span><span>EPUB 3, reflowable{% if info.cover_px %} · cover {{ info.cover_px[0] }}&times;{{ info.cover_px[1] }} px{% endif %}</span>

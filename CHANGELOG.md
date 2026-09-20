@@ -12,6 +12,19 @@ line here.
 
 ### Added
 
+- **Send to print now takes your own cover art.** A book whose cover is an
+  image you uploaded — commissioned art, a designer's front — used to be turned
+  away at Send to print and Send to publish, which wanted one of the built-in
+  cover templates. Your art is now the front of the wrap: it runs out into the
+  bleed so nothing white can show at the edge, the title overlay (if you use one)
+  sits where it does in the book, and the back and spine are painted in a quiet
+  colour taken from the art itself, with your blurb, imprint and the barcode
+  space where they always were. The package also measures the art against the
+  panel it has to fill and tells you the pixels and the dpi — the one thing about
+  a commissioned cover that only shows up once it is printed — so a file that
+  looked crisp on screen doesn't reach a printed proof soft. The only cover Send
+  to print still refuses is no cover at all.
+
 - **Send to publish — the whole book, both editions, in one download.** Send to
   print hands a printer the interior and the cover wrap. Send to publish, the
   button beside it, adds the ebook: the same manuscript comes out as a press-ready
