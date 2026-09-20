@@ -37,7 +37,7 @@
 {% block body %}
   {% set w = info.wrap %}
   <div class="pagehead">
-    {% if info.publish %}
+    {% if info.publish and info.ebook %}
       <div class="eyebrow">Send to publish</div>
       <h1>Ready for the printer and the shop</h1>
       <p>Both editions were built from the same manuscript in one pass — the print files in
@@ -45,6 +45,13 @@
          the store listing and the inside of the EPUB alike.
          <code>PUBLISH-SPEC.txt</code> in the package walks through both uploads to
          {{ info.retailer_label }}.</p>
+    {% elif info.publish %}
+      <div class="eyebrow">Send to publish</div>
+      <h1>Ready for the printer</h1>
+      <p>The ebook edition could not be built — the checks below say why — so this package
+         holds the print half only: the interior and the cover wrap in <code>print/</code>,
+         cut to the same page count as ever. <code>PUBLISH-SPEC.txt</code> walks through
+         the upload to {{ info.retailer_label }}.</p>
     {% else %}
       <div class="eyebrow">Send to print</div>
       <h1>Ready for the printer</h1>
@@ -70,7 +77,7 @@
         <span class="k">Spine</span><span>{{ '%.4f'|format(w.spine_w) }}"{% if not w.spine_text %} · no spine text{% endif %}</span>
         <span class="k">Wrap</span><span>{{ '%g'|format(w.wrap_w) }}&times;{{ '%g'|format(w.wrap_h) }}" incl. {{ '%g'|format(info.bleed) }}" bleed</span>
         <span class="k">Interior</span><span>{{ 'Press-ready, no cover' if info.press_ready else 'Ordinary RGB — see checks' }}</span>
-        {% if info.publish %}
+        {% if info.ebook %}
           <span class="k">Ebook</span><span>EPUB 3, reflowable{% if info.cover_px %} · cover {{ info.cover_px[0] }}&times;{{ info.cover_px[1] }} px{% endif %}</span>
         {% endif %}
       </div>
