@@ -320,18 +320,18 @@ try:
     with open(ART_PATH, 'wb') as f:
         from PIL import Image
         Image.new('RGB', (600, 900), (30, 60, 90)).save(f, 'PNG')
-    real_jpeg = A._designed_cover_jpeg
+    real_jpeg = A._cover_page_jpeg
 
     def refuse_cover(*a, **k):
         raise RuntimeError('no cover today')
 
-    A._designed_cover_jpeg = refuse_cover
+    A._cover_page_jpeg = refuse_cover
     try:
         r = send(dict(PROJ, cover_file=ART_NAME), 'publish')
         html = r.get_data(as_text=True)
         nocov = unpack(A.load_project(PID)['last_print_package'])
     finally:
-        A._designed_cover_jpeg = real_jpeg
+        A._cover_page_jpeg = real_jpeg
     check('the ebook still ships', 'ebook/the-salt-road.epub' in nocov, sorted(nocov))
     with zipfile.ZipFile(io.BytesIO(nocov['ebook/the-salt-road.epub'])) as ez:
         pics = [n for n in ez.namelist() if n.lower().endswith(('.jpg', '.jpeg', '.png'))]
@@ -359,15 +359,129 @@ try:
           and '[!!] Ebook checks:' in spec,
           [l for l in spec.splitlines() if 'EBOOK' in l or 'Ebook checks' in l])
 
+    # ------------------------------------------------- uploaded cover art (#66)
+    # The art is the front panel and the rest of the wrap is built around it, so
+    # what is worth measuring is where the art stops: it has to reach the outer
+    # edge of the sheet (bleed included) and no further than the front fold.
+    print('a package around uploaded cover art')
+    from PIL import Image
+    ART = (206, 41, 58)
+    g = engine.wrap_geometry({'trim_w': tw, 'trim_h': th, 'bleed': 0.125,
+                              'spine_w': pages * A._PAPER['cream']['ppi'],
+                              'binding': 'paperback'})
+    aw, ah = engine.front_art_size(g)
+    Image.new('RGB', (int(aw * 300), int(ah * 300)), ART).save(ART_PATH, 'PNG')
+    IMG_PROJ = dict(PROJ, cover_mode='image', cover_file=ART_NAME,
+                    cover_template='', cover_overlay=True, cover_color='light')
+    r = send(dict(IMG_PROJ))
+    html = r.get_data(as_text=True)
+    check('it builds', r.status_code == 200 and 'Ready for the printer' in html,
+          r.status_code)
+    art_files = unpack(A.load_project(PID)['last_print_package'])
+    check('with the same four files as a designed cover',
+          sorted(art_files) == sorted(['the-salt-road-interior.pdf',
+                                       'the-salt-road-cover-wrap.pdf',
+                                       'the-salt-road-front-cover.jpg',
+                                       'PRINT-SPEC.txt']), sorted(art_files))
+    art_pages, _, _ = pdf_info(art_files['the-salt-road-interior.pdf'])
+    check('the interior is still coverless, so the spine is still honest',
+          art_pages == pages, (art_pages, pages))
+    _, aww, awh = pdf_info(art_files['the-salt-road-cover-wrap.pdf'])
+    paperback_w = 2 * 0.125 + 2 * tw + pages * A._PAPER['cream']['ppi']
+    check('and the wrap is the size it would have been with a template',
+          abs(aww - paperback_w) < 0.01 and abs(awh - (th + 0.25)) < 0.01, (aww, awh))
+
+    with fitz.open(stream=art_files['the-salt-road-cover-wrap.pdf'],
+                   filetype='pdf') as doc:
+        DPI = 36
+        pm = doc[0].get_pixmap(dpi=DPI)
+        text = doc[0].get_text()
+
+    def at(x_in, y_in):
+        """Colour at a point on the wrap, measured in inches from the top-left."""
+        return pm.pixel(min(int(x_in * DPI), pm.width - 1),
+                        min(int(y_in * DPI), pm.height - 1))
+
+    def near(c, want, tol=12):
+        return all(abs(a - b) <= tol for a, b in zip(c[:3], want))
+
+    check('the front panel is the art', near(at(g['front_x'] + tw / 2, 0.75), ART),
+          at(g['front_x'] + tw / 2, 0.75))
+    check('which runs out into the bleed at the fore-edge and the head',
+          near(at(g['wrap_w'] - 0.05, th / 2), ART) and near(at(g['front_x'] + 0.5, 0.03), ART),
+          (at(g['wrap_w'] - 0.05, th / 2), at(g['front_x'] + 0.5, 0.03)))
+    check('and stops at the spine, so the back panel is not the art',
+          not near(at(g['back_x'] + tw / 2, th / 2), ART),
+          at(g['back_x'] + tw / 2, th / 2))
+    check('the back panel takes its colour from the art',
+          at(g['back_x'] + tw / 2, th / 2)[0] > at(g['back_x'] + tw / 2, th / 2)[2],
+          at(g['back_x'] + tw / 2, th / 2))
+    # this book is too short for spine text, so the only title on the sheet is
+    # the overlay one — which is how we know the overlay reached the wrap
+    check('the title overlay is drawn on the front panel', 'The Salt Road' in text,
+          text[:200])
+    r = send(dict(IMG_PROJ, cover_overlay=False))
+    with fitz.open(stream=unpack(A.load_project(PID)['last_print_package'])
+                   ['the-salt-road-cover-wrap.pdf'], filetype='pdf') as doc:
+        plain_text = doc[0].get_text()
+    check('and left off when the writer turned it off', 'The Salt Road' not in plain_text,
+          plain_text[:200])
+
+    art_spec = art_files['PRINT-SPEC.txt'].decode('utf-8')
+    check('the sheet says the cover is the writer’s own art, at its resolution',
+          'Cover        Uploaded art' in art_spec and ' dpi on the front panel)' in art_spec,
+          [l for l in art_spec.splitlines() if 'Cover' in l])
+    check('and the page says so too', 'Uploaded art' in html and 'dpi on the front' in html)
+    check('the resolution passes at 300 dpi',
+          re.search(r'Cover art[^<]*</span>\s*<span class="chk-detail">[^<]*300 dpi', html)
+          is not None or '300 dpi across the' in html,
+          [l for l in art_spec.splitlines() if 'Cover art' in l])
+
+    # too small is the failure this check exists for: it only shows up in print
+    print('when the art is too small for the panel')
+    Image.new('RGB', (900, 1350), ART).save(ART_PATH, 'PNG')
+    r = send(dict(IMG_PROJ))
+    html = r.get_data(as_text=True)
+    small = unpack(A.load_project(PID)['last_print_package'])
+    small_spec = small['PRINT-SPEC.txt'].decode('utf-8')
+    check('the wrap still ships', 'the-salt-road-cover-wrap.pdf' in small, sorted(small))
+    check('and the row says how soft it will print, in pixels',
+          'will print soft' in html and '900×1350 px' in html,
+          [l for l in small_spec.splitlines() if 'Cover art' in l])
+    check('the sheet counts it as an issue like any other',
+          '[!!] Cover art:' in small_spec, [l for l in small_spec.splitlines()
+                                            if 'Cover art' in l])
+    on_page = re.search(r'badge-warn">\s*(\d+) to look at', html)
+    in_spec = re.search(r'CHECKS \((\d+) to look at\)', small_spec)
+    check('and the page and the sheet still agree on the tally',
+          (on_page.group(1) if on_page else None) == (in_spec.group(1) if in_spec else None),
+          (on_page.group(0) if on_page else 'none', in_spec.group(0) if in_spec else 'none'))
+
+    print('a publish package around uploaded cover art')
+    Image.new('RGB', (int(aw * 300), int(ah * 300)), ART).save(ART_PATH, 'PNG')
+    r = send(dict(IMG_PROJ), 'publish')
+    pub_art = unpack(A.load_project(PID)['last_print_package'])
+    check('both editions come out of it',
+          'print/the-salt-road-cover-wrap.pdf' in pub_art
+          and 'ebook/the-salt-road.epub' in pub_art, sorted(pub_art))
+    with zipfile.ZipFile(io.BytesIO(pub_art['ebook/the-salt-road.epub'])) as ez:
+        inside = [n for n in ez.namelist() if n.lower().endswith(('.jpg', '.jpeg'))]
+        cover_bytes = ez.read(inside[0]) if inside else b''
+    # the rasterised cover page, not the raw upload: that one has no title on it
+    check('and the ebook carries the rendered cover, not the raw upload',
+          bool(inside) and cover_bytes == pub_art['ebook/the-salt-road-cover.jpg']
+          and cover_bytes != open(ART_PATH, 'rb').read(), (len(cover_bytes), inside))
+    os.remove(ART_PATH)
+
     # ------------------------------------------------------------ refusals
     print('what it refuses')
-    r = send(dict(PROJ, cover_mode='image'))
-    check('a book without a designed cover is sent back to Edit with the reason',
-          'needs a designed cover' in r.get_data(as_text=True))
-    r = send(dict(PROJ, cover_mode='image'), 'publish')
+    r = send(dict(PROJ, cover_mode='none'))
+    check('a book with no cover at all is sent back to Edit with the reason',
+          'needs a cover' in r.get_data(as_text=True))
+    r = send(dict(PROJ, cover_mode='image', cover_file=''), 'publish')
     check('and the reason names the button that was pressed',
-          'Send to publish needs a designed' in r.get_data(as_text=True),
-          [l for l in r.get_data(as_text=True).splitlines() if 'designed cover' in l])
+          'Send to publish needs a cover' in r.get_data(as_text=True),
+          [l for l in r.get_data(as_text=True).splitlines() if 'needs a cover' in l])
     os.remove(MS_PATH)
     r = send(dict(PROJ))
     check('a missing manuscript is a message, not a crash',

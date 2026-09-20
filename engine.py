@@ -220,6 +220,153 @@ def _draw_image_cover(canv, path, x0, y0, w, h):
         pass
 
 
+def _paint_cover_overlay(canv, title, author, tfont, afont, x0, y0, w, h, light=True):
+    """Title + author over cover art, on a soft scrim so they stay readable.
+
+    Shared by page 1 of an interior and the front panel of a wrap (#66), which
+    is the point: a writer who turns the overlay on sees the same cover in the
+    book and on the printer's proof. `light` describes the **art**, so the type
+    goes white on a dark scrim over light art and black over dark art.
+    """
+    if not title and not author:
+        return
+    cx = x0 + w / 2.0
+    ty = y0 + h * 0.30
+    canv.saveState()
+    canv.setFillColorRGB(0, 0, 0) if light else canv.setFillColorRGB(1, 1, 1)
+    canv.setFillAlpha(0.32)
+    band_h = h * 0.26
+    canv.rect(x0, ty - band_h * 0.42, w, band_h, stroke=0, fill=1)
+    canv.setFillAlpha(1)
+    canv.setFillColorRGB(1, 1, 1) if light else canv.setFillColorRGB(0.06, 0.06, 0.06)
+    tsize = min(34, w / max(len(title), 8) * 1.6) if title else 28
+    canv.setFont(tfont, tsize)
+    canv.drawCentredString(cx, ty, title)
+    if author:
+        canv.setFont(afont, tsize * 0.5)
+        canv.drawCentredString(cx, ty - tsize * 0.95, author)
+    canv.restoreState()
+
+
+def _mix(a, b, t):
+    """Blend two '#rrggbb' colours, t of the way from a to b. Returns hex."""
+    ca, cb = _hex(a), _hex(b)
+    return '#%02x%02x%02x' % tuple(
+        int(round(255 * ((1 - t) * x + t * y)))
+        for x, y in ((ca.red, cb.red), (ca.green, cb.green), (ca.blue, cb.blue)))
+
+
+def _lum(c):
+    """Perceived lightness of a '#rrggbb' colour, 0..1."""
+    col = _hex(c)
+    return 0.2126 * col.red + 0.7152 * col.green + 0.0722 * col.blue
+
+
+# The wrap around uploaded cover art has no template to take its colours from,
+# so it takes them from the art: a back panel and spine in the average colour
+# of the front, darkened until type sits on it safely. A neutral slate is the
+# fallback when Pillow is missing or the file will not open - never a guess at
+# a colour that isn't there.
+_IMAGE_WRAP_BASE = '#2b3038'
+
+
+def image_wrap_template(path):
+    """A minimal cover template whose palette is sampled from uploaded art (#66).
+
+    Only the wrap's *other* panels use it - the front is the art itself - so it
+    carries what `_paint_back_panel`, `_paint_spine` and `_paint_flap` read and
+    nothing else: a palette, a quiet border, and the collection/studio sizes.
+    The art is averaged down to one colour and darkened, which is dull by
+    design: the back of a commissioned cover should recede behind the blurb,
+    and a saturated guess at "the cover's colour" is the kind of thing a writer
+    would have to fix rather than ship.
+    """
+    base = _IMAGE_WRAP_BASE
+    if path and os.path.exists(path) and _HAVE_PIL:
+        try:
+            with PILImage.open(path) as im:
+                small = im.convert('RGB').resize((32, 48), PILImage.LANCZOS)
+            px = list(small.getdata())
+            n = len(px)
+            base = '#%02x%02x%02x' % tuple(
+                int(round(sum(c[i] for c in px) / n)) for i in range(3))
+        except Exception:
+            base = _IMAGE_WRAP_BASE
+    bg_top = _mix(base, '#000000', 0.28)
+    bg_bottom = _mix(base, '#000000', 0.52)
+    dark = _lum(bg_bottom) < 0.45
+    ink = '#f3f0e9' if dark else '#141414'
+    return {
+        'name': 'Uploaded cover art',
+        'palette': {
+            'bg_top': bg_top, 'bg_bottom': bg_bottom, 'ink': ink,
+            'gold': _mix(ink, bg_bottom, 0.22),
+            'teal': _mix(ink, bg_bottom, 0.34),
+            'muted': _mix(ink, bg_bottom, 0.45),
+        },
+        'border': {'color': 'muted', 'inset': 0.42, 'gap': 0.055, 'line': 0.8,
+                   'corner': 0.42, 'corner_line': 1.0},
+        'collection': {'size': 10.5, 'tracking': 4.0, 'color': 'muted'},
+        'title': {'color': 'ink'},
+        'accent': {'color': 'muted'},
+        'studio': {'size': 8.5, 'tracking': 2.4, 'color': 'muted'},
+    }
+
+
+def image_cover_check(path, w_in, h_in, dpi=300):
+    """How uploaded cover art measures up to the panel it has to fill.
+
+    Resolution is the one thing about a commissioned cover that only shows up
+    in print: a 6x9" front plus bleed wants ~1875x2775 px at 300 dpi, and the
+    same file that looked crisp on screen prints soft. Returns the numbers and
+    a verdict, or `None` if the file cannot be read at all. Cover-fit scales by
+    the *larger* of the two ratios and crops the rest, so the effective dpi is
+    set by the tighter dimension.
+    """
+    if not (path and os.path.exists(path) and _HAVE_PIL):
+        return None
+    try:
+        with PILImage.open(path) as im:
+            iw, ih = im.size
+    except Exception:
+        return None
+    if not (iw and ih and w_in > 0 and h_in > 0):
+        return None
+    eff = min(iw / float(w_in), ih / float(h_in))
+    return {'px': (iw, ih),
+            'need': (int(math.ceil(w_in * dpi)), int(math.ceil(h_in * dpi))),
+            'dpi': int(round(eff)), 'want_dpi': dpi,
+            'panel': (round(w_in, 3), round(h_in, 3)),
+            'ok': eff >= dpi - 1, 'soft': eff < dpi * 0.67}
+
+
+def _front_art(meta):
+    """The uploaded cover image a wrap should use as its front panel, or ''."""
+    if (meta or {}).get('cover_mode') != 'image':
+        return ''
+    src = (meta or {}).get('cover_image') or ''
+    return src if src and os.path.exists(src) else ''
+
+
+def _paint_image_front(canv, cf, meta, x0, y0, w, h, trim):
+    """Front panel from uploaded art: cover-fit over the whole bleed, then the title.
+
+    `trim` is the trimmed panel - the part that survives the guillotine - and
+    the overlay is centred on *that*, not on the printed rectangle, so the
+    title sits where it does on the finished book rather than a bleed's width
+    off-centre. The art itself runs to the outer edge, because anything short
+    of that prints a white sliver when the trim wanders.
+    """
+    _draw_image_cover(canv, _front_art(meta), x0, y0, w, h)
+    if not meta.get('cover_overlay'):
+        return
+    tx, ty, tw, th = trim
+    _paint_cover_overlay(canv, meta.get('title', ''), meta.get('author', ''),
+                         cf.get('display') or cf.get('serif'), cf.get('serif'),
+                         tx, ty, tw, th,
+                         light=meta.get('cover_color', 'light') == 'light')
+
+
 def _paint_background(canv, tpl, x0, y0, w, h):
     """Optional full-bleed background inside (x0,y0,w,h): art image (cover-fit),
     edge vignette, then a flat colour overlay. Drawn over the base gradient and
@@ -1294,8 +1441,18 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
             panel_meta.pop('cover_blurb', None)
     _paint_back_panel(c, tpl, cf, panel_meta, back_x, edge, pw, ph)
     _paint_spine(c, tpl, cf, meta, spine_x, edge, sp, ph, draw_text=draw_spine)
-    _paint_background(c, tpl, front_x, edge, pw, ph)
-    _paint_cover_front(c, tpl, cf, meta, front_x, edge, pw, ph)
+    art = _front_art(meta)
+    if art:
+        # Uploaded art is the front panel (#66). It runs past the trim to the
+        # outer edge of the sheet — bleed, and on a case the turn-in too — so
+        # nothing white can appear at the fore-edge; a jacket stops at the fold
+        # instead, because past it is the flap, which folds in and is not front.
+        art_w, art_h = front_art_size(g)
+        _paint_image_front(c, cf, meta, front_x, 0.0, art_w * inch, art_h * inch,
+                           (front_x, edge, pw, ph))
+    else:
+        _paint_background(c, tpl, front_x, edge, pw, ph)
+        _paint_cover_front(c, tpl, cf, meta, front_x, edge, pw, ph)
     if flap:
         _paint_flap(c, tpl, cf, meta, edge, edge, flap, ph, 'back')
         _paint_flap(c, tpl, cf, meta, front_x + pw, edge, flap, ph, 'front')
@@ -1307,7 +1464,7 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
     c.save()
     return {'wrap_w': round(g['wrap_w'], 3), 'wrap_h': round(g['wrap_h'], 3),
             'spine_w': round(g['spine_w'], 4), 'spine_text': bool(draw_spine),
-            'binding': g['binding'],
+            'binding': g['binding'], 'front': 'image' if art else 'designed',
             'wrap': round(g['wrap'], 4), 'hinge': round(g['hinge'], 4),
             'flap': round(g['flap'], 4), 'panel_w': round(g['panel_w'], 4)}
 
@@ -1354,6 +1511,18 @@ def wrap_geometry(dims):
         'back_x': back_x, 'spine_x': spine_x, 'front_x': spine_x + sp + hinge,
         'spine_text': (pages is None or pages >= smin) and sp >= 0.10,
     }
+
+
+def front_art_size(g):
+    """The rectangle, in inches, that uploaded front-cover art has to fill.
+
+    Not the trim and not the whole sheet: the front panel *plus* every
+    allowance outside it that still gets printed. One function, so the
+    resolution a package checks is the resolution the wrap actually asks for —
+    `build_cover_wrap` paints to these same two numbers.
+    """
+    art_w = g['panel_w'] if g['flap'] else g['wrap_w'] - g['front_x']
+    return round(art_w, 4), round(g['wrap_h'], 4)
 
 
 def wrap_pixels(g, dpi=300):
@@ -1868,28 +2037,13 @@ class BookDoc(BaseDocTemplate):
                        preserveAspectRatio=False, mask=None)
         if not cv.get('overlay'):
             return
-        light = cv.get('color', 'light') == 'light'
-        title = self.meta.get('title', '')
-        author = self.meta.get('author', '')
-        tfont = cv.get('title_font', self.head_font)
-        afont = self.head_font
-        cx = self._pw / 2.0
-        ty = self._ph * 0.30
-        # soft scrim band for legibility
-        canv.saveState()
-        canv.setFillColorRGB(0, 0, 0) if light else canv.setFillColorRGB(1, 1, 1)
-        canv.setFillAlpha(0.32)
-        band_h = self._ph * 0.26
-        canv.rect(0, ty - band_h * 0.42, self._pw, band_h, stroke=0, fill=1)
-        canv.setFillAlpha(1)
-        canv.setFillColorRGB(1, 1, 1) if light else canv.setFillColorRGB(0.06, 0.06, 0.06)
-        tsize = min(34, self._pw / max(len(title), 8) * 1.6) if title else 28
-        canv.setFont(tfont, tsize)
-        canv.drawCentredString(cx, ty, title)
-        if author:
-            canv.setFont(afont, tsize * 0.5)
-            canv.drawCentredString(cx, ty - tsize * 0.95, author)
-        canv.restoreState()
+        # the same painter the wrap's front panel uses, so the cover in the
+        # book and the cover going to the printer carry the same title
+        _paint_cover_overlay(canv, self.meta.get('title', ''),
+                             self.meta.get('author', ''),
+                             cv.get('title_font', self.head_font), self.head_font,
+                             0, 0, self._pw, self._ph,
+                             light=cv.get('color', 'light') == 'light')
 
     def _draw_designed_cover(self, canv):
         """Render a text-driven cover from a covers/*.json template on page 1."""
