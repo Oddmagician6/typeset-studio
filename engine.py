@@ -1815,12 +1815,12 @@ class SceneBreak(Flowable):
         if self.image_path and os.path.exists(self.image_path):
             try:
                 from reportlab.lib.utils import ImageReader
-                ir  = ImageReader(self.image_path)
+                ir  = ImageReader(_upright(self.image_path))
                 iw, ih = ir.getSize()
                 img_h = self.size
                 img_w = img_h * (iw / ih)
                 x = (self.width - img_w) / 2.0
-                self.canv.drawImage(self.image_path, x, self.gap,
+                self.canv.drawImage(ir, x, self.gap,
                                     width=img_w, height=img_h, mask='auto')
                 return
             except Exception:
@@ -2690,7 +2690,7 @@ def _figure_size(path, box_w, max_h):
     ratio = 0.75                                  # 4:3 fallback if unreadable
     try:
         from reportlab.lib.utils import ImageReader
-        iw, ih = ImageReader(path).getSize()
+        iw, ih = ImageReader(_upright(path)).getSize()   # the way up it prints
         if iw > 0 and ih > 0:
             ratio = float(ih) / float(iw)
     except Exception:
@@ -2728,8 +2728,9 @@ class FigureImage(Flowable):
         c, x = self.canv, self._x()
         if self.path:
             try:
-                c.drawImage(self.path, x, 0, width=self._w, height=self._h,
-                            mask='auto')
+                from reportlab.lib.utils import ImageReader
+                c.drawImage(ImageReader(_upright(self.path)), x, 0,
+                            width=self._w, height=self._h, mask='auto')
                 return
             except Exception:
                 pass                              # fall through to the placeholder
