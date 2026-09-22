@@ -1551,7 +1551,7 @@ def _cover_page_jpeg(preset, meta, jpg_path):
 
 @contextlib.contextmanager
 def _epub_cover(preset, meta):
-    """Yield a meta whose ``cover_image`` an EPUB build can use for a designed cover.
+    """Yield a meta whose ``cover_image`` is page 1 of the book's cover, rasterised.
 
     ``epub.py`` is deliberately stdlib-only and image-only, so a book set with a
     designed cover (``cover_mode == 'designed'``) used to lose its cover in the
@@ -1561,10 +1561,16 @@ def _epub_cover(preset, meta):
     typeset one cover page instead of rebuilding the whole book (which a TOC would
     make a two-pass build on top).
 
+    Uploaded art goes the same way (#66): the raw file has no title overlay and
+    is not cropped to the trim, so an ebook that took it would show a different
+    cover from the book's page 1 — and from the one a publish package ships.
+
     Any failure — no PyMuPDF/Pillow, no template, a render error — yields the meta
-    unchanged, so the EPUB still builds, coverless, exactly as it did before.
+    unchanged, so the EPUB still builds exactly as it did before: coverless for a
+    designed cover, with the raw upload for uploaded art.
     """
-    if meta.get('cover_mode') != 'designed' or not meta.get('cover_template_data'):
+    designed = meta.get('cover_mode') == 'designed' and meta.get('cover_template_data')
+    if not (designed or engine._front_art(meta)):
         yield meta
         return
     try:
@@ -1581,7 +1587,7 @@ def _epub_cover(preset, meta):
             _cover_page_jpeg(preset, meta, jpg_path)
             img_path = jpg_path
         except Exception:
-            logging.exception('designed cover for EPUB failed; building without one')
+            logging.exception('cover page for EPUB failed; building without it')
             img_path = ''
 
         if img_path:
@@ -3232,14 +3238,16 @@ def _project_source(proj):
 
 def _project_meta(proj):
     """The build meta for a saved project, and the cover image path it points at."""
+    cover_mode = proj.get('cover_mode', 'none')
     cover_path = ''
     cover_file = proj.get('cover_file', '')
-    if cover_file:
+    # "No cover" keeps the uploaded file (so switching back needs no re-upload)
+    # but must not use it — the engine sets any cover_image it is handed as page 1.
+    if cover_file and cover_mode != 'none':
         cp = os.path.join(PROJECT_MS_DIR, cover_file)
         if os.path.exists(cp):
             cover_path = cp
 
-    cover_mode = proj.get('cover_mode', 'none')
     meta = {
         'title':            proj.get('title', ''),
         'subtitle':         proj.get('subtitle', ''),
@@ -3398,7 +3406,11 @@ def build_print_package(proj, scope='print'):
                      cover_back_image=back,
                      cover_back_image_w=_f(p, 'print_back_w', 1.5),
                      cover_back_image_y=_f(p, 'print_back_y', 0.4))
-        cf = engine._register_cover_fonts(tpl, engine.register_fonts(DEFAULTS))
+        # The faces page 1 of the book is set in, so the wrap's front matches it:
+        # the preset's for uploaded art, the template's own (falling back to the
+        # preset's, as page 1 does) for a designed cover.
+        cf = (engine.image_cover_fonts(preset) if art else
+              engine._register_cover_fonts(tpl, engine.register_fonts(preset)))
         wrap = os.path.join(work, base + _WRAP_SUFFIX[binding] + '.pdf')
         wres = engine.build_cover_wrap(tpl, cf, wmeta, dims, wrap)
         files[pdir + os.path.basename(wrap)] = wrap
