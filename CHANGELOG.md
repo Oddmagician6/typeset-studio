@@ -8,10 +8,29 @@ line here.
 
 ---
 
-## Unreleased
+## 1.2.3 — 22 September 2026
+
+Your book goes out the door from here: Send to print packs the paperback for a
+printer, Send to publish adds the ebook, and your own commissioned cover art now
+works with both.
 
 ### Added
 
+- **Send to print — the paperback, packed for the printer.** A printer wants the
+  interior and the cover as two files, and the width of the spine depends on how
+  many pages the interior turns out to have. Send to print builds them in that
+  order: a press-ready interior without the cover, then a cover wrap sized to
+  that interior's real page count. The zip also has a front-cover image for your
+  shop listing and a `PRINT-SPEC.txt` with every check and the upload steps for
+  the printer you picked. Print settings are saved with the project.
+- **Cover specs for designing your own wrap.** If you're designing a cover
+  outside the app, you need the wrap's exact size before you start. Every style
+  now has a Cover specs page. Put in your page count, paper, binding and printer,
+  and it gives you the measurements in inches, millimetres and pixels, a
+  to-scale diagram, guide positions to copy into your design app, and a blank
+  full-size template PDF with the bleed, spine, safe areas and barcode space
+  marked. They're the same measurements the app's own designed wraps are built
+  to.
 - **Send to print now takes your own cover art.** A book whose cover is an
   image you uploaded — commissioned art, a designer's front — used to be turned
   away at Send to print and Send to publish, which wanted one of the built-in
@@ -40,6 +59,17 @@ line here.
 
 ### Fixed
 
+- **Photos taken on a phone print the right way up.** A phone often saves a
+  photo on its side, with a note in the file saying which way is up. The app
+  followed the note and showed the picture upright, but the PDF ignored it. An
+  illustration, a chapter-opening picture or a picture used as a scene break
+  could look fine on screen and then print on its side, stretched to the wrong
+  shape. It now prints the way you see it. The ebook was never affected.
+- **Grammarly and similar tools no longer write into your manuscript.**
+  Grammarly, LanguageTool and ProWritingAid put their underlines and suggestion
+  cards inside the text you're editing. The rich editor read some of that as
+  part of your book, and autosave wrote it to the draft. It now skips anything
+  those tools add. Markdown mode and the desktop window were never affected.
 - **An "&" in a title no longer breaks the ebook.** A chapter called "Salt & Ash",
   a book called "Sense & Sensibility", two authors credited as "Lovelace &
   Babbage" — any ampersand (or `<`, `>`) in a title, subtitle, author, publisher,
