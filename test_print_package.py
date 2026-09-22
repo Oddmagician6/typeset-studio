@@ -471,6 +471,58 @@ try:
     check('and the ebook carries the rendered cover, not the raw upload',
           bool(inside) and cover_bytes == pub_art['ebook/the-salt-road-cover.jpg']
           and cover_bytes != open(ART_PATH, 'rb').read(), (len(cover_bytes), inside))
+
+    # The overlay is one painter in two places; it has to be one face as well.
+    with fitz.open(stream=pub_art['print/the-salt-road-cover-wrap.pdf'],
+                   filetype='pdf') as doc:
+        wrap_faces = {s['text']: s['font'] for b in doc[0].get_text('dict')['blocks']
+                      for l in b.get('lines', []) for s in l['spans']}
+    from reportlab.pdfbase import pdfmetrics
+    book_fonts = engine.register_fonts(A.load_preset(PROJ['preset']))
+    face = lambda role: pdfmetrics.getFont(book_fonts[role]).face.name.decode()
+    check('the wrap’s title is set in the book’s own faces, as page 1 is',
+          wrap_faces.get('The Salt Road') == face('bold')
+          and wrap_faces.get('Ellinor Vale') == face('regular'),
+          (wrap_faces, face('bold'), face('regular')))
+
+    # A phone photo stored sideways with an EXIF turn: upright in the browser,
+    # so it has to be upright on the book too — blue at the head, red at the foot.
+    print('when the art is a phone photo stored on its side')
+    BLUE, RED = (30, 40, 200), (200, 30, 40)
+    turned = Image.new('RGB', (int(ah * 300), int(aw * 300)), RED)
+    turned.paste(BLUE, (0, 0, turned.width // 2, turned.height))
+    ex = Image.Exif()
+    ex[0x0112] = 6                       # stored a quarter-turn anticlockwise
+    turned.save(ART_PATH, 'JPEG', exif=ex.tobytes())
+    r = send(dict(IMG_PROJ, cover_overlay=False))
+    html = r.get_data(as_text=True)
+    side = unpack(A.load_project(PID)['last_print_package'])
+    with fitz.open(stream=side['the-salt-road-cover-wrap.pdf'], filetype='pdf') as doc:
+        pm = doc[0].get_pixmap(dpi=DPI)
+    check('the front panel is printed the way up the writer sees it',
+          near(at(g['front_x'] + tw / 2, 1.0), BLUE, 30)
+          and near(at(g['front_x'] + tw / 2, th - 1.0), RED, 30),
+          (at(g['front_x'] + tw / 2, 1.0), at(g['front_x'] + tw / 2, th - 1.0)))
+    front = Image.open(io.BytesIO(side['the-salt-road-front-cover.jpg'])).convert('RGB')
+    check('and so is the cover page',
+          near(front.getpixel((front.width // 2, front.height // 8)), BLUE, 30)
+          and near(front.getpixel((front.width // 2, front.height * 7 // 8)), RED, 30),
+          (front.getpixel((front.width // 2, front.height // 8)),
+           front.getpixel((front.width // 2, front.height * 7 // 8))))
+    check('and its resolution is measured upright, so it is not flagged soft',
+          'will print soft' not in html and '300 dpi across the' in html,
+          re.findall(r'[^>]*dpi[^<]*', html)[:3])
+
+    # A project's standalone EPUB export takes the same cover the package does.
+    Image.new('RGB', (int(aw * 300), int(ah * 300)), ART).save(ART_PATH, 'PNG')
+    ometa, _ = A._project_meta(dict(IMG_PROJ))
+    with A._epub_cover(A.load_preset(PROJ['preset']), ometa) as emeta:
+        check('an exported EPUB carries the rendered cover page, overlay and all',
+              emeta['cover_image'] != ART_PATH and emeta['cover_image'].endswith('.jpg'),
+              emeta['cover_image'])
+    nmeta, npath = A._project_meta(dict(IMG_PROJ, cover_mode='none'))
+    check('and a project set to No cover does not use the art it still keeps',
+          nmeta['cover_image'] == '' and npath == '', (nmeta['cover_image'], npath))
     os.remove(ART_PATH)
 
     # ------------------------------------------------------------ refusals

@@ -200,12 +200,41 @@ _COVER_LAYOUTS = {
 }
 
 
+_EXIF_ORIENTATION = 0x0112
+_EXIF_TURNED = (5, 6, 7, 8)       # orientations stored a quarter-turn from upright
+
+
+def _exif_orientation(im):
+    try:
+        return im.getexif().get(_EXIF_ORIENTATION, 1) or 1
+    except Exception:
+        return 1
+
+
+def _upright(path):
+    """What to hand ReportLab for an image file: the path, or an upright copy.
+
+    A phone photo is usually stored sideways with an EXIF tag saying which way
+    up it goes. The browser obeys the tag, so the writer sees the art upright in
+    the app; ReportLab ignores it and prints it on its side. Only a file that
+    carries a turn is decoded here — everything else goes through as the path.
+    """
+    if _HAVE_PIL:
+        try:
+            with PILImage.open(path) as im:
+                if _exif_orientation(im) != 1:
+                    return ImageOps.exif_transpose(im)
+        except Exception:
+            pass
+    return path
+
+
 def _draw_image_cover(canv, path, x0, y0, w, h):
     """Draw an image cover-fit (fill then crop) into (x0,y0,w,h), clipped to the rect.
     Shared by the full-bleed background and the postcard family's inset panel."""
     try:
         from reportlab.lib.utils import ImageReader
-        ir = ImageReader(path)
+        ir = ImageReader(_upright(path))
         iw, ih = ir.getSize()
         scale = max(w / iw, h / ih) if iw and ih else 1.0
         dw, dh = iw * scale, ih * scale                  # cover-fit: fill then crop
@@ -328,6 +357,8 @@ def image_cover_check(path, w_in, h_in, dpi=300):
     try:
         with PILImage.open(path) as im:
             iw, ih = im.size
+            if _exif_orientation(im) in _EXIF_TURNED:
+                iw, ih = ih, iw          # measured the way up it prints
     except Exception:
         return None
     if not (iw and ih and w_in > 0 and h_in > 0):
@@ -365,6 +396,18 @@ def _paint_image_front(canv, cf, meta, x0, y0, w, h, trim):
                          cf.get('display') or cf.get('serif'), cf.get('serif'),
                          tx, ty, tw, th,
                          light=meta.get('cover_color', 'light') == 'light')
+
+
+def image_cover_fonts(preset):
+    """The faces a wrap around uploaded art is set in: the book's own.
+
+    Page 1 of the interior sets the overlay title in the preset's bold and the
+    author in its regular, so the wrap's front panel has to as well, or the
+    cover in the book and the cover on the printer's proof carry the same title
+    in two different faces.
+    """
+    f = register_fonts(preset)
+    return {'display': f['bold'], 'serif': f['regular'], 'italic': f['italic']}
 
 
 def _paint_background(canv, tpl, x0, y0, w, h):
@@ -476,7 +519,7 @@ def _paint_emblems(canv, tpl, x0, y0, w, h):
         if not path or not os.path.exists(path):
             continue
         try:
-            ir = ImageReader(path)
+            ir = ImageReader(_upright(path))
             iw, ih = ir.getSize()
             tw = max(_num(em.get('w', 0.7), 0.7), 0.1) * inch
             th = tw * (ih / iw) if iw else tw
@@ -1222,7 +1265,7 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
     if bimg and os.path.exists(bimg):
         try:
             from reportlab.lib.utils import ImageReader
-            ir = ImageReader(bimg)
+            ir = ImageReader(_upright(bimg))
             iw, ih = ir.getSize()
             tw = max(meta.get('cover_back_image_w', 1.5), 0.25) * inch
             tw = min(tw, (bx1 - bx0) - 2 * gap)          # keep inside the frame
@@ -1295,7 +1338,7 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
         if bimg and os.path.exists(bimg):
             try:
                 from reportlab.lib.utils import ImageReader
-                ir = ImageReader(bimg)
+                ir = ImageReader(_upright(bimg))
                 iw, ih = ir.getSize()
                 tw = min(max(meta.get('cover_back_image_w', 1.5), 0.25) * inch, colw)
                 thh = tw * (ih / iw) if iw else tw
@@ -3727,7 +3770,7 @@ def _prepare_cover(meta, preset):
         dpi = 300
         w_px = int(round(trim['w'] * dpi))
         h_px = int(round(trim['h'] * dpi))
-        img = PILImage.open(src).convert('RGB')
+        img = ImageOps.exif_transpose(PILImage.open(src)).convert('RGB')
         img = ImageOps.fit(img, (w_px, h_px), method=PILImage.LANCZOS)
         fd, tmp = tempfile.mkstemp(suffix='.jpg')
         os.close(fd)
