@@ -47,6 +47,8 @@ META = {'title': 'T', 'subtitle': '', 'author': 'E', 'year': '2026', 'publisher'
 
 ART = 'test-chapter-art.png'
 ART_PATH = os.path.join(A.FIGURE_DIR, ART)
+TURNED = 'test-chapter-art-turned.jpg'
+TURNED_PATH = os.path.join(A.FIGURE_DIR, TURNED)
 
 
 def styled(**art):
@@ -172,6 +174,41 @@ try:
         check('an art-free build is unchanged', doc[0].get_text() == plain_text)
     check('the page count is unchanged by an art-free style',
           plain['page_count'] == 2, plain['page_count'])
+
+    # A phone photo is stored on its side with an EXIF tag saying which way is
+    # up. The browser obeys it, so the picker shows it upright; the book has to.
+    # Stored 1200x600, blue on the left: upright it is 600x1200, blue on top.
+    from PIL import Image
+    turned = Image.new('RGB', (1200, 600), (200, 30, 40))
+    turned.paste((30, 40, 200), (0, 0, 600, 600))
+    ex = Image.Exif()
+    ex[0x0112] = 6
+    turned.save(TURNED_PATH, 'JPEG', exif=ex.tobytes())
+    side = engine._chapter_art(styled(image=TURNED, width=0.3), COL, TEXT_H)[0]
+    check('art stored on its side is sized the way up it prints',
+          abs(side._h - side._w * 2) < 0.5, (side._w, side._h))
+    tms = manuscript.parse_markdown(
+        MS + f'\n~~~ figure src="{TURNED}"\n~~~\n', smartquotes=True)
+    engine.build_pdf(tms, styled(image=TURNED, width=0.3), pdf_path, dict(META))
+
+    def top_and_foot(page, rect):
+        pm = page.get_pixmap(clip=rect, dpi=72)
+        return pm.pixel(pm.width // 2, 2), pm.pixel(pm.width // 2, pm.height - 3)
+
+    def upright(c):
+        (t, f) = c
+        return t[2] > 150 > t[0] and f[0] > 150 > f[2]
+
+    with fitz.open(pdf_path) as doc:
+        xrefs = {x[0] for p in doc for x in p.get_images()}
+        first, last = doc[0], doc[doc.page_count - 1]
+        opener = top_and_foot(first, first.get_image_rects(first.get_images()[0][0])[0])
+        # the figure closes the book: the lowest image on the last page
+        figure = top_and_foot(last, max(last.get_image_rects(last.get_images()[0][0]),
+                                        key=lambda r: r.y0))
+    check('and printed upright at the chapter opening', upright(opener), opener)
+    check('and as a figure in the text', upright(figure), figure)
+    check('turning it does not embed a copy per chapter', len(xrefs) == 1, len(xrefs))
     os.remove(pdf_path)
 
     # ------------------------------------------------------------ the EPUB
@@ -278,8 +315,9 @@ try:
     finally:
         open(PRESET, 'wb').write(snapshot)
 finally:
-    if os.path.exists(ART_PATH):
-        os.remove(ART_PATH)
+    for p in (ART_PATH, TURNED_PATH):
+        if os.path.exists(p):
+            os.remove(p)
 
 print('\n' + ('ALL PASS' if not fails else 'FAILED: ' + ', '.join(fails)))
 sys.exit(1 if fails else 0)
