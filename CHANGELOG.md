@@ -19,6 +19,11 @@ line here.
   cover, and Send to print and Send to publish build the whole wrap from it,
   sized to the book's real page count, with a resolution check for every
   picture on it.
+- **Undo and redo in the Wrap designer** (Ctrl+Z, Ctrl+Y), for every change:
+  moves, edits, deleted layers, even Start over.
+- **Crop and zoom pictures in the Wrap designer.** Zoom into a picture and
+  choose which part of it shows; the printed cover crops it exactly as the
+  screen does, and the resolution check accounts for the zoom.
 
 ---
 

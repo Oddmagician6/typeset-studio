@@ -113,6 +113,66 @@
     return el.rotate === 90 ? [r[0] - h, r[1], h, w] : [x, r[1], w, h];
   }
 
+  // ---- pictures -------------------------------------------------------------------
+  // Cover-fit, then zoom (1 to 8), then the focal point fx/fy (0..1 across the
+  // overflow, like CSS object-position). Mirrors wrap_design.image_fit.
+  function clamp(v, lo, hi, dflt) { v = +v; return isFinite(v) ? Math.min(Math.max(v, lo), hi) : dflt; }
+  function imageFit(iw, ih, bw, bh, el) {
+    var s = Math.max(bw / iw, bh / ih) * clamp(el.zoom == null ? 1 : el.zoom, 1, 8, 1);
+    var dw = iw * s, dh = ih * s;
+    return [dw, dh, (bw - dw) * clamp(el.fx == null ? 0.5 : el.fx, 0, 1, 0.5),
+                    (bh - dh) * clamp(el.fy == null ? 0.5 : el.fy, 0, 1, 0.5)];
+  }
+  var sizes = {};                     // natural pixel size of each picture, once loaded
+  function imgSize(src) {
+    if (sizes[src] !== undefined) return sizes[src];
+    sizes[src] = null;
+    var im = new Image();
+    im.onload = function () { sizes[src] = [im.naturalWidth, im.naturalHeight]; render(); };
+    im.src = '/wrap-designer/art/' + encodeURIComponent(src);
+    return null;
+  }
+
+  // ---- undo -------------------------------------------------------------------------
+  // Snapshots of the design, taken once an edit settles: a drag when it ends,
+  // typing or a slider once it pauses. Opening a book starts a fresh history.
+  var past = [], future = [], lastSnap = null, commitTimer = null;
+  function snapshot() { return JSON.stringify(design); }
+  function undoButtons() {
+    $('wd-undo').disabled = !past.length && snapshot() === lastSnap;
+    $('wd-redo').disabled = !future.length;
+  }
+  function resetHistory() { past = []; future = []; lastSnap = snapshot(); undoButtons(); }
+  function commit() {
+    clearTimeout(commitTimer);
+    var now = snapshot();
+    if (lastSnap === null) { lastSnap = now; return; }
+    if (now === lastSnap) return;
+    past.push(lastSnap);
+    if (past.length > 200) past.shift();
+    future = []; lastSnap = now; undoButtons();
+  }
+  function scheduleCommit() {
+    clearTimeout(commitTimer);
+    commitTimer = setTimeout(commit, 400);
+    undoButtons();
+  }
+  function restore(snap) {
+    lastSnap = snap; design = JSON.parse(snap);
+    if (sel && !find(sel)) sel = null;
+    showProps(); loadFonts().then(render); undoButtons();
+  }
+  function undo() {
+    commit();
+    if (!past.length) return;
+    future.push(lastSnap); restore(past.pop());
+  }
+  function redo() {
+    commit();
+    if (!future.length) return;
+    past.push(lastSnap); restore(future.pop());
+  }
+
   // ---- render -----------------------------------------------------------------
   function node(tag, attrs, parent) {
     var n = document.createElementNS(NS, tag);
@@ -129,10 +189,21 @@
       if (el.type === 'rect')
         node('rect', {x:r[0], y:r[1], width:Math.max(r[2], 0), height:Math.max(r[3], 0), fill:el.color || '#000',
                       opacity:el.opacity == null ? 1 : el.opacity}, grp);
-      else if (el.type === 'image')
-        node('image', {x:r[0], y:r[1], width:Math.max(r[2], 0), height:Math.max(r[3], 0),
-                       href:'/wrap-designer/art/' + encodeURIComponent(el.src),
-                       preserveAspectRatio:'xMidYMid slice', opacity:el.opacity == null ? 1 : el.opacity}, grp);
+      else if (el.type === 'image') {
+        var href = '/wrap-designer/art/' + encodeURIComponent(el.src), sz = imgSize(el.src);
+        var op = el.opacity == null ? 1 : el.opacity;
+        if (sz && r[2] > 0 && r[3] > 0) {
+          // a nested <svg> is a clipping viewport: the picture sized and placed
+          // by imageFit, exactly as wrap_design.image_fit places it in the PDF
+          var f = imageFit(sz[0], sz[1], r[2], r[3], el);
+          var vp = node('svg', {x:r[0], y:r[1], width:r[2], height:r[3], overflow:'hidden'}, grp);
+          node('image', {x:f[2], y:f[3], width:f[0], height:f[1], href:href,
+                         preserveAspectRatio:'none', opacity:op}, vp);
+        } else {
+          node('image', {x:r[0], y:r[1], width:Math.max(r[2], 0), height:Math.max(r[3], 0), href:href,
+                         preserveAspectRatio:'xMidYMid slice', opacity:op}, grp);
+        }
+      }
       else if (el.type === 'text') {
         var t = node('g', {transform:'translate(' + r[0] + ' ' + r[1] + ')' + (el.rotate === 90 ? ' rotate(90)' : '')}, grp);
         var lay = layout(el);
@@ -152,6 +223,7 @@
     renderChecks();
     persist();
     markDirty();
+    if (!drag && lastSnap !== null) scheduleCommit();
   }
 
   function drawGuides() {
@@ -285,7 +357,7 @@
     }
     render();
   });
-  svg.addEventListener('pointerup', function () { if (drag) { drag = null; showProps(); } });
+  svg.addEventListener('pointerup', function () { if (drag) { drag = null; showProps(); commit(); } });
   // centre a box on its panel when it comes within 0.08"
   function snap(el) {
     var pw = panelW(el.anchor);
@@ -294,7 +366,13 @@
     if (Math.abs(el.x + el.w / 2 - pw / 2) < 0.08) el.x = round(pw / 2 - el.w / 2);
   }
   document.addEventListener('keydown', function (e) {
-    if (!sel || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;   // their own undo
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      var k0 = e.key.toLowerCase();
+      if (k0 === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
+      if (k0 === 'y' || (k0 === 'z' && e.shiftKey)) { e.preventDefault(); redo(); return; }
+    }
+    if (!sel) return;
     var el = find(sel);
     if (!el) return;
     var step = e.shiftKey ? 0.1 : 0.01, k = 'cx' in el ? 'cx' : 'x';
@@ -325,9 +403,10 @@
       });
       else if (kind !== 'textarea') inp.type = kind;
       if (kind === 'number') inp.step = 'any';
-      inp.value = el[key] == null ? '' : el[key];
+      if (kind === 'range') { inp.min = opts.min; inp.max = opts.max; inp.step = opts.step; }
+      inp.value = el[key] == null ? (kind === 'range' ? opts.dflt : '') : el[key];
       inp.addEventListener('input', function () {
-        el[key] = kind === 'number' ? (+inp.value || 0) : inp.value;
+        el[key] = (kind === 'number' || kind === 'range') ? (+inp.value || 0) : inp.value;
         (key === 'font' ? ensureFont(el.font) : Promise.resolve()).then(render);
       });
       wrap.appendChild(inp);
@@ -348,6 +427,11 @@
       add('Colour', 'color', 'color', null, true); add('Opacity', 'opacity', 'number', null, true);
       if (!el.fill) { add('Width (in)', 'w', 'number', null, true); add('Height (in)', 'h', 'number', null, true); }
     } else if (el.type === 'image') {
+      add('Zoom', 'zoom', 'range', {min:1, max:4, step:0.01, dflt:1});
+      add('Show more of the left ' + String.fromCharCode(8596) + ' right', 'fx', 'range',
+          {min:0, max:1, step:0.01, dflt:0.5});
+      add('Show more of the top ' + String.fromCharCode(8597) + ' bottom', 'fy', 'range',
+          {min:0, max:1, step:0.01, dflt:0.5});
       add('Opacity', 'opacity', 'number', null, true);
       if (!el.fill) { add('Width (in)', 'w', 'number', null, true); add('Height (in)', 'h', 'number', null, true); }
     }
@@ -445,7 +529,7 @@
         return fetchGeometry().then(function () {
           if (!keepLocal) design = b.design || starter(b, g);
           return loadFonts();
-        }).then(render);
+        }).then(function () { render(); resetHistory(); });
       });
   }
   $('wd-project').addEventListener('change', function () { openBook(this.value, false); });
@@ -517,9 +601,12 @@
   } else {
     startPromise = loadFonts().then(regeometry);
   }
-  startPromise.then(function () { window.WD_READY = true; });
+  startPromise.then(function () { resetHistory(); window.WD_READY = true; });
+  $('wd-undo').addEventListener('click', undo);
+  $('wd-redo').addEventListener('click', redo);
 
   // for the browser test: the live design and the geometry it is drawn against
   window.WD_EDITOR = { design: function () { return design; }, geometry: function () { return g; },
-                       layout: layout, regeometry: regeometry };
+                       layout: layout, regeometry: regeometry, commit: commit, imageFit: imageFit,
+                       undo: undo, redo: redo };
 })();

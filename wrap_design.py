@@ -157,6 +157,34 @@ def text_layout(el):
     return out
 
 
+def zoom_of(el):
+    try:
+        return min(max(float(el.get('zoom', 1.0)), 1.0), 8.0)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def focus_of(el, key):
+    try:
+        return min(max(float(el.get(key, 0.5)), 0.0), 1.0)
+    except (TypeError, ValueError):
+        return 0.5
+
+
+def image_fit(iw, ih, bw, bh, el):
+    """How a picture fills its box: (width, height, x, y), x and y from the box's
+    top-left, in the box's units.
+
+    Cover-fit, then `zoom` (1 = just covering, up to 8), then placed so the
+    focal point `fx`/`fy` (0..1 across the overflow, 0.5 = centred) is what the
+    box shows - CSS `object-position` in fractions. The editor's wrap_designer.js
+    does the same arithmetic, so the crop on screen is the crop in print.
+    """
+    s = max(bw / iw, bh / ih) * zoom_of(el)
+    dw, dh = iw * s, ih * s
+    return dw, dh, (bw - dw) * focus_of(el, 'fx'), (bh - dh) * focus_of(el, 'fy')
+
+
 def build_pdf(design, dims, out_path):
     """Render a design to a print-size wrap PDF. Returns {element id: lines}.
 
@@ -179,13 +207,11 @@ def build_pdf(design, dims, out_path):
         elif kind == 'image' and art_file(el.get('src')) and w > 0 and h > 0:
             img = ImageReader(art_file(el['src']))
             iw, ih = img.getSize()
-            s = max(w * inch / iw, h * inch / ih)            # cover-fit
-            dw, dh = iw * s, ih * s
+            dw, dh, ox, oy = image_fit(iw, ih, w * inch, h * inch, el)
             p = c.beginPath()
             p.rect(X, Ytop - h * inch, w * inch, h * inch)
             c.clipPath(p, stroke=0, fill=0)
-            c.drawImage(img, X + (w * inch - dw) / 2, Ytop - h * inch + (h * inch - dh) / 2,
-                        dw, dh)
+            c.drawImage(img, X + ox, Ytop - oy - dh, dw, dh)
         elif kind == 'text' and font_file(el.get('font')):
             layout = text_layout(el)
             lines[el.get('id', '')] = [ln for ln, _, _ in layout]
@@ -259,7 +285,8 @@ def placed_images(design, g):
         path = art_file(el.get('src'))
         _, _, w, h = el_rect(g, el)
         if path and w > 0 and h > 0:
-            out.append((path, w, h))
+            z = zoom_of(el)
+            out.append((path, w * z, h * z))
     return out
 
 

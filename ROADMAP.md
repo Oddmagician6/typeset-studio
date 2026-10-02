@@ -2238,8 +2238,26 @@ the app as its own **Wrap designer** tab (`/wrap-designer`), so it can be tried 
   edit page, and a publish package whose wrap is the design at the real page count with its
   spine and picture checks) and a second browser pass (a book opened by link, its trim locked,
   Save to book).
-- **Still to come (phases C–D):** undo, image crop/zoom, "Customise this design" from a template,
-  flowed-text niceties (justify), align/distribute, flaps' own content presets.
+- **Still to come (phases C–D):** "Customise this design" from a template, flowed-text
+  niceties (justify), align/distribute, flaps' own content presets.
+
+**Phase C, first half — undo and picture crop: SHIPPED (2026-10-02).**
+- **Undo / redo** (toolbar, Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z) over snapshots of the design. A
+  snapshot is taken when an edit *settles* rather than at each call site: `render()` schedules a
+  commit 0.4 s after the last change, a drag commits on pointer-up, and undo commits anything
+  pending first. So a typed word or a slider drag is one step, a drag is one step, and every
+  kind of edit (add, delete, reorder, art, properties, Start over) is undoable without each
+  having to remember to record itself. Opening a book starts a fresh history, so undo can't
+  reach into another book's design. Text fields keep their own native undo while focused.
+- **Zoom and focal point for pictures**: `zoom` (1–8, slider to 4) and `fx` / `fy` (0..1 across
+  the overflow — CSS `object-position` in fractions). `wrap_design.image_fit` and the editor's
+  `imageFit` are the same arithmetic; the editor draws the picture inside a nested `<svg>`
+  viewport, which clips, at the size and offset `imageFit` gives once the picture's natural
+  size has loaded. The resolution check measures a zoomed picture at its zoomed size, since
+  zooming in spends the same pixels on a larger printed area.
+- Tests: in the PDF, a 2× zoom pinned left and bottom draws exactly the 4×6" picture at the
+  box's left and bottom edges, and is measured at 4×4"; in the browser, Ctrl+Z undoes a drag,
+  Ctrl+Y redoes it, a deleted layer comes back, and a 2× zoom draws the picture twice as wide.
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 
