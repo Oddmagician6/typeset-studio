@@ -47,6 +47,8 @@
   #wd-proof-msg{font-size:13px}
   #wd-proof-msg.ok{color:var(--muted)} #wd-proof-msg.bad{color:var(--red-deep)}
   .wd-art{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .wd-note{margin:-6px 0 14px;font-size:13px;color:var(--muted)}
+  #wd-save-status{font-size:12.5px;color:var(--muted)}
   .beta{font-family:var(--mono);font-size:10px;letter-spacing:.12em;border:1px solid var(--red);
     color:var(--red);border-radius:2px;padding:1px 5px;vertical-align:middle;margin-left:8px}
 {% endblock %}
@@ -57,11 +59,16 @@
     <h1>Wrap designer <span class="beta">BETA</span></h1>
     <p>Lay out the whole printed cover (back, spine and front) to the exact size your printer
        needs. Drag things to move them, pull the orange corner to resize, and press
-       <b>Proof</b> to build the real PDF. Your design is kept in this browser as you work.</p>
+       <b>Proof</b> to build the real PDF. Pick a book to design its cover: <b>Save to book</b>
+       keeps the design with it, and Send to print then uses it.</p>
   </div>
 
   <div class="wd-bar">
-    <label class="grow">Book title (for the file name)<input id="wd-name" type="text" value="My book"></label>
+    <label>Book<select id="wd-project">
+      <option value="">Not linked to a book</option>
+      {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+    </select></label>
+    <label class="grow">Title (for the file name)<input id="wd-name" type="text" value="My book"></label>
     <label>Printer<select id="wd-retailer">
       {% for k, r in retailers.items() %}<option value="{{ k }}">{{ r.label }}</option>{% endfor %}
     </select></label>
@@ -77,13 +84,20 @@
     </select></label>
     <label>Pages<input id="wd-pages" type="number" value="320" min="24" max="1000" step="10" style="width:90px"></label>
   </div>
+  <p class="wd-note" id="wd-book-note" hidden></p>
   <div class="wd-bar">
     <button class="btn btn-sm" id="wd-add-text" type="button">+ Text</button>
     <button class="btn btn-sm" id="wd-add-rect" type="button">+ Shape</button>
     <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:13px;color:var(--muted)">
       <input id="wd-guides" type="checkbox" checked> Guides</label>
     <span class="grow"></span>
+    <span id="wd-save-status"></span>
     <button class="btn btn-sm btn-ghost" id="wd-reset" type="button">Start over</button>
+    <span id="wd-save-group" style="display:none;gap:10px;align-items:center">
+      <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:13px;color:var(--muted)">
+        <input id="wd-use-cover" type="checkbox" checked> Use as this book's cover</label>
+      <button class="btn" id="wd-save" type="button">Save to book</button>
+    </span>
     <button class="btn btn-primary" id="wd-proof-btn" type="button">Proof</button>
   </div>
 
@@ -123,7 +137,7 @@
     </aside>
   </div>
 
-  <script id="wd-config" type="application/json">{{ {'fonts': fonts, 'standIn': stand_in, 'retailers': retailers} | tojson }}</script>
+  <script id="wd-config" type="application/json">{{ {'fonts': fonts, 'standIn': stand_in, 'retailers': retailers, 'startProject': start_project} | tojson }}</script>
   <script src="{{ url_for('static', filename='wrap_text.js') }}"></script>
   <script src="{{ url_for('static', filename='wrap_designer.js') }}"></script>
 {% endblock %}

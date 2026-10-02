@@ -224,3 +224,68 @@ def stand_in_art(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     im.save(path)
     return path
+
+
+# ---- a design as a book's cover (phase B) -----------------------------------------
+
+def has_spine_text(design):
+    return any(el.get('type') == 'text' and el.get('anchor') == 'spine' and
+               str(el.get('text', '')).strip() for el in design.get('elements', []))
+
+
+def summary(g, design):
+    """What `engine.build_cover_wrap` reports about a wrap, for a designed one, so
+    the print package's page and spec sheet read it the same way."""
+    return {'wrap_w': round(g['wrap_w'], 3), 'wrap_h': round(g['wrap_h'], 3),
+            'spine_w': round(g['spine_w'], 4), 'spine_text': has_spine_text(design),
+            'binding': g['binding'], 'front': 'design',
+            'wrap': round(g['wrap'], 4), 'hinge': round(g['hinge'], 4),
+            'flap': round(g['flap'], 4), 'panel_w': round(g['panel_w'], 4)}
+
+
+def front_trim(g):
+    """The finished front cover on the sheet, in inches (x, y, w, h; y down): the
+    trim, not the panel - on a jacket the panel is the board, a little larger."""
+    return g['front_x'], g['edge'] + g['board_ext'], g['trim_w'], g['trim_h']
+
+
+def placed_images(design, g):
+    """[(path, w, h)] in inches for every picture in a design that exists - what
+    a resolution check measures each one against."""
+    out = []
+    for el in design.get('elements', []):
+        if el.get('type') != 'image':
+            continue
+        path = art_file(el.get('src'))
+        _, _, w, h = el_rect(g, el)
+        if path and w > 0 and h > 0:
+            out.append((path, w, h))
+    return out
+
+
+def render_front(design, dims, out_path, dpi=300):
+    """The front cover of a design as a JPG: page 1 of the book, the ebook's cover
+    and the store listing all use it, the way they use uploaded cover art."""
+    import tempfile
+    import fitz
+    from PIL import Image
+    g = engine.wrap_geometry(dims)
+    fd, tmp = tempfile.mkstemp(suffix='.pdf')
+    os.close(fd)
+    try:
+        build_pdf(design, dims, tmp)
+        x, y, w, h = front_trim(g)
+        with fitz.open(tmp) as doc:
+            pix = doc[0].get_pixmap(dpi=dpi, alpha=False,
+                                    clip=fitz.Rect(x * 72, y * 72, (x + w) * 72, (y + h) * 72))
+            im = Image.frombytes('RGB', (pix.width, pix.height), pix.samples)
+            # The panel rarely starts on a whole pixel, and the clip rounds out to
+            # take the partial one: trim back to exactly the trim at this dpi.
+            im.crop((0, 0, min(im.width, round(w * dpi)),
+                     min(im.height, round(h * dpi)))).save(out_path, 'JPEG', quality=92)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return out_path

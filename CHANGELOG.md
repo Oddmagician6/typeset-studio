@@ -8,6 +8,20 @@ line here.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **A wrap design is now your book's cover.** Pick a book in the Wrap
+  designer and it opens with that book's trim, page count, printer and paper,
+  and a starting layout that fits it. **Save to book** keeps the design with
+  the book and makes it the cover: its front becomes page 1 and the ebook
+  cover, and Send to print and Send to publish build the whole wrap from it,
+  sized to the book's real page count, with a resolution check for every
+  picture on it.
+
+---
+
 ## 1.2.5 — 2 October 2026
 
 A long footnote no longer stops a book from building: it runs on to the next

@@ -18,22 +18,33 @@
     'printed cover will: drag the orange corner to make it wider or narrower and watch the ' +
     'lines move. Keep it inside the dashed safe zone so nothing is trimmed off.';
 
-  function starter() {
-    return { elements: [
+  // The example design, laid out for the panel it's going on: a fixed 6x9 layout
+  // ran off a smaller trim, and a new design shouldn't open covered in warnings.
+  // Spine text is only added where the printer allows it (geo.spine_text).
+  function starter(book, geom) {
+    book = book || {};
+    var title = book.title || 'My Book', author = book.author || 'Author Name';
+    var pw = geom ? geom.panel_w : 6, ph = geom ? geom.panel_h : 9, k = pw / 6;
+    var els = [
       {id:'bg-back', type:'rect', fill:'back', color:'#20283b'},
       {id:'bg-spine', type:'rect', fill:'spine', color:'#7d2a26'},
       {id:'front-art', type:'image', fill:'front', src:CFG.standIn},
-      {id:'title', type:'text', anchor:'front', x:0.5, y:0.9, w:5, text:'My Book',
-       font:pick('EBGaramond-Bold.ttf'), size:46, leading:1.05, color:'#fbf3e2', align:'center', tracking:0.5},
-      {id:'author', type:'text', anchor:'front', x:0.5, y:7.9, w:5, text:'AUTHOR NAME',
-       font:pick('Spectral-Regular.ttf'), size:16, leading:1.2, color:'#fbf3e2', align:'center', tracking:3},
-      {id:'spine-text', type:'text', anchor:'spine', cx:0.11, y:0.6, w:7.8, rotate:90,
-       text:'MY BOOK   AUTHOR NAME', font:pick('Spectral-Regular.ttf'), size:12, leading:1.2,
-       color:'#fbf3e2', align:'center', tracking:1.5},
-      {id:'blurb', type:'text', anchor:'back', x:0.6, y:1.0, w:4.8, text:BLURB,
+      {id:'title', type:'text', anchor:'front', x:0.5, y:0.9, w:round(pw - 1), text:title,
+       font:pick('EBGaramond-Bold.ttf'), size:Math.round(46 * k), leading:1.05, color:'#fbf3e2',
+       align:'center', tracking:0.5},
+      {id:'author', type:'text', anchor:'front', x:0.5, y:round(ph - 1.1), w:round(pw - 1),
+       text:author.toUpperCase(), font:pick('Spectral-Regular.ttf'), size:Math.round(16 * k),
+       leading:1.2, color:'#fbf3e2', align:'center', tracking:3},
+      {id:'blurb', type:'text', anchor:'back', x:0.6, y:1.0, w:round(pw - 1.2), text:book.blurb || BLURB,
        font:pick('EBGaramond-Regular.ttf'), size:12.5, leading:1.4, color:'#efe7d6', align:'left', tracking:0},
-      {id:'barcode', type:'rect', anchor:'back', x:3.75, y:7.55, w:2, h:1.2, color:'#ffffff', label:'Barcode area'}
-    ]};
+      {id:'barcode', type:'rect', anchor:'back', x:round(pw - 2.25), y:round(ph - 1.45), w:2, h:1.2,
+       color:'#ffffff', label:'Barcode area'}
+    ];
+    if (!geom || geom.spine_text)
+      els.splice(5, 0, {id:'spine-text', type:'text', anchor:'spine', cx:0.11, y:0.6, w:round(ph - 1.2),
+        rotate:90, text:(title + '   ' + author).toUpperCase(), font:pick('Spectral-Regular.ttf'),
+        size:12, leading:1.2, color:'#fbf3e2', align:'center', tracking:1.5});
+    return {elements: els};
   }
   function pick(f) { return CFG.fonts.indexOf(f) !== -1 ? f : CFG.fonts[0]; }
 
@@ -42,7 +53,7 @@
   try { saved = JSON.parse(localStorage.getItem(STORE) || 'null'); } catch (e) { saved = null; }
   var design = (saved && saved.design && saved.design.elements) ? saved.design : starter();
   var g = null, geo = null, sel = null, metrics = {}, drag = null, seq = Date.now() % 100000;
-  var SETTINGS = ['wd-name', 'wd-retailer', 'wd-paper', 'wd-binding', 'wd-trim', 'wd-pages'];
+  var SETTINGS = ['wd-project', 'wd-name', 'wd-retailer', 'wd-paper', 'wd-binding', 'wd-trim', 'wd-pages'];
   if (saved && saved.settings) SETTINGS.forEach(function (id) {
     if (saved.settings[id] != null && $(id)) $(id).value = saved.settings[id];
   });
@@ -140,6 +151,7 @@
     renderLayers();
     renderChecks();
     persist();
+    markDirty();
   }
 
   function drawGuides() {
@@ -381,20 +393,84 @@
   });
   $('wd-reset').addEventListener('click', function () {
     if (!confirm('Start over with the example design? Your current design will be replaced.')) return;
-    design = starter(); sel = null; showProps(); loadFonts().then(render);
+    design = starter($('wd-project').value ? currentBook : null, g); sel = null; showProps();
+    loadFonts().then(render);
   });
   $('wd-guides').addEventListener('change', render);
+
+  // ---- a book's cover ---------------------------------------------------------------
+  // With a book picked, its trim is its style's and its printer, paper and
+  // binding are its Send to print settings; Save keeps the design with the book.
+  var savedJSON = null;                 // the design as last saved to (or loaded from) the book
+  var currentBook = null;
+  function markDirty() {
+    var pid = $('wd-project').value, st = $('wd-save-status');
+    if (!pid || savedJSON === null) return;
+    if (JSON.stringify(design) !== savedJSON) st.textContent = 'Unsaved changes';
+  }
+  function lockTrim(w, h) {
+    var sel = $('wd-trim'), v = w + 'x' + h;
+    if (!Array.prototype.some.call(sel.options, function (o) { return o.value === v; })) {
+      var op = document.createElement('option'); op.value = v;
+      op.textContent = w + ' × ' + h + ' in (this book’s style)'; sel.appendChild(op);
+    }
+    sel.value = v; sel.disabled = true;
+  }
+  function bookUi(on) {
+    $('wd-save-group').style.display = on ? 'inline-flex' : 'none';
+    if (!on) { $('wd-trim').disabled = false; $('wd-book-note').hidden = true; $('wd-save-status').textContent = ''; }
+  }
+  function openBook(pid, keepLocal) {
+    bookUi(!!pid);
+    if (!pid) { savedJSON = null; currentBook = null; persist(); return regeometry(); }
+    return fetch('/wrap-designer/project/' + encodeURIComponent(pid)).then(function (r) { return r.json(); })
+      .then(function (b) {
+        var s = b.settings;
+        $('wd-retailer').value = s.wrap_retailer; $('wd-paper').value = s.wrap_paper;
+        $('wd-binding').value = s.wrap_binding; $('wd-pages').value = s.pages;
+        lockTrim(s.wrap_trim_w, s.wrap_trim_h);
+        $('wd-name').value = b.title || $('wd-name').value;
+        $('wd-use-cover').checked = b.is_cover || !b.design;
+        var note = $('wd-book-note');
+        note.hidden = false;
+        note.textContent = (b.pages_known
+          ? 'Pages are from this book’s last build; Send to print sizes the spine from the real count.'
+          : 'This book hasn’t been built yet, so the page count is a guess. Send to print sizes the spine from the real count.')
+          + (b.is_cover ? ' This design is the book’s cover.' : '');
+        savedJSON = b.design ? JSON.stringify(b.design) : null;
+        currentBook = b;
+        sel = null; showProps();
+        $('wd-save-status').textContent = b.saved ? 'Saved ' + b.saved.replace('T', ' ') : 'Not saved to this book yet';
+        // the geometry first, so an example design can be laid out for this book
+        return fetchGeometry().then(function () {
+          if (!keepLocal) design = b.design || starter(b, g);
+          return loadFonts();
+        }).then(render);
+      });
+  }
+  $('wd-project').addEventListener('change', function () { openBook(this.value, false); });
+  $('wd-save').addEventListener('click', function () {
+    var pid = $('wd-project').value, st = $('wd-save-status');
+    if (!pid) return;
+    st.textContent = 'Saving…';
+    post('/wrap-designer/project/' + encodeURIComponent(pid) + '/save',
+         {design: design, settings: settings(), use_as_cover: $('wd-use-cover').checked})
+      .then(function (res) {
+        if (!res.ok) { st.textContent = res.error; return; }
+        savedJSON = JSON.stringify(design);
+        st.textContent = 'Saved ' + res.saved.replace('T', ' ') + (res.is_cover ? ' · the book’s cover' : '');
+      }).catch(function () { st.textContent = 'Not saved: no answer from the app.'; });
+  });
 
   // ---- server: geometry and the real PDF ------------------------------------------
   function post(url, body) {
     return fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
       .then(function (r) { return r.json(); });
   }
-  function regeometry() {
-    return post('/wrap-designer/geometry', settings()).then(function (res) {
-      geo = res; g = res.geometry; render();
-    });
+  function fetchGeometry() {
+    return post('/wrap-designer/geometry', settings()).then(function (res) { geo = res; g = res.geometry; });
   }
+  function regeometry() { return fetchGeometry().then(render); }
   SETTINGS.forEach(function (id) { $(id).addEventListener('change', function () { persist(); regeometry(); }); });
   $('wd-pages').addEventListener('input', regeometry);
 
@@ -431,7 +507,17 @@
     var used = design.elements.filter(function (e) { return e.font; }).map(function (e) { return e.font; });
     return Promise.all(used.filter(function (f, i) { return used.indexOf(f) === i; }).map(ensureFont));
   }
-  loadFonts().then(regeometry).then(function () { window.WD_READY = true; });
+  var start = CFG.startProject || '';
+  var startPromise;
+  if (start && Array.prototype.some.call($('wd-project').options, function (o) { return o.value === start; })) {
+    $('wd-project').value = start;
+    startPromise = openBook(start, saved && saved.settings && saved.settings['wd-project'] === start);
+  } else if ($('wd-project').value) {
+    startPromise = openBook($('wd-project').value, true);   // carry on with the local working copy
+  } else {
+    startPromise = loadFonts().then(regeometry);
+  }
+  startPromise.then(function () { window.WD_READY = true; });
 
   // for the browser test: the live design and the geometry it is drawn against
   window.WD_EDITOR = { design: function () { return design; }, geometry: function () { return g; },

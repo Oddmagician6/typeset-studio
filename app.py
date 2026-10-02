@@ -1892,7 +1892,10 @@ def wrap_designer():
                         if f.lower().endswith(IMAGE_EXTS))
     except OSError:
         assets = []
-    return render_template('wrap_designer.html', active='wrap',
+    projects = [{'id': it['id'], 'name': it['data'].get('name') or it['data'].get('title')
+                 or it['id']} for it in list_projects()]
+    return render_template('wrap_designer.html', active='wrap', projects=projects,
+                           start_project=request.args.get('project', ''),
                            fonts=[f for f in list_fonts() if f.lower().endswith('.ttf')],
                            assets=assets, stand_in=WRAP_STAND_IN,
                            retailers=WRAP_RETAILERS, papers=_PAPER, trims=TRIM_PRESETS)
@@ -1927,6 +1930,95 @@ def wrap_designer_art(fname):
     if not path:
         abort(404)
     return send_from_directory(os.path.dirname(path), os.path.basename(path))
+
+
+# A design saved with a project (phase B). The designer's printer, paper and
+# binding *are* the project's Send to print settings, saved back to it, so the
+# wrap a writer designs and the wrap the package builds can't disagree; the trim
+# is the style's and the page count the last build's.
+
+def _project_wrap_settings(proj):
+    p = {**PRINT_DEFAULTS, **{k: proj[k] for k in PRINT_DEFAULTS if k in proj}}
+    try:
+        trim = load_preset(proj['preset'])['trim']
+    except Exception:
+        trim = {'w': 6.0, 'h': 9.0}
+    return {'pages': int(proj.get('last_page_count') or 200),
+            'wrap_retailer': p['print_retailer'], 'wrap_paper': p['print_paper'],
+            'wrap_binding': p['print_binding'],
+            'wrap_trim_w': trim['w'], 'wrap_trim_h': trim['h']}
+
+
+def _wrap_front_path(proj):
+    """The project's design rendered as its front cover, rendering it if the file
+    has gone; '' when there is no design or it won't render."""
+    fn = secure_filename(proj.get('wrap_front_file', ''))
+    design = proj.get('wrap_design')
+    if not fn or not design:
+        return ''
+    path = os.path.join(PROJECT_MS_DIR, fn)
+    if not os.path.exists(path):
+        try:
+            dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
+            wrap_design.render_front(design, dims, path)
+        except Exception:
+            logging.exception('Rendering the wrap design front cover failed')
+            return ''
+    return path
+
+
+def _clean_design(design):
+    """A design from the browser, kept to what the model knows: a list of plain
+    elements, sized within reason. Anything else is refused, not repaired."""
+    if not isinstance(design, dict) or not isinstance(design.get('elements'), list):
+        return None
+    els = [e for e in design['elements'] if isinstance(e, dict)]
+    if len(els) > 400 or len(json.dumps(els)) > 1_000_000:
+        return None
+    return {'elements': els}
+
+
+@app.route('/wrap-designer/project/<pid>')
+def wrap_designer_project(pid):
+    proj = load_project(pid)
+    p = {**PRINT_DEFAULTS, **{k: proj[k] for k in PRINT_DEFAULTS if k in proj}}
+    return jsonify(design=proj.get('wrap_design'), settings=_project_wrap_settings(proj),
+                   title=proj.get('title') or proj.get('name', ''), author=proj.get('author', ''),
+                   blurb=p['print_blurb'], pages_known=bool(proj.get('last_page_count')),
+                   is_cover=proj.get('cover_mode') == 'wrap',
+                   saved=proj.get('wrap_design_saved', ''))
+
+
+@app.route('/wrap-designer/project/<pid>/save', methods=['POST'])
+def wrap_designer_save(pid):
+    proj = load_project(pid)
+    body = request.get_json(silent=True) or {}
+    design = _clean_design(body.get('design'))
+    if design is None:
+        return jsonify(ok=False, error='That design could not be read.')
+    s = body.get('settings') or {}
+    if s.get('wrap_retailer') in WRAP_RETAILERS:
+        proj['print_retailer'] = s['wrap_retailer']
+    if s.get('wrap_paper') in _PAPER:
+        proj['print_paper'] = s['wrap_paper']
+    if s.get('wrap_binding') in _WRAP_SUFFIX:
+        proj['print_binding'] = s['wrap_binding']
+    proj['wrap_design'] = design
+    proj['wrap_design_saved'] = datetime.now().isoformat(timespec='seconds')
+    proj['wrap_front_file'] = secure_filename(f'{pid}-wrap-front.jpg')
+    if body.get('use_as_cover'):
+        proj['cover_mode'] = 'wrap'
+    front = os.path.join(PROJECT_MS_DIR, proj['wrap_front_file'])
+    try:
+        dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
+        wrap_design.render_front(design, dims, front)
+    except Exception as exc:
+        logging.error('Wrap design front render failed: %s', traceback.format_exc())
+        return jsonify(ok=False, error=f'The design was not saved: {exc}')
+    proj['updated'] = datetime.now().isoformat(timespec='seconds')
+    save_project_file(pid, proj)
+    return jsonify(ok=True, saved=proj['wrap_design_saved'],
+                   is_cover=proj.get('cover_mode') == 'wrap')
 
 
 @app.route('/wrap-designer/build', methods=['POST'])
@@ -3391,10 +3483,17 @@ def _project_meta(proj):
     cover_file = proj.get('cover_file', '')
     # "No cover" keeps the uploaded file (so switching back needs no re-upload)
     # but must not use it — the engine sets any cover_image it is handed as page 1.
-    if cover_file and cover_mode != 'none':
+    if cover_file and cover_mode not in ('none', 'wrap'):
         cp = os.path.join(PROJECT_MS_DIR, cover_file)
         if os.path.exists(cp):
             cover_path = cp
+    # A wrap design (#72) is the cover: its front panel, rendered, stands in for
+    # uploaded art everywhere one page of cover is wanted - page 1, the ebook,
+    # the store listing - with no title overlay, as the design carries its own.
+    wrap_cover = cover_mode == 'wrap'
+    if wrap_cover:
+        cover_path = _wrap_front_path(proj)
+        cover_mode = 'image' if cover_path else 'none'
 
     meta = {
         'title':            proj.get('title', ''),
@@ -3405,7 +3504,7 @@ def _project_meta(proj):
         'front_matter':     proj.get('front_matter', 'full'),
         'right_hand_starts': proj.get('right_hand_starts', True),
         'cover_image':   cover_path,
-        'cover_overlay': proj.get('cover_overlay', False),
+        'cover_overlay': proj.get('cover_overlay', False) and not wrap_cover,
         'cover_color':   proj.get('cover_color', 'light'),
         'cover_mode':       cover_mode,
         'cover_template':   proj.get('cover_template', ''),
@@ -3492,12 +3591,15 @@ def build_print_package(proj, scope='print'):
         raise PrintPackageError(err)
     meta, _ = _project_meta(proj)
     tpl = meta.get('cover_template_data')
+    # A wrap design (#72) is the whole wrap, laid out by the writer; it is built
+    # as designed, at this interior's page count, rather than around a front.
+    design = proj.get('wrap_design') if proj.get('cover_mode') == 'wrap' else None
     # Two kinds of cover reach a printer. A designed one paints the front panel
     # from its template; uploaded art *is* the front panel and the rest of the
     # wrap is built around it (#66). A book with no cover at all has nothing to
     # wrap the block in, and that is the only refusal left.
-    art = engine._front_art(meta)
-    if not art and (meta.get('cover_mode') != 'designed' or not tpl):
+    art = '' if design else engine._front_art(meta)
+    if not design and not art and (meta.get('cover_mode') != 'designed' or not tpl):
         raise PrintPackageError(
             f'{"Send to publish" if publish else "Send to print"} needs a cover — '
             'pick a cover template under Cover, or upload your own cover art.')
@@ -3557,10 +3659,27 @@ def build_print_package(proj, scope='print'):
         # The faces page 1 of the book is set in, so the wrap's front matches it:
         # the preset's for uploaded art, the template's own (falling back to the
         # preset's, as page 1 does) for a designed cover.
-        cf = (engine.image_cover_fonts(preset) if art else
-              engine._register_cover_fonts(tpl, engine.register_fonts(preset)))
         wrap = os.path.join(work, base + _WRAP_SUFFIX[binding] + '.pdf')
-        wres = engine.build_cover_wrap(tpl, cf, wmeta, dims, wrap)
+        if design:
+            g = engine.wrap_geometry(dims)
+            wrap_design.build_pdf(design, dims, wrap)
+            wres = wrap_design.summary(g, design)
+            # every picture measured at the size it is placed at, bleed included
+            for path, w_in, h_in in wrap_design.placed_images(design, g):
+                row = _art_resolution_check(engine.image_cover_check(path, w_in, h_in),
+                                            w_in, h_in)
+                row['label'] = f'Picture: {os.path.basename(path)}'
+                checks.append(row)
+            if wres['spine_text'] and not g['spine_text']:
+                checks.append({'label': 'Spine text', 'ok': False, 'detail': (
+                    f'Your design has spine text, but {pages} pages is under '
+                    f'{WRAP_RETAILERS[retailer]["label"]}’s minimum of '
+                    f'{WRAP_RETAILERS[retailer]["spine_text_min"]} — take it off in the '
+                    'Wrap designer, or the printer may refuse the cover')})
+        else:
+            cf = (engine.image_cover_fonts(preset) if art else
+                  engine._register_cover_fonts(tpl, engine.register_fonts(preset)))
+            wres = engine.build_cover_wrap(tpl, cf, wmeta, dims, wrap)
         files[pdir + os.path.basename(wrap)] = wrap
         for w in dims['warnings']:
             checks.append({'label': 'Cover wrap', 'ok': False, 'detail': w})
@@ -3574,7 +3693,7 @@ def build_print_package(proj, scope='print'):
             aw, ah = engine.front_art_size(engine.wrap_geometry(dims))
             art_res = engine.image_cover_check(art, aw, ah)
             checks.append(_art_resolution_check(art_res, aw, ah))
-        if not wres['spine_text']:
+        if not wres['spine_text'] and not design:
             checks.append({'label': 'Spine text', 'ok': True,
                            'detail': (f'Left off — {pages} pages is under '
                                       f'{WRAP_RETAILERS[retailer]["label"]}’s minimum of '
@@ -3638,8 +3757,8 @@ def build_print_package(proj, scope='print'):
             # `publish` is what was asked for; `ebook` is what came out. Only the
             # second may promise an ebook edition on the page or the sheet.
             'scope': scope, 'publish': publish, 'ebook': ebook_built,
-            'cover_kind': 'image' if art else 'designed',
-            'cover_label': ('Uploaded art' if art
+            'cover_kind': 'wrap' if design else ('image' if art else 'designed'),
+            'cover_label': ('Wrap design' if design else 'Uploaded art' if art
                             else (tpl.get('name') or meta.get('cover_template') or 'Designed')),
             'cover_art': art_res,
             'epub': (sorted(epub_checks, key=lambda c: c['ok']) if epub_checks
