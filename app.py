@@ -1,6 +1,7 @@
 """Typeset Studio - local web app.
 
-Run:  python app.py   (a browser tab opens at http://127.0.0.1:5050)
+Run:  python app.py   (a browser tab opens at http://127.0.0.1:5050, or the next
+      free port if 5050 is taken)
 
 This is a single-user tool meant to run on your own machine. Presets live as
 plain JSON files in ./presets so you can clone one per customer and tweak it.
@@ -3887,14 +3888,18 @@ def download(fn):
     return send_from_directory(OUT_DIR, fn, as_attachment=True)
 
 
-def _open_browser():
-    webbrowser.open('http://127.0.0.1:5050/')
+def _open_browser(port=5050):
+    webbrowser.open(f'http://127.0.0.1:{port}/')
 
 
 def _free_port(preferred=5050):
-    """Return the preferred port if free, else an OS-assigned one."""
+    """Return the preferred port if free, else one of the next nine, else any.
+
+    The near ones first, so a second copy lands somewhere memorable (5051)
+    rather than on a random high port.
+    """
     import socket
-    for p in (preferred, 0):
+    for p in [preferred] + [preferred + i for i in range(1, 10)] + [0]:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.bind(('127.0.0.1', p))
@@ -3988,7 +3993,22 @@ if __name__ == '__main__':
         # browser tab. In dev, keep Flask's debug + auto-reloader; a frozen build
         # runs them off (the reloader re-execs the interpreter, which breaks in a
         # bundle).
+        #
+        # The port is chosen once, by the first process: 5050 unless something
+        # already has it - the installed app, say - in which case the next free
+        # one. Run from source, the fixed 5050 used to fail to bind beside the
+        # installed app while the browser opened 5050 anyway, showing the
+        # installed app's pages instead. The reloader's child process - the one
+        # that actually serves, restarted on every code change - inherits the
+        # choice through TS_PORT rather than choosing again, so a restart can't
+        # wander to a different port from the one the browser was opened on.
         dev = not IS_FROZEN
         if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
-            threading.Timer(1.0, _open_browser).start()
-        app.run(host='127.0.0.1', port=5050, debug=dev, use_reloader=dev, threaded=True)
+            port = int(os.environ.get('TS_PORT') or _free_port(5050))
+            os.environ['TS_PORT'] = str(port)
+            if port != 5050:
+                print(f'Port 5050 is in use (another copy of Typeset Studio?), '
+                      f'so this one is at http://127.0.0.1:{port}/')
+            threading.Timer(1.0, _open_browser, args=(port,)).start()
+        port = int(os.environ.get('TS_PORT', 5050))
+        app.run(host='127.0.0.1', port=port, debug=dev, use_reloader=dev, threaded=True)
