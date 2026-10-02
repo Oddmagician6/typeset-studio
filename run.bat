@@ -26,7 +26,7 @@ if not exist ".venv\Scripts\activate.bat" (
 echo.
 echo ============================================================
 echo  Typeset Studio is starting.
-echo  A browser tab will open at http://127.0.0.1:5050
+echo  A browser tab will open at http://127.0.0.1:5050 (or the next free port)
 echo  Keep this window open while you work; close it to stop.
 echo ============================================================
 echo.

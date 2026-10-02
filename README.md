@@ -73,7 +73,9 @@ It runs on your own machine and sends nothing anywhere.
    - The first run sets up a private workspace and installs what it needs (about a minute).
    - Every run after that starts immediately.
 3. A browser tab opens at <http://127.0.0.1:5050>. Keep the little black window open
-   while you work; close it to stop the tool.
+   while you work; close it to stop the tool. If 5050 is already in use (the installed
+   app is open, say), it picks the next free port — 5051, 5052… — and says so in that
+   window.
 
 ## Running it (macOS / Linux)
 
@@ -81,7 +83,8 @@ It runs on your own machine and sends nothing anywhere.
    `sudo apt install python3 python3-venv`).
 2. Run **`./run.sh`** from a terminal in this folder. As on Windows, the first run
    makes a private workspace and installs what it needs; later runs start straight away.
-3. Open <http://127.0.0.1:5050>. Ctrl-C in the terminal stops it.
+3. A browser tab opens at <http://127.0.0.1:5050> (or the next free port, which the
+   terminal names, if 5050 is taken). Ctrl-C in the terminal stops it.
 
 Everything the app does is pure Python — the same PDFs and EPUBs come out on every
 platform. The one difference is the packaged build: the Windows installer exists, and

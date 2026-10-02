@@ -48,7 +48,7 @@ cat <<'MSG'
 
 ============================================================
  Typeset Studio is starting.
- A browser tab will open at http://127.0.0.1:5050
+ A browser tab will open at http://127.0.0.1:5050 (or the next free port)
  Keep this window open while you work; Ctrl-C stops it.
 ============================================================
 

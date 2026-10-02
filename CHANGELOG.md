@@ -23,6 +23,10 @@ line here.
 
 ### Fixed
 
+- **`run.bat` works while the installed app is open.** Running Typeset Studio
+  from its folder used to fail if the installed app was already running, and
+  the browser opened the installed one instead. It now takes the next free
+  port (5051, 5052…) and says so in its window.
 - **A long footnote runs on to the next page.** A footnote too long for the
   space at the foot of its page used to stop the whole PDF from building. Now
   it starts on the page of its reference and continues at the foot of the next
