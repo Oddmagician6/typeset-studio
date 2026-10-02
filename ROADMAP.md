@@ -2076,6 +2076,71 @@ package with the ebook edition in it, so one click hands off every edition of th
   both upload sections and the ebook pixel size reach the sheet, that a forced ebook-check failure
   tallies the same on the page and in the file, and that a refused EPUB build still ships print.
 
+**72. A freeform wrap designer — design the whole cover yourself, in the app** *(large;
+several sessions; asked for 2026-10-02)* — **PLANNED**
+Templates (#16, #33) give a professional cover from a few fields, and #66 / #68 serve a writer
+who has a designer. Missing is the writer who wants to *design* the wrap themselves without
+leaving the app: place the art, set the title where they want it, run a band across the spine,
+lay out the back. This **reverses** the "no freeform canvas" call in the cover strategy note and
+Tier 5H; that note's worries become this item's constraints.
+
+**What it is.** A full-page editor over the *whole* wrap (back, spine and front, plus flaps on a
+jacket), drawn to the exact geometry `wrap_geometry` already works out for the book's page count,
+paper, binding and printer. Element types:
+- **Image** — from the cover asset library or an upload; move, scale, crop, rotate, opacity;
+  "fill this panel to the bleed" as a one-click fit.
+- **Text** — title, author, series, blurb, review quotes, spine text; any face from the font
+  library (#17); size, tracking, leading, alignment, colour; multi-line, with the blurb a
+  proper flowed text box that wraps inside its frame.
+- **Shape** — rectangle, rule, ellipse; fill, stroke, opacity — for bands, panels, frames.
+- **Barcode area** — the reserved ISBN box from the printer's spec, placed for the writer and
+  locked by default.
+Layers with order, lock, hide and grouping; undo/redo; snapping to the panel edges, the spine
+centre, the safe-zone lines and other elements; arrow-key nudge; zoom.
+
+**The guides are the point.** What makes a homemade wrap fail at the printer is not taste but
+geometry: text in the trim, art stopping short of the bleed, spine text on a book too thin to
+hold it, a barcode over the blurb. So the trim, bleed, spine folds, hinges / turn-ins / flaps and
+safe zones are drawn from `wrap_geometry` and **re-flow when the page count changes** —
+elements anchored to a panel (front centre, spine centre, back top) move with it. A live
+preflight beside the canvas uses the press-check vocabulary of #62/#65: text inside the safe
+zone, art reaching the bleed, image dpi at its placed size (#66's `image_cover_check` logic),
+spine text only past the printer's minimum page count, nothing over the barcode box.
+
+**Good by default — the strategy note's concern, answered.** It never starts from a blank
+canvas: **"Customise this design"** on any template or uploaded-art wrap converts that wrap into
+editable elements, so the starting point is already a professional cover and the writer edits
+rather than invents. Templates stay the default path; the designer is an opt-in from them.
+
+**Output is vector, through the same engine.** A design is a JSON document (`elements` in
+inches, anchored to panels) saved on the project. A new `build_designed_wrap` renders it with
+ReportLab like every other cover — real text in embedded fonts, not a screenshot — so it goes
+through Send to print / Send to publish (#65/#67) unchanged: the wrap is sized to the interior's
+real page count, the front panel becomes page 1 and the EPUB cover (#43), and the press checks
+run on it. The browser canvas is a preview of that document; the PDF is the truth, and a
+"Proof" button renders the real file beside the canvas.
+
+**The big decision — how to build the canvas.** Two routes, to settle with a spike first, as the
+WYSIWYG did:
+1. **Hand-rolled SVG editor** (no dependency): elements are SVG nodes, with selection handles,
+   drag/resize/rotate and snapping in plain JS. Keeps the offline / no-build convention, and
+   SVG maps cleanly onto ReportLab's model (same units, same primitives). More code to write.
+2. **Vendored Fabric.js or Konva.js**, served from `static/` (never a CDN). Faster to a rich
+   editor; adds a large dependency and a second model of the cover to keep in step with the
+   engine.
+The spike: render a template's wrap as SVG elements, drag a title and resize an image, write
+the JSON, and build the PDF from it — and check that what the canvas shows is what ReportLab
+prints, **text metrics especially** (line breaks in a flowed blurb must land in the same place
+in both, or the preview lies). Text matching is the riskiest part; measure it in the spike.
+
+**Phases.** (A) spike + decision; (B) images, single-line text, shapes, guides, save, build,
+preflight — a usable designer for the front and spine; (C) flowed text boxes, layers panel,
+undo, snapping, "Customise this design" from templates; (D) flaps and case wraps, barcode box
+per printer, review-quote presets, align/distribute tools.
+
+*Out of scope:* filters and photo editing (bring a finished image), AI image generation, and
+interior page design — the preset still owns the inside of the book.
+
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 
 Source: a feature scan of **Vellum** ($199/$249, macOS-only), **Atticus** ($147, web),
@@ -2223,8 +2288,9 @@ someone asks for it.
 - **Writing goals / sprints / session analytics** (Atticus, Scrivener). Plausible in the editor
   someday, but it competes with drafting tools rather than formatting ones, and the editor's own
   open obligation (backups / no data loss) outranks it.
-- **Freeform cover canvas** — already ruled out in the cover strategy note below; restated here
-  because Book Brush-style tools show up in every comparison.
+- ~~**Freeform cover canvas**~~ — **reversed 2026-10-02**: now planned as **#72**, a freeform
+  wrap designer built on the wrap geometry and press checks, starting from a template rather
+  than a blank canvas. The reasoning below is kept as that item's constraints.
 
 **Suggested order.** ~~Designed-cover-in-EPUB (D)~~ #43 → ~~bundled typefaces (E)~~ #44 →
 ~~figures/images incl. `.docx` (A + C)~~ #46/#47 → ~~lists / block quote / alignment (A)~~ #48 →
@@ -2367,6 +2433,10 @@ entry point disables Flask debug/reloader when `IS_FROZEN`. Verified via a simul
 (seeding + a full PDF build against `%APPDATA%`) and an unchanged dev run. Remaining: a free
 **code-signing** cert avoids the SmartScreen "unknown publisher" warning (skippable at first);
 consider making the `anthropic` dep a lazy import to slim the bundle.
+
+*(Reversed 2026-10-02: a freeform wrap designer is now planned as **#72**. The argument below
+is why it starts from a template, keeps templates the default, and is judged by press checks —
+read it as #72's constraints, not as a veto.)*
 
 **Cover customization — enrich the template, do NOT build a freeform design studio.** A full
 in-app graphic editor (layers, shapes, drag-anything — a mini Canva via a vendored Fabric.js /
