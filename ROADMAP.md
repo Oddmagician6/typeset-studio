@@ -7,6 +7,54 @@ sections before changing the engine.
 
 ---
 
+## Next up — priority order (as of 1.2.6, 2026-10-02)
+
+Start here in a new session. Each item points at its full entry below.
+
+1. **Wrap designer, phase C part 2: "Customise this design" (#72).** Turn any of the 24
+   template covers into editable designer elements, so a writer starts from a professional
+   layout instead of the example. The work is one converter per design family: each of the
+   eight paints its front through its own renderer in `engine._COVER_DESIGNS`, and the back
+   and spine through `build_cover_wrap`. Start with `classic-frame` (the default) and
+   `photographic`, check each conversion against the template's own wrap PDF, then do the rest.
+   Entry point: a "Customise" button beside each template, landing in `/wrap-designer` with the
+   book picked.
+2. **Wrap designer leftovers (#72):** justified blurbs, align / distribute for selected
+   elements, and content presets for jacket flaps. Check SVG `letter-spacing` and the
+   font-feature switches in WebKit before any macOS build.
+3. **Browser bug hunt on the cover editor and the style editor.** The method that found nine
+   real bugs in rich mode (#71): drive the real page in headless Chrome through the edits a
+   writer makes, against throwaway data folders, and keep the harness as a test
+   (`test_rich_editor.py` is the template).
+4. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
+   free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
+   (Tier 5D, only if a store refuses EPUB 3).
+5. **Tabletop RPG books (#74), when the designer is done:** typed blocks first (stat block,
+   read-aloud box, sidebar), two-column pagination after.
+6. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
+   enabling it needs admin and a reboot) and a macOS build (needs a Mac). The code is already
+   audited as portable; see the cross-platform notes in the strategy section.
+
+**Cutting a release** (1.2.4, 1.2.5 and 1.2.6 all went out this way on 2026-10-02 — release
+once a coherent piece lands):
+1. All `test_*.py` pass. `VERSION` gets the new number with no trailing newline; README's
+   "Current version" line follows; `## Unreleased` in CHANGELOG.md becomes `## x.y.z — D Month
+   YYYY` with a one-paragraph summary. Check every commit since the last release has its entry.
+2. Commit `Release x.y.z` (with a short summary body) on master; tag `vx.y.z`.
+3. Build: `python -m PyInstaller typeset-studio.spec --noconfirm --clean`, then **smoke-test the
+   frozen app** — `TS_NO_WINDOW=1 TS_PORT=5099` keeps it windowless, and pointing `BROWSER` at a
+   no-op stops it opening a tab; check `/about` shows the version. It uses the real AppData
+   data folder, so delete anything it writes. Then `ISCC.exe typeset-studio.iss` for
+   `dist_installer/TypesetStudio-Setup-x.y.z.exe` (`build.bat` / `make-installer.bat` do the
+   same but end in `pause`).
+4. Push master and the tag to `typeset-studio`. **The release itself goes on
+   `Oddmagician6/Ashforge-Studio-LLC`** — that is the repo the in-app update check reads
+   (`UPDATE_FEED`): tag `typeset-studio-vx.y.z`, title `Typeset Studio x.y.z`, the installer
+   attached, `gh release create … --target main --draft` first, then `gh release edit …
+   --draft=false --latest`. Notes follow the previous release's shape.
+5. Confirm `app._pick_release(app._fetch_json(app.UPDATE_FEED))` returns the new version.
+   GitHub caches that unauthenticated call for about a minute, so retry before suspecting it.
+
 ## What this app is
 
 A local, single-user Flask web app that turns a manuscript + a reusable **style**
