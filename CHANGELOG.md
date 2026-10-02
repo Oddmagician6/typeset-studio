@@ -8,7 +8,11 @@ line here.
 
 ---
 
-## Unreleased
+## 1.2.5 — 2 October 2026
+
+A long footnote no longer stops a book from building: it runs on to the next
+page, as it would in print. And there is a first look at the wrap designer,
+for laying out your whole printed cover yourself.
 
 ### Added
 
