@@ -1,0 +1,50 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wrap designer spike: text measurement</title>
+<style>
+  svg text { font-kerning: none; font-variant-ligatures: none;
+             font-feature-settings: "kern" 0, "liga" 0, "clig" 0, "calt" 0; }
+</style>
+<pre id="out">running</pre>
+<svg id="svg" width="2000" height="200" style="position:absolute;left:-3000px"></svg>
+<script src="wd.js"></script>
+<script>
+(async function () {
+  const data = await (await fetch('/measure/data')).json();
+  const fonts = data.fonts, paras = data.corpus.slice(0, 20);
+  const SIZES = [9, 11, 14], WIDTHS = [1.5, 2, 2.5, 3, 3.5, 4, 4.5], TRACK = [0, 0.6];
+  const cv = document.createElement('canvas').getContext('2d');
+  const svg = document.getElementById('svg');
+  const res = {cases: [], render: []};
+  for (const f of fonts) {
+    const fam = await WD.loadFont(f);
+    const m = await WD.metrics(f);
+    // B: the browser's own measurement, kerning and ligatures off
+    cv.font = '100px "' + fam + '"';
+    cv.fontKerning = 'none';
+    cv.textRendering = 'optimizeSpeed';
+    const measureB = (s, size, tr) =>
+      cv.measureText(s).width * size / 100 + tr * Math.max(Array.from(s).length - 1, 0);
+    for (const p of paras) for (const size of SIZES) for (const w of WIDTHS) for (const tr of TRACK) {
+      const el = {font: f, size: size, w: w, tracking: tr, text: p};
+      res.cases.push({f, size, w, tr, p: paras.indexOf(p),
+        C: WD.breakLines(p, m, size, w * 72, tr).join('\n'),
+        B: WD.breakWith((s) => measureB(s, size, tr), p, w * 72).join('\n')});
+    }
+    // rendered: the width SVG actually draws a line at, against the table width
+    for (const p of paras.slice(0, 5)) {
+      const line = p.slice(0, 60);
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', 0); t.setAttribute('y', 100);
+      t.setAttribute('font-family', fam); t.setAttribute('font-size', 100);
+      t.textContent = line; svg.appendChild(t);
+      res.render.push({f, line, svg: t.getComputedTextLength(),
+                       table: WD.width(line, m, 100, 0)});
+      t.remove();
+    }
+  }
+  await fetch('/measure/result', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                  body: JSON.stringify(res)});
+  document.getElementById('out').textContent = 'DONE ' + res.cases.length;
+})();
+</script>

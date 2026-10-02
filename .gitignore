@@ -48,3 +48,6 @@ promo/shots/
 
 # internal working notes that point at paths outside this repo
 SCREENSHOTS-FOR-WEBSITE.md
+
+# wrap designer spike: generated stand-in art
+spikes/wrap_designer/art/

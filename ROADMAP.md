@@ -2108,7 +2108,7 @@ tall flowable — a chapter opening's sink — no longer fitted: **the whole PDF
   fail on the old engine with the `LayoutError`.
 
 **72. A freeform wrap designer — design the whole cover yourself, in the app** *(large;
-several sessions; asked for 2026-10-02)* — **PLANNED**
+several sessions; asked for 2026-10-02)* — **PLANNED; phase A done**
 Templates (#16, #33) give a professional cover from a few fields, and #66 / #68 serve a writer
 who has a designer. Missing is the writer who wants to *design* the wrap themselves without
 leaving the app: place the art, set the title where they want it, run a band across the spine,
@@ -2171,6 +2171,20 @@ per printer, review-quote presets, align/distribute tools.
 
 *Out of scope:* filters and photo editing (bring a finished image), AI image generation, and
 interior page design — the preset still owns the inside of the book.
+**Phase A — DONE (2026-10-02): hand-rolled SVG, and text parity is solved.** The spike lives in
+`spikes/wrap_designer/` (findings in its README). Measured over 17,640 line-breaking cases (21
+fonts × real prose × sizes, widths, tracking): an editor measuring with **ReportLab's own
+advance-width tables**, sent to the browser, breaks lines identically to the PDF in every case;
+the browser's own `measureText` (kerning and ligatures off) disagrees in 5 — rare, and exactly
+the failure a print-true editor can't have. Bit-exactness needed one subtlety: Python ≥3.12
+sums floats with Neumaier compensation, and Crimson Pro's widths are floats, so the JS mirrors
+CPython's summation. Rendered SVG line widths match the tables to 0.001%. A ~380-line
+dependency-free SVG editor (guides from `wrap_geometry`, drag, resize, snap, nudge, properties,
+Proof round trip) passed its self-test: identical line breaks, elements following their panel
+as the page count widens the spine, exact drag distances. **Decision: hand-rolled SVG** — a
+canvas library measures text the 5-in-17,640 way and its text layer would need replacing
+anyway. Carried into phase B: flag glyphs a font lacks, image crop and dpi, undo, layers, and a
+WebKit check before a macOS build.
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 
