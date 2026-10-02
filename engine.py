@@ -2131,7 +2131,11 @@ class BookDoc(BaseDocTemplate):
         top = self._bottom + self._fn_reserve.get(page, 0) - em.get('foot_gap', 10.0)
 
         if em.get('foot_rule', True):
-            rl = w * em.get('foot_rule_width', 0.3)
+            # A page whose notes open with the rest of one from the page before
+            # takes a full-measure rule — the typesetter's sign that the note
+            # above it is continued, since the carried part has no number.
+            cont = len(keys[0]) == 3 and keys[0][2] > 0
+            rl = w if cont else w * em.get('foot_rule_width', 0.3)
             canv.setStrokeGray(0.45)
             canv.setLineWidth(0.5)
             canv.line(x, top, x + rl, top)
@@ -3295,13 +3299,38 @@ def _footnote_pages(pdf_path):
     return found
 
 
+def _fit_note(fl, room, avail_w, text_h):
+    """Split a note to fit `room` points: (head, tail), (fl, None) or (None, fl).
+
+    The footnote style inherits the body's widow and orphan control, so a split
+    never leaves a single line on either side; a note that can't give at least
+    that much to this page stays whole for the next one.
+    """
+    _, h = fl.wrap(avail_w, text_h)
+    if h + fl.style.spaceAfter <= room:
+        return fl, None
+    if room - fl.style.spaceAfter <= 0:
+        return None, fl
+    parts = fl.split(avail_w, room - fl.style.spaceAfter)
+    if len(parts) < 2:
+        return None, fl
+    return parts[0], parts[1]
+
+
 def _plan_footnotes(pages, flowables, avail_w, text_h, preset, last_page=None):
     """Turn {note: page} into per-page (reserved height, notes) plans.
 
-    A page whose notes would eat more than `max_height` of the text block keeps
-    what fits and pushes the rest onto the next page — which is what a
-    typesetter does with an overlong note rather than letting it swallow the
-    page.
+    Returns (reserve, assign, unplaced, pieces). The notes on a page fill the
+    space up to `foot_max_height` of the text block; the note that would cross
+    it is split there, its first lines on its reference's page and the rest
+    carried to the top of the next page's notes — a continued footnote, as a
+    typesetter sets one, rather than a note pushed whole away from its reference
+    or one that swallows the page. Notes stay in number order: once one has run
+    on, the notes after it follow it to the next page.
+
+    A note that is split is set as pieces keyed (chapter, n, part), returned in
+    `pieces` for the drawing pass; a note that fits keeps its plain (chapter, n)
+    key, so a book whose notes all fit is planned exactly as before.
     """
     em = preset.get('endnotes', {})
     cap = text_h * em.get('foot_max_height', 0.4)
@@ -3314,38 +3343,50 @@ def _plan_footnotes(pages, flowables, avail_w, text_h, preset, last_page=None):
     for page in by_page:
         by_page[page].sort()
 
-    reserve, assign, spill = {}, {}, []
-    # walk contiguous pages from the first with notes, so an overflow lands on
-    # the very next page rather than skipping to the next page that has its own
-    # Spill runs one page past the end of today's document on purpose: reserving
-    # room pushes body text along, so the next pass usually has the page to hold
-    # it. Anything still homeless after that is reported, never dropped quietly.
+    reserve, assign, pieces, spill = {}, {}, {}, []
+    # Walk contiguous pages from the first with notes, so a continuation lands on
+    # the very next page rather than the next page that has notes of its own.
+    # The walk runs one page past the end of today's document on purpose:
+    # reserving room pushes body text along, so the next pass usually has the
+    # page to hold it. Anything still homeless after that is reported, never
+    # dropped quietly.
     stop = (last_page or (max(by_page) if by_page else 0)) + 1
     for page in range(min(by_page) if by_page else 0, stop + 1):
-        queue = spill + by_page.get(page, [])
+        queue = spill + [(key, flowables[key], 0) for key in by_page.get(page, [])
+                         if key in flowables]
         spill = []
         if not queue:
             continue
-        # The cap keeps notes from swallowing a page — but only where there is a
-        # later page to push them onto. On the last one the notes take whatever
-        # room they need: a crowded foot is a real book, a dropped note is a bug.
-        may_spill = page < stop - 1
+        # Where there is no later page to run on to, the notes may take more of
+        # the page — but never all of it: the text block has to keep room for a
+        # chapter opening's sink, or the whole build fails.
+        last = page >= stop - 1
+        limit = max(cap, text_h * 0.6) if last else cap
         used, keep = 0.0, []
-        for key in queue:
-            fl = flowables.get(key)
-            if fl is None:
+        for item in queue:
+            if spill:                      # something ran on: the rest follow it
+                spill.append(item)
                 continue
-            _, h = fl.wrap(avail_w, text_h)
-            h += fl.style.spaceAfter
-            if keep and used + h > cap and may_spill:
-                spill.append(key)          # doesn't fit: it runs on to the next page
+            key, fl, part = item
+            head, tail = _fit_note(fl, limit - used, avail_w, text_h)
+            if head is None:
+                spill.append(item)
                 continue
-            used += h
-            keep.append(key)
+            if part or tail is not None:
+                pk = key + (part,)
+                pieces[pk] = head
+            else:
+                pk = key
+            _, h = head.wrap(avail_w, text_h)
+            used += h + head.style.spaceAfter
+            keep.append(pk)
+            if tail is not None:
+                spill.append((key, tail, part + 1))
         if keep:
             assign[page] = keep
             reserve[page] = min(used + gap + (6 if rule else 0), text_h - 24)
-    return reserve, assign, list(spill)
+    unplaced = sorted({key for key, _, _ in spill})
+    return reserve, assign, unplaced, pieces
 
 
 def _apply_note_markers(chapters, preset, measure=False):
@@ -3800,6 +3841,17 @@ def _prepare_cover(meta, preset):
         return None
 
 
+def _notes_not_drawn(flow, drawn):
+    """The notes (chapter, n) with nothing of them on any page.
+
+    `flow` holds whole notes under (chapter, n) and the parts of a note that ran
+    on under (chapter, n, part); a note counts as set if any part of it was, as
+    a part that found no page is already in the planner's own unplaced list.
+    """
+    seen = {key[:2] for key in drawn}
+    return [key for key in flow if len(key) == 2 and key not in seen]
+
+
 def _resolve_footnotes(build, chapters, preset, fonts, st, avail_w, text_h,
                        passes=3, probe=None):
     """Work out what to keep free at the foot of each page, and what goes there.
@@ -3811,12 +3863,14 @@ def _resolve_footnotes(build, chapters, preset, fonts, st, avail_w, text_h,
     passes settles every book tested; whatever it has after that is used, and a
     stale note simply sits one page from its reference rather than breaking.
 
-    `build(reserve, assign)` must build to a temp path and return it.
+    `build(reserve, assign)` must build to a temp path and return it. Returns
+    (reserve, assign, unplaced, pieces): `pieces` holds the split parts of the
+    notes that run on, keyed as `assign` names them.
     """
     flow = _footnote_flowables(chapters, preset, fonts, st)
     if not flow:
-        return {}, {}
-    reserve, assign, seen, unplaced = {}, {}, None, []
+        return {}, {}, [], {}
+    reserve, assign, seen, unplaced, pieces = {}, {}, None, [], {}
     last_seen = 0
     for _ in range(passes):
         tmp = build(reserve, assign)
@@ -3840,7 +3894,7 @@ def _resolve_footnotes(build, chapters, preset, fonts, st, avail_w, text_h,
         seen = pages
         doc_pages = pages.pop('#pages', None)
         last_seen = doc_pages or last_seen
-        new_reserve, assign, unplaced = _plan_footnotes(
+        new_reserve, assign, unplaced, pieces = _plan_footnotes(
             pages, flow, avail_w, text_h, preset, last_page=doc_pages)
         merged = dict(reserve)
         for page, h in new_reserve.items():        # monotone: damps oscillation
@@ -3854,9 +3908,9 @@ def _resolve_footnotes(build, chapters, preset, fonts, st, avail_w, text_h,
     # swallowing it — there is no honest way to fit more notes than page.
     if last_seen:
         for page in [pg for pg in assign if pg > last_seen]:
-            unplaced.extend(assign.pop(page))
+            unplaced.extend(key[:2] for key in assign.pop(page))
             reserve.pop(page, None)
-    return reserve, assign, unplaced
+    return reserve, assign, sorted(set(unplaced)), pieces
 
 
 _RGB_OP_RE = re.compile(r'(?<![A-Za-z/])(rg|RG)(?![A-Za-z])')
@@ -4131,11 +4185,12 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
             d._fn_reserve, d._fn_assign = reserve, assign
             d.build(story)
             return tmp
-        found_reserve, found_assign, homeless = _resolve_footnotes(
+        found_reserve, found_assign, homeless, pieces = _resolve_footnotes(
             _measure, manuscript['chapters'], preset, fonts, st, avail_w, text_h,
             probe=probe)
         fn_reserve.clear(); fn_reserve.update(found_reserve)
         fn_assign.clear(); fn_assign.update(found_assign)
+        fn_flow.update(pieces)                  # the parts of notes that run on
         unplaced_notes.clear(); unplaced_notes.extend(homeless)
 
     if foot_notes and not meta.get('include_toc'):
@@ -4191,7 +4246,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
         doc2 = _make_doc(out_path)
         doc2.build(story2)
         page_count = doc2.page
-        unplaced_notes.extend(set(fn_flow) - doc2._fn_drawn)
+        unplaced_notes.extend(_notes_not_drawn(fn_flow, doc2._fn_drawn))
     else:
         story = _build_story(manuscript, preset, meta, fonts, st, head_font,
                              has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
@@ -4199,7 +4254,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
         doc = _make_doc(out_path)
         doc.build(story)
         page_count = doc.page
-        unplaced_notes.extend(set(fn_flow) - doc._fn_drawn)
+        unplaced_notes.extend(_notes_not_drawn(fn_flow, doc._fn_drawn))
     if cover_path:
         try:
             os.remove(cover_path)
@@ -4207,7 +4262,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
             pass
     return {
         'page_count':     page_count,
-        'notes_unplaced': len(unplaced_notes),
+        'notes_unplaced': len(set(unplaced_notes)),
         'dead_links':     dead_links + sorted(_matter_dead),
         'font_family':    fonts['family'],
         'font_fallback':  fonts['fallback'],

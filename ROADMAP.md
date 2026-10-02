@@ -2076,6 +2076,37 @@ package with the ebook edition in it, so one click hands off every edition of th
   both upload sections and the ebook pixel size reach the sheet, that a forced ebook-check failure
   tallies the same on the page and in the file, and that a refused EPUB build still ships print.
 
+**73. Continued footnotes — a long note runs on to the next page** *(medium; the gap #55 left)*
+— **SHIPPED**
+#55 planned each footnote whole. A note taller than the space a page allows for notes was kept on
+its reference's page anyway, the reservation grew to nearly the whole text block, and the next
+tall flowable — a chapter opening's sink — no longer fitted: **the whole PDF build died with a
+`LayoutError`**. So one long scholarly note made a book unbuildable, which is worse than the
+"reported, not dropped" the roadmap had recorded.
+- **Split where the space runs out** (`engine._plan_footnotes`, `_fit_note`). The notes on a page
+  fill up to `foot_max_height`; the note that would cross it is split there with
+  `Paragraph.split`, its first lines on its reference's page and the rest carried to the top of
+  the next page's notes. The footnote style inherits the body's widow and orphan control, so a
+  split never leaves a lone line; a note that can't give two lines to this page starts on the
+  next. **Notes stay in number order**: once one runs on, the notes after it follow it (before,
+  a short later note could jump ahead of a long earlier one).
+- **Pieces, not new flowables in the story.** A split note is set as parts keyed
+  `(chapter, n, part)`; `_plan_footnotes` returns them in `pieces`, `_resolve_footnotes` carries
+  them out, and `build_pdf` merges them into the flowables `_draw_footnotes` looks up. A note
+  that fits keeps its plain `(chapter, n)` key, so **a book whose notes all fit builds exactly as
+  before** — compared page by page against the old engine.
+- **The typesetter's mark.** A page whose notes open with a carried part takes a full-measure
+  rule instead of the short one, since the carried text has no number to show it is continued.
+- **The last page has nowhere to go.** Where there is no later page, notes may take up to 60% of
+  the text block (never all of it — the old "whatever room they need" is what crashed), and a
+  part still left over is counted in `notes_unplaced`. `_notes_not_drawn` counts a note as set
+  if any part of it was, so a note is never counted twice. The preflight row now says what that
+  means: a long note near the end of the book with no later page to continue on.
+- Tests: `test_footnotes.py` cases 7 and 8 — an overlong note mid-book builds, starts on its
+  reference's page, continues, prints every sentence, keeps the next note after it and sits
+  under a full-measure rule; on the last page it builds and reports the part with no page. Both
+  fail on the old engine with the `LayoutError`.
+
 **72. A freeform wrap designer — design the whole cover yourself, in the app** *(large;
 several sessions; asked for 2026-10-02)* — **PLANNED**
 Templates (#16, #33) give a professional cover from a few fields, and #66 / #68 serve a writer
@@ -2182,8 +2213,8 @@ seven-file round: `manuscript.py` (parse) · `engine.py` (render) · `epub.py` (
 - ~~**Endnotes.**~~ — **SHIPPED (feature #50)** as `[^label]` + `[^label]: text`, numbered per
   chapter, with a Notes back-matter page and, in the ebook, a link each way.
 - ~~**Footnotes.**~~ — **SHIPPED (feature #55)** as an `endnotes.placement` choice, reusing #50's
-  syntax and numbering wholesale. **Not done:** a note longer than its page cannot be split across
-  two note areas ("continued footnotes"); the surplus is reported rather than dropped.
+  syntax and numbering wholesale. ~~**Not done:** continued footnotes~~ — **SHIPPED (feature
+  #73):** a note too long for its page splits and runs on to the next.
 - ~~**Tables.**~~ — **SHIPPED (feature #57)** as `~~~ table`, line-oriented (one row per
   line, cells on `|`), with a header row that repeats on every page the table runs onto, a
   preset `table` section, and real `<table>`/`<thead>` in the EPUB. Word tables import as

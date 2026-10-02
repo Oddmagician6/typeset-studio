@@ -424,8 +424,9 @@ def _preflight(build_result, preset, page_count):
     if missing:
         checks.append({
             'label': 'Footnotes', 'ok': False,
-            'detail': (f'{missing} note(s) had no room on the page they belong to — '
-                       'shorten them, or set the style to put notes at the back')})
+            'detail': (f'{missing} note(s) ran out of pages — a long note near the end '
+                       'of the book has no later page to continue on. Shorten it, or '
+                       'set the style to put notes at the back')})
 
     if page_count:
         kdp_ok = 24 <= page_count <= 828
