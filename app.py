@@ -38,6 +38,7 @@ import manuscript
 import checker
 import matter
 import ornaments
+import wrap_design
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IS_FROZEN = getattr(sys, 'frozen', False)
@@ -1855,6 +1856,102 @@ def _wrap_dims(form, pages):
         dims['warnings'].append('KDP does not print dust jackets — this file is for '
                                 'IngramSpark or another printer.')
     return dims
+
+
+# ------------------------------------------------------------ wrap designer (#72)
+# Beta: a freeform editor over the whole wrap, from the phase A spike. The
+# design lives in the browser for now (saved there as you work); the server
+# measures, works out the geometry, and builds the real PDF.
+
+WRAP_DESIGN_DIR = os.path.join(OUT_DIR, '_wrap_designer')   # stand-in art, proofs
+wrap_design.FONT_DIR = FONT_DIR
+wrap_design.ART_DIRS = [COVER_ASSET_DIR, WRAP_DESIGN_DIR]
+WRAP_STAND_IN = 'stand-in-dusk.png'
+
+
+def _wrap_design_dims(body):
+    """Geometry for the designer from its settings, through the same `_wrap_dims`
+    the cover editor and the print package use, so a spine is worked out one way."""
+    try:
+        pages = max(int(body.get('pages', 320)), 1)
+    except (TypeError, ValueError):
+        pages = 320
+    form = {k: body.get(k) for k in ('wrap_paper', 'wrap_retailer', 'wrap_binding',
+                                     'wrap_trim_w', 'wrap_trim_h') if body.get(k) is not None}
+    dims = _wrap_dims(form, pages)
+    warnings = dims.pop('warnings', [])
+    return dims, warnings
+
+
+@app.route('/wrap-designer')
+def wrap_designer():
+    wrap_design.stand_in_art(os.path.join(WRAP_DESIGN_DIR, WRAP_STAND_IN))
+    try:
+        assets = sorted(f for f in os.listdir(COVER_ASSET_DIR)
+                        if f.lower().endswith(IMAGE_EXTS))
+    except OSError:
+        assets = []
+    return render_template('wrap_designer.html', active='wrap',
+                           fonts=[f for f in list_fonts() if f.lower().endswith('.ttf')],
+                           assets=assets, stand_in=WRAP_STAND_IN,
+                           retailers=WRAP_RETAILERS, papers=_PAPER, trims=TRIM_PRESETS)
+
+
+@app.route('/wrap-designer/geometry', methods=['POST'])
+def wrap_designer_geometry():
+    dims, warnings = _wrap_design_dims(request.get_json(silent=True) or {})
+    g = engine.wrap_geometry(dims)
+    return jsonify(geometry=g, dims=dims, warnings=warnings, safe=engine.WRAP_SAFE,
+                   spine_safe=engine.WRAP_SPINE_SAFE)
+
+
+@app.route('/wrap-designer/metrics/<path:fname>')
+def wrap_designer_metrics(fname):
+    if not wrap_design.font_file(fname):
+        abort(404)
+    return jsonify(wrap_design.metrics(fname))
+
+
+@app.route('/wrap-designer/font/<path:fname>')
+def wrap_designer_font(fname):
+    path = wrap_design.font_file(fname)
+    if not path:
+        abort(404)
+    return send_from_directory(FONT_DIR, os.path.basename(path))
+
+
+@app.route('/wrap-designer/art/<path:fname>')
+def wrap_designer_art(fname):
+    path = wrap_design.art_file(fname)
+    if not path:
+        abort(404)
+    return send_from_directory(os.path.dirname(path), os.path.basename(path))
+
+
+@app.route('/wrap-designer/build', methods=['POST'])
+def wrap_designer_build():
+    """Build the real wrap PDF from a design; return a picture of it, its line
+    breaks (for the editor to check against its own), and a download link."""
+    body = request.get_json(silent=True) or {}
+    dims, warnings = _wrap_design_dims(body.get('settings') or {})
+    slug = slugify(body.get('name') or 'wrap-design') or 'wrap-design'
+    fn = f'{slug}-wrap-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pdf'
+    path = os.path.join(OUT_DIR, fn)
+    try:
+        lines = wrap_design.build_pdf(body.get('design') or {}, dims, path)
+    except Exception as exc:
+        logging.error('Wrap design build failed: %s', traceback.format_exc())
+        return jsonify(ok=False, error=f'The PDF could not be built: {exc}')
+    png = ''
+    try:
+        import fitz
+        with fitz.open(path) as doc:
+            png = ('data:image/png;base64,'
+                   + base64.b64encode(doc[0].get_pixmap(dpi=40).tobytes('png')).decode())
+    except Exception:
+        logging.exception('Wrap design preview failed')
+    return jsonify(ok=True, lines=lines, png=png, warnings=warnings,
+                   pdf=url_for('download', fn=fn))
 
 
 @app.route('/cover/wrap', methods=['POST'])

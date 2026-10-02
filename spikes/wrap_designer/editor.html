@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Wrap Designer Spike</title>
+<style>
+  :root { --bg:#f4f1ea; --ink:#1b1a18; --muted:#6b665d; --rule:#d8d2c6; --red:#b3261e; --panel:#fffdf8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1d1c1a; --ink:#ece7dd; --muted:#a39d92; --rule:#3a3732; --red:#e2645b; --panel:#262420; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px system-ui, sans-serif; }
+  header { display:flex; gap:12px; align-items:center; flex-wrap:wrap; padding:10px 16px;
+           border-bottom:1px solid var(--rule); }
+  header b { font-family: Georgia, serif; font-size:16px; }
+  header label { font-size:12px; color:var(--muted); display:flex; gap:6px; align-items:center; }
+  input, select, textarea, button { font:inherit; color:inherit; background:var(--panel);
+           border:1px solid var(--rule); border-radius:3px; padding:4px 6px; }
+  button { cursor:pointer; }
+  button.primary { background:var(--red); color:#fff; border-color:var(--red); }
+  main { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:16px; padding:16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  #stage { background:#8a8579; border-radius:3px; padding:12px; overflow:auto; }
+  #svg { width:100%; height:auto; display:block; background:#fff; touch-action:none; }
+  svg text { font-kerning:none; font-variant-ligatures:none;
+             font-feature-settings:"kern" 0, "liga" 0, "clig" 0, "calt" 0; }
+  .el { cursor:move; }
+  aside { display:flex; flex-direction:column; gap:12px; min-width:0; }
+  .card { background:var(--panel); border:1px solid var(--rule); border-radius:3px; padding:12px; }
+  .card h3 { margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+  .props label { display:block; font-size:12px; color:var(--muted); margin:6px 0 2px; }
+  .props input, .props select, .props textarea { width:100%; }
+  #check { font-family:ui-monospace, monospace; font-size:12px; white-space:pre-wrap; }
+  #check.ok { color:#2e7d32; } #check.bad { color:var(--red); }
+  #proof img { width:100%; display:block; border:1px solid var(--rule); }
+  #json { width:100%; height:140px; font:11px ui-monospace, monospace; }
+</style>
+<body>
+<header>
+  <b>Wrap Designer · spike</b>
+  <label>Pages <input id="pages" type="number" value="320" min="24" max="900" step="20" style="width:80px"></label>
+  <label>Binding <select id="binding"><option>paperback</option><option>hardcover</option><option>jacket</option></select></label>
+  <label><input id="guides" type="checkbox" checked> Guides</label>
+  <button id="add-text">+ Text</button>
+  <button id="add-rect">+ Shape</button>
+  <button class="primary" id="proof-btn">Proof</button>
+  <span id="status" style="color:var(--muted);font-size:12px"></span>
+</header>
+<main>
+  <div id="stage"><svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+  <aside>
+    <div class="card props" id="props"><h3>Selected</h3><p style="color:var(--muted);margin:0">Click an element.</p></div>
+    <div class="card"><h3>Proof (the real PDF)</h3><div id="check">Not built yet.</div><div id="proof"></div></div>
+    <div class="card"><h3>Design JSON</h3><textarea id="json" readonly></textarea></div>
+  </aside>
+</main>
+<script src="/wd.js"></script>
+<script>
+(function () {
+  'use strict';
+  var NS = 'http://www.w3.org/2000/svg';
+  var svg = document.getElementById('svg');
+  var BLURB = 'The rain had not stopped for three days, and Aldren had begun to suspect it ' +
+    'never would. He stood beneath the eaves of the Split Lantern Inn, watching the water carve ' +
+    'small rivers through the mud of Briars Hollow, and thought about how far he had come to ' +
+    'arrive at a place so determined to be forgotten. Inside, someone was laughing.';
+  var design = { elements: [
+    {id:'bg-back', type:'rect', fill:'back', color:'#20283b'},
+    {id:'bg-spine', type:'rect', fill:'spine', color:'#7d2a26'},
+    {id:'art', type:'image', fill:'front', src:'art.png'},
+    {id:'title', type:'text', anchor:'front', x:0.5, y:0.9, w:5, text:'The Salt Road',
+     font:'EBGaramond-Bold.ttf', size:46, leading:1.05, color:'#fbf3e2', align:'center', tracking:0.5},
+    {id:'author', type:'text', anchor:'front', x:0.5, y:7.9, w:5, text:'ELLINOR VALE',
+     font:'Spectral-Regular.ttf', size:16, leading:1.2, color:'#fbf3e2', align:'center', tracking:3},
+    {id:'spine', type:'text', anchor:'spine', cx:0.11, y:0.6, w:7.8, rotate:90,
+     text:'THE SALT ROAD   ELLINOR VALE', font:'Spectral-Regular.ttf', size:13, leading:1.2,
+     color:'#fbf3e2', align:'center', tracking:1.5},
+    {id:'blurb', type:'text', anchor:'back', x:0.6, y:1.0, w:4.8, text:BLURB,
+     font:'EBGaramond-Regular.ttf', size:12.5, leading:1.4, color:'#efe7d6', align:'left', tracking:0},
+    {id:'quote', type:'text', anchor:'back', x:0.6, y:4.4, w:4.8,
+     text:'"A slow, rain-soaked marvel of a book."', font:'EBGaramond-Italic.ttf', size:15,
+     leading:1.3, color:'#e9c98f', align:'center', tracking:0},
+    {id:'barcode', type:'rect', anchor:'back', x:3.75, y:7.55, w:2, h:1.2, color:'#ffffff'}
+  ]};
+  var g = null, sel = null, metrics = {}, fontlist = [];
+
+  function dims() {
+    var pages = +document.getElementById('pages').value || 320;
+    return { trim_w:6, trim_h:9, spine_w: Math.round(pages * 0.0025 * 1000) / 1000, bleed:0.125,
+             pages: pages, spine_text_min: 80, binding: document.getElementById('binding').value };
+  }
+  function status(s) { document.getElementById('status').textContent = s; }
+
+  // ---- geometry (mirrors model.py) -----------------------------------------
+  function origin(a) {
+    return a === 'back' ? [g.back_x, g.edge] : a === 'spine' ? [g.spine_x, g.edge]
+         : a === 'front' ? [g.front_x, g.edge] : [0, 0];
+  }
+  function panelW(a) { return a === 'spine' ? g.spine_w : (a === 'front' || a === 'back') ? g.panel_w : g.wrap_w; }
+  function fillRect(w) {
+    if (w === 'front') return [g.front_x, 0, g.wrap_w - g.front_x, g.wrap_h];
+    if (w === 'back') return [0, 0, g.back_x + g.panel_w, g.wrap_h];
+    if (w === 'spine') return [g.spine_x, 0, g.spine_w, g.wrap_h];
+    return [0, 0, g.wrap_w, g.wrap_h];
+  }
+  function elRect(el) {
+    if (el.fill) return fillRect(el.fill);
+    var o = origin(el.anchor || 'sheet');
+    var x = ('cx' in el) ? panelW(el.anchor) / 2 + el.cx : (el.x || 0);
+    return [o[0] + x, o[1] + (el.y || 0), el.w || 0, el.h || 0];
+  }
+  // [(line, dx, base)] in points from the element's top-left, as model.text_layout
+  function layout(el) {
+    var m = metrics[el.font];
+    if (!m) return [];
+    var lines = el.w ? WD.breakLines(el.text, m, el.size, el.w * 72, el.tracking || 0)
+                     : (el.text.split(/\r?\n/));
+    var asc = m.ascent / 1000 * el.size, box = (el.w || 0) * 72;
+    return lines.map(function (ln, i) {
+      var lw = WD.width(ln, m, el.size, el.tracking || 0), dx = 0;
+      if (el.align === 'center') dx = box ? (box - lw) / 2 : -lw / 2;
+      else if (el.align === 'right') dx = box ? box - lw : -lw;
+      return [ln, dx, asc + i * el.size * (el.leading || 1.2)];
+    });
+  }
+
+  // ---- render ---------------------------------------------------------------
+  function node(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function bbox(el) {
+    var r = elRect(el);
+    if (el.type !== 'text') return r;
+    var lay = layout(el), h = lay.length * el.size * (el.leading || 1.2) / 72;
+    var w = el.w || Math.max.apply(null, lay.map(function (l) { return WD.width(l[0], metrics[el.font], el.size, el.tracking || 0); })) / 72;
+    return el.rotate === 90 ? [r[0] - h, r[1], h, w] : [r[0], r[1], w, h];
+  }
+
+  function render() {
+    if (!g) return;
+    svg.setAttribute('viewBox', '0 0 ' + g.wrap_w + ' ' + g.wrap_h);
+    svg.innerHTML = '';
+    design.elements.forEach(function (el) {
+      var r = elRect(el), grp = node('g', {'class': 'el', 'data-id': el.id}, svg);
+      if (el.type === 'rect')
+        node('rect', {x:r[0], y:r[1], width:r[2], height:r[3], fill:el.color, opacity:el.opacity == null ? 1 : el.opacity}, grp);
+      else if (el.type === 'image')
+        node('image', {x:r[0], y:r[1], width:r[2], height:r[3], href:'/art/' + el.src,
+                       preserveAspectRatio:'xMidYMid slice'}, grp);
+      else if (el.type === 'text') {
+        var t = node('g', {transform:'translate(' + r[0] + ' ' + r[1] + ')' + (el.rotate === 90 ? ' rotate(90)' : '')}, grp);
+        layout(el).forEach(function (l) {
+          var tx = node('text', {x:l[1] / 72, y:l[2] / 72, 'font-family':WD.family(el.font),
+                                 'font-size':el.size / 72, 'letter-spacing':(el.tracking || 0) / 72,
+                                 fill:el.color, 'xml:space':'preserve'}, t);
+          tx.textContent = l[0];
+        });
+      }
+    });
+    if (document.getElementById('guides').checked) drawGuides();
+    if (sel) drawSelection();
+    document.getElementById('json').value = JSON.stringify(design, null, 1);
+  }
+
+  function drawGuides() {
+    var gl = node('g', {'pointer-events':'none'}, svg), b = g.bleed, s = 0.25;
+    var line = function (x1, y1, x2, y2, c, dash) {
+      node('line', {x1:x1, y1:y1, x2:x2, y2:y2, stroke:c, 'stroke-width':0.012, 'stroke-dasharray':dash || ''}, gl);
+    };
+    var box = function (x, y, w, h, c, dash) {
+      node('rect', {x:x, y:y, width:w, height:h, fill:'none', stroke:c, 'stroke-width':0.012, 'stroke-dasharray':dash || ''}, gl);
+    };
+    box(g.wrap ? g.wrap + b : b, b, g.wrap_w - 2 * (g.wrap + b), g.wrap_h - 2 * b, '#d32f2f');   // trim
+    [g.spine_x, g.spine_x + g.spine_w].forEach(function (x) { line(x, 0, x, g.wrap_h, '#1565c0'); });  // folds
+    if (g.hinge) [g.spine_x - g.hinge, g.spine_x + g.spine_w + g.hinge].forEach(function (x) { line(x, 0, x, g.wrap_h, '#1565c0', '0.05 0.05'); });
+    if (g.flap) [g.back_x, g.front_x + g.panel_w].forEach(function (x) { line(x, 0, x, g.wrap_h, '#6a1b9a', '0.08 0.04'); });
+    ['back', 'front'].forEach(function (a) {                     // safe zones
+      var o = origin(a); box(o[0] + s, o[1] + s, g.panel_w - 2 * s, g.panel_h - 2 * s, '#00897b', '0.06 0.04');
+    });
+  }
+
+  function drawSelection() {
+    var el = design.elements.find(function (e) { return e.id === sel; });
+    if (!el) return;
+    var bb = bbox(el), gs = node('g', {'pointer-events':'none'}, svg);
+    node('rect', {x:bb[0], y:bb[1], width:bb[2], height:bb[3], fill:'none', stroke:'#ff6f00', 'stroke-width':0.02}, gs);
+    if (!el.fill) {
+      var hs = 0.12, h = node('rect', {x:bb[0] + bb[2] - hs / 2, y:bb[1] + bb[3] - hs / 2, width:hs, height:hs,
+                                      fill:'#ff6f00', 'pointer-events':'all', 'data-handle':'1', style:'cursor:nwse-resize'}, svg);
+    }
+  }
+
+  // ---- interaction ----------------------------------------------------------
+  function toInches(evt) {
+    var pt = svg.createSVGPoint(); pt.x = evt.clientX; pt.y = evt.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+  var drag = null;
+  svg.addEventListener('pointerdown', function (e) {
+    var p = toInches(e);
+    if (e.target.getAttribute('data-handle')) {
+      var el = design.elements.find(function (x) { return x.id === sel; });
+      drag = {mode:'resize', el:el, p:p, w:el.w || 0, h:el.h || 0};
+    } else {
+      var grp = e.target.closest('.el');
+      sel = grp ? grp.getAttribute('data-id') : null;
+      var el2 = design.elements.find(function (x) { return x.id === sel; });
+      drag = el2 && !el2.fill ? {mode:'move', el:el2, p:p, x:el2.x, y:el2.y, cx:el2.cx} : null;
+      showProps();
+    }
+    svg.setPointerCapture(e.pointerId);
+    render();
+  });
+  svg.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    var p = toInches(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, el = drag.el;
+    if (drag.mode === 'resize') {
+      el.w = Math.max(0.2, round(drag.w + (el.rotate === 90 ? dy : dx)));
+      if (el.type !== 'text') el.h = Math.max(0.2, round(drag.h + dy));
+    } else {
+      if ('cx' in el) el.cx = round(drag.cx + dx); else el.x = round(drag.x + dx);
+      el.y = round(drag.y + dy);
+      snap(el);
+    }
+    render();
+  });
+  svg.addEventListener('pointerup', function () { if (drag) { drag = null; showProps(); } });
+  function round(v) { return Math.round(v * 1000) / 1000; }
+  // centre a box on its panel when it comes within 0.08"
+  function snap(el) {
+    if (el.type === 'text' && !el.w) return;
+    var w = el.rotate === 90 ? 0 : el.w, pw = panelW(el.anchor);
+    if ('cx' in el) { if (Math.abs(el.cx) < 0.08) el.cx = 0; return; }
+    if (Math.abs(el.x + w / 2 - pw / 2) < 0.08) el.x = round(pw / 2 - w / 2);
+  }
+  document.addEventListener('keydown', function (e) {
+    if (!sel || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    var el = design.elements.find(function (x) { return x.id === sel; });
+    if (!el || el.fill) return;
+    var step = e.shiftKey ? 0.1 : 0.01, k = 'cx' in el ? 'cx' : 'x';
+    if (e.key === 'ArrowLeft') el[k] = round(el[k] - step);
+    else if (e.key === 'ArrowRight') el[k] = round(el[k] + step);
+    else if (e.key === 'ArrowUp') el.y = round(el.y - step);
+    else if (e.key === 'ArrowDown') el.y = round(el.y + step);
+    else if (e.key === 'Delete') { design.elements = design.elements.filter(function (x) { return x !== el; }); sel = null; showProps(); }
+    else return;
+    e.preventDefault(); render();
+  });
+
+  function showProps() {
+    var box = document.getElementById('props'), el = design.elements.find(function (x) { return x.id === sel; });
+    box.innerHTML = '<h3>Selected</h3>';
+    if (!el) { box.insertAdjacentHTML('beforeend', '<p style="color:var(--muted);margin:0">Click an element.</p>'); return; }
+    var add = function (label, key, kind, opts) {
+      var l = document.createElement('label'); l.textContent = label; box.appendChild(l);
+      var inp = document.createElement(kind === 'textarea' ? 'textarea' : kind === 'select' ? 'select' : 'input');
+      if (kind === 'select') opts.forEach(function (o) { var op = document.createElement('option'); op.textContent = o; inp.appendChild(op); });
+      else if (kind !== 'textarea') inp.type = kind;
+      if (kind === 'number') inp.step = 'any';
+      inp.value = el[key] == null ? '' : el[key];
+      inp.addEventListener('input', function () {
+        el[key] = kind === 'number' ? +inp.value : inp.value;
+        (key === 'font' ? ensureFont(el.font) : Promise.resolve()).then(render);
+      });
+      box.appendChild(inp);
+    };
+    box.insertAdjacentHTML('beforeend', '<div style="font:12px ui-monospace,monospace">' + el.id + ' · ' + el.type + (el.anchor ? ' · ' + el.anchor : '') + '</div>');
+    if (el.type === 'text') {
+      add('Text', 'text', 'textarea'); add('Font', 'font', 'select', fontlist);
+      add('Size (pt)', 'size', 'number'); add('Leading', 'leading', 'number');
+      add('Tracking (pt)', 'tracking', 'number'); add('Align', 'align', 'select', ['left', 'center', 'right']);
+      add('Box width (in)', 'w', 'number'); add('Colour', 'color', 'color');
+    } else if (el.type === 'rect') {
+      add('Colour', 'color', 'color'); add('Opacity', 'opacity', 'number');
+      if (!el.fill) { add('Width (in)', 'w', 'number'); add('Height (in)', 'h', 'number'); }
+    }
+  }
+
+  var n = 0;
+  document.getElementById('add-text').addEventListener('click', function () {
+    var el = {id:'text-' + (++n), type:'text', anchor:'front', x:1, y:4, w:4, text:'New text',
+              font:'EBGaramond-Regular.ttf', size:20, leading:1.2, color:'#ffffff', align:'center', tracking:0};
+    design.elements.push(el); sel = el.id; showProps(); ensureFont(el.font).then(render);
+  });
+  document.getElementById('add-rect').addEventListener('click', function () {
+    var el = {id:'shape-' + (++n), type:'rect', anchor:'front', x:0.5, y:6.5, w:5, h:0.6, color:'#000000', opacity:0.4};
+    design.elements.push(el); sel = el.id; showProps(); render();
+  });
+
+  // ---- server: geometry and the real PDF -------------------------------------
+  function post(url, body) {
+    return fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+      .then(function (r) { return r.json(); });
+  }
+  function regeometry() { return post('/geometry', dims()).then(function (geo) { g = geo; render(); }); }
+  ['pages', 'binding'].forEach(function (id) { document.getElementById(id).addEventListener('input', regeometry); });
+  document.getElementById('guides').addEventListener('change', render);
+
+  document.getElementById('proof-btn').addEventListener('click', function () {
+    status('Building the PDF...');
+    post('/build', {design:design, dims:dims(), dpi:40}).then(function (res) {
+      var bad = [], count = 0;
+      design.elements.forEach(function (el) {
+        if (el.type !== 'text') return;
+        count++;
+        var mine = layout(el).map(function (l) { return l[0]; });
+        if (JSON.stringify(mine) !== JSON.stringify(res.lines[el.id])) bad.push(el.id);
+      });
+      var chk = document.getElementById('check');
+      chk.className = bad.length ? 'bad' : 'ok';
+      chk.textContent = bad.length
+        ? 'Line breaks differ from the PDF in: ' + bad.join(', ')
+        : 'All ' + count + ' text boxes break into lines exactly as the PDF does.';
+      document.getElementById('proof').innerHTML = '<img alt="Proof of the wrap PDF" src="' + res.png + '">' +
+        '<p><a href="/proof.pdf" target="_blank">Open the PDF</a></p>';
+      status('');
+    });
+  });
+
+  function ensureFont(f) {
+    return Promise.all([WD.loadFont(f), WD.metrics(f).then(function (m) { metrics[f] = m; })]);
+  }
+  fetch('/fontlist').then(function (r) { return r.json(); }).then(function (fl) {
+    fontlist = fl;
+    var used = design.elements.filter(function (e) { return e.font; }).map(function (e) { return e.font; });
+    return Promise.all(used.map(ensureFont));
+  }).then(regeometry).then(function () { status('Ready'); window.WD_READY = true; });
+
+  // #selftest: proof, then a page-count change, results in <pre id="selftest">
+  if (location.hash === '#selftest') {
+    var wait = setInterval(function () {
+      if (!window.WD_READY) return;
+      clearInterval(wait);
+      var out = {}, title = design.elements.find(function (e) { return e.id === 'title'; });
+      var spineEl = design.elements.find(function (e) { return e.id === 'spine'; });
+      document.getElementById('proof-btn').click();
+      var w2 = setInterval(function () {
+        var chk = document.getElementById('check').textContent;
+        if (chk === 'Not built yet.') return;
+        clearInterval(w2);
+        out.proof = chk;
+        var before = {spine: g.spine_w, title: elRect(title)[0], spineText: elRect(spineEl)[0] - g.spine_x};
+        window.WD_SPIKE.setPages(640).then(function () {
+          var after = {spine: g.spine_w, title: elRect(title)[0], spineText: elRect(spineEl)[0] - g.spine_x};
+          out.spine_grew = round(after.spine - before.spine);
+          out.title_moved = round(after.title - before.title);
+          out.spine_text_offset_from_centre = [round(before.spineText - before.spine / 2),
+                                               round(after.spineText - after.spine / 2)];
+          // drag the title 120 screen px right; it should move 120 px worth of inches
+          var tnode = svg.querySelector('[data-id="title"] text'), b = tnode.getBoundingClientRect();
+          var x0 = title.x, cx = b.left + b.width / 2, cy = b.top + b.height / 2;
+          var fire = function (type, x, y, target) {
+            target.dispatchEvent(new PointerEvent(type, {clientX:x, clientY:y, bubbles:true, pointerId:1, isPrimary:true}));
+          };
+          fire('pointerdown', cx, cy, tnode);
+          fire('pointermove', cx + 120, cy, svg);
+          fire('pointerup', cx + 120, cy, svg);
+          var inchesPerPx = g.wrap_w / svg.getBoundingClientRect().width;
+          out.drag_moved_in = round(title.x - x0);
+          out.drag_expected_in = round(120 * inchesPerPx);
+          out.selected_after_drag = sel;
+          var pre = document.createElement('pre'); pre.id = 'selftest';
+          pre.textContent = JSON.stringify(out); document.body.appendChild(pre);
+        });
+      }, 100);
+    }, 100);
+  }
+
+  // test hooks for the spike's own browser check
+  window.WD_SPIKE = { design: design, dims: dims, layout: layout, regeometry: regeometry,
+                      setPages: function (p) { document.getElementById('pages').value = p; return regeometry(); },
+                      geometry: function () { return g; } };
+})();
+</script>
+</body>
+</html>

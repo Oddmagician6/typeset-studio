@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% set active = 'wrap' %}
+{% block title %}Wrap designer · Typeset Studio{% endblock %}
+
+{% block style %}
+  main{max-width:1440px}
+  .wd-bar{display:flex;gap:10px 14px;align-items:flex-end;flex-wrap:wrap;margin:0 0 14px}
+  .wd-bar label{display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:10.5px;
+    text-transform:uppercase;letter-spacing:.08em;color:var(--faint)}
+  .wd-bar input,.wd-bar select,.wd-side input,.wd-side select,.wd-side textarea{
+    font-family:var(--sans);font-size:13.5px;color:var(--ink);background:var(--surface-2);
+    border:1px solid var(--rule-strong);border-radius:2px;padding:6px 8px}
+  .wd-bar .grow{flex:1}
+  .wd-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
+  @media (max-width:980px){.wd-grid{grid-template-columns:1fr}}
+  .wd-stage{background:#7d786d;border-radius:3px;padding:12px;overflow:auto;box-shadow:var(--shadow)}
+  #wd-svg{width:100%;height:auto;display:block;background:#fff;touch-action:none;user-select:none}
+  #wd-svg text{font-kerning:none;font-variant-ligatures:none;
+    font-feature-settings:"kern" 0,"liga" 0,"clig" 0,"calt" 0}
+  #wd-svg .el{cursor:move}
+  .wd-legend{display:flex;gap:14px;flex-wrap:wrap;margin:8px 2px 0;font-size:12px;color:#f1eee6}
+  .wd-legend i{display:inline-block;width:14px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+  .wd-side{display:flex;flex-direction:column;gap:12px;min-width:0}
+  .wd-card{background:var(--surface);border:1px solid var(--rule);border-radius:3px;padding:12px 14px;box-shadow:var(--shadow)}
+  .wd-card h3{margin:0 0 8px;font-family:var(--mono);font-size:10.5px;font-weight:400;
+    text-transform:uppercase;letter-spacing:.14em;color:var(--red)}
+  .wd-card p{margin:0;color:var(--muted);font-size:13px}
+  .wd-props label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+  .wd-props input,.wd-props select,.wd-props textarea{width:100%}
+  .wd-props textarea{min-height:70px;resize:vertical}
+  .wd-props .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .wd-props .id{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+  .wd-layers{list-style:none;margin:0;padding:0;max-height:220px;overflow:auto}
+  .wd-layers li{display:flex;gap:6px;align-items:center;padding:4px 6px;border-radius:2px;
+    font-size:13px;cursor:pointer}
+  .wd-layers li:hover{background:rgba(127,127,127,.12)}
+  .wd-layers li.on{background:rgba(177,42,29,.14)}
+  .wd-layers li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wd-layers button{border:0;background:none;color:var(--muted);cursor:pointer;padding:0 3px;font-size:13px}
+  .wd-checks{list-style:none;margin:0;padding:0;font-size:13px}
+  .wd-checks li{padding:3px 0 3px 20px;position:relative}
+  .wd-checks li::before{position:absolute;left:0;font-family:var(--mono)}
+  .wd-checks li.ok::before{content:"✓";color:var(--muted)}
+  .wd-checks li.bad{color:var(--red-deep)}
+  .wd-checks li.bad::before{content:"!";font-weight:700}
+  #wd-proof img{width:100%;display:block;border:1px solid var(--rule);margin-top:8px}
+  #wd-proof-msg{font-size:13px}
+  #wd-proof-msg.ok{color:var(--muted)} #wd-proof-msg.bad{color:var(--red-deep)}
+  .wd-art{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .beta{font-family:var(--mono);font-size:10px;letter-spacing:.12em;border:1px solid var(--red);
+    color:var(--red);border-radius:2px;padding:1px 5px;vertical-align:middle;margin-left:8px}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">Design your own cover</div>
+    <h1>Wrap designer <span class="beta">BETA</span></h1>
+    <p>Lay out the whole printed cover (back, spine and front) to the exact size your printer
+       needs. Drag things to move them, pull the orange corner to resize, and press
+       <b>Proof</b> to build the real PDF. Your design is kept in this browser as you work.</p>
+  </div>
+
+  <div class="wd-bar">
+    <label class="grow">Book title (for the file name)<input id="wd-name" type="text" value="My book"></label>
+    <label>Printer<select id="wd-retailer">
+      {% for k, r in retailers.items() %}<option value="{{ k }}">{{ r.label }}</option>{% endfor %}
+    </select></label>
+    <label>Paper<select id="wd-paper">
+      {% for k, p in papers.items() %}<option value="{{ k }}">{{ p.label }}</option>{% endfor %}
+    </select></label>
+    <label>Binding<select id="wd-binding">
+      <option value="paperback">Paperback</option><option value="hardcover">Hardcover (case)</option>
+      <option value="jacket">Dust jacket</option>
+    </select></label>
+    <label>Trim<select id="wd-trim">
+      {% for w, h, name in trims %}<option value="{{ w }}x{{ h }}"{% if w == 6.0 and h == 9.0 %} selected{% endif %}>{{ '%g' % w }} × {{ '%g' % h }} in — {{ name }}</option>{% endfor %}
+    </select></label>
+    <label>Pages<input id="wd-pages" type="number" value="320" min="24" max="1000" step="10" style="width:90px"></label>
+  </div>
+  <div class="wd-bar">
+    <button class="btn btn-sm" id="wd-add-text" type="button">+ Text</button>
+    <button class="btn btn-sm" id="wd-add-rect" type="button">+ Shape</button>
+    <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:13px;color:var(--muted)">
+      <input id="wd-guides" type="checkbox" checked> Guides</label>
+    <span class="grow"></span>
+    <button class="btn btn-sm btn-ghost" id="wd-reset" type="button">Start over</button>
+    <button class="btn btn-primary" id="wd-proof-btn" type="button">Proof</button>
+  </div>
+
+  <div class="wd-grid">
+    <div>
+      <div class="wd-stage"><svg id="wd-svg" xmlns="http://www.w3.org/2000/svg" aria-label="The cover wrap"></svg>
+        <div class="wd-legend">
+          <span><i style="border-color:#e53935"></i>Trim (where it's cut)</span>
+          <span><i style="border-color:#1e88e5"></i>Spine folds</span>
+          <span><i style="border-color:#00897b;border-top-style:dashed"></i>Safe zone: keep text inside</span>
+        </div>
+      </div>
+    </div>
+    <aside class="wd-side">
+      <div class="wd-card wd-props" id="wd-props"><h3>Selected</h3><p>Click something on the cover.</p></div>
+      <div class="wd-card"><h3>Checks</h3><ul class="wd-checks" id="wd-checks"></ul></div>
+      <div class="wd-card"><h3>Proof</h3>
+        <div id="wd-proof-msg"><p>Press <b>Proof</b> to build the PDF the printer gets.</p></div>
+        <div id="wd-proof"></div></div>
+      <div class="wd-card"><h3>Layers</h3><ul class="wd-layers" id="wd-layers"></ul></div>
+      <div class="wd-card"><h3>Art</h3>
+        <p>Choose a picture, then place it or make it the front cover.</p>
+        <div class="wd-art">
+          <select id="wd-art-pick" style="flex:1;min-width:0">
+            <option value="{{ stand_in }}">Placeholder (dusk)</option>
+            {% for a in assets %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+          </select>
+          <button class="btn btn-sm" id="wd-art-upload" type="button">Upload…</button>
+          <input id="wd-art-file" type="file" accept=".jpg,.jpeg,.png" hidden>
+        </div>
+        <div class="wd-art">
+          <button class="btn btn-sm" id="wd-art-front" type="button">Front cover</button>
+          <button class="btn btn-sm" id="wd-art-back" type="button">Back cover</button>
+          <button class="btn btn-sm" id="wd-art-place" type="button">Place</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script id="wd-config" type="application/json">{{ {'fonts': fonts, 'standIn': stand_in, 'retailers': retailers} | tojson }}</script>
+  <script src="{{ url_for('static', filename='wrap_text.js') }}"></script>
+  <script src="{{ url_for('static', filename='wrap_designer.js') }}"></script>
+{% endblock %}
