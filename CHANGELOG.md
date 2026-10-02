@@ -10,6 +10,17 @@ line here.
 
 ## Unreleased
 
+### Added
+
+- **Wrap designer (beta).** A new tab for laying out the whole printed cover
+  yourself: back, spine and front, at the exact size your printer needs for
+  your page count, paper and binding. Drag text, colour blocks and pictures
+  where you want them; blurbs wrap exactly as they will in print; and the
+  checks warn you about text outside the safe zone or a spine too thin for
+  text. **Proof** builds the real PDF to download. It is a first version for
+  trying out: designs are kept in your browser and are not yet saved with a
+  project or used by Send to print.
+
 ### Fixed
 
 - **A long footnote runs on to the next page.** A footnote too long for the

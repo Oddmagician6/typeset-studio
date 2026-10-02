@@ -38,6 +38,8 @@ test_history.py   Manuscript safety: atomic writes, snapshots, thinning, restore
 test_update.py    The version check: consent, caching, and every way a feed can misbehave.
 test_rebuild.py   Rebuild all: one project's build answered in JSON, failures included.
 test_rich_editor.py The rich editor, edited in a headless browser: round trips, Enter, paste.
+test_wrap_designer.py The wrap designer: routes, geometry, the PDF, and the editor in a browser.
+wrap_design.py    Freeform wrap designs (#72 beta): the design document, width tables, and its PDF.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -2108,7 +2110,7 @@ tall flowable — a chapter opening's sink — no longer fitted: **the whole PDF
   fail on the old engine with the `LayoutError`.
 
 **72. A freeform wrap designer — design the whole cover yourself, in the app** *(large;
-several sessions; asked for 2026-10-02)* — **PLANNED; phase A done**
+several sessions; asked for 2026-10-02)* — **PLANNED; phase A done, beta tab shipped**
 Templates (#16, #33) give a professional cover from a few fields, and #66 / #68 serve a writer
 who has a designer. Missing is the writer who wants to *design* the wrap themselves without
 leaving the app: place the art, set the title where they want it, run a band across the spine,
@@ -2185,6 +2187,29 @@ as the page count widens the spine, exact drag distances. **Decision: hand-rolle
 canvas library measures text the 5-in-17,640 way and its text layer would need replacing
 anyway. Carried into phase B: flag glyphs a font lacks, image crop and dpi, undo, layers, and a
 WebKit check before a macOS build.
+**Beta tab — SHIPPED for testing (2026-10-02), ahead of phase B.** The spike editor now lives in
+the app as its own **Wrap designer** tab (`/wrap-designer`), so it can be tried for real:
+- `wrap_design.py` is the spike's model promoted — the design document, `metrics()`, and
+  `build_pdf`, which skips an element whose font or picture is missing rather than failing the
+  wrap. It reads fonts from the app's font library and art from the cover-art library
+  (`COVER_ASSET_DIR`) plus a generated stand-in picture in `out/_wrap_designer/`; the routes only
+  serve bare `.ttf` / image names found in those folders.
+- **The spine is the app's spine:** the page's printer, paper, binding, trim and page count go
+  through `_wrap_dims`, the same function the cover editor's wrap and the print package use, so
+  paper thickness, case boards and jacket flaps are all real, and `_wrap_dims`' warnings (KDP
+  and jackets, hardcover trims) are shown.
+- Beyond the spike: layers (reorder, delete), art upload into the cover-art library and "front
+  cover / back cover / place", live **checks** (text inside the safe zones — `WRAP_SAFE` on the
+  panels, `WRAP_SPINE_SAFE` on the spine — spine text against the printer's page minimum, and
+  characters the font lacks, which would print blank), Proof with a line-break comparison and a
+  download, and the design autosaved in the browser.
+- **Not yet:** saving a design with a project, Send to print using it, undo, image crop/zoom and
+  dpi, "Customise this design" from a template. Those are phases B–D.
+- `test_wrap_designer.py`: the routes and what they refuse, geometry agreeing with `_wrap_dims`
+  (paper and binding change the spine; KDP is warned off jackets), a real build (page size to the
+  point, the engine's line breaks, a missing picture skipped), and — in headless Chrome — Proof
+  agreeing box by box, the front panel moving by what the spine grew, a drag landing where it
+  was dragged, and the checks catching text outside the safe zone and a missing glyph.
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 
