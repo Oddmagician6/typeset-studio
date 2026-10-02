@@ -1839,6 +1839,29 @@ doc_model / WYSIWYG round-trip:
   the paid-app scan reached the same conclusion from the other direction, and endnotes/footnotes/
   figures are specced there alongside the other missing block types.)*
 
+- **74. Tabletop RPG rulebooks and adventures (D&D-style)** — **FUTURE** *(large; noted
+  2026-10-02 at the user's request, not scheduled)*. A big self-publishing market (DMs Guild,
+  DriveThruRPG, Kickstarter zines) whose books have a strong, recognisable look and few
+  affordable tools that do it. It fits the app's bet: a family of "game book" **presets** owns
+  the look, and the manuscript carries only structure. What it would need, roughly by cost:
+  - **Typed blocks**, the same mechanism as the epistolary blocks (#4): a **stat block**
+    (`~~~ statblock name="…" size="…"` with ability scores laid out as a table, then traits and
+    actions), **read-aloud boxed text** (the shaded "read this to the players" box), and
+    **sidebars** / callouts. These reuse the block model, `doc_model` round trip and WYSIWYG.
+  - **Two-column body text**, the defining layout. ReportLab can do it with two frames per
+    page template; the hard parts are a column-spanning element (a full-width map or table
+    between two-column runs) and keeping footnotes, figures and the rich-mode preview right.
+  - Headings at more levels (chapter, section, sub-section, room keys like "A3. Guard Room"),
+    running heads by section, art spots and full-page maps (figures already exist; full-bleed
+    pages are the imposition work noted under Tier 5E), and a **table of contents with
+    sections**, likely an **index** (ruled out for novels in Tier 5H, but rulebooks expect one).
+  - A parchment-style background and ornament set as preset options, kept print-safe (light
+    enough for a black-and-white interior, and off for press-ready builds).
+  *Avoid the trade dress:* the look is genre convention, but the official books' fonts, page
+  art and logos are WotC's own, and a preset should look like the genre rather than copy
+  those books. Sequence after the wrap designer (#72); start with the typed blocks, which are
+  cheap and useful in single column, before taking on two-column pagination.
+
 These grow *what* the app does; per the strategy note below, **packaging still grows *who* uses
 it**, and remains the bigger lever for a free+donate app. Rank poetry ≈ anthologies (cheap,
 on-philosophy) above nonfiction (heavier), and all below distribution.
