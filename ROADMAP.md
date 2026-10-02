@@ -2110,7 +2110,7 @@ tall flowable — a chapter opening's sink — no longer fitted: **the whole PDF
   fail on the old engine with the `LayoutError`.
 
 **72. A freeform wrap designer — design the whole cover yourself, in the app** *(large;
-several sessions; asked for 2026-10-02)* — **PLANNED; phase A done, beta tab shipped**
+several sessions; asked for 2026-10-02)* — **IN PROGRESS: phases A and B done, beta tab shipped**
 Templates (#16, #33) give a professional cover from a few fields, and #66 / #68 serve a writer
 who has a designer. Missing is the writer who wants to *design* the wrap themselves without
 leaving the app: place the art, set the title where they want it, run a band across the spine,
@@ -2210,6 +2210,36 @@ the app as its own **Wrap designer** tab (`/wrap-designer`), so it can be tried 
   point, the engine's line breaks, a missing picture skipped), and — in headless Chrome — Proof
   agreeing box by box, the front panel moving by what the spine grew, a drag landing where it
   was dragged, and the checks catching text outside the safe zone and a missing glyph.
+**Phase B — a design belongs to a book: SHIPPED (2026-10-02).** The designer was a scratchpad
+(designs lived in the browser); now a design is a book's cover.
+- **One set of print settings.** Picking a book opens it with its style's trim (locked — the
+  trim is the style's to change), its last build's page count, and its Send to print printer,
+  paper and binding (`_project_wrap_settings`). **Save to book** stores the design as
+  `wrap_design` on the project *and* writes the printer, paper and binding back to the
+  project's `print_*` fields, so the wrap designed and the wrap packaged can't disagree.
+- **A new cover mode, `wrap`, reusing the uploaded-art path.** Saving renders the design's front
+  — the trim, not the panel, so a jacket's board allowance is left off — to a 300 dpi JPG
+  (`wrap_design.render_front`, cropped to exactly the trim: the panel rarely starts on a whole
+  pixel and the clip rounds out). `_project_meta` turns `cover_mode: 'wrap'` into `image` with
+  that JPG and no title overlay, so page 1, the EPUB cover and the store-listing JPG all come
+  from the design through code that already worked; the JPG is re-rendered if it goes missing.
+  The edit page offers "My wrap design" once a book has one, with a link back.
+- **Send to print builds the design** (`build_print_package`): with `cover_mode: 'wrap'` the
+  wrap is `wrap_design.build_pdf` at the *interior's real page count*, reported through
+  `wrap_design.summary` in the shape `build_cover_wrap` returns, so the page and spec sheet are
+  unchanged. Every picture is measured at the size it is placed at (`placed_images` +
+  `image_cover_check`); spine text on a book under the printer's minimum is flagged, not
+  silently dropped — the design is the writer's.
+- **The example design fits the book.** It was laid out in fixed inches for 6×9, so on a
+  smaller trim it opened with text outside the safe zone; it is now laid out from the panel
+  size, and only takes spine text where the printer allows it.
+- `test_wrap_designer.py` gained the phase B half (a book's settings, a bad design refused, the
+  save writing design + print settings + cover mode, the 1800×2700 front, `_project_meta`, the
+  edit page, and a publish package whose wrap is the design at the real page count with its
+  spine and picture checks) and a second browser pass (a book opened by link, its trim locked,
+  Save to book).
+- **Still to come (phases C–D):** undo, image crop/zoom, "Customise this design" from a template,
+  flowed-text niceties (justify), align/distribute, flaps' own content presets.
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 

@@ -85,8 +85,21 @@
               <option value="none"     {{ 'selected' if cmode=='none' }}>None</option>
               <option value="designed" {{ 'selected' if cmode=='designed' }}>Designed template</option>
               <option value="image"    {{ 'selected' if cmode=='image' }}>Uploaded image</option>
+              {% if proj.get('wrap_design') or cmode=='wrap' %}
+              <option value="wrap"     {{ 'selected' if cmode=='wrap' }}>My wrap design</option>
+              {% endif %}
             </select></div>
         </div>
+
+        <div id="pe-cover-wrap" class="pe-cover-panel">
+          <p class="hint" style="margin:10px 0 2px">This book uses the whole cover you laid out
+            in the <a href="{{ url_for('wrap_designer', project=pid) }}">Wrap designer</a>: its
+            front is page 1 and the ebook cover, and Send to print uses the full wrap.</p>
+        </div>
+        {% if not proj.get('wrap_design') %}
+          <p class="hint" style="margin:8px 0 0">Want to lay out the whole cover yourself?
+            Open this book in the <a href="{{ url_for('wrap_designer', project=pid) }}">Wrap designer</a>.</p>
+        {% endif %}
 
         <div id="pe-cover-designed" class="pe-cover-panel">
           <p class="hint" style="margin:10px 0 2px">The big <strong>title</strong> and the coloured
@@ -168,7 +181,8 @@
       (function(){
         var sel=document.getElementById('pe-cover-mode');
         var panels={designed:document.getElementById('pe-cover-designed'),
-                    image:document.getElementById('pe-cover-image')};
+                    image:document.getElementById('pe-cover-image'),
+                    wrap:document.getElementById('pe-cover-wrap')};
         function sync(){for(var k in panels){if(panels[k])panels[k].classList.toggle('on',sel.value===k);}}
         sel.addEventListener('change',sync);sync();
       })();
