@@ -10,6 +10,13 @@ line here.
 
 ## Unreleased
 
+### Added
+
+- **Rebuild all.** The Projects page has a button that builds every book again
+  with its current style and settings, one after another, showing each one as
+  it finishes with its PDF and EPUB links and anything its checks found. Filter
+  the page first and it rebuilds only the books you can see.
+
 ### Fixed
 
 - **Rich mode no longer deletes your scene breaks.** Editing a book in rich

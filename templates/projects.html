@@ -41,6 +41,23 @@
   .card .actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:auto}
   .card .actions .sep{flex:1}
   .empty,.noresults{color:var(--muted);font-size:15px;margin-top:8px}
+
+  /* Rebuild all: one row per book, filled in as each build finishes */
+  .rebuild{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+    box-shadow:var(--shadow);padding:14px 18px;margin:0 0 20px;display:none}
+  .rebuild.on{display:block}
+  .rebuild .head{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin:0 0 8px}
+  .rebuild .head b{font-family:var(--serif);font-size:16px}
+  .rebuild .head .sum{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .rebuild ol{list-style:none;margin:0;padding:0}
+  .rebuild li{display:grid;grid-template-columns:1.2em minmax(0,1fr) auto;gap:4px 10px;
+    padding:6px 0;border-top:1px solid var(--rule);font-size:14px;align-items:baseline}
+  .rebuild .mark{font-family:var(--mono);color:var(--faint)}
+  .rebuild li.ok .mark,.rebuild li.warn .mark{color:var(--ink)}
+  .rebuild li.bad .mark,.rebuild li.bad .msg{color:var(--red)}
+  .rebuild .links{display:flex;gap:6px}
+  .rebuild .msg{grid-column:2 / -1;font-size:12.5px;color:var(--muted)}
+  .rebuild .msg:empty{display:none}
   .noresults{display:none}
 {% endblock %}
 
@@ -66,14 +83,21 @@
              autocomplete="off" aria-label="Filter projects">
     </div>
     <span class="count" id="proj-count">{{ projects|length }} project{{ 's' if projects|length != 1 }}</span>
+    <button class="btn btn-sm" type="button" id="rebuild-all"
+            title="Build every book again with its current style and settings">Rebuild all</button>
   </div>
+  <section class="rebuild" id="rebuild" aria-live="polite">
+    <div class="head"><b>Rebuilding</b><span class="sum" id="rebuild-sum"></span></div>
+    <ol id="rebuild-list"></ol>
+  </section>
   {% endif %}
 
   <div class="grid" id="proj-grid">
     {% for item in projects %}
       {% set p = item.data %}
       {% set style_name = preset_map.get(p.preset, {}).get('name', p.preset) %}
-      <article class="card"
+      <article class="card" data-pid="{{ item.id }}"
+               data-name="{{ p.name or p.title or 'Untitled' }}"
                data-search="{{ (p.name ~ ' ' ~ (p.title or '') ~ ' ' ~ (p.author or '') ~ ' ' ~ style_name)|lower }}">
         <div class="top">
           {% if item.has_thumb %}
@@ -176,6 +200,101 @@
         }
       }
       input.addEventListener('input', apply);
+
+      // ---- Rebuild all: the books on show, one request each, in order ----
+      var btn  = document.getElementById('rebuild-all');
+      var box  = document.getElementById('rebuild');
+      var list = document.getElementById('rebuild-list');
+      var sum  = document.getElementById('rebuild-sum');
+      var running = false;
+
+      function shownCards() {
+        return cards.filter(function (c) { return c.style.display !== 'none'; });
+      }
+      function label() {                  // says what a click will do while filtered
+        var n = shownCards().length;
+        btn.textContent = n === total ? 'Rebuild all' : 'Rebuild ' + n + ' shown';
+        btn.disabled = running || n === 0;
+      }
+      input.addEventListener('input', label);
+
+      function el(tag, cls, text) {
+        var e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text) e.textContent = text;
+        return e;
+      }
+      function link(href, text) {
+        var a = el('a', 'btn btn-sm', text); a.href = href; return a;
+      }
+
+      btn.addEventListener('click', function () {
+        var todo = shownCards();
+        if (!todo.length || running) return;
+        running = true; label();
+        list.innerHTML = ''; box.classList.add('on');
+        var rows = todo.map(function (c) {
+          var li = el('li');
+          li.appendChild(el('span', 'mark', '·'));
+          li.appendChild(el('span', 'name', c.getAttribute('data-name')));
+          li.appendChild(el('span', 'links'));
+          li.appendChild(el('span', 'msg', 'Waiting'));
+          list.appendChild(li);
+          return li;
+        });
+        var done = 0, failed = 0, flagged = 0;
+
+        function next(i) {
+          sum.textContent = (i < todo.length ? (i + 1) + ' of ' + todo.length : 'Finished')
+            + (done ? ' · ' + done + ' built' : '') + (failed ? ' · ' + failed + ' failed' : '')
+            + (flagged ? ' · ' + flagged + ' with checks to look at' : '');
+          if (i >= todo.length) { running = false; label(); return; }
+          var li = rows[i], card = todo[i];
+          li.querySelector('.mark').textContent = '…';
+          li.querySelector('.msg').textContent = 'Building…';
+          fetch('/project/' + encodeURIComponent(card.getAttribute('data-pid')) + '/rebuild',
+                {method: 'POST', headers: {'X-Requested-With': 'fetch'}})
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+              var msg = li.querySelector('.msg'), links = li.querySelector('.links');
+              if (!j.ok) {
+                failed++; li.className = 'bad';
+                li.querySelector('.mark').textContent = '✕';
+                msg.textContent = j.error;
+                return;
+              }
+              done++;
+              var notes = (j.warnings || []).concat(j.issues || []);
+              if (notes.length) flagged++;
+              li.className = notes.length ? 'warn' : 'ok';
+              li.querySelector('.mark').textContent = notes.length ? '!' : '✓';
+              // the page-count check already says how many pages there are
+              var counted = notes.some(function (n) { return n.indexOf('Page count') === 0; });
+              msg.textContent = (counted ? '' : (j.pages ? j.pages + ' pages' : 'Ebook only')
+                + (notes.length ? ' — ' : '')) + notes.join(' · ');
+              if (j.pdf)  links.appendChild(link(j.pdf, 'PDF'));
+              if (j.epub) links.appendChild(link(j.epub, 'EPUB'));
+              // a book built for the first time swaps its letter for page 1
+              var thumb = card.querySelector('.thumb');
+              if (j.thumb && thumb) {
+                if (thumb.tagName !== 'IMG') {
+                  var img = el('img', 'thumb');
+                  img.alt = 'Cover of ' + card.getAttribute('data-name');
+                  thumb.replaceWith(img); thumb = img;
+                }
+                thumb.src = j.thumb + '?t=' + Date.now();
+              }
+            })
+            .catch(function () {
+              failed++; li.className = 'bad';
+              li.querySelector('.mark').textContent = '✕';
+              li.querySelector('.msg').textContent = 'No answer from the app — is it still running?';
+            })
+            .then(function () { next(i + 1); });
+        }
+        next(0);
+      });
+      label();
     })();
   </script>
 {% endblock %}
