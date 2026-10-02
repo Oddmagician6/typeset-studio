@@ -12,6 +12,10 @@ line here.
 
 ### Fixed
 
+- **Rich mode no longer deletes your scene breaks.** Editing a book in rich
+  mode saved it without any of its `* * *` breaks, and turned a `#* Prologue`
+  into a numbered chapter. Both now come through. If a book lost its breaks
+  this way, the History panel has the versions from before.
 - **A note that cites another note keeps its number.** A note reading "See
   also [^b]" printed as "See also for more", with the number missing. The
   number now prints, and in the ebook it links to the note it names.

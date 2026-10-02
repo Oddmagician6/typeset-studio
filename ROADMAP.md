@@ -280,6 +280,15 @@ created, updated    ISO 8601 datetime strings
   `\*` / `\[` mechanism, which `doc_model` mirrors) cannot express it without teaching the
   round-trip model about cells — a new node type for a rare need in a low-priority block.
 
+- **`WYS.read` lets the editor's own blocks through before the foreign-element check.** That
+  check drops anything `contenteditable="false"` so a writing aid's cards stay out of the
+  manuscript, and a scene break is `contenteditable="false"` too. Without the `data-block`
+  exemption every break in a book vanished the first time it was edited in rich mode — shipped
+  that way from the writing-aid fix (2026-07-31) to 1.2.3. Anything the editor renders as
+  uneditable needs a `data-block` (or, inline, a `data-note`) to survive `read`. Same lesson for
+  block flags: a chapter's `unnumbered` was dropped by `render`/`read` until it got a
+  `data-unnumbered`, so check a new model field against `read(render(m))`, not just the Markdown.
+
 - **A note reference is its own run in the document model, never plain text** (#69). The
   escape layer used to lose `\[^note]`: `_parse_inline` read the literal and the live reference
   as the same plain-run text, so a round trip turned one into the other. A reference is now a

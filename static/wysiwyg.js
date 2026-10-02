@@ -167,6 +167,8 @@
       // round-trips through read(); its text is edited in Markdown mode, like
       // doc-block metadata. Kept out of textContent so title stays clean.
       if (b.byline) el.dataset.byline = b.byline;
+      // `#* Prologue` takes no number; the flag rides along the same way
+      if (b.unnumbered) el.dataset.unnumbered = 'yes';
       if (!el.textContent) el.appendChild(document.createElement('br'));
     } else if (b.type === 'part') {
       el = document.createElement('h2');
@@ -354,8 +356,12 @@
 
   function readBlockEl(el) {
     var type = blockTypeOf(el);
-    if (type === 'chapter') return { type: 'chapter', title: titleOrNull(el),
-                                     byline: (el.dataset && el.dataset.byline) || null };
+    if (type === 'chapter') {
+      var ch = { type: 'chapter', title: titleOrNull(el),
+                 byline: (el.dataset && el.dataset.byline) || null };
+      if (el.dataset && el.dataset.unnumbered) ch.unnumbered = true;   // `#*`
+      return ch;
+    }
     if (type === 'part')    return { type: 'part', title: titleOrNull(el) };
     if (type === 'subhead') return { type: 'subhead', runs: readInline(el) };
     if (type === 'scene')   return { type: 'scene' };
@@ -379,7 +385,10 @@
   function read(root) {
     var blocks = [];
     Array.prototype.forEach.call(root.children, function (el) {
-      if (isForeignEl(el)) return;          // an extension's overlay, not a block
+      // An extension's overlay, not a block. Our own blocks are let through first:
+      // a scene break is contenteditable="false" too, and skipping it saved the
+      // book without a single one of its breaks.
+      if (!(el.dataset && el.dataset.block) && isForeignEl(el)) return;
       // skip stray empty text-only wrappers the browser may leave behind
       var b = readBlockEl(el);
       if (b.type === 'para' || b.type === 'subhead') {
