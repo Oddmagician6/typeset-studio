@@ -93,6 +93,29 @@ f.onload = function () {
         fire('pointerdown', cx, cy, t); fire('pointermove', cx + 100, cy, svg); fire('pointerup', cx + 100, cy, svg);
         var perPx = g1.wrap_w / svg.getBoundingClientRect().width;
         out.drag_ok = Math.abs((title.x - tx) - 100 * perPx) < 0.01;
+        var moved = title.x;
+        var key = function (k, shift) {
+          d.dispatchEvent(new w.KeyboardEvent('keydown', {key:k, ctrlKey:true, shiftKey:!!shift, bubbles:true}));
+        };
+        var T = function () { return E.design().elements.find(function (e) { return e.id === 'title'; }); };
+        key('z');
+        out.undo_ok = Math.abs(T().x - tx) < 1e-9;
+        key('y');
+        out.redo_ok = Math.abs(T().x - moved) < 1e-9;
+        var n0 = E.design().elements.length;
+        d.querySelector('#wd-layers li button[title="Delete"]').click();      // the top layer
+        var n1 = E.design().elements.length;
+        key('z');
+        out.delete_undo_ok = n1 === n0 - 1 && E.design().elements.length === n0;
+        // zoom the front picture: its drawn width doubles
+        var art = E.design().elements.find(function (e) { return e.type === 'image' && e.fill === 'front'; });
+        var pic = function () { return svg.querySelector('[data-id="' + art.id + '"] svg image'); };
+        var w0 = pic() ? +pic().getAttribute('width') : 0;
+        art.zoom = 2; art.fx = 0;
+        d.getElementById('wd-guides').dispatchEvent(new w.Event('change'));
+        var w1 = pic() ? +pic().getAttribute('width') : 0;
+        out.zoom_ok = w0 > 0 && Math.abs(w1 - 2 * w0) < 1e-6 && Math.abs(+pic().getAttribute('x')) < 1e-9;
+        title = T();
         title.text = 'Title with a stray क glyph';
         title.x = -0.4;
         d.getElementById('wd-guides').dispatchEvent(new w.Event('change'));
@@ -221,6 +244,21 @@ try:
     check('the preview picture is there', res['png'].startswith('data:image/png;base64,'))
     gg = engine.wrap_geometry(A._wrap_dims({}, 320))
     x = WDm.el_rect(gg, DESIGN['elements'][4])[0]
+    zdesign = {'elements': [{'id': 'pic', 'type': 'image', 'anchor': 'front', 'x': 1, 'y': 1,
+                             'w': 2, 'h': 2, 'src': 'stand-in-dusk.png', 'zoom': 2, 'fx': 0, 'fy': 1}]}
+    zp = os.path.join(tmp, 'zoom.pdf')
+    WDm.build_pdf(zdesign, A._wrap_dims({}, 320), zp)
+    zg = engine.wrap_geometry(A._wrap_dims({}, 320))
+    with fitz.open(zp) as zd:
+        info = zd[0].get_image_info()
+    r_ = info[0]['bbox'] if info else (0, 0, 0, 0)
+    bx, by = (zg['front_x'] + 1) * 72, (zg['edge'] + 1) * 72
+    # the stand-in is 1200x1800: cover-fit to 2" wide is 3" tall, then zoomed 2x
+    check('zoom and focus reach the PDF: 4x6" picture, left edge and bottom pinned',
+          abs((r_[2] - r_[0]) - 4 * 72) < 0.5 and abs((r_[3] - r_[1]) - 6 * 72) < 0.5
+          and abs(r_[0] - bx) < 0.5 and abs(r_[3] - (by + 2 * 72)) < 0.5, (r_, bx, by))
+    pl = WDm.placed_images(zdesign, zg)
+    check('a zoomed picture is measured at its zoomed size', pl and pl[0][1:] == (4, 4), pl)
     check('spine text placed from the spine\'s centre',
           abs(x - (gg['spine_x'] + gg['spine_w'] / 2 + 0.11)) < 1e-9)
 
@@ -305,6 +343,11 @@ try:
             check('more pages: the front panel moves by what the spine grew',
                   result['front_moved_with_spine'])
             check('a drag moves the title by the distance dragged', result['drag_ok'])
+            check('Ctrl+Z undoes the drag', result['undo_ok'])
+            check('Ctrl+Y redoes it', result['redo_ok'])
+            check('a deleted layer comes back with undo', result['delete_undo_ok'])
+            check('zooming a picture to 2x draws it twice as wide, pinned left',
+                  result['zoom_ok'])
             check('the checks catch text outside the safe zone',
                   'Outside the safe zone' in result['checks'], result['checks'])
             check('and a character the font doesn\'t have',

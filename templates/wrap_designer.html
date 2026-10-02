@@ -11,6 +11,7 @@
     font-family:var(--sans);font-size:13.5px;color:var(--ink);background:var(--surface-2);
     border:1px solid var(--rule-strong);border-radius:2px;padding:6px 8px}
   .wd-bar .grow{flex:1}
+  .wd-bar .btn:disabled{opacity:.45;cursor:default}
   .wd-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
   @media (max-width:980px){.wd-grid{grid-template-columns:1fr}}
   .wd-stage{background:#7d786d;border-radius:3px;padding:12px;overflow:auto;box-shadow:var(--shadow)}
@@ -88,6 +89,8 @@
   <div class="wd-bar">
     <button class="btn btn-sm" id="wd-add-text" type="button">+ Text</button>
     <button class="btn btn-sm" id="wd-add-rect" type="button">+ Shape</button>
+    <button class="btn btn-sm" id="wd-undo" type="button" title="Undo (Ctrl+Z)" disabled>Undo</button>
+    <button class="btn btn-sm" id="wd-redo" type="button" title="Redo (Ctrl+Y)" disabled>Redo</button>
     <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:13px;color:var(--muted)">
       <input id="wd-guides" type="checkbox" checked> Guides</label>
     <span class="grow"></span>
