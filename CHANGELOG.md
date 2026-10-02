@@ -19,6 +19,21 @@ line here.
 
 ### Fixed
 
+- **Rich mode edits safely.** A round of fixes from testing the rich editor
+  the way you use it:
+  - Clicking Chapter or Subhead with the cursor inside a letter, poem or
+    figure no longer replaces the whole block with a heading.
+  - Turning a paragraph into a subhead keeps its italics, bold, links and notes.
+  - Shift+Enter no longer glues the last word of one line to the next.
+  - Pasting from Word, Google Docs or a web page keeps paragraphs and list
+    items apart and keeps italics, without turning a whole Google Docs paste
+    bold. A copied word keeps the space after it.
+  - A space typed after a note or a link is an ordinary space, not a
+    non-breaking one. Non-breaking spaces already in your manuscript stay.
+  - Enter at the end of a subhead starts a normal paragraph.
+  - Backspace after a scene break removes just the break.
+  - Enter on an empty last line leaves a letter, list or caption; in a poem,
+    Enter twice starts a new stanza and a third time leaves the poem.
 - **Rich mode no longer deletes your scene breaks.** Editing a book in rich
   mode saved it without any of its `* * *` breaks, and turned a `#* Prologue`
   into a numbered chapter. Both now come through. If a book lost its breaks

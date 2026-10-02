@@ -37,6 +37,7 @@ test_press.py     Press-ready interiors: colour, boxes and annotations, read bac
 test_history.py   Manuscript safety: atomic writes, snapshots, thinning, restore and undo.
 test_update.py    The version check: consent, caching, and every way a feed can misbehave.
 test_rebuild.py   Rebuild all: one project's build answered in JSON, failures included.
+test_rich_editor.py The rich editor, edited in a headless browser: round trips, Enter, paste.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -1956,6 +1957,46 @@ current style and settings.
   project answered as failures in JSON with the project untouched, and Regenerate's result page
   and failure redirect unchanged. The page itself was driven in headless Chrome against
   throwaway data dirs: progress, the failure row, the filtered label and the thumbnail swap.
+
+**71. A rich-mode sweep — the editor tested by editing in a browser** *(medium; prompted by the
+scene-break loss in 1.2.3)* — **SHIPPED**
+The scene-break bug (rich mode saved a book without any of its breaks) had shipped because
+nothing tested the rich editor the way it is used: by a browser, editing. The sweep drove the real
+editor page in headless Chrome through 40 edits a writer makes. The engine side held — every
+manuscript round-trips to the same book — but ordinary editing did not:
+- **Chapter / Subhead / Part with the caret in a letter, poem or figure destroyed the block**,
+  replacing it with a heading made of its label and text. `convertBlock` now only converts a
+  plain line, and says so otherwise.
+- **Paragraph ⇄ subhead flattened** bold, italics, links and notes (a note became its bare
+  label). The children are moved now; only chapter and part titles, stored raw, take text.
+- **Shift+Enter glued words** ("First halfsecond half"): `read` ignored `<br>`. It is a space
+  now, and line edges are trimmed — the manuscript never has edge spaces, and the trim is also
+  what turns an empty line's placeholder `<br>` back into nothing.
+- **Paste glued paragraphs and list items** together and kept any `href`. A paste handler now
+  turns clipboard HTML (or plain text, blank line = paragraph) into blocks by the reader's own
+  rules (`WYS.pasteBlocks`) and inserts them as the editor's own lines (`WYS.insertPaste`): the
+  first joins the caret's line, the rest become lines of the same kind, the text after the caret
+  follows the last; headings take plain text. Only `LINK_TARGET` links survive (a pasted
+  `/relative` printed as literal brackets); an explicit style beats the tag, so Google Docs'
+  `<b style="font-weight:normal">` wrapper no longer bolds a whole paste; the edge space a
+  double-clicked word carries is kept, from the clipboard's plain text.
+- **Browser-made non-breaking spaces leaked into the manuscript** — the one a typed space
+  becomes after a note or link, or as a second space. `read` turns U+00A0 into a space unless it
+  sits in a `span[data-nbsp]`, which is how `render` marks the ones the manuscript really has
+  (a Word import's "Mr. Smith"), so those survive.
+- **Enter at the end of a subhead made the next paragraph a subhead** (the browser clones the
+  line it splits). **Backspace after a scene break** removed it and merged the paragraphs either
+  side; it removes only the break now, and Delete before one likewise. **There was no way out of
+  a block** at the end of a manuscript: Enter on an empty last line of a letter, list or caption
+  now leaves it, and in a poem — where one empty line is a stanza break — a second one does.
+- **Left as the browser does them, on purpose:** select-all then typing takes the first line's
+  kind (as in Word); Backspace at the start of a paragraph merges it into the heading above; a
+  typed ` | ` in a chapter title is the byline syntax. Not intercepted: drag-and-drop.
+- **`test_rich_editor.py` keeps it that way.** It serves the app on a thread against throwaway
+  folders, opens the real editor in headless Chrome/Edge (`TS_BROWSER` to point at one; with
+  none it says so and passes), runs `test_rich_editor.js`, and checks the corpus round trip at
+  the engine level plus the exact Markdown each of 40 scenarios leaves. Run against the editor
+  as it was before the sweep, most of them fail.
 
 **66. Send to print with an uploaded cover image** *(small–medium; the half #65 left out)* —
 **SHIPPED**
