@@ -16,7 +16,8 @@
  *     {type:"para",     runs:[run,...]}
  *     {type:"scene"}
  *     {type:"docblock", block_type:str, attrs:{k:v}, children:[para,...]}
- *     run = {text:str, bold:bool, italic:bool}
+ *     run = {text:str, bold:bool, italic:bool, link:str}
+ *     note run = {..., text:label, note:true}   -- an endnote reference `[^label]`
  */
 (function (global) {
   'use strict';
@@ -33,6 +34,8 @@
   // `[^label]: …` — an endnote's text. Kept as a plain paragraph here, but it
   // must start a new one. Mirrors manuscript.NOTE_DEF_RE.
   var NOTE_DEF_RE = /^\s*\[\^([\w\-]+)\]:\s*(.*)$/;
+  // `[^label]` — an endnote reference. Mirrors manuscript.NOTE_REF_RE.
+  var NOTE_REF_RE = /\[\^([\w\-]+)\]/g;
   var SCENE_BREAK_RE = /^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$/;
   var CHAPTER_RE     = /^#\s+(.*)$/;
   // `#* Prologue` — a chapter that takes no number. Mirrors manuscript.UNNUMBERED_RE.
@@ -65,6 +68,7 @@
   // ---- escape layer (private-use codepoints, same scheme as Python) --------
   var BSL = '\\';
   var PARK_STAR = '', PARK_UNDER = '', PARK_BSL = '', PARK_BRK = '';
+  var PARK_NOTE = '';      // stands in for one `[^label]` during emphasis
 
   function parkEscapes(text) {
     return text.split(BSL + BSL).join(PARK_BSL)   // \\ -> literal backslash
@@ -87,6 +91,17 @@
 
   function run(text, bold, italic, link) {
     return { text: text, bold: !!bold, italic: !!italic, link: link || '' };
+  }
+  // An endnote reference: a run of its own, so a literal `\[^label]` (a plain run
+  // reading "[^label]") can never be mistaken for one. `note` is only present on
+  // note runs, matching doc_model.py.
+  function noteRun(label, bold, italic) {
+    return { text: label, bold: !!bold, italic: !!italic, link: '', note: true };
+  }
+  function copyRun(r) {
+    var c = { text: r.text, bold: r.bold, italic: r.italic, link: r.link || '' };
+    if (r.note) c.note = true;
+    return c;
   }
 
   // ---- inline: markdown <-> runs -------------------------------------------
@@ -130,8 +145,9 @@
     runs.forEach(function (r) {
       var last = out[out.length - 1];
       if (last && last.bold === r.bold && last.italic === r.italic
-          && (last.link || '') === (r.link || '')) last.text += r.text;
-      else out.push({ text: r.text, bold: r.bold, italic: r.italic, link: r.link || '' });
+          && (last.link || '') === (r.link || '')
+          && !last.note && !r.note) last.text += r.text;
+      else out.push(copyRun(r));
     });
     return out.filter(function (r) { return r.text !== ''; });
   }
@@ -159,35 +175,58 @@
     text = parkEscapes(text);
     var out = [], pos = 0;
     eachMatch(LINK_RE, text, function (m) {
-      if (m.index > pos) out = out.concat(emphasisRuns(text.slice(pos, m.index)));
+      if (m.index > pos) out = out.concat(noteRuns(text.slice(pos, m.index)));
       var target = restoreEscapes(m[2]);
       emphasisRuns(m[1]).forEach(function (r) { r.link = target; out.push(r); });
       pos = m.index + m[0].length;
     });
-    if (pos < text.length) out = out.concat(emphasisRuns(text.slice(pos)));
+    if (pos < text.length) out = out.concat(noteRuns(text.slice(pos)));
     return coalesce(out);
   }
 
-  function emphMd(r) {
-    if (r.bold && r.italic) return '***' + escapeAll(r.text) + '***';
-    if (r.bold)   return '**' + escapeAll(r.text) + '**';
-    if (r.italic) return '*' + escapeAll(r.text) + '*';
-    return escapePlain(r.text);
+  // Emphasis runs for a link-free stretch, with its note references split out.
+  // References are swapped for a placeholder first — what the engine does with
+  // its own marker — so one inside **bold** comes out as a bold note run.
+  function noteRuns(text) {
+    var labels = [];
+    text = text.replace(NOTE_REF_RE, function (_, label) { labels.push(label); return PARK_NOTE; });
+    if (!labels.length) return emphasisRuns(text);
+    var out = [], q = 0;
+    emphasisRuns(text).forEach(function (r) {
+      r.text.split(PARK_NOTE).forEach(function (piece, k) {
+        if (k) out.push(noteRun(labels[q++], r.bold, r.italic));
+        if (piece) out.push({ text: piece, bold: r.bold, italic: r.italic, link: r.link || '' });
+      });
+    });
+    return out;
+  }
+
+  // Runs sharing one emphasis are written as a single span. They only sit side
+  // by side when a note reference splits them, and `**a**` + `**[^n]**` would join
+  // into `**a****[^n]**`, which does not read back. A reference is written bare.
+  function emphMd(group, forceEscape) {
+    var g = group[0];
+    var mark = g.bold && g.italic ? '***' : g.bold ? '**' : g.italic ? '*' : '';
+    return mark + group.map(function (r) {
+      if (r.note) return '[^' + r.text + ']';
+      return (mark || forceEscape) ? escapeAll(r.text) : escapePlain(r.text);
+    }).join('') + mark;
   }
 
   function emitRuns(runs, forceEscape) {
-    function one(r) {
-      return (forceEscape && !r.bold && !r.italic) ? escapeAll(r.text) : emphMd(r);
-    }
     var parts = [], i = 0;
     while (i < runs.length) {
-      var link = runs[i].link || '';
-      if (!link) { parts.push(one(runs[i])); i++; continue; }
-      var inner = [];                       // one [..](..) per run of the same link
-      while (i < runs.length && (runs[i].link || '') === link) {
-        inner.push(one(runs[i])); i++;
+      var link = runs[i].link || '', j = i;
+      while (j < runs.length && (runs[j].link || '') === link) j++;
+      var inner = [], k = i;
+      while (k < j) {                       // one span per emphasis
+        var m = k;
+        while (m < j && runs[m].bold === runs[k].bold && runs[m].italic === runs[k].italic) m++;
+        inner.push(emphMd(runs.slice(k, m), forceEscape));
+        k = m;
       }
-      parts.push('[' + inner.join('') + '](' + link + ')');
+      parts.push(link ? '[' + inner.join('') + '](' + link + ')' : inner.join(''));
+      i = j;
     }
     return parts.join('');
   }
@@ -197,9 +236,7 @@
   // bold. Check the assembled line, and re-emit fully escaped if it drifted.
   function runsToMd(runs) {
     var md = emitRuns(runs, false);
-    if (!sameRuns(parseInline(md), coalesce(runs.map(function (r) {
-      return { text: r.text, bold: r.bold, italic: r.italic, link: r.link || '' };
-    })))) md = emitRuns(runs, true);
+    if (!sameRuns(parseInline(md), coalesce(runs.map(copyRun)))) md = emitRuns(runs, true);
     return md;
   }
 
@@ -207,7 +244,7 @@
     if (a.length !== b.length) return false;
     for (var i = 0; i < a.length; i++) {
       if (a[i].text !== b[i].text || a[i].bold !== b[i].bold || a[i].italic !== b[i].italic
-          || (a[i].link || '') !== (b[i].link || ''))
+          || (a[i].link || '') !== (b[i].link || '') || !a[i].note !== !b[i].note)
         return false;
     }
     return true;
@@ -391,6 +428,7 @@
     toMarkdown: toMarkdown,
     // exposed for tests
     _parseInline: parseInline,
-    _run: run
+    _run: run,
+    _noteRun: noteRun
   };
 })(typeof window !== 'undefined' ? window : this);

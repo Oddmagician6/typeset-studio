@@ -61,6 +61,16 @@ def _endnotes_xhtml(chapters, preset):
     heading = em.get('heading', 'Notes')
     body = ['<div class="matter-body endnotes">',
             f'  <h1 class="matter-head">{html.escape(heading)}</h1>']
+    # Only a note the body cites has a reference to link back to. One cited only
+    # from inside another note, or never cited, gets a plain number: a back-link
+    # to an id that isn't there is a broken link the EPUB check reports.
+    cited = set()
+
+    def collect(text, ch):
+        cited.update(re.findall(r'id="noteref-(\d+-\d+)"', text))
+        return text
+    _ms_map_texts(chapters, collect)
+
     for i, ch in enumerate(chapters, start=1):
         notes = ch.get('notes') or []
         if not notes:
@@ -69,12 +79,16 @@ def _endnotes_xhtml(chapters, preset):
             label = ch.get('title') or f'Chapter {i}'
             body.append(f'  <h2 class="note-group">{_text_to_html(label)}</h2>')
         for note in notes:
-            text = _markup_to_html(note['text']) if note['text'] \
+            # a note citing a note links to that entry, here on the same page
+            text = _NOTE_MARK_RE.sub(
+                lambda m: f'<sup class="noteref"><a href="#note-{i}-{m.group(1)}">'
+                          f'{m.group(1)}</a></sup>',
+                _markup_to_html(note['text'])) if note['text'] \
                 else '<em>[no note text]</em>'
-            body.append(
-                f'  <p class="note" id="note-{i}-{note["n"]}">'
-                f'<a class="note-back" href="chapter{i:03d}.xhtml#noteref-{i}-{note["n"]}">'
-                f'{note["n"]}.</a> {text}</p>')
+            num = (f'<a class="note-back" href="chapter{i:03d}.xhtml#noteref-{i}-{note["n"]}">'
+                   f'{note["n"]}.</a>' if f'{i}-{note["n"]}' in cited
+                   else f'<span class="note-back">{note["n"]}.</span>')
+            body.append(f'  <p class="note" id="note-{i}-{note["n"]}">{num} {text}</p>')
     body.append('</div>')
     return _xhtml(heading, '\n'.join(body))
 
@@ -296,7 +310,7 @@ sup.noteref { font-size: 0.7em; line-height: 0; vertical-align: super; }
 sup.noteref a { text-decoration: none; }
 .endnotes h2.note-group { font-size: 1em; font-weight: bold; text-align: left; margin: 1.4em 0 0.5em; }
 .endnotes p.note { text-indent: -1.2em; padding-left: 1.2em; margin: 0 0 0.4em; font-size: 0.9em; }
-.endnotes a.note-back { text-decoration: none; font-weight: bold; }
+.endnotes .note-back { text-decoration: none; font-weight: bold; }
 .part-page { margin: 0 5%; text-align: center; padding-top: 30%; }
 .part-page .part-num { font-size: 0.9em; color: #666; margin: 0 0 0.5em; letter-spacing: 0.06em; }
 .part-page .part-title { font-size: 1.6em; font-weight: bold; margin: 0; }

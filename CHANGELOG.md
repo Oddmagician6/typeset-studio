@@ -8,6 +8,26 @@ line here.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **A note that cites another note keeps its number.** A note reading "See
+  also [^b]" printed as "See also for more", with the number missing. The
+  number now prints, and in the ebook it links to the note it names.
+- **Note labels with an underscore work.** A label like `[^my_note]` could
+  break the paragraph around it when that paragraph also had italics written
+  with underscores.
+- **A typed `\[^label]` stays literal.** Switching to rich mode turned it into
+  a real endnote with an entry on the Notes page. Typing `[^label]` in rich
+  mode still makes a note; it now shows as a small superscript that deletes in
+  one keystroke.
+- **No dead links on the ebook's Notes page.** A note the text never cites
+  linked back to a spot that doesn't exist, which the ebook check flagged as
+  a broken link.
+
+---
+
 ## 1.2.3 — 22 September 2026
 
 Your book goes out the door from here: Send to print packs the paperback for a

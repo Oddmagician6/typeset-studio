@@ -192,6 +192,8 @@
   .ms-rich em{font-style:italic}
   /* links read as links while writing; the book's own styling is the preset's */
   .ms-rich a{color:var(--red);text-decoration:underline;text-underline-offset:2px}
+  .ms-rich .wb-note{font-family:var(--mono);font-size:.62em;font-weight:400;font-style:normal;
+    color:var(--red);padding:0 1px;cursor:default;user-select:all}
   @media (max-width:880px){.work{grid-template-columns:1fr}.side{position:static}}
 {% endblock %}
 
@@ -270,7 +272,7 @@
           <tr><td><code>~~~ table</code> … <code>~~~</code></td><td>a table — one row per line, cells split on <code>|</code>. The first row is the header (<code>header="no"</code> to turn that off); add <code>align="left,right"</code>, <code>widths="3,1"</code> or <code>caption="…"</code></td></tr>
           <tr><td><code>~~~ center</code> · <code>~~~ right</code> · <code>~~~ left</code></td><td>an aligned block — one line per line</td></tr>
           <tr><td><code>[text](https://…)</code></td><td>a link — also <code>mailto:</code> and <code>#chapter-2</code> inside the book</td></tr>
-          <tr><td><code>a claim.[^src]</code> + <code>[^src]: the note</code></td><td>an endnote; numbers restart each chapter and a Notes page is added automatically</td></tr>
+          <tr><td><code>a claim.[^src]</code> + <code>[^src]: the note</code></td><td>an endnote; numbers restart each chapter and a Notes page is added automatically. A note can cite another, and in rich mode typing the closing <code>]</code> makes the reference</td></tr>
           <tr><td>blank line</td><td>new paragraph</td></tr>
         </table>
       </details>
@@ -798,7 +800,9 @@
       }
       modeBtn.addEventListener('click', function(){ richMode ? exitRich() : enterRich(); });
 
-      rich.addEventListener('input', function(){
+      rich.addEventListener('input', function(e){
+        // `[^label]` becomes a note reference as its closing bracket is typed
+        if (e.inputType === 'insertText' && e.data === ']') WYS.noteInputRule(rich);
         status('Editing…');
         clearTimeout(richSyncTimer);
         richSyncTimer = setTimeout(syncFromRich, 500);

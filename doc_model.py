@@ -31,7 +31,10 @@ A document is a list of blocks. Each block is a plain JSON-able dict:
                          "attrs": {key: value, ...},    # ordered as authored
                          "children": [para, ...]}       # each child is a para block
 
-    run = {"text": str, "bold": bool, "italic": bool}  # emphasis is non-nesting
+    run = {"text": str, "bold": bool, "italic": bool,  # emphasis is non-nesting
+           "link": str}                                 # "" outside a link
+    note run = {..., "text": label, "note": True}       # an endnote reference
+                                                        # `[^label]`; never merged
 
 Chapter and part titles are stored raw (no smartening / emphasis) to mirror the
 engine; subheads and paragraphs carry smartened text with emphasis runs.
@@ -75,6 +78,7 @@ _PARK_STAR = chr(0xE000)
 _PARK_UNDER = chr(0xE001)
 _PARK_BSL = chr(0xE002)
 _PARK_BRK = chr(0xE003)
+_PARK_NOTE = chr(0xE004)       # stands in for one `[^label]` during emphasis
 
 
 def _park_escapes(text):
@@ -124,12 +128,24 @@ def _run(text, bold=False, italic=False, link=""):
     return {"text": text, "bold": bold, "italic": italic, "link": link}
 
 
+def _note_run(label, bold=False, italic=False):
+    r"""An endnote reference. A run of its own, so a literal `\[^label]` (a plain
+    run whose text happens to read "[^label]") can never be mistaken for one —
+    run text alone cannot tell the two apart. The key is only present on note
+    runs, so a note-free model is exactly what it was before references existed."""
+    return {"text": label, "bold": bold, "italic": italic, "link": "", "note": True}
+
+
 def _parse_inline(text, smartquotes=True):
     """Smarten (optional), then split into emphasis runs.
 
     Links are carved out first: a target may contain ``_`` or ``*``, which the
     emphasis passes would otherwise eat. Each run carries the link it sits in
     (``""`` for ordinary text), so emphasis inside a link survives.
+
+    Note references are then swapped for a placeholder — what the engine does
+    with its own marker — so a reference inside ``**bold**`` comes out as a
+    bold note run, and the emphasis passes see exactly what the engine's do.
     """
     text = _park_escapes(text)
     if smartquotes:
@@ -139,14 +155,37 @@ def _parse_inline(text, smartquotes=True):
     pos = 0
     for m in manuscript.LINK_RE.finditer(text):
         if m.start() > pos:
-            out.extend(_emphasis_runs(text[pos:m.start()]))
+            out.extend(_note_runs(text[pos:m.start()]))
         for r in _emphasis_runs(m.group(1)):
             r["link"] = _restore_escapes(m.group(2))
             out.append(r)
         pos = m.end()
     if pos < len(text):
-        out.extend(_emphasis_runs(text[pos:]))
+        out.extend(_note_runs(text[pos:]))
     return _coalesce(out)
+
+
+def _note_runs(text):
+    """Emphasis runs for a link-free stretch, with its note references split out."""
+    labels = []
+
+    def park(m):
+        labels.append(m.group(1))
+        return _PARK_NOTE
+
+    text = manuscript.NOTE_REF_RE.sub(park, text)
+    if not labels:
+        return _emphasis_runs(text)
+    out = []
+    queue = iter(labels)
+    for r in _emphasis_runs(text):
+        pieces = r["text"].split(_PARK_NOTE)
+        for k, piece in enumerate(pieces):
+            if k:
+                out.append(_note_run(next(queue), r["bold"], r["italic"]))
+            if piece:
+                out.append(dict(r, text=piece))
+    return out
 
 
 def _emphasis_runs(text):
@@ -228,21 +267,35 @@ def _coalesce(runs):
     for r in runs:
         if (out and out[-1]["bold"] == r["bold"]
                 and out[-1]["italic"] == r["italic"]
-                and out[-1].get("link", "") == r.get("link", "")):
+                and out[-1].get("link", "") == r.get("link", "")
+                and not out[-1].get("note") and not r.get("note")):
             out[-1]["text"] += r["text"]
         else:
             out.append(dict(r))
     return [r for r in out if r["text"]]
 
 
-def _emph_md(r):
-    if r["bold"] and r["italic"]:
-        return f"***{_escape_all(r['text'])}***"
-    if r["bold"]:
-        return f"**{_escape_all(r['text'])}**"
-    if r["italic"]:
-        return f"*{_escape_all(r['text'])}*"
-    return _escape_plain(r["text"])
+_EMPH_MARK = {(True, True): "***", (True, False): "**", (False, True): "*"}
+
+
+def _emph_md(group, force_escape=False):
+    r"""Serialize runs sharing one emphasis as a single span.
+
+    Runs only sit side by side with the same emphasis when a note reference
+    splits them, and they have to share one marker pair: `**a**` + `**[^n]**`
+    would join into `**a****[^n]**`, which does not read back. A reference is
+    written bare — its label is `[\w-]`, with nothing in it to escape.
+    """
+    mark = _EMPH_MARK.get((group[0]["bold"], group[0]["italic"]), "")
+    parts = []
+    for r in group:
+        if r.get("note"):
+            parts.append(f"[^{r['text']}]")
+        elif mark or force_escape:
+            parts.append(_escape_all(r["text"]))
+        else:
+            parts.append(_escape_plain(r["text"]))
+    return mark + "".join(parts) + mark
 
 
 def _emit_runs(runs, force_escape=False):
@@ -250,20 +303,19 @@ def _emit_runs(runs, force_escape=False):
     i = 0
     while i < len(runs):
         link = runs[i].get("link", "")
-        if not link:
-            parts.append(_escape_all(runs[i]["text"]) if force_escape
-                         and not (runs[i]["bold"] or runs[i]["italic"])
-                         else _emph_md(runs[i]))
-            i += 1
-            continue
         j = i
-        inner = []
         while j < len(runs) and runs[j].get("link", "") == link:
-            inner.append(_escape_all(runs[j]["text"]) if force_escape
-                         and not (runs[j]["bold"] or runs[j]["italic"])
-                         else _emph_md(runs[j]))
             j += 1
-        parts.append(f"[{''.join(inner)}]({link})")
+        inner = []
+        k = i
+        while k < j:                                 # one span per emphasis
+            m = k
+            while (m < j and runs[m]["bold"] == runs[k]["bold"]
+                   and runs[m]["italic"] == runs[k]["italic"]):
+                m += 1
+            inner.append(_emph_md(runs[k:m], force_escape))
+            k = m
+        parts.append(f"[{''.join(inner)}]({link})" if link else "".join(inner))
         i = j
     return "".join(parts)
 
