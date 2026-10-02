@@ -8,7 +8,11 @@ line here.
 
 ---
 
-## Unreleased
+## 1.2.6 — 2 October 2026
+
+The Wrap designer can now make your book's actual cover: save a design to a
+book and Send to print builds the wrap from it. It also gains undo and redo,
+and pictures you can crop and zoom.
 
 ### Added
 
