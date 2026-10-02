@@ -1995,8 +1995,8 @@ manuscript round-trips to the same book — but ordinary editing did not:
 - **`test_rich_editor.py` keeps it that way.** It serves the app on a thread against throwaway
   folders, opens the real editor in headless Chrome/Edge (`TS_BROWSER` to point at one; with
   none it says so and passes), runs `test_rich_editor.js`, and checks the corpus round trip at
-  the engine level plus the exact Markdown each of 40 scenarios leaves. Against the editor as it
-  was, 27 of them fail.
+  the engine level plus the exact Markdown each of 40 scenarios leaves. Run against the editor
+  as it was before the sweep, most of them fail.
 
 **66. Send to print with an uploaded cover image** *(small–medium; the half #65 left out)* —
 **SHIPPED**
