@@ -815,6 +815,78 @@ def test_notes():
     _check("no notes -> no notes key", "notes" not in plain["chapters"][0])
 
 
+def test_note_refs():
+    r"""#69: the model tells a note reference from a literal `\[^label]`."""
+    print("\n[note references]")
+
+    def para_runs(md, smart=False):
+        return doc_model.from_markdown(md, smartquotes=smart)[0]["runs"]
+
+    def roundtrips(md):
+        for smart in (True, False):
+            doc1 = doc_model.from_markdown(md, smartquotes=smart)
+            md2 = doc_model.to_markdown(doc1)
+            if (manuscript.parse_markdown(md, smartquotes=smart)
+                    != manuscript.parse_markdown(md2, smartquotes=smart)
+                    or doc_model.from_markdown(md2, smartquotes=smart) != doc1):
+                return False
+        return True
+
+    live = para_runs("A claim[^src] here.")
+    _check("a reference is its own run",
+           [r.get("note", False) for r in live] == [False, True, False]
+           and live[1]["text"] == "src", live)
+    lit = para_runs(r"A literal \[^src] here.")
+    _check("an escaped reference is plain text",
+           lit == [doc_model._run("A literal [^src] here.")], lit)
+    _check("the escape survives a round trip",
+           doc_model.to_markdown(doc_model.from_markdown(r"A literal \[^src] here.")).strip()
+           == r"A literal \[^src] here.")
+    eng = manuscript.parse_markdown(doc_model.to_markdown(
+        doc_model.from_markdown("# One\n\n" + r"A literal \[^src] here.")))
+    _check("and gives no live note or phantom Notes entry",
+           "notes" not in eng["chapters"][0], eng["chapters"][0])
+
+    bold = para_runs("**bold[^a] text**")
+    _check("a reference inside bold is a bold note run",
+           [(r["text"], r["bold"], r.get("note", False)) for r in bold]
+           == [("bold", True, False), ("a", True, True), (" text", True, False)], bold)
+    _check("and serializes as one bold span",
+           doc_model.to_markdown([{"type": "para", "runs": bold}]).strip()
+           == "**bold[^a] text**")
+    twice = para_runs("x[^a][^a] y")
+    _check("two adjacent references never merge",
+           [r["text"] for r in twice] == ["x", "a", "a", " y"], twice)
+    plain = para_runs("No notes here.")
+    _check("a run with no reference has no note key",
+           all("note" not in r for r in plain), plain)
+
+    for md in [r"mix \[^lit] and [^live]", "**bold[^a] text** and *it[^b]*",
+               "***both[^c]***", "_x[^my_note] y_", "[^a]: See also[^b].",
+               r"\[^a]: not a definition", "a *[^n]* b", "see [[^a]",
+               "[^a](http://example.com)", "~~~ list\nitem[^a]\n\\[^b] literal\n~~~"]:
+        _check(f"round-trips: {md!r}", roundtrips(md))
+
+    # The engine half. A label may contain `_`, which the italic pass used to
+    # pair through the marker, breaking it.
+    out = manuscript._inline("A claim[^my_note] and _more_ here.")
+    _check("an underscore label leaves the marker whole",
+           '<note id="my_note"/>' in out and "<i>more</i>" in out, out)
+
+    ch = manuscript.parse_markdown(
+        "# One\n\nBody[^a] and[^c].\n\n[^a]: See also[^b] for more.\n"
+        "[^b]: The other.\n[^c]: Third.\n[^d]: An orphan citing[^e].\n[^e]: Last.\n"
+    )["chapters"][0]
+    by = {n["label"]: n for n in ch["notes"]}
+    _check("a note cited from a note is numbered",
+           '<note n="3" id="b"/>' in by["a"]["text"], by["a"]["text"])
+    _check("numbered after the notes the body cites",
+           [(n["label"], n["n"]) for n in ch["notes"]]
+           == [("a", 1), ("c", 2), ("b", 3), ("d", 4), ("e", 5)], ch["notes"])
+    _check("an orphan's own citations are numbered too",
+           '<note n="5" id="e"/>' in by["d"]["text"], by["d"]["text"])
+
+
 VOCAB_MD = """\
 #* Prologue
 
@@ -901,6 +973,7 @@ if __name__ == "__main__":
     test_tables()
     test_links()
     test_notes()
+    test_note_refs()
     test_vocabulary()
     print()
     if _failures:

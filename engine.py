@@ -3228,6 +3228,20 @@ def _note_anchor(ch_idx, n):
     return f'note-{ch_idx}-{n}'
 
 
+def _note_text_markers(text, ch_idx, size, link):
+    """Draw a reference *inside* a note ("See also [^b].") as its superscript.
+
+    `_apply_note_markers` only walks the body, so a note citing a note would
+    reach ReportLab as a bare marker, which it drops without a word. On the
+    Notes page it links to the cited entry, which sits on that same page; at the
+    foot it doesn't, as the cited note may be on another page or none.
+    """
+    def one(m):
+        mark = f'<super size="{size}">{m.group(1)}</super>'
+        return f'<a href="#{_note_anchor(ch_idx, m.group(1))}">{mark}</a>' if link else mark
+    return _NOTE_MARK_RE.sub(one, text)
+
+
 _FN_SCHEME = 'tsfn://'          # measuring-pass marker; never reaches a real build
 
 
@@ -3245,10 +3259,12 @@ def _footnote_style(preset, fonts, st):
 def _footnote_flowables(chapters, preset, fonts, st):
     """A Paragraph per note, keyed (chapter index, number) — laid out at the foot."""
     style = _footnote_style(preset, fonts, st)
+    mark = round(style.fontSize * preset.get('endnotes', {}).get('marker_scale', 0.62), 2)
     out = {}
     for i, ch in enumerate(chapters, start=1):
         for note in ch.get('notes') or []:
-            body = note['text'] or '<i>[no note text]</i>'
+            body = (_note_text_markers(note['text'], i, mark, link=False)
+                    or '<i>[no note text]</i>')
             out[(i, note['n'])] = Paragraph(
                 f'{note["n"]}.&#160;&#160;{body}', style)
     return out
@@ -3396,7 +3412,10 @@ def _endnotes_page(chapters, fonts, st, preset):
             label = ch.get('title') or f'Chapter {i}'
             out.append(Paragraph(_esc_markup(label), head_style))
         for note in notes:
-            body = note['text'] or '<i>[no note text]</i>'
+            body = (_note_text_markers(note['text'], i,
+                                       round(size * em.get('marker_scale', 0.62), 2),
+                                       link=True)
+                    or '<i>[no note text]</i>')
             out.append(Paragraph(
                 f'<a name="{_note_anchor(i, note["n"])}"/>{note["n"]}.&#160;&#160;{body}',
                 entry_style))

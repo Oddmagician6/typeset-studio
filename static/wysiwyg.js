@@ -16,9 +16,22 @@
 
   // ---- model -> DOM ---------------------------------------------------------
 
+  // An endnote reference is one uneditable superscript, so the writer can see it,
+  // delete it whole, and can't type into the middle of its label. The label rides
+  // on data-note; the text is only what shows.
+  function noteEl(label) {
+    var s = document.createElement('sup');
+    s.className = 'wb-note';
+    s.setAttribute('contenteditable', 'false');
+    s.dataset.note = label;
+    s.title = 'Endnote: ' + label;
+    s.textContent = label;
+    return s;
+  }
+
   function appendInline(el, runs) {
     (runs || []).forEach(function (r) {
-      var node = document.createTextNode(r.text);
+      var node = r.note ? noteEl(r.text) : document.createTextNode(r.text);
       if (r.bold && r.italic) {
         var s = document.createElement('strong'), e = document.createElement('em');
         e.appendChild(node); s.appendChild(e); node = s;
@@ -154,6 +167,8 @@
       // round-trips through read(); its text is edited in Markdown mode, like
       // doc-block metadata. Kept out of textContent so title stays clean.
       if (b.byline) el.dataset.byline = b.byline;
+      // `#* Prologue` takes no number; the flag rides along the same way
+      if (b.unnumbered) el.dataset.unnumbered = 'yes';
       if (!el.textContent) el.appendChild(document.createElement('br'));
     } else if (b.type === 'part') {
       el = document.createElement('h2');
@@ -242,6 +257,11 @@
                                     link: link || '' });
       } else if (child.nodeType === 1) {                // element
         if (child.tagName === 'BR') return;             // soft breaks -> ignored
+        if (child.dataset && child.dataset.note) {      // an endnote reference
+          runs.push({ text: child.dataset.note, bold: bold, italic: italic,
+                      link: '', note: true });
+          return;
+        }
         if (isForeignEl(child)) return;                 // an extension's own overlay
         var href = link || '';
         if (child.tagName === 'A' && child.getAttribute('href'))
@@ -257,10 +277,37 @@
     runs.forEach(function (r) {
       var last = out[out.length - 1];
       if (last && last.bold === r.bold && last.italic === r.italic
-          && (last.link || '') === (r.link || '')) last.text += r.text;
-      else out.push({ text: r.text, bold: r.bold, italic: r.italic, link: r.link || '' });
+          && (last.link || '') === (r.link || '')
+          && !last.note && !r.note) last.text += r.text;
+      else {
+        var c = { text: r.text, bold: r.bold, italic: r.italic, link: r.link || '' };
+        if (r.note) c.note = true;
+        out.push(c);
+      }
     });
     return out.filter(function (r) { return r.text !== ''; });
+  }
+
+  // Typing the `]` that closes `[^label]` turns it into a reference, which is how
+  // a note is added in rich mode. Only the text just typed is looked at, so a
+  // literal "[^label]" already on the page (a `\[^label]` in the Markdown) stays
+  // literal. Returns true if it made one.
+  var TYPED_NOTE_RE = /\[\^([\w\-]+)\]$/;
+  function noteInputRule(root) {
+    var sel = root.ownerDocument.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
+    var node = sel.anchorNode, off = sel.anchorOffset;
+    if (!node || node.nodeType !== 3 || !root.contains(node)) return false;
+    var m = TYPED_NOTE_RE.exec(node.data.slice(0, off));
+    if (!m) return false;
+    var after = node.splitText(off);                  // text after the caret
+    node.data = node.data.slice(0, off - m[0].length);
+    var sup = noteEl(m[1]);
+    node.parentNode.insertBefore(sup, after);
+    var r = root.ownerDocument.createRange();
+    r.setStart(after, 0); r.collapse(true);
+    sel.removeAllRanges(); sel.addRange(r);
+    return true;
   }
 
   function readInline(el) {
@@ -309,8 +356,12 @@
 
   function readBlockEl(el) {
     var type = blockTypeOf(el);
-    if (type === 'chapter') return { type: 'chapter', title: titleOrNull(el),
-                                     byline: (el.dataset && el.dataset.byline) || null };
+    if (type === 'chapter') {
+      var ch = { type: 'chapter', title: titleOrNull(el),
+                 byline: (el.dataset && el.dataset.byline) || null };
+      if (el.dataset && el.dataset.unnumbered) ch.unnumbered = true;   // `#*`
+      return ch;
+    }
     if (type === 'part')    return { type: 'part', title: titleOrNull(el) };
     if (type === 'subhead') return { type: 'subhead', runs: readInline(el) };
     if (type === 'scene')   return { type: 'scene' };
@@ -334,7 +385,10 @@
   function read(root) {
     var blocks = [];
     Array.prototype.forEach.call(root.children, function (el) {
-      if (isForeignEl(el)) return;          // an extension's overlay, not a block
+      // An extension's overlay, not a block. Our own blocks are let through first:
+      // a scene break is contenteditable="false" too, and skipping it saved the
+      // book without a single one of its breaks.
+      if (!(el.dataset && el.dataset.block) && isForeignEl(el)) return;
       // skip stray empty text-only wrappers the browser may leave behind
       var b = readBlockEl(el);
       if (b.type === 'para' || b.type === 'subhead') {
@@ -345,5 +399,6 @@
     return blocks;
   }
 
-  global.WYS = { render: render, read: read, renderBlock: renderBlock, readInline: readInline };
+  global.WYS = { render: render, read: read, renderBlock: renderBlock, readInline: readInline,
+                 noteInputRule: noteInputRule };
 })(typeof window !== 'undefined' ? window : this);

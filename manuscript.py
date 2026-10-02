@@ -182,8 +182,16 @@ def _inline(text, smartquotes=True):
 
     # Endnote references become a neutral marker; the number is filled in by
     # _number_notes once the whole chapter is known, and each builder decides
-    # how to draw it.
-    text = NOTE_REF_RE.sub(lambda m: f'<note id="{m.group(1)}"/>', text)
+    # how to draw it. Parked like the link targets until emphasis is done: a
+    # label may contain `_`, and `<note id="my_note"/>` left in place would have
+    # its underscore paired with the next one in the line by the italic pass.
+    labels = []
+
+    def _stash_note(m):
+        labels.append(m.group(1))
+        return f'\x02{len(labels) - 1}\x03'
+
+    text = NOTE_REF_RE.sub(_stash_note, text)
 
     # Bold-italic first, and as one span. Left to the ** and * passes below it
     # comes out cross-nested (`<b><i>x</b></i>`), which is not well-formed: it
@@ -208,6 +216,9 @@ def _inline(text, smartquotes=True):
             lambda m: f'<a href="{html.escape(targets[int(m.group(1))], quote=True)}">'
                       f'{m.group(2)}</a>',
             text, flags=re.S)
+    if labels:
+        text = re.sub(r'\x02(\d+)\x03',
+                      lambda m: f'<note id="{labels[int(m.group(1))]}"/>', text)
     return _restore_escapes(text)
 
 
@@ -281,12 +292,24 @@ def _number_notes(chapter):
         if '<note id=' in text:
             setter(renumber(text))
 
-    # a definition nobody referenced is still the author's writing — keep it,
-    # numbered after the referenced ones, rather than dropping it
-    for label, text in defs.items():
-        if label not in seen:
-            seen[label] = len(seen) + 1
-            notes.append({'n': seen[label], 'label': label, 'text': text})
+    # A note may cite another ("See also [^b]."), so the notes' own text is
+    # renumbered too — in number order, which numbers a note cited only from
+    # inside another one straight after the notes the body cites. Skipping this
+    # left an un-numbered marker that neither builder draws, so the reference
+    # vanished from the printed note without a word.
+    # A definition nobody referenced is still the author's writing — keep it,
+    # numbered after the referenced ones, rather than dropping it.
+    done = 0
+    while True:
+        while done < len(notes):
+            if '<note id=' in notes[done]['text']:
+                notes[done]['text'] = renumber(notes[done]['text'])
+            done += 1
+        orphan = next((label for label in defs if label not in seen), None)
+        if orphan is None:
+            break
+        seen[orphan] = len(seen) + 1
+        notes.append({'n': seen[orphan], 'label': orphan, 'text': defs[orphan]})
 
     if notes:
         chapter['notes'] = notes

@@ -112,5 +112,30 @@ check('a book with no notes is identical either way', rf['page_count'] == re_['p
       (rf['page_count'], re_['page_count']))
 os.remove(out_f); os.remove(out_e)
 
+# 6. a note that cites another note (#69). The reference used to reach the
+# builders un-numbered, and both dropped it without a word.
+t6 = ('# One\n\nA claim.[^a]\n\n[^a]: See also[^b] for more.\n'
+      '[^b]: The other note.\n[^c]: Cited by nothing at all.\n')
+for placement in ('end', 'foot'):
+    out, r = build(t6, preset(placement))
+    d = fitz.open(out); txt = ' '.join(p.get_text() for p in d); d.close()
+    check(f'a note citing a note keeps its number ({placement})',
+          re.search(r'See also\s*2\s*for more', txt) is not None,
+          re.findall(r'See also.{0,20}', txt))
+    os.remove(out)
+
+import epub, zipfile
+fd, ep = tempfile.mkstemp(suffix='.epub'); os.close(fd)
+epub.build_epub(manuscript.parse_markdown(t6, smartquotes=True), preset('end'), ep, META)
+with zipfile.ZipFile(ep) as z:
+    notes_x = z.read(next(n for n in z.namelist()
+                          if n.endswith('endnotes.xhtml'))).decode('utf-8')
+check('the ebook links a note to the note it cites',
+      '<a href="#note-1-2">2</a>' in notes_x and '<note' not in notes_x,
+      re.findall(r'See also.{0,80}', notes_x))
+bad = [c for c in epub.check(ep) if not c['ok']]
+check('the ebook still passes its own checks', not bad, bad)
+os.remove(ep)
+
 print('\n' + ('ALL PASS' if not fails else 'FAILED: ' + ', '.join(fails)))
 sys.exit(1 if fails else 0)
