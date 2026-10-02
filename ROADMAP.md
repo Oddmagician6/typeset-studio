@@ -36,6 +36,7 @@ test_wrap.py      Print-wrap arithmetic: paperback, case-laminate and jacket geo
 test_press.py     Press-ready interiors: colour, boxes and annotations, read back off the PDF.
 test_history.py   Manuscript safety: atomic writes, snapshots, thinning, restore and undo.
 test_update.py    The version check: consent, caching, and every way a feed can misbehave.
+test_rebuild.py   Rebuild all: one project's build answered in JSON, failures included.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -1930,6 +1931,32 @@ forms into identical run text before `to_markdown` ever ran.
   trips, the underscore label, note-in-note numbering) and case 6 in `test_footnotes.py` (the
   number survives in both placements, the ebook links it, and `epub.check` stays clean).
 
+**70. Rebuild all — every book on the shelf, from `/projects`** *(small; Tier 5G's batch
+regenerate)* — **SHIPPED**
+Vellum regenerates every edition with one command; we rebuilt one project at a time. A
+**Rebuild all** button on `/projects` now builds every book again in its own format(s), with its
+current style and settings.
+- **One build, two callers.** `_build_project(pid, proj)` is the body of `project_generate`
+  lifted out — source, meta, PDF, EPUB, and the `last_pdf` / `last_epub` / `last_page_count`
+  bookkeeping — so Regenerate and Rebuild all cannot build a book differently. It returns
+  `error` when nothing usable came out (no manuscript, or the PDF failed; the project is left
+  untouched, as before) and `warnings` for a build that worked but has news (a failed EPUB beside
+  a good PDF, a press build that fell back). Regenerate flashes them exactly as it did.
+- **One request per book, driven by the page.** `POST /project/<pid>/rebuild` builds one project
+  and answers in JSON (`ok`, `pages`, `pdf` / `epub` / `thumb` URLs, `warnings`, and `issues` —
+  the PDF preflight and EPUB check rows counted through `issue_rows`, as everywhere else). The
+  page walks the cards in order. A shelf in a single request would sit silent for as long as
+  the slowest footnoted books take, which reads as a hang; this way each row fills in as its book
+  finishes. Any exception in one book is answered as that book's failure, so the batch carries on.
+- **It rebuilds what is on show.** With the filter in use the button reads *Rebuild N shown*, so
+  a writer can rebuild one series by typing its name. A card's thumbnail is refreshed (or, for
+  a book built for the first time, appears) as its build lands.
+- Tests: `test_rebuild.py` — a book in both formats (page count, both files download, thumbnail,
+  the build recorded on the project), a PDF-only project, a missing manuscript and a missing
+  project answered as failures in JSON with the project untouched, and Regenerate's result page
+  and failure redirect unchanged. The page itself was driven in headless Chrome against
+  throwaway data dirs: progress, the failure row, the filtered label and the thumbnail swap.
+
 **66. Send to print with an uploaded cover image** *(small–medium; the half #65 left out)* —
 **SHIPPED**
 #65 built its wrap from a cover *template*, so a book whose cover is an uploaded image (cover
@@ -2143,8 +2170,8 @@ someone asks for it.
 - **Box sets / omnibus** — combine several projects into one book with merged front matter and a
   unified TOC (Vellum's "Volume" element, Atticus's bundles). Needs a multi-manuscript build path;
   defer.
-- **Batch regenerate** — Vellum regenerates every edition with one command; we regenerate one
-  project at a time. A "rebuild all" on `/projects` is small if wanted.
+- ~~**Batch regenerate**~~ — **SHIPPED (feature #70):** *Rebuild all* on `/projects` builds
+  every book (or every one the filter shows), one at a time, with live progress.
 
 **H. Explicitly NOT doing** *(recorded so the scan doesn't get re-run into the same answers)*
 
@@ -2164,7 +2191,7 @@ someone asks for it.
 ~~EPUB preflight (D)~~ #52 → ~~device preview (D)~~ #53 →
 ~~large print + trim presets (G)~~ #54 → ~~footnotes (A)~~ #55 → ~~ornament library (E)~~ #56 →
 ~~tables (A)~~ #57 → ~~the `.docx` follow-ups (C)~~ #58 → ~~chapter-heading art (E)~~ #59 →
-~~hardcover case wrap (G)~~ #60 → ~~dust jackets (G)~~ #61 → ~~PDF/X-1a, spiked (D)~~ #62 →
+~~hardcover case wrap (G)~~ #60 → ~~dust jackets (G)~~ #61 → ~~PDF/X-1a, spiked (D)~~ #62 → ~~batch regenerate (G)~~ #70 →
 **what's left**: box sets (G, explicitly deferred as needing a multi-manuscript build path),
 full-bleed interior pages (E, an imposition change — see the note there), and spread balancing
 (D, which the scan says to note rather than schedule). Sections **A, B, C, D and F are now

@@ -3145,69 +3145,118 @@ def project_write_preview(pid):
             pass
 
 
-@app.route('/project/<pid>/generate', methods=['POST'])
-def project_generate(pid):
-    proj   = load_project(pid)
-    preset = load_preset(proj['preset'])
+def _build_project(pid, proj):
+    """Build a saved project in its own format(s) and record the result on it.
 
-    ms_type = proj.get('manuscript_type', 'file')
+    Shared by Regenerate and Rebuild all, so the two can never build a book
+    differently. Returns a dict: `error` is set when nothing usable came out
+    (no manuscript, or the PDF failed) and the project is left untouched;
+    `warnings` are things the writer should hear about on a build that did
+    succeed — an EPUB that failed beside a good PDF, a press build that fell back.
+    """
+    preset = load_preset(proj['preset'])
     raw, err = _project_source(proj)
     if err:
-        flash(err)
-        return redirect(url_for('projects'))
+        return {'error': err}
     meta, cover_path = _project_meta(proj)
     ms_parsed = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     base  = slugify(meta['title'] or proj.get('name', 'book'))
     fmt   = proj.get('format', 'pdf')
-
-    out_name     = ''
-    epub_name    = ''
-    build_result = None
-    page_count   = 0
+    res = {'error': '', 'warnings': [], 'preset': preset, 'meta': meta,
+           'cover_path': cover_path, 'ms_parsed': ms_parsed, 'fmt': fmt,
+           'out_name': '', 'epub_name': '', 'build_result': None, 'page_count': 0}
 
     if fmt in ('pdf', 'both'):
-        out_name = f'{base}-{stamp}.pdf'
+        res['out_name'] = f'{base}-{stamp}.pdf'
         try:
-            build_result = engine.build_pdf(ms_parsed, preset,
-                                            os.path.join(OUT_DIR, out_name), meta,
-                                            press=meta['press'])
-            page_count   = build_result['page_count']
-            if meta['press'] and build_result.get('press_error'):
-                flash('This book has colour in it, so it was built the normal way: '
-                      + build_result['press_error'])
+            res['build_result'] = engine.build_pdf(
+                ms_parsed, preset, os.path.join(OUT_DIR, res['out_name']), meta,
+                press=meta['press'])
+            res['page_count'] = res['build_result']['page_count']
+            if meta['press'] and res['build_result'].get('press_error'):
+                res['warnings'].append(
+                    'This book has colour in it, so it was built the normal way: '
+                    + res['build_result']['press_error'])
         except Exception as exc:
             logging.error('PDF build failed: %s', traceback.format_exc())
-            flash(f'PDF build failed: {exc}')
-            return redirect(url_for('projects'))
+            return {'error': f'PDF build failed: {exc}'}
 
     if fmt in ('epub', 'both'):
-        epub_name = f'{base}-{stamp}.epub'
+        res['epub_name'] = f'{base}-{stamp}.epub'
         try:
             with _epub_cover(preset, meta) as emeta:
-                epub.build_epub(ms_parsed, preset, os.path.join(OUT_DIR, epub_name), emeta)
+                epub.build_epub(ms_parsed, preset,
+                                os.path.join(OUT_DIR, res['epub_name']), emeta)
         except Exception as exc:
             logging.error('EPUB build failed: %s', traceback.format_exc())
-            flash(f'EPUB build failed: {exc}')
-            epub_name = ''
+            res['warnings'].append(f'EPUB build failed: {exc}')
+            res['epub_name'] = ''
 
-    proj['last_pdf']  = out_name
-    proj['last_epub'] = epub_name
-    if page_count:
-        proj['last_page_count'] = page_count
+    proj['last_pdf']  = res['out_name']
+    proj['last_epub'] = res['epub_name']
+    if res['page_count']:
+        proj['last_page_count'] = res['page_count']
     proj['updated']   = datetime.now().isoformat(timespec='seconds')
     save_project_file(pid, proj)
+    return res
 
+
+@app.route('/project/<pid>/generate', methods=['POST'])
+def project_generate(pid):
+    proj = load_project(pid)
+    res  = _build_project(pid, proj)
+    if res['error']:
+        flash(res['error'])
+        return redirect(url_for('projects'))
+    for w in res['warnings']:
+        flash(w)
+
+    page_count, build_result = res['page_count'], res['build_result']
+    out_name, epub_name, preset = res['out_name'], res['epub_name'], res['preset']
     spec      = print_spec(page_count, preset) if page_count else None
     preflight = _preflight(build_result, preset, page_count) if build_result else None
     press     = _press_report(out_name, build_result)
-    chapters  = len(ms_parsed['chapters'])
+    chapters  = len(res['ms_parsed']['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
-                           meta=meta, preset=preset, preset_id=proj['preset'],
-                           chapters=chapters, ms_path='', ms_type=ms_type,
-                           cover_path=cover_path, from_project=pid, fmt=fmt,
+                           meta=res['meta'], preset=preset, preset_id=proj['preset'],
+                           chapters=chapters, ms_path='',
+                           ms_type=proj.get('manuscript_type', 'file'),
+                           cover_path=res['cover_path'], from_project=pid, fmt=res['fmt'],
                            spec=spec, preflight=preflight, press=press,
                            epub_preflight=_epub_preflight(epub_name))
+
+
+@app.route('/project/<pid>/rebuild', methods=['POST'])
+def project_rebuild(pid):
+    """One step of Rebuild all on /projects: build a project, answer in JSON.
+
+    The page walks the projects one request at a time rather than building the
+    whole shelf in one: a book with footnotes takes several passes, and a single
+    request for ten of them would sit silent long enough to look hung.
+    """
+    try:
+        proj = load_project(pid)
+    except Exception:
+        return jsonify(ok=False, error='This project could not be opened.')
+    try:
+        res = _build_project(pid, proj)
+    except Exception as exc:                       # the batch must outlive one bad book
+        logging.error('Rebuild failed: %s', traceback.format_exc())
+        return jsonify(ok=False, error=f'Build failed: {exc}')
+    if res['error']:
+        return jsonify(ok=False, error=res['error'])
+    issues = []
+    if res['build_result']:
+        issues += issue_rows(_preflight(res['build_result'], res['preset'], res['page_count']))
+    if res['epub_name']:
+        issues += issue_rows(_epub_checks(os.path.join(OUT_DIR, res['epub_name'])))
+    return jsonify(
+        ok=True, pages=res['page_count'], warnings=res['warnings'],
+        issues=[f"{c['label'].strip()}: {c['detail']}" for c in issues],
+        pdf=url_for('download', fn=res['out_name']) if res['out_name'] else '',
+        epub=url_for('download', fn=res['epub_name']) if res['epub_name'] else '',
+        thumb=url_for('project_thumb', pid=pid) if res['out_name'] else '')
 
 
 def _project_source(proj):
