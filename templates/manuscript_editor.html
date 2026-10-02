@@ -819,14 +819,32 @@
         var r = document.createRange(); r.selectNodeContents(el); r.collapse(true);
         var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); rich.focus();
       }
+      // Chapter / Part / Subhead on the line the caret is in. Only a plain line
+      // converts: with the caret inside a letter, a poem or a figure, this used to
+      // replace the whole block with a heading made of its text. A paragraph and a
+      // subhead keep their emphasis, links and notes either way; a chapter or part
+      // title is plain text, as the manuscript stores it.
+      var CONVERTIBLE = /\bwb-(para|subhead|chapter|part)\b/;
       function convertBlock(type){
         var el = currentRichBlock(); if (!el) return;
-        var text = el.textContent, neu;
-        if (type === 'chapter'){ neu = document.createElement('h1'); neu.className = 'wb wb-chapter'; neu.dataset.block = 'chapter'; neu.textContent = text; }
-        else if (type === 'part'){ neu = document.createElement('h2'); neu.className = 'wb wb-part'; neu.dataset.block = 'part'; neu.textContent = text; }
-        else if (type === 'subhead'){ neu = document.createElement('p'); neu.className = 'wb wb-subhead'; neu.dataset.block = 'subhead'; neu.textContent = text; }
-        else { neu = document.createElement('p'); neu.className = 'wb wb-para'; neu.dataset.block = 'para'; neu.textContent = text; }
-        if (!neu.textContent) neu.appendChild(document.createElement('br'));
+        if (!CONVERTIBLE.test(el.className)){
+          status('Put the cursor in a paragraph to make it a heading');
+          return;
+        }
+        var neu;
+        if (type === 'chapter'){ neu = document.createElement('h1'); neu.className = 'wb wb-chapter'; neu.dataset.block = 'chapter'; }
+        else if (type === 'part'){ neu = document.createElement('h2'); neu.className = 'wb wb-part'; neu.dataset.block = 'part'; }
+        else if (type === 'subhead'){ neu = document.createElement('p'); neu.className = 'wb wb-subhead'; neu.dataset.block = 'subhead'; }
+        else { neu = document.createElement('p'); neu.className = 'wb wb-para'; neu.dataset.block = 'para'; }
+        var inline = /\bwb-(para|subhead)\b/;
+        if (inline.test(el.className) && inline.test(neu.className)){
+          while (el.firstChild) neu.appendChild(el.firstChild);
+        } else {
+          var bare = el.cloneNode(true);
+          Array.prototype.forEach.call(bare.querySelectorAll('sup.wb-note'), function(n){ n.remove(); });
+          neu.textContent = bare.textContent.replace(/\s+/g, ' ').trim();
+        }
+        if (!neu.textContent && !neu.querySelector('sup')) { neu.innerHTML = ''; neu.appendChild(document.createElement('br')); }
         el.replaceWith(neu); placeCaret(neu); syncFromRich();
       }
       var RICH_ACTS = {
@@ -918,10 +936,70 @@
         syncFromRich();
       }
 
+      // Is the (collapsed) caret at the very start / end of `el`?
+      function caretAt(el, end){
+        var sel = window.getSelection();
+        if (!sel.rangeCount || !sel.isCollapsed) return false;
+        var r = document.createRange();
+        if (end){ r.setStart(sel.anchorNode, sel.anchorOffset); r.setEnd(el, el.childNodes.length); }
+        else { r.setStart(el, 0); r.setEnd(sel.anchorNode, sel.anchorOffset); }
+        return !r.toString().replace(/​/g, '') && !r.cloneContents().querySelector('sup');
+      }
+      function isEmptyLine(el){ return !el.textContent.trim() && !el.querySelector('sup'); }
+      // Leave a block for the paragraph after it, making one if there isn't an
+      // empty one waiting.
+      function exitBlock(block){
+        var next = block.nextElementSibling;
+        if (!(next && /\bwb-para\b/.test(next.className) && isEmptyLine(next))){
+          next = WYS.renderBlock({type:'para', runs:[]});
+          block.after(next);
+        }
+        placeCaret(next); syncFromRich();
+      }
+
+      rich.addEventListener('paste', function(e){
+        var cd = e.clipboardData;
+        if (!cd) return;
+        e.preventDefault();
+        var blocks = WYS.pasteBlocks(cd.getData('text/html'), cd.getData('text/plain'));
+        if (WYS.insertPaste(rich, blocks)) syncFromRich();
+      });
+
       rich.addEventListener('keydown', function(e){
+        if ((e.key === 'Backspace' || e.key === 'Delete') && !e.ctrlKey && !e.metaKey){
+          // Next to a scene break, Backspace / Delete removes the break and
+          // nothing else. Left to the browser it also merged the paragraphs on
+          // either side of it into one.
+          var blk = currentRichBlock();
+          var back = e.key === 'Backspace';
+          var nb = blk && (back ? blk.previousElementSibling : blk.nextElementSibling);
+          if (nb && nb.dataset.block === 'scene' && caretAt(blk, !back)){
+            e.preventDefault(); nb.remove(); syncFromRich();
+            return;
+          }
+        }
         if (e.key === 'Enter' && !e.shiftKey){
           var sel = window.getSelection();
           var anchor = sel.rangeCount ? sel.anchorNode : null;
+          // Enter on an empty last line of a block (a letter, a list, a caption,
+          // a poem) leaves the block — otherwise there was no way out of one at the
+          // end of the manuscript. An only line stays, so the block keeps a line.
+          // In a poem an empty line is a stanza break, so it takes two of them:
+          // Enter twice starts a stanza, a third time leaves the poem.
+          var line = WYS.lineOf(rich, anchor);
+          if (line && /\bwb-(verse|doc-para|figure-para)\b/.test(line.className)
+              && isEmptyLine(line) && !line.nextElementSibling){
+            var prev = line.previousElementSibling;
+            var verse = /\bwb-verse\b/.test(line.className);
+            if (!verse || (prev && isEmptyLine(prev))){
+              e.preventDefault();
+              var block = currentRichBlock();
+              if (verse) { prev.remove(); line.remove(); }
+              else if (prev) line.remove();
+              exitBlock(block);
+              return;
+            }
+          }
           // Enter inside verse => split into a new verse line
           var verse = closestClass(anchor, 'wb-verse');
           if (verse){ e.preventDefault(); splitVerse(verse); return; }
@@ -935,7 +1013,11 @@
             return;
           }
           var el = currentRichBlock();
-          if (el && /wb-chapter|wb-part|wb-scene/.test(el.className)){
+          // After a heading (and at the end of a subhead) the next line is a
+          // paragraph. The browser clones the line it splits, so Enter at the end
+          // of a subhead made the next paragraph a subhead too.
+          if (el && (/wb-chapter|wb-part|wb-scene/.test(el.className)
+                     || (/\bwb-subhead\b/.test(el.className) && caretAt(el, true)))){
             e.preventDefault();
             var p = WYS.renderBlock({type:'para', runs:[]});
             el.after(p); placeCaret(p); syncFromRich();

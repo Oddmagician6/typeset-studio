@@ -2,9 +2,10 @@
  *
  * The pure, testable core of the rich editor. `render(blocks)` builds DOM for the
  * editable surface; `read(rootEl)` walks that surface back into the document model.
- * `read(render(model))` is the identity (verified by _wystest.html over the corpus),
- * so editing the DOM and reading it back never corrupts structure -- and the model
- * serializes to Markdown via DocModel (doc_model.js), which the engine consumes.
+ * `read(render(model))` is the identity, so editing the DOM and reading it back never
+ * corrupts structure -- and the model serializes to Markdown via DocModel
+ * (doc_model.js), which the engine consumes. test_rich_editor.py checks both that
+ * and real edits (Enter, Backspace, paste, the toolbar) in a headless browser.
  *
  * The editor stores raw Markdown as source of truth; this surface is a *view* the
  * template keeps synced into the textarea. Doc-block headers (type + attrs) are held
@@ -29,9 +30,28 @@
     return s;
   }
 
+  // A non-breaking space the manuscript really has (a Word import's U+00A0 in
+  // "Mr. Smith") is wrapped in a marked span. The browser makes its own, for a typed space it
+  // would otherwise collapse — after a note or a link, or a second space — and
+  // those are read back as plain spaces; only a marked one survives as itself.
+  var NBSP = '\u00a0';
+  function textNode(text) {
+    if (text.indexOf(NBSP) === -1) return document.createTextNode(text);
+    var frag = document.createDocumentFragment();
+    text.split(NBSP).forEach(function (piece, i) {
+      if (i) {
+        var s = document.createElement('span');
+        s.className = 'wb-nbsp'; s.dataset.nbsp = '1'; s.textContent = NBSP;
+        frag.appendChild(s);
+      }
+      if (piece) frag.appendChild(document.createTextNode(piece));
+    });
+    return frag;
+  }
+
   function appendInline(el, runs) {
     (runs || []).forEach(function (r) {
-      var node = r.note ? noteEl(r.text) : document.createTextNode(r.text);
+      var node = r.note ? noteEl(r.text) : textNode(r.text);
       if (r.bold && r.italic) {
         var s = document.createElement('strong'), e = document.createElement('em');
         e.appendChild(node); s.appendChild(e); node = s;
@@ -227,17 +247,27 @@
 
   // ---- DOM -> model ---------------------------------------------------------
 
-  function isBoldEl(el) {
-    var t = el.tagName;
-    if (t === 'B' || t === 'STRONG') return true;
+  // Emphasis an element sets, given what it sits in. An explicit style wins over
+  // the tag: Google Docs wraps a whole paste in <b style="font-weight:normal">,
+  // and reading the tag alone made every pasted word bold.
+  function boldOf(el, inherited) {
     var w = el.style && el.style.fontWeight;
-    return w === 'bold' || w === 'bolder' || (/^\d+$/.test(w) && parseInt(w, 10) >= 600);
+    if (w === 'normal' || w === 'lighter' || (/^\d+$/.test(w) && parseInt(w, 10) < 600))
+      return false;
+    if (w === 'bold' || w === 'bolder' || /^\d+$/.test(w)) return true;
+    return inherited || el.tagName === 'B' || el.tagName === 'STRONG';
   }
-  function isItalicEl(el) {
-    var t = el.tagName;
-    if (t === 'I' || t === 'EM') return true;
-    return el.style && el.style.fontStyle === 'italic';
+  function italicOf(el, inherited) {
+    var st = el.style && el.style.fontStyle;
+    if (st === 'normal') return false;
+    if (st === 'italic' || st === 'oblique') return true;
+    return inherited || el.tagName === 'I' || el.tagName === 'EM';
   }
+
+  // Only what the engine reads as a link is kept as one — mirrors
+  // manuscript.LINK_TARGET. Anything else (a pasted "/relative" or "javascript:")
+  // would be written as [text](target) and printed as those literal brackets.
+  var LINK_TARGET_RE = /^(?:https?:\/\/[^\s)]+|mailto:[^\s)]+|#[A-Za-z0-9][\w\-]*)$/;
 
   // Anything a writing-aid extension (Grammarly, LanguageTool, ProWritingAid)
   // draws into the editor. They render their underlines and cards by injecting
@@ -250,13 +280,19 @@
         || el.getAttribute('contenteditable') === 'false';
   }
 
-  function collectRuns(node, bold, italic, runs, link) {
+  function collectRuns(node, bold, italic, runs, link, keepNbsp) {
     node.childNodes.forEach(function (child) {
       if (child.nodeType === 3) {                       // text
-        if (child.data) runs.push({ text: child.data, bold: bold, italic: italic,
-                                    link: link || '' });
+        var text = keepNbsp ? child.data : child.data.split(NBSP).join(' ');
+        if (text) runs.push({ text: text, bold: bold, italic: italic, link: link || '' });
       } else if (child.nodeType === 1) {                // element
-        if (child.tagName === 'BR') return;             // soft breaks -> ignored
+        // A line break inside a paragraph (Shift+Enter, or pasted) is a space:
+        // a paragraph is one line in the manuscript, and ignoring it glued the
+        // last word of one line to the first of the next.
+        if (child.tagName === 'BR') {
+          runs.push({ text: ' ', bold: bold, italic: italic, link: link || '' });
+          return;
+        }
         if (child.dataset && child.dataset.note) {      // an endnote reference
           runs.push({ text: child.dataset.note, bold: bold, italic: italic,
                       link: '', note: true });
@@ -264,10 +300,12 @@
         }
         if (isForeignEl(child)) return;                 // an extension's own overlay
         var href = link || '';
-        if (child.tagName === 'A' && child.getAttribute('href'))
-          href = child.getAttribute('href');
-        collectRuns(child, bold || isBoldEl(child), italic || isItalicEl(child),
-                    runs, href);
+        if (child.tagName === 'A') {
+          var h = (child.getAttribute('href') || '').trim();
+          if (LINK_TARGET_RE.test(h)) href = h;
+        }
+        collectRuns(child, boldOf(child, bold), italicOf(child, italic), runs, href,
+                    keepNbsp || !!(child.dataset && child.dataset.nbsp));
       }
     });
   }
@@ -310,10 +348,172 @@
     return true;
   }
 
+  // A line never starts or ends with a space in the manuscript, so the edges are
+  // trimmed — which is also what turns an empty line's placeholder <br> back
+  // into nothing.
+  function trimEdges(runs) {
+    while (runs.length && !runs[0].note && !(runs[0].text = runs[0].text.replace(/^\s+/, '')))
+      runs.shift();
+    var n = runs.length - 1;
+    while (n >= 0 && !runs[n].note && !(runs[n].text = runs[n].text.replace(/\s+$/, ''))) {
+      runs.pop(); n--;
+    }
+    return runs;
+  }
+
   function readInline(el) {
     var runs = [];
-    collectRuns(el, false, false, runs, '');
-    return coalesce(runs);
+    collectRuns(el, false, false, runs, '', false);
+    return trimEdges(coalesce(runs));
+  }
+
+  // ---- paste ---------------------------------------------------------------
+  // The browser's own paste drops the source's markup in as-is: a Word or web
+  // page's <div>s and <li>s read back as one paragraph with the words glued
+  // together. So a paste is turned into blocks of runs here, by the same rules as
+  // reading the page, and inserted as the editor's own elements.
+
+  var PASTE_BLOCK_RE = /^(P|DIV|LI|UL|OL|H[1-6]|BLOCKQUOTE|PRE|TABLE|TBODY|THEAD|TR|DL|DT|DD|SECTION|ARTICLE|HEADER|FOOTER|FIGURE|FIGCAPTION|ASIDE|NAV|MAIN)$/;
+
+  // [{runs:[...]}, {scene:true}, ...] from clipboard HTML, or from plain text when
+  // there is none. Plain text follows the manuscript's own rule: a blank line
+  // starts a paragraph, a single line break is a space.
+  function pasteBlocks(html, text) {
+    var blocks = [];
+    if (html) {
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      Array.prototype.forEach.call(
+        doc.querySelectorAll('style, script, meta, title, link, noscript, template'),
+        function (n) { n.remove(); });
+      var cur = [];
+      var flush = function () {
+        var runs = trimEdges(coalesce(cur));
+        if (runs.length) blocks.push({ runs: runs });
+        cur = [];
+      };
+      var walk = function (node, bold, italic, link, keepNbsp) {
+        node.childNodes.forEach(function (child) {
+          if (child.nodeType === 3) {
+            // HTML whitespace: source line breaks and indentation are one space
+            var t = child.data.replace(keepNbsp ? /[ \t\r\n\f]+/g : /\s+/g, ' ');
+            if (t) cur.push({ text: t, bold: bold, italic: italic, link: link });
+            return;
+          }
+          if (child.nodeType !== 1) return;
+          if (child.tagName === 'BR') { cur.push({ text: ' ', bold: bold, italic: italic, link: link }); return; }
+          if (child.dataset && child.dataset.note) {          // copied from this editor
+            cur.push({ text: child.dataset.note, bold: bold, italic: italic, link: '', note: true });
+            return;
+          }
+          if (child.dataset && child.dataset.block === 'scene') { flush(); blocks.push({ scene: true }); return; }
+          if (isForeignEl(child)) return;
+          var block = PASTE_BLOCK_RE.test(child.tagName);
+          if (block) flush();
+          var href = link;
+          if (child.tagName === 'A') {
+            var h = (child.getAttribute('href') || '').trim();
+            if (LINK_TARGET_RE.test(h)) href = h;
+          }
+          walk(child, boldOf(child, bold), italicOf(child, italic), href,
+               keepNbsp || !!(child.dataset && child.dataset.nbsp));
+          if (block) flush();
+        });
+      };
+      walk(doc.body, false, false, '', false);
+      flush();
+    }
+    if (!blocks.length && text) {
+      text.replace(/\r\n?/g, '\n').split(/\n\s*\n/).forEach(function (para) {
+        var t = para.replace(/\s+/g, ' ').trim();
+        if (t) blocks.push({ runs: [{ text: t, bold: false, italic: false, link: '' }] });
+      });
+    }
+    // Every line was trimmed, but a copied word often carries a space at its
+    // edge (a double-click takes the one after it), and dropping that glues the
+    // word to its neighbour. The plain-text copy says whether there was one.
+    var firstB = blocks[0], lastB = blocks[blocks.length - 1];
+    if (text && firstB && firstB.runs && /^[ \t]/.test(text) && !firstB.runs[0].note)
+      firstB.runs[0].text = ' ' + firstB.runs[0].text;
+    if (text && lastB && lastB.runs && /[ \t]$/.test(text)) {
+      var lr = lastB.runs[lastB.runs.length - 1];
+      if (!lr.note) lr.text += ' ';
+    }
+    return blocks;
+  }
+
+  // The line a caret is on: a verse, a line of a block, a caption, a poem title,
+  // or a top-level block of the page.
+  function lineOf(root, node) {
+    var n = node && node.nodeType === 3 ? node.parentNode : node;
+    while (n && n !== root) {
+      var c = n.classList;
+      if (c && (c.contains('wb-verse') || c.contains('wb-doc-para') || c.contains('wb-figure-para')
+                || c.contains('wb-poem-title'))) return n;
+      if (n.parentNode === root) return n;
+      n = n.parentNode;
+    }
+    return null;
+  }
+
+  // Insert pasted blocks at the caret. The first block joins the line the caret
+  // is on, each further one becomes a new line of the same kind (a paragraph at
+  // the top level, a verse in a poem, a line in a list), and whatever followed
+  // the caret ends up after the last. Headings take plain text only — a title is
+  // one line with no emphasis. Returns true if it inserted anything.
+  function insertPaste(root, blocks) {
+    var doc = root.ownerDocument, sel = doc.getSelection();
+    if (!sel || !sel.rangeCount || !blocks.length) return false;
+    if (!sel.isCollapsed) doc.execCommand('delete');   // replaces a selection, merging lines
+    var range = sel.getRangeAt(0);
+    var line = lineOf(root, range.startContainer);
+    if (!line) return false;
+    var c = line.classList, top = line.parentNode === root;
+    var asText = c.contains('wb-chapter') || c.contains('wb-part') || c.contains('wb-poem-title');
+    if (top && !(asText || c.contains('wb-para') || c.contains('wb-subhead'))) return false;
+
+    if (asText) {
+      var plain = blocks.filter(function (b) { return b.runs; }).map(function (b) {
+        return b.runs.map(function (r) { return r.text; }).join('');
+      }).join(' ');
+      doc.execCommand('insertText', false, plain);
+      return true;
+    }
+    if (!top) blocks = blocks.filter(function (b) { return b.runs; });  // no scene inside a block
+    if (!blocks.length) return false;
+
+    var tail = doc.createRange();
+    tail.setStart(range.startContainer, range.startOffset);
+    tail.setEnd(line, line.childNodes.length);
+    var rest = tail.extractContents();
+    if (line.childNodes.length === 1 && line.firstChild.nodeName === 'BR') line.innerHTML = '';
+
+    var first = blocks[0].runs ? blocks.shift().runs : [];
+    var frag = doc.createDocumentFragment();
+    appendInline(frag, first);
+    if (frag.lastChild && frag.lastChild.nodeName === 'BR') frag.removeChild(frag.lastChild);
+    line.appendChild(frag);
+
+    var last = line;
+    blocks.forEach(function (b) {
+      var el;
+      if (b.scene) el = renderBlock({ type: 'scene' });
+      else if (top) { el = renderBlock({ type: 'para', runs: b.runs }); }
+      else { el = line.cloneNode(false); appendInline(el, b.runs); }
+      last.after(el); last = el;
+    });
+    if (last.dataset && last.dataset.block === 'scene') {
+      var p = renderBlock({ type: 'para', runs: [] }); last.after(p); last = p;
+    }
+    if (last !== line && last.childNodes.length === 1 && last.firstChild.nodeName === 'BR')
+      last.innerHTML = '';
+    var mark = doc.createTextNode('');                     // where the caret goes
+    last.appendChild(mark);
+    last.appendChild(rest);
+    if (!last.childNodes.length || !last.textContent && !last.querySelector('sup'))
+      last.appendChild(doc.createElement('br'));
+    var r = doc.createRange(); r.setStart(mark, 0); r.collapse(true);
+    sel.removeAllRanges(); sel.addRange(r);
+    return true;
   }
 
   function titleOrNull(el) {
@@ -400,5 +600,6 @@
   }
 
   global.WYS = { render: render, read: read, renderBlock: renderBlock, readInline: readInline,
-                 noteInputRule: noteInputRule };
+                 noteInputRule: noteInputRule, pasteBlocks: pasteBlocks,
+                 insertPaste: insertPaste, lineOf: lineOf };
 })(typeof window !== 'undefined' ? window : this);
