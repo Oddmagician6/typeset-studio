@@ -8,7 +8,12 @@ line here.
 
 ---
 
-## Unreleased
+## 1.2.4 — 2 October 2026
+
+Rich mode is safe to write in again: it no longer drops your scene breaks, and
+pasting, Enter and the heading buttons now do what you expect. The Projects
+page can rebuild every book in one go, and notes that cite other notes keep
+their numbers.
 
 ### Added
 
