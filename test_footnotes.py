@@ -137,5 +137,58 @@ bad = [c for c in epub.check(ep) if not c['ok']]
 check('the ebook still passes its own checks', not bad, bad)
 os.remove(ep)
 
+# 7. a note too long for its page continues on the next (#73). It used to be
+# planned whole, the reservation grew to nearly the full page, and the build
+# died with a LayoutError on the next tall flowable.
+def norm(s):
+    return re.sub(r'\s+', ' ', s.replace('­', ''))
+
+long_note = ' '.join('Sentence %d of a very long scholarly note that keeps going.' % k
+                     for k in range(1, 61))
+t7 = '# One\n\n' + '\n\n'.join(
+    body % (i, '[^big]' if i == 2 else ('[^small]' if i == 3 else '')) for i in range(1, 30))
+t7 += '\n\n[^big]: ' + long_note + ' THE-END.\n[^small]: A short one after it.\n'
+try:
+    out, r = build(t7, preset())
+    built = True
+except Exception as exc:
+    built, r = False, {'error': repr(exc)}
+check('a book with an overlong footnote builds', built, r)
+if built:
+    d = fitz.open(out)
+    texts = [norm(p.get_text()) for p in d]
+    def page_with(s):
+        return next((i for i, t in enumerate(texts) if s in t), None)
+    start, end, small = page_with('Sentence 1 of'), page_with('THE-END'), page_with('A short one')
+    check('nothing is reported unplaced', r.get('notes_unplaced') == 0, r.get('notes_unplaced'))
+    check('the note starts on its reference\'s page', start == 0, start)
+    check('and continues onto later pages', end is not None and end > start, (start, end))
+    whole = ' '.join(texts)
+    check('every sentence of it is printed',
+          all(' %d of a very long' % k in whole for k in range(1, 61)),
+          [k for k in range(1, 61) if ' %d of a very long' % k not in whole][:5])
+    check('the next note follows it, in order', small is not None and small >= end, (end, small))
+
+    def rule_width(page):
+        ws = [it['rect'].width for dr in page.get_drawings() for it in [dr]
+              if dr['rect'].height < 2 and dr['rect'].width > 20]
+        return max(ws) if ws else 0
+    w0, w1 = rule_width(d[start]), rule_width(d[start + 1])
+    check('a continued note sits under a full-measure rule', w1 > 2 * w0 > 0, (w0, w1))
+    d.close(); os.remove(out)
+
+# 8. ...and on the last page of a book there is no next page: it says so
+t8 = ('# One\n\nA short book with one claim.[^big]\n\n[^big]: '
+      + ' '.join('Sentence %d of a very long scholarly note that keeps going.' % k
+                 for k in range(1, 121)) + '\n')
+try:
+    out, r = build(t8, preset())
+    check('an overlong note on the last page builds', True)
+    check('and the part with no page is reported', r.get('notes_unplaced') == 1,
+          r.get('notes_unplaced'))
+    os.remove(out)
+except Exception as exc:
+    check('an overlong note on the last page builds', False, repr(exc))
+
 print('\n' + ('ALL PASS' if not fails else 'FAILED: ' + ', '.join(fails)))
 sys.exit(1 if fails else 0)

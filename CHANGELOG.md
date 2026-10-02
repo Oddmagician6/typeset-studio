@@ -8,6 +8,18 @@ line here.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **A long footnote runs on to the next page.** A footnote too long for the
+  space at the foot of its page used to stop the whole PDF from building. Now
+  it starts on the page of its reference and continues at the foot of the next
+  page, under a full-width rule, the way a printed book sets a continued note.
+  Notes also stay in number order when one runs on.
+
+---
+
 ## 1.2.4 — 2 October 2026
 
 Rich mode is safe to write in again: it no longer drops your scene breaks, and
