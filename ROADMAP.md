@@ -7,29 +7,23 @@ sections before changing the engine.
 
 ---
 
-## Next up — priority order (as of 1.2.6, 2026-10-02)
+## Next up — priority order (as of 1.2.7, 2026-10-02)
 
 Start here in a new session. Each item points at its full entry below.
 
-1. **Very long titles in three more families (#72 follow-up, small).** The three template
-   bugs "Customise this design" exposed are fixed (spine text, barcode label, photographic
-   title — see #72's phase C entry). The same scan with a five-line title still finds the
-   thriller-noir, stripe and typographic layouts growing the title downward until the
-   author line (or typographic's tagline) leaves the safe zone. Three-line titles are fine
-   everywhere and are tested; lift the cluster the way `_design_photographic` now does.
-2. **Wrap designer leftovers (#72):** justified blurbs, align / distribute for selected
+1. **Wrap designer leftovers (#72):** justified blurbs, align / distribute for selected
    elements, and content presets for jacket flaps. Check SVG `letter-spacing` and the
    font-feature switches in WebKit before any macOS build.
-3. **Browser bug hunt on the cover editor and the style editor.** The method that found nine
+2. **Browser bug hunt on the cover editor and the style editor.** The method that found nine
    real bugs in rich mode (#71): drive the real page in headless Chrome through the edits a
    writer makes, against throwaway data folders, and keep the harness as a test
    (`test_rich_editor.py` is the template).
-4. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
+3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
-5. **Tabletop RPG books (#74), when the designer is done:** typed blocks first (stat block,
+4. **Tabletop RPG books (#74), when the designer is done:** typed blocks first (stat block,
    read-aloud box, sidebar), two-column pagination after.
-6. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
+5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
    enabling it needs admin and a reboot) and a macOS build (needs a Mac). The code is already
    audited as portable; see the cross-platform notes in the strategy section.
 
@@ -2384,6 +2378,19 @@ the app as its own **Wrap designer** tab (`/wrap-designer`), so it can be tried 
   - *The photographic title* grew downward from `title_y` and pushed the author below the
     trim; the cluster now lifts to clear the studio footer by 0.35" (or the safe zone).
     One- and two-line titles are unchanged.
+- **Long titles, every family (after 1.2.7).** The same scan with a 16-word title, plus a
+  new check that front-cover lines don't run into each other, found the bug in all eight
+  families, not just photographic: each hangs its title from a fixed line and grows it
+  downward into what is set below (44 collisions across the 24 templates). Now every family
+  works out where its title cluster would end and shrinks the title until it clears the next
+  line down by 0.12" (`_shrink_to_clear`, `_floor_above`): the epigraph, series line and
+  imprint on the classic frame, the band edges on geometric (the title must sit inside its
+  band), the tagline or author band on vintage, the author or imprint on the rest.
+  Photographic still lifts first and shrinks only when the lifted title would reach the
+  series line. Titles that already fitted render byte-identically (compared old against new
+  for one- to three-line titles on all 24); the four-line classic titles that change were
+  genuinely overprinting their epigraph. Tested with the 16-word title in every template:
+  safe zones and collisions.
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 

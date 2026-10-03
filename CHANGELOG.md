@@ -8,6 +8,20 @@ line here.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Long titles no longer run into the rest of the cover.** On every cover
+  template, a title long enough to wrap onto four or more lines used to grow
+  down through whatever sat below it: through the epigraph on the classic
+  frames, out of the colour band on the geometric ones, over the tagline on
+  vintage, into the author or imprint line, or off the bottom of the cover. A
+  long title now shrinks (or, on photographic covers, moves up) just enough to
+  keep clear. Titles that already fitted are unchanged.
+
+---
+
 ## 1.2.7 — 2 October 2026
 
 Any cover template can now be opened in the Wrap designer and made your own:
