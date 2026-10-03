@@ -39,6 +39,7 @@ import manuscript
 import checker
 import matter
 import ornaments
+import wrap_convert
 import wrap_design
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1896,6 +1897,9 @@ def wrap_designer():
                  or it['id']} for it in list_projects()]
     return render_template('wrap_designer.html', active='wrap', projects=projects,
                            start_project=request.args.get('project', ''),
+                           start_from=request.args.get('from', ''),
+                           templates=[{'id': c['id'], 'name': c['data'].get('name') or c['id']}
+                                      for c in list_cover_templates()],
                            fonts=[f for f in list_fonts() if f.lower().endswith('.ttf')],
                            assets=assets, stand_in=WRAP_STAND_IN,
                            retailers=WRAP_RETAILERS, papers=_PAPER, trims=TRIM_PRESETS)
@@ -2019,6 +2023,63 @@ def wrap_designer_save(pid):
     save_project_file(pid, proj)
     return jsonify(ok=True, saved=proj['wrap_design_saved'],
                    is_cover=proj.get('cover_mode') == 'wrap')
+
+
+# "Customise this design" (phase C): a template's wrap - or the wrap a book's
+# own cover would get - turned into designer elements, so a writer starts from a
+# finished layout. The conversion records what the engine draws (wrap_convert).
+
+_SAMPLE_BOOK = {'title': 'Your Book Title', 'author': 'Author Name',
+                'cover_collection': 'Series Name', 'cover_studio': 'Imprint',
+                'cover_blurb': ('The back-cover copy goes here: a paragraph or two that '
+                                'makes a browser want to open the book.')}
+
+
+@app.route('/wrap-designer/customise', methods=['POST'])
+def wrap_designer_customise():
+    body = request.get_json(silent=True) or {}
+    dims, _ = _wrap_design_dims(body.get('settings') or {})
+    cid, pid = body.get('template') or '', body.get('project') or ''
+    preset, meta, own = DEFAULTS, dict(_SAMPLE_BOOK), ''
+    if pid:
+        if not os.path.exists(os.path.join(PROJECT_DIR, secure_filename(pid) + '.json')):
+            return jsonify(ok=False, error='That book could not be found.')
+        proj = load_project(pid)
+        try:
+            preset = load_preset(proj['preset'])
+        except Exception:
+            preset = DEFAULTS
+        p = {**PRINT_DEFAULTS, **{k: proj[k] for k in PRINT_DEFAULTS if k in proj}}
+        meta = _wrap_meta(_project_meta(proj)[0], p)
+        # the cover the book has of its own; a saved wrap design's front is
+        # handed on as uploaded art, which is not a cover to start from
+        own = proj.get('cover_mode', 'none')
+    if cid:
+        tpl = load_cover_template(cid)
+        if not tpl:
+            return jsonify(ok=False, error='That cover template could not be found.')
+        # the template, not the book's own art: a book with an uploaded cover
+        # (or a saved design, whose front is handed on as one) starts afresh
+        meta = dict(meta, cover_mode='designed')
+        cf = engine._register_cover_fonts(tpl, engine.register_fonts(preset))
+        name = tpl.get('name') or cid
+    elif own == 'image' and engine._front_art(meta):
+        tpl = engine.image_wrap_template(engine._front_art(meta))
+        cf = engine.image_cover_fonts(preset)
+        name = 'this book’s cover art'
+    elif own == 'designed' and meta.get('cover_template_data'):
+        tpl = meta['cover_template_data']
+        cf = engine._register_cover_fonts(tpl, engine.register_fonts(preset))
+        name = tpl.get('name') or 'this book’s cover'
+    else:
+        return jsonify(ok=False, error='There is no cover to start from: pick a template.')
+    wrap_convert.IMPORT_DIR = WRAP_DESIGN_DIR
+    try:
+        design, notes = wrap_convert.from_template(tpl, cf, meta, dims)
+    except Exception as exc:
+        logging.error('Customise this design failed: %s', traceback.format_exc())
+        return jsonify(ok=False, error=f'That cover could not be converted: {exc}')
+    return jsonify(ok=True, design=design, notes=notes, name=name)
 
 
 @app.route('/wrap-designer/build', methods=['POST'])
@@ -3566,6 +3627,25 @@ def _art_resolution_check(res, w_in, h_in):
                        f'Ask for {need[0]}×{need[1]} px or larger.')}
 
 
+def _wrap_meta(meta, p):
+    """A book's meta plus what only its wrap prints - the back-cover copy, the
+    flaps, the author photo - from its Send to print settings `p`."""
+    back = ''
+    if p['print_back_file']:
+        # a project file is editable by hand; this is the one print setting
+        # that becomes a path, so it is read as a bare filename
+        bp = os.path.join(PROJECT_MS_DIR,
+                          secure_filename(os.path.basename(p['print_back_file'])))
+        back = bp if os.path.exists(bp) else ''
+    return dict(meta,
+                cover_blurb=p['print_blurb'],
+                cover_jacket_blurb=p['print_flap_blurb'],
+                cover_author_bio=p['print_flap_bio'],
+                cover_back_image=back,
+                cover_back_image_w=_f(p, 'print_back_w', 1.5),
+                cover_back_image_y=_f(p, 'print_back_y', 0.4))
+
+
 class PrintPackageError(ValueError):
     """A reason the package can't be built that the writer can fix in Edit."""
 
@@ -3642,20 +3722,7 @@ def build_print_package(proj, scope='print'):
                            'wrap_paper': paper,
                            'wrap_trim_w': preset['trim']['w'],
                            'wrap_trim_h': preset['trim']['h']}, pages)
-        back = ''
-        if p['print_back_file']:
-            # a project file is editable by hand; this is the one print setting
-            # that becomes a path, so it is read as a bare filename
-            bp = os.path.join(PROJECT_MS_DIR,
-                              secure_filename(os.path.basename(p['print_back_file'])))
-            back = bp if os.path.exists(bp) else ''
-        wmeta = dict(meta,
-                     cover_blurb=p['print_blurb'],
-                     cover_jacket_blurb=p['print_flap_blurb'],
-                     cover_author_bio=p['print_flap_bio'],
-                     cover_back_image=back,
-                     cover_back_image_w=_f(p, 'print_back_w', 1.5),
-                     cover_back_image_y=_f(p, 'print_back_y', 0.4))
+        wmeta = _wrap_meta(meta, p)
         # The faces page 1 of the book is set in, so the wrap's front matches it:
         # the preset's for uploaded art, the template's own (falling back to the
         # preset's, as page 1 does) for a designed cover.
@@ -3694,8 +3761,12 @@ def build_print_package(proj, scope='print'):
             art_res = engine.image_cover_check(art, aw, ah)
             checks.append(_art_resolution_check(art_res, aw, ah))
         if not wres['spine_text'] and not design:
+            thin = engine.wrap_geometry(dims)['spine_text']    # allowed, but no room
             checks.append({'label': 'Spine text', 'ok': True,
-                           'detail': (f'Left off — {pages} pages is under '
+                           'detail': ('Left off — at ' + f'{dims["spine_w"]:.3f}' + '" the spine '
+                                      'is too thin for type to fit inside its safe margins'
+                                      if thin else
+                                      f'Left off — {pages} pages is under '
                                       f'{WRAP_RETAILERS[retailer]["label"]}’s minimum of '
                                       f'{WRAP_RETAILERS[retailer]["spine_text_min"]}')})
 

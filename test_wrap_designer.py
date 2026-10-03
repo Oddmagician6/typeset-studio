@@ -173,6 +173,66 @@ def _wd_result2():
     return 'ok'
 
 
+SCRIPT3 = r'''
+var f = document.getElementById('f');
+f.onload = function () {
+  var w = f.contentWindow, d = f.contentDocument, out = {};
+  var wait = setInterval(function () {
+    if (!w.WD_READY) return;
+    clearInterval(wait);
+    var E = w.WD_EDITOR, svg = d.getElementById('wd-svg');
+    var els = E.design().elements;
+    out.vectors = els.filter(function (e) { return e.type === 'vector'; }).length;
+    out.title = (els.find(function (e) { return e.type === 'text' && e.text.indexOf('SALT') !== -1; }) || {}).text;
+    out.paths = svg.querySelectorAll('.el path').length;
+    out.msg = d.getElementById('wd-from-msg').textContent;
+    // the front and back panels' text against their safe zones, as the checks
+    // measure it (the template's own spine title sits close to the folds)
+    var g = E.geometry(), s = 0.25, e5 = 0.005;
+    out.outside = els.filter(function (e) {
+      if (e.type !== 'text' || (e.anchor !== 'front' && e.anchor !== 'back')) return false;
+      var b = E.bbox(e), o = e.anchor === 'front' ? g.front_x : g.back_x;
+      return b[0] < o + s - e5 || b[0] + b[2] > o + g.panel_w - s + e5 ||
+             b[1] < g.edge + s - e5 || b[1] + b[3] > g.edge + g.panel_h - s + e5;
+    }).map(function (e) { return e.text; });
+    // recolour the front frame through its swatch
+    var frame = els.find(function (e) { return e.label === 'Frame (front)'; });
+    Array.prototype.find.call(d.querySelectorAll('#wd-layers li'), function (li) {
+      return li.textContent.indexOf('Frame (front)') === 0;
+    }).click();
+    var sw = d.querySelector('#wd-props .swatches input');
+    out.swatch = !!sw;
+    if (sw) { sw.value = '#00ff00'; sw.dispatchEvent(new w.Event('input')); }
+    out.recoloured = frame.ops.every(function (op) { return op[op.length - 1].stroke === '#00ff00'; })
+      && !!svg.querySelector('[data-id="' + frame.id + '"] path[stroke="#00ff00"]');
+    E.commit();
+    d.getElementById('wd-proof-btn').click();
+    var w2 = setInterval(function () {
+      var msg = d.getElementById('wd-proof-msg').textContent;
+      if (msg.indexOf('Built') !== 0 && msg.indexOf('These') !== 0 && msg.indexOf('The PDF') !== 0) return;
+      clearInterval(w2);
+      out.proof = msg;
+      E.undo(); E.undo();                       // the recolour, then the conversion itself
+      out.undone = E.design().elements.some(function (e) { return e.id === 'title'; })
+        && !E.design().elements.some(function (e) { return e.type === 'vector'; });
+      var x = new XMLHttpRequest(); x.open('POST', '/_wd_result3', false); x.send(JSON.stringify(out));
+    }, 100);
+  }, 100);
+};'''
+result3 = {}
+
+@A.app.route('/_wd_harness3')
+def _wd_harness3():
+    return ('<!doctype html><meta charset="utf-8"><iframe id="f" src="/wrap-designer?project='
+            + PID + '&from=ashforge-house" style="width:1300px;height:900px"></iframe><script>'
+            + SCRIPT3 + '</script>')
+
+@A.app.route('/_wd_result3', methods=['POST'])
+def _wd_result3():
+    result3.update(json.loads(request.get_data(as_text=True)))
+    return 'ok'
+
+
 client = A.app.test_client()
 
 SETTINGS = {'pages': 320, 'wrap_retailer': 'kdp', 'wrap_paper': 'white',
@@ -314,6 +374,236 @@ try:
     check('every picture is measured at its placed size',
           any(l.startswith('Picture: stand-in-dusk.png') for l in rows), sorted(rows))
 
+    print('\n[customise this design (phase C)]')
+    import wrap_convert as WC
+    from PIL import Image, ImageChops, ImageOps
+    WC.IMPORT_DIR = A.WRAP_DESIGN_DIR
+    META = {'title': 'The Salt Road Between Winters', 'author': 'Ada Merrow',
+            'cover_collection': 'The Tidewater Cycle', 'cover_kicker': 'A novel',
+            'cover_epigraph': 'What the sea keeps, it keeps for a reason.',
+            'cover_studio': 'Ashforge Studio',
+            'cover_blurb': ('On the night the lighthouse goes dark, Mara Venn finds a letter in '
+                            'her dead father\'s coat. It names a road no map shows.\n\n'
+                            'She has one winter to walk it.'),
+            'cover_author_bio': 'Ada Merrow lives on the coast.'}
+
+    def glyphs(path):
+        out = {}
+        with fitz.open(path) as doc:
+            for b in doc[0].get_text('rawdict')['blocks']:
+                for s in (s for l in b.get('lines', []) for s in l['spans']):
+                    for c in s['chars']:
+                        if c['c'].strip():
+                            out.setdefault((c['c'], round(s['size'], 2)), []).append(c['origin'])
+        return out
+
+    def same_glyphs(a, b):
+        """Every glyph of one PDF at the same place in the other, to 0.02 pt."""
+        ga, gb = glyphs(a), glyphs(b)
+        if {k: len(v) for k, v in ga.items()} != {k: len(v) for k, v in gb.items()}:
+            return False
+        return all(any(abs(p[0] - q[0]) < 0.02 and abs(p[1] - q[1]) < 0.02 for q in gb[k])
+                   for k, ps in ga.items() for p in ps)
+
+    def differ(a, b):
+        """Pixels that differ visibly between two one-page PDFs, and whether every
+        glyph sits in the same place. The pixels are counted at two resolutions and
+        the smaller count kept: a baseline that lands on a half pixel can snap
+        either way over a thousandth of a point, and does so at one resolution
+        but not the next, where a real difference shows at both."""
+        counts = []
+        for dpi in (67, 73):
+            ims = []
+            for p in (a, b):
+                with fitz.open(p) as doc:
+                    pix = doc[0].get_pixmap(dpi=dpi, alpha=False)
+                    ims.append(Image.frombytes('RGB', (pix.width, pix.height), pix.samples))
+            counts.append(sum(ImageChops.difference(*ims).convert('L').histogram()[25:]))
+        return min(counts) if same_glyphs(a, b) else 10 ** 6
+
+    def convert_and_compare(tpl, cf, meta, dims):
+        a, b = os.path.join(tmp, 'tpl.pdf'), os.path.join(tmp, 'des.pdf')
+        engine.build_cover_wrap(tpl, cf, meta, dims, a)
+        design, notes = WC.from_template(tpl, cf, meta, dims)
+        WDm.build_pdf(design, dims, b)
+        return design, notes, differ(a, b)
+
+    def outside_safe(design, g):
+        """The text a design's checks would call outside the safe zone, measured
+        as the editor's renderChecks measures it (static/wrap_designer.js)."""
+        from reportlab.pdfbase import pdfmetrics
+        s, ss, out = engine.WRAP_SAFE, engine.WRAP_SPINE_SAFE, []
+        for e in design['elements']:
+            if e['type'] != 'text' or e.get('anchor', 'sheet') == 'sheet':
+                continue
+            x, y, w, _ = WDm.el_rect(g, e)
+            lines = WDm.break_lines(e)
+            h = sum(e['size'] * e['leading'] * (1 if ln.strip() else e.get('blank', 1))
+                    for ln in lines) / 72
+            if not e.get('w'):
+                w = max(WDm.line_width(ln, e) for ln in lines) / 72
+            bb = (x - h, y, h, w) if e.get('rotate') == 90 else (x, y, w, h)
+            o, pw = WDm.origin(g, e['anchor'])[0], WDm.panel_width(g, e['anchor'])
+            inset = min(ss, pw / 2) if e['anchor'] == 'spine' else s
+            x0, x1 = o + inset, o + pw - inset
+            mid = bb[0] + bb[2] / 2
+            if g['flap'] and mid < g['back_x']:
+                x0, x1 = g['edge'] + s, g['back_x'] - s
+            elif g['flap'] and mid > g['front_x'] + g['panel_w']:
+                x0, x1 = g['front_x'] + g['panel_w'] + s, g['front_x'] + g['panel_w'] + g['flap'] - s
+            if (bb[0] < x0 - 0.005 or bb[0] + bb[2] > x1 + 0.005 or bb[1] < g['edge'] + s - 0.005
+                    or bb[1] + bb[3] > g['edge'] + g['panel_h'] - s + 0.005):
+                out.append(e['text'][:30])
+        return out
+
+    interior = engine.register_fonts(A.DEFAULTS)
+    off, count = [], 0
+    for c in A.list_cover_templates():
+        cf = engine._register_cover_fonts(c['data'], interior)
+        for binding in ('paperback', 'hardcover', 'jacket'):
+            dims = A._wrap_dims({'wrap_binding': binding, 'wrap_retailer': 'ingramspark'}, 320)
+            design, notes, n = convert_and_compare(c['data'], cf, META, dims)
+            count += 1
+            if n > 10 or notes:
+                off.append((c['id'], binding, n, notes))
+            if c['id'] == 'ashforge-house' and binding == 'paperback':
+                classic = design
+    check(f'every template converts to a design that prints the same wrap, pixel for pixel '
+          f'({count} wraps: each template in all three bindings)',
+          count >= 72 and not off, off)
+    # The templates themselves, read by the designer's own checks: a conversion
+    # is faithful, so text a template prints outside the safe zone shows up here.
+    # (Fixed together: spine text sized to the spine's safe margins, the barcode
+    # label no longer inheriting the series line's tracking, and the
+    # photographic title lifted when a long one would push the author off.)
+    unsafe = []
+    for c in A.list_cover_templates():
+        cf = engine._register_cover_fonts(c['data'], interior)
+        for binding in ('paperback', 'hardcover', 'jacket'):
+            for pages in (150, 320):
+                dims = A._wrap_dims({'wrap_binding': binding, 'wrap_retailer': 'ingramspark'}, pages)
+                design, _ = WC.from_template(c['data'], cf, META, dims)
+                bad = outside_safe(design, engine.wrap_geometry(dims))
+                if bad:
+                    unsafe.append((c['id'], binding, pages, bad))
+    check('every template keeps its text inside the safe zones, spine and flaps included, '
+          'with a three-line title', not unsafe, unsafe[:6])
+    thin = A._wrap_dims({'wrap_retailer': 'ingramspark'}, 60)
+    tpl = A.load_cover_template('ashforge-house')
+    res = engine.build_cover_wrap(tpl, engine._register_cover_fonts(tpl, interior), META, thin,
+                                  os.path.join(tmp, 'thin.pdf'))
+    check('a spine too thin for type inside its margins is left without, and says so',
+          engine.wrap_geometry(thin)['spine_text'] and not res['spine_text'], res)
+    labels = [e.get('label') for e in classic['elements']]
+    texts = {e['text'] for e in classic['elements'] if e['type'] == 'text'}
+    check('the background, frame and ornament are layers of their own',
+          classic['elements'][0].get('fill') == 'sheet' and 'Frame (front)' in labels
+          and 'Ornament (front)' in labels, labels)
+    check('a title the template set on three lines is one text box with its words rejoined',
+          'THE SALT ROAD BETWEEN WINTERS' in texts, texts)
+    blurb = next(e for e in classic['elements'] if e['type'] == 'text' and 'lighthouse' in e['text'])
+    check('a blurb keeps its paragraphs, and the gap between them',
+          blurb['text'].count('\n\n') == 1 and abs(blurb['blank'] - 0.6) < 1e-6, blurb)
+    # the design is the writer's now: a thicker book moves its front panel along
+    d2 = A._wrap_dims({'wrap_retailer': 'ingramspark'}, 640)
+    g1, g2 = (engine.wrap_geometry(A._wrap_dims({'wrap_retailer': 'ingramspark'}, 320)),
+              engine.wrap_geometry(d2))
+    frame = next(e for e in classic['elements'] if e.get('label') == 'Frame (front)')
+    check('a converted frame moves with the front panel when the spine grows',
+          abs((WDm.el_rect(g2, frame)[0] - WDm.el_rect(g1, frame)[0])
+              - (g2['front_x'] - g1['front_x'])) < 1e-9 and g2['front_x'] > g1['front_x'])
+    longer = json.loads(json.dumps(classic))
+    next(e for e in longer['elements'] if e.get('text') == 'THE SALT ROAD BETWEEN WINTERS')['text'] \
+        = 'THE SALT ROAD BETWEEN THE WINTERS OF THE NORTH'
+    lines = WDm.build_pdf(longer, d2, os.path.join(tmp, 'longer.pdf'))
+    check('an edited title re-flows in its box', any(len(v) > 3 for v in lines.values()), lines)
+
+    # pictures: background art and an emblem from the asset library, a phone photo
+    # stored on its side as the author photo, and uploaded art as the front
+    engine_assets = engine.COVER_ASSET_DIR
+    engine.COVER_ASSET_DIR = A.COVER_ASSET_DIR
+    try:
+        Image.new('RGB', (900, 1200), (40, 90, 140)).save(os.path.join(A.COVER_ASSET_DIR, 'sea.png'))
+        Image.new('RGB', (200, 200), (220, 200, 60)).save(os.path.join(A.COVER_ASSET_DIR, 'mark.png'))
+        photo = os.path.join(tmp, 'author.jpg')
+        im = Image.new('RGB', (300, 200), (200, 80, 40))
+        ex = im.getexif(); ex[0x0112] = 6
+        im.save(photo, exif=ex)
+        meta = dict(META, cover_back_image=photo, cover_back_image_w=1.4, cover_back_image_y=0.35)
+        tpl = dict(A.load_cover_template('photo-dusk'),
+                   background={'image': 'sea.png', 'vignette': 0.3},
+                   emblems=[{'image': 'mark.png', 'slot': 'top-right', 'w': 0.8}])
+        dims = A._wrap_dims({'wrap_retailer': 'ingramspark'}, 320)
+        design, notes, n = convert_and_compare(tpl, engine._register_cover_fonts(tpl, interior),
+                                               meta, dims)
+        srcs = [e['src'] for e in design['elements'] if e['type'] == 'image']
+        check('background art, an emblem and a turned author photo carry over',
+              n <= 10 and 'sea.png' in srcs and 'mark.png' in srcs
+              and any(s.startswith('imported-') for s in srcs), (n, srcs))
+        check('the turned photo is copied upright where the designer can serve it',
+              any(client.get('/wrap-designer/art/' + s).status_code == 200
+                  for s in srcs if s.startswith('imported-')))
+        art_meta = dict(meta, cover_mode='image', cover_overlay=True,
+                        cover_image=os.path.join(A.COVER_ASSET_DIR, 'sea.png'))
+        design, notes, n = convert_and_compare(engine.image_wrap_template(art_meta['cover_image']),
+                                               engine.image_cover_fonts(A.DEFAULTS), art_meta, dims)
+        check('a wrap around uploaded art converts too', n <= 10 and any(
+            e.get('src') == 'sea.png' for e in design['elements']), n)
+    finally:
+        engine.COVER_ASSET_DIR = engine_assets
+
+    # opacity reaches the PDF (ReportLab's colours carry their own alpha, and
+    # used to undo it), and a stretched shape keeps its line width
+    half = {'elements': [{'id': 'k', 'type': 'rect', 'fill': 'sheet', 'color': '#000000'},
+                         {'id': 'w', 'type': 'rect', 'fill': 'sheet', 'color': '#ffffff',
+                          'opacity': 0.5}]}
+    hp = os.path.join(tmp, 'half.pdf')
+    WDm.build_pdf(half, A._wrap_dims({}, 320), hp)
+    with fitz.open(hp) as doc:
+        px = doc[0].get_pixmap(dpi=10).pixel(20, 20)
+    check('a shape at half opacity prints at half opacity', 110 < px[0] < 145, px)
+    vec = {'type': 'vector', 'id': 'v', 'anchor': 'front', 'x': 1, 'y': 1, 'w': 4, 'h': 1,
+           'vw': 2, 'vh': 1, 'ops': [['path', [['M', 0, 0.5], ['L', 2, 0.5]],
+                                      {'stroke': '#ff0000', 'lw': 3}]]}
+    vp = os.path.join(tmp, 'vec.pdf')
+    WDm.build_pdf({'elements': [vec]}, A._wrap_dims({}, 320), vp)
+    with fitz.open(vp) as doc:
+        dr = doc[0].get_drawings()
+    check('a shape stretched to twice its width: twice as long, same line weight',
+          dr and abs(dr[0]['rect'].width - 4 * 72) < 0.01 and abs(dr[0]['width'] - 3) < 1e-6,
+          dr and (dr[0]['rect'], dr[0]['width']))
+
+    # the route, and the ways in
+    res = client.post('/wrap-designer/customise', json={
+        'template': 'ashforge-house', 'project': PID, 'settings': SETTINGS}).get_json()
+    texts = [e['text'] for e in res['design']['elements'] if e['type'] == 'text'] if res['ok'] else []
+    check("Customise lays a template out with the book's own title and back copy",
+          res['ok'] and 'THE SALT ROAD' in texts and 'A road of salt.' in texts, (res.get('error'), texts))
+    res = client.post('/wrap-designer/customise', json={'template': 'ashforge-house',
+                                                        'settings': SETTINGS}).get_json()
+    check('without a book it uses stand-in text',
+          res['ok'] and any(e.get('text') == 'YOUR BOOK TITLE' for e in res['design']['elements']))
+    res = client.post('/wrap-designer/customise', json={'template': 'no-such-cover'}).get_json()
+    check('an unknown template is refused', not res['ok'] and 'template' in res['error'], res)
+    res = client.post('/wrap-designer/customise', json={'project': PID}).get_json()
+    check("a book whose cover is already a wrap design has no other cover to start from",
+          not res['ok'], res)
+    p = A.load_project(PID)
+    A.save_project_file(PID, dict(p, cover_mode='designed', cover_template='minimal-noir'))
+    res = client.post('/wrap-designer/customise', json={'project': PID, 'settings': SETTINGS}).get_json()
+    check("“This book's own cover” starts from the template the book uses",
+          res['ok'] and res['name'] == A.load_cover_template('minimal-noir')['name'], res.get('error'))
+    A.save_project_file(PID, p)
+    page = client.get('/covers').get_data(as_text=True)
+    check('the covers page offers Customise on each template',
+          page.count('/wrap-designer?from=') >= 24)
+    page = client.get(f'/project/{PID}/edit').get_data(as_text=True)
+    check("the book's template picker offers it too, for this book",
+          f'/wrap-designer?project={PID}&amp;from=ashforge-house' in page
+          or f'/wrap-designer?from=ashforge-house&amp;project={PID}' in page)
+    page = client.get('/wrap-designer?from=photo-dusk').get_data(as_text=True)
+    check('the designer is told which template to start from', '"startFrom": "photo-dusk"' in page)
+
     browser = find_browser()
     print('\n[the editor, in a browser]')
     if not browser:
@@ -331,6 +621,11 @@ try:
                             '--user-data-dir=' + os.path.join(tmp, 'browser'),
                             '--window-size=1400,1000', '--virtual-time-budget=60000', '--dump-dom',
                             f'http://127.0.0.1:{server.server_port}/_wd_harness2'],
+                           capture_output=True, timeout=300)
+            subprocess.run([browser, '--headless=new', '--disable-gpu', '--no-first-run',
+                            '--user-data-dir=' + os.path.join(tmp, 'browser'),
+                            '--window-size=1400,1000', '--virtual-time-budget=60000', '--dump-dom',
+                            f'http://127.0.0.1:{server.server_port}/_wd_harness3'],
                            capture_output=True, timeout=300)
         finally:
             server.shutdown()
@@ -359,6 +654,20 @@ try:
                   and result2['trim_locked'], result2)
             check('and Save to book saves it', result2['save_shown']
                   and result2['status'].startswith('Saved'), result2)
+        check("a template's Customise link opens it in the editor", bool(result3))
+        if result3:
+            check('as layers: frames and ornaments drawn as shapes, the title as text',
+                  result3['vectors'] >= 4 and result3['paths'] > 10
+                  and result3['title'] == 'THE SALT ROAD', result3)
+            check('it says where it started from, and that it is not saved yet',
+                  'Ashforge House' in result3['msg'] or 'not saved' in result3['msg'], result3['msg'])
+            check('with the text on its front and back inside their safe zones',
+                  result3['outside'] == [], result3['outside'])
+            check('a shape layer recolours from its swatch', result3['swatch'] and result3['recoloured'])
+            check('and every converted text box breaks where the PDF does',
+                  result3['proof'].startswith('Built. All') and 'exactly' in result3['proof'],
+                  result3['proof'])
+            check('undo goes back to the design from before', result3['undone'])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

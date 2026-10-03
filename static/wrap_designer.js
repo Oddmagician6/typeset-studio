@@ -94,19 +94,28 @@
     if (!m) return [];
     var lines = el.w ? WD.breakLines(el.text, m, el.size, el.w * 72, el.tracking || 0)
                      : String(el.text).split(/\r?\n/);
-    var asc = m.ascent / 1000 * el.size, box = (el.w || 0) * 72;
-    return lines.map(function (ln, i) {
+    var asc = m.ascent / 1000 * el.size, box = (el.w || 0) * 72, down = 0;
+    var step = el.size * (el.leading || 1.2), blank = blankOf(el);
+    return lines.map(function (ln) {
       var lw = WD.width(ln, m, el.size, el.tracking || 0), dx = 0;
       if (el.align === 'center') dx = box ? (box - lw) / 2 : -lw / 2;
       else if (el.align === 'right') dx = box ? box - lw : -lw;
-      return [ln, dx, asc + i * el.size * (el.leading || 1.2)];
+      var out = [ln, dx, asc + down];
+      down += step * (ln.trim() ? 1 : blank);
+      return out;
     });
+  }
+  // an empty line's height in lines (a template's blurb leaves 0.6 between paragraphs)
+  function blankOf(el) { return clamp(el.blank == null ? 1 : el.blank, 0, 2, 1); }
+  function textHeight(el, lay) {        // inches
+    var step = el.size * (el.leading || 1.2), blank = blankOf(el);
+    return lay.reduce(function (h, l) { return h + step * (l[0].trim() ? 1 : blank); }, 0) / 72;
   }
   function bbox(el) {                   // on the sheet, inches: [x, y, w, h]
     var r = elRect(el);
     if (el.type !== 'text') return r;
     var lay = layout(el), m = metrics[el.font];
-    var h = lay.length * el.size * (el.leading || 1.2) / 72;
+    var h = textHeight(el, lay);
     var w = el.w || (m ? Math.max.apply(null, lay.map(function (l) { return WD.width(l[0], m, el.size, el.tracking || 0); }).concat([0])) / 72 : 0);
     var x = r[0];
     if (!el.w && el.align === 'center') x -= w / 2; else if (!el.w && el.align === 'right') x -= w;
@@ -204,6 +213,7 @@
                          preserveAspectRatio:'xMidYMid slice', opacity:op}, grp);
         }
       }
+      else if (el.type === 'vector') drawVector(el, r, grp);
       else if (el.type === 'text') {
         var t = node('g', {transform:'translate(' + r[0] + ' ' + r[1] + ')' + (el.rotate === 90 ? ' rotate(90)' : '')}, grp);
         var lay = layout(el);
@@ -213,7 +223,8 @@
         lay.forEach(function (l) {
           node('text', {x:l[1] / 72, y:l[2] / 72, 'font-family':WD.family(el.font),
                         'font-size':el.size / 72, 'letter-spacing':(el.tracking || 0) / 72,
-                        fill:el.color, 'xml:space':'preserve', 'pointer-events':'none'}, t).textContent = l[0];
+                        fill:el.color, 'fill-opacity':el.opacity == null ? 1 : el.opacity,
+                        'xml:space':'preserve', 'pointer-events':'none'}, t).textContent = l[0];
         });
       }
     });
@@ -224,6 +235,67 @@
     persist();
     markDirty();
     if (!drag && lastSnap !== null) scheduleCommit();
+  }
+
+  // A `vector` element: a template's own shapes (frame, ornament, shading),
+  // drawn as wrap_design.draw_vector draws them - paths stretched to the box,
+  // line widths not.
+  var CAPS = ['butt', 'round', 'square'], JOINS = ['miter', 'round', 'bevel'];
+  function drawVector(el, r, grp) {
+    var sx = el.vw ? r[2] / el.vw : 1, sy = el.vh ? r[3] / el.vh : 1, a = el.opacity == null ? 1 : el.opacity;
+    var X = function (x) { return r[0] + x * sx; }, Y = function (y) { return r[1] + y * sy; };
+    // an invisible box under the drawing, so a thin frame can be grabbed anywhere inside it
+    node('rect', {x:r[0], y:r[1], width:Math.max(r[2], 0), height:Math.max(r[3], 0), fill:'transparent'}, grp);
+    (el.ops || []).forEach(function (op, i) {
+      var st = op[op.length - 1] || {}, attrs = {'pointer-events':'none'};
+      attrs.fill = st.fill || 'none';
+      if (st.fill) { attrs['fill-opacity'] = a * (st.fa == null ? 1 : st.fa); attrs['fill-rule'] = 'evenodd'; }
+      if (st.stroke) {
+        attrs.stroke = st.stroke; attrs['stroke-width'] = (st.lw == null ? 1 : st.lw) / 72;
+        attrs['stroke-opacity'] = a * (st.sa == null ? 1 : st.sa);
+        attrs['stroke-linecap'] = CAPS[st.cap || 0]; attrs['stroke-linejoin'] = JOINS[st.join || 0];
+        if (st.dash) attrs['stroke-dasharray'] = st.dash.map(function (v) { return v / 72; }).join(' ');
+      }
+      if (op[0] === 'path') {
+        attrs.d = op[1].map(function (sg) {
+          if (sg[0] === 'Z') return 'Z';
+          var pts = [];
+          for (var k = 1; k < sg.length; k += 2) pts.push(X(sg[k]) + ' ' + Y(sg[k + 1]));
+          return sg[0] + pts.join(' ');
+        }).join(' ');
+        node('path', attrs, grp);
+      } else if (op[0] === 'ellipse') {
+        attrs.cx = X(op[1]); attrs.cy = Y(op[2]); attrs.rx = op[3] * sx; attrs.ry = op[4] * sy;
+        node('ellipse', attrs, grp);
+      } else if (op[0] === 'grad') {
+        var id = 'wdg-' + el.id + '-' + i;
+        var lg = node('linearGradient', {id:id, gradientUnits:'userSpaceOnUse', x1:0, x2:0, y1:Y(op[7]), y2:Y(op[8])},
+                      node('defs', {}, grp));
+        node('stop', {offset:0, 'stop-color':op[5]}, lg);
+        node('stop', {offset:1, 'stop-color':op[6]}, lg);
+        node('rect', {x:X(op[1]), y:Y(op[2]), width:op[3] * sx, height:op[4] * sy, fill:'url(#' + id + ')',
+                      'fill-opacity':a * (st.fa == null ? 1 : st.fa), 'pointer-events':'none'}, grp);
+      }
+    });
+  }
+  // The colours a vector element is drawn in, each once, for recolouring.
+  function vectorColours(el) {
+    var seen = [];
+    (el.ops || []).forEach(function (op) {
+      var st = op[op.length - 1] || {};
+      (op[0] === 'grad' ? [op[5], op[6]] : [st.fill, st.stroke]).forEach(function (c) {
+        if (c && seen.indexOf(c) === -1) seen.push(c);
+      });
+    });
+    return seen;
+  }
+  function recolour(el, from, to) {
+    (el.ops || []).forEach(function (op) {
+      var st = op[op.length - 1] || {};
+      if (op[0] === 'grad') { if (op[5] === from) op[5] = to; if (op[6] === from) op[6] = to; }
+      if (st.fill === from) st.fill = to;
+      if (st.stroke === from) st.stroke = to;
+    });
   }
 
   function drawGuides() {
@@ -259,6 +331,7 @@
     if (el.label) return el.label;
     if (el.type === 'text') return '"' + String(el.text).slice(0, 28) + '"';
     if (el.type === 'image') return (el.fill ? 'Picture (' + el.fill + ' cover)' : 'Picture') + ': ' + el.src;
+    if (el.type === 'vector') return 'Shapes';
     return el.fill ? 'Colour (' + el.fill + ')' : 'Shape';
   }
   function renderLayers() {
@@ -311,6 +384,11 @@
       var inset = el.anchor === 'spine' ? spineSafe : s;
       var x0 = o[0] + (el.anchor === 'spine' ? Math.min(inset, pw / 2) : inset);
       var x1 = o[0] + pw - (el.anchor === 'spine' ? Math.min(inset, pw / 2) : inset);
+      var mid = bb[0] + bb[2] / 2;          // on a jacket, text out on a flap is held to the flap
+      if (g.flap && mid < g.back_x) { x0 = g.edge + s; x1 = g.back_x - s; }
+      else if (g.flap && mid > g.front_x + g.panel_w) {
+        x0 = g.front_x + g.panel_w + s; x1 = g.front_x + g.panel_w + g.flap - s;
+      }
       var y0 = o[1] + s, y1 = o[1] + g.panel_h - s, eps = 0.005;
       if (bb[0] < x0 - eps || bb[0] + bb[2] > x1 + eps || bb[1] < y0 - eps || bb[1] + bb[3] > y1 + eps)
         outside.push(label(el));
@@ -434,6 +512,22 @@
           {min:0, max:1, step:0.01, dflt:0.5});
       add('Opacity', 'opacity', 'number', null, true);
       if (!el.fill) { add('Width (in)', 'w', 'number', null, true); add('Height (in)', 'h', 'number', null, true); }
+    } else if (el.type === 'vector') {
+      var cols = vectorColours(el);
+      if (cols.length) {
+        var lab = document.createElement('label');
+        lab.textContent = cols.length > 1 ? 'Colours' : 'Colour';
+        box.appendChild(lab);
+        var sw = document.createElement('div'); sw.className = 'swatches'; box.appendChild(sw);
+        cols.forEach(function (c) {
+          var inp = document.createElement('input'); inp.type = 'color'; inp.value = c; inp.title = c;
+          var cur = c;                          // follows the colour as it is changed
+          inp.addEventListener('input', function () { recolour(el, cur, inp.value); cur = inp.value; render(); });
+          sw.appendChild(inp);
+        });
+      }
+      add('Opacity', 'opacity', 'number', null, true);
+      if (!el.fill) { add('Width (in)', 'w', 'number', null, true); add('Height (in)', 'h', 'number', null, true); }
     }
   }
 
@@ -481,6 +575,28 @@
     loadFonts().then(render);
   });
   $('wd-guides').addEventListener('change', render);
+
+  // ---- start from a template ("Customise this design") ------------------------------
+  // The template's wrap - or the book's own cover - converted by the server into
+  // elements, laid out for this book and printer. One undo goes back.
+  function customise(from) {
+    var msg = $('wd-from-msg'), pid = $('wd-project').value;
+    if (!from) return Promise.resolve();
+    msg.textContent = 'Converting…';
+    return post('/wrap-designer/customise', {template: from === '@book' ? '' : from, project: pid,
+                                             settings: settings()})
+      .then(function (res) {
+        if (!res.ok) { msg.textContent = res.error; return; }
+        commit();
+        design = res.design; sel = null; showProps();
+        return loadFonts().then(function () {
+          render(); commit();
+          msg.textContent = 'Started from ' + res.name + (pid ? ', not saved to the book yet.' : '.') +
+            (res.notes.length ? ' ' + res.notes.join(' ') : '');
+        });
+      }).catch(function () { msg.textContent = 'No answer from the app.'; });
+  }
+  $('wd-from-btn').addEventListener('click', function () { customise($('wd-from').value); });
 
   // ---- a book's cover ---------------------------------------------------------------
   // With a book picked, its trim is its style's and its printer, paper and
@@ -601,12 +717,19 @@
   } else {
     startPromise = loadFonts().then(regeometry);
   }
-  startPromise.then(function () { resetHistory(); window.WD_READY = true; });
+  startPromise.then(function () {
+    resetHistory();
+    var from = CFG.startFrom;             // arrived from a template's "Customise"
+    if (from && Array.prototype.some.call($('wd-from').options, function (o) { return o.value === from; })) {
+      $('wd-from').value = from;
+      return customise(from);
+    }
+  }).then(function () { window.WD_READY = true; });
   $('wd-undo').addEventListener('click', undo);
   $('wd-redo').addEventListener('click', redo);
 
   // for the browser test: the live design and the geometry it is drawn against
   window.WD_EDITOR = { design: function () { return design; }, geometry: function () { return g; },
                        layout: layout, regeometry: regeometry, commit: commit, imageFit: imageFit,
-                       undo: undo, redo: redo };
+                       undo: undo, redo: redo, customise: customise, bbox: bbox };
 })();

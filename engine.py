@@ -743,6 +743,23 @@ def _design_photographic(canv, tpl, cf, meta, x0, y0, w, h):
             tsize -= 1
             lines = _wrap_tracked(title, cf['display'], tsize, inner_w, trk)
         leading = tsize * _num(ph.get('title_leading', 1.08), 1.08)
+        # The title grows downward from title_y, so a long one pushes the author
+        # line toward the foot. Lift the whole cluster as far as it takes to
+        # keep its lowest line clear of the studio footer and inside the safe zone.
+        accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
+        bottom = title_y - leading * (len(lines) - 1)
+        if accent:
+            asize = _num(ph.get('author_size', 18), 18)
+            bottom -= tsize * 0.42 + asize * 1.1 + _depth(cf['display'], asize)[1]
+        else:
+            bottom -= _depth(cf['display'], tsize)[1]
+        floor = y0 + WRAP_SAFE * inch
+        st = tpl.get('studio', {})
+        if (meta.get('cover_studio') or meta.get('publisher') or '').strip():
+            floor = max(floor, y0 + h * _num(st.get('y', 0.06), 0.06)
+                        + _depth(cf['serif'], st.get('size', 8.5))[0] + 0.35 * inch)
+        if bottom < floor:
+            title_y += floor - bottom
         canv.setFillColor(_pal_color(tpl, ph.get('title_color', 'ink')))
         yy = title_y
         for ln in lines:
@@ -1286,8 +1303,11 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
     canv.setLineWidth(0.6)
     canv.rect(bxr, byr, bw, bh, stroke=1, fill=1)
     canv.setFillGray(0.55)
-    canv.setFont(cf['serif'], 7.5)
-    canv.drawCentredString(bxr + bw / 2.0, byr + bh / 2.0 - 2, 'ISBN / barcode area')
+    # _tracked_centre, not drawCentredString: character spacing is PDF text
+    # state, and with no blurb above it the series line's tracking would still
+    # be in force and stretch the label past its box
+    _tracked_centre(canv, bxr + bw / 2.0, byr + bh / 2.0 - 2, 'ISBN / barcode area',
+                    cf['serif'], 7.5, 0.0)
 
     # studio footer — centred in the space to the LEFT of the barcode so they never collide
     st = tpl.get('studio', {})
@@ -1373,34 +1393,88 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
     canv.restoreState()
 
 
+def _depth(font, size):
+    """How far a face reaches above and below its baseline at `size` (points,
+    both positive): the ascent and descent the font declares, not the ink of
+    any one string, so a line of capitals and a line with descenders get the
+    same room."""
+    asc, desc = pdfmetrics.getAscentDescent(font, size)
+    return asc, abs(desc)
+
+
+def _spine_layout(title, author, font, w, h):
+    """Sizes and baselines for spine text, across a spine `w` points wide.
+
+    The title (and the author under it, at 0.62 of its size) are set as one
+    block, centred across the spine and sized so the whole block - ascent of
+    the first line to descent of the last - stays inside the spine's safe zone
+    (WRAP_SPINE_SAFE each side of the folds). Along the spine the title takes
+    no more than 82% of the height. If the two lines would have to drop below
+    7 pt to fit across, the author is left off and the title takes the room;
+    if the title won't fit even at 4 pt, the spine is too thin for type and
+    None is returned. Otherwise (tsize, title baseline, asize, author baseline),
+    baselines as offsets from the spine's centre line towards the front, and
+    the author parts None when it is left off.
+    """
+    room = w - 2 * WRAP_SPINE_SAFE * inch
+    gap = 0.12                                   # between the lines, in title sizes
+
+    def fit(with_author):
+        size = 15.0
+        while size > 4:
+            ta, td = _depth(font, size)
+            block = ta + td
+            if with_author:
+                aa, ad = _depth(font, size * 0.62)
+                block += gap * size + aa + ad
+            if block <= room and stringWidth(title, font, size) <= h * 0.82:
+                return size
+            size -= 0.25
+        return None
+
+    tsize = fit(bool(author)) if author else None
+    two = tsize is not None and tsize >= 7
+    if not two:
+        tsize = fit(False)
+        if tsize is None:
+            return None
+    ta, td = _depth(font, tsize)
+    if not two or not author:
+        return tsize, (ta + td) / 2.0 - ta, None, None
+    asize = tsize * 0.62
+    aa, ad = _depth(font, asize)
+    block = ta + td + gap * tsize + aa + ad
+    tbase = block / 2.0 - ta
+    return tsize, tbase, asize, tbase - td - gap * tsize - aa
+
+
 def _paint_spine(canv, tpl, cf, meta, x0, y0, w, h, draw_text=True):
-    """Rotated spine text (title + author), if allowed and wide enough to carry it."""
+    """Rotated spine text (title + author), if allowed and wide enough to carry it.
+    Returns whether any was drawn."""
     if not draw_text or w < 0.10 * inch:   # retailer minimum not met, or physically too thin
-        return
+        return False
     title = (meta.get('title') or '').upper()
     author = (meta.get('cover_accent') or meta.get('author') or '').upper()
     if not title and not author:
-        return
+        return False
+    if not title:                          # an author alone is set the way a title would be
+        title, author = author, ''
     cx = x0 + w / 2.0
     cy = y0 + h / 2.0
-    avail = h * 0.82               # length available along the spine
-    # size the title to the spine width, but no longer than the spine allows
-    tsize = min(w * 0.55, 15.0)
-    while tsize > 6 and stringWidth(title, cf['display'], tsize) > avail:
-        tsize -= 0.5
-    asize = tsize * 0.62
+    layout = _spine_layout(title, author, cf['display'], w, h)
+    if layout is None:                     # no room for type inside the safe margins
+        return False
+    tsize, tbase, asize, abase = layout
     canv.saveState()
     canv.translate(cx, cy)
     canv.rotate(-90)               # reads top-to-bottom (US/UK convention)
-    if title:
-        canv.setFillColor(_pal_color(tpl, tpl.get('title', {}).get('color', 'gold')))
-        canv.setFont(cf['display'], tsize)
-        canv.drawCentredString(0, w * 0.10, title)
-    if author:
+    canv.setFillColor(_pal_color(tpl, tpl.get('title', {}).get('color', 'gold')))
+    _tracked_centre(canv, 0, tbase, title, cf['display'], tsize, 0.0)
+    if asize:
         canv.setFillColor(_pal_color(tpl, tpl.get('accent', {}).get('color', 'teal')))
-        canv.setFont(cf['display'], asize)
-        canv.drawCentredString(0, -w * 0.28, author)
+        _tracked_centre(canv, 0, abase, author, cf['display'], asize, 0.0)
     canv.restoreState()
+    return True
 
 
 def _paint_wrap_guides(canv, W, H, folds, y0, panel_h, wrap=0.0):
@@ -1427,7 +1501,7 @@ def _paint_wrap_guides(canv, W, H, folds, y0, panel_h, wrap=0.0):
     canv.restoreState()
 
 
-def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
+def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
     """Render a standalone print-ready wrap PDF: back + spine + front + bleed.
 
     dims: {'trim_w','trim_h','spine_w','bleed'} in inches, plus optional
@@ -1454,6 +1528,9 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
     side up the order is back flap, back, spine, front, front flap — the flaps
     fold in behind the covers they adjoin.
 
+    `canv` paints into a canvas the caller already has instead of a new file -
+    the wrap designer's "Customise this design" hands it a recording canvas.
+
     Returns the finished wrap dimensions (inches) and whether spine text was drawn.
     """
     from reportlab.pdfgen import canvas as _canvas
@@ -1466,7 +1543,7 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
     pw, ph = g['panel_w'] * inch, g['panel_h'] * inch
     W, H = g['wrap_w'] * inch, g['wrap_h'] * inch
     draw_spine = g['spine_text']
-    c = _canvas.Canvas(out_path, pagesize=(W, H))
+    c = canv if canv is not None else _canvas.Canvas(out_path, pagesize=(W, H))
     pal = tpl.get('palette', {})
     _paint_gradient(c, pal, 0, 0, W, H)
     back_x = edge + flap
@@ -1483,7 +1560,7 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
         if not (meta.get('cover_jacket_blurb') or '').strip():
             panel_meta.pop('cover_blurb', None)
     _paint_back_panel(c, tpl, cf, panel_meta, back_x, edge, pw, ph)
-    _paint_spine(c, tpl, cf, meta, spine_x, edge, sp, ph, draw_text=draw_spine)
+    drew_spine = _paint_spine(c, tpl, cf, meta, spine_x, edge, sp, ph, draw_text=draw_spine)
     art = _front_art(meta)
     if art:
         # Uploaded art is the front panel (#66). It runs past the trim to the
@@ -1503,10 +1580,11 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False):
         folds = [edge, edge + flap, back_x + pw, spine_x, spine_x + sp,
                  front_x, front_x + pw, front_x + pw + flap]
         _paint_wrap_guides(c, W, H, folds, edge, ph, wrap=wrap)
-    c.showPage()
-    c.save()
+    if canv is None:
+        c.showPage()
+        c.save()
     return {'wrap_w': round(g['wrap_w'], 3), 'wrap_h': round(g['wrap_h'], 3),
-            'spine_w': round(g['spine_w'], 4), 'spine_text': bool(draw_spine),
+            'spine_w': round(g['spine_w'], 4), 'spine_text': bool(drew_spine),
             'binding': g['binding'], 'front': 'image' if art else 'designed',
             'wrap': round(g['wrap'], 4), 'hinge': round(g['hinge'], 4),
             'flap': round(g['flap'], 4), 'panel_w': round(g['panel_w'], 4)}

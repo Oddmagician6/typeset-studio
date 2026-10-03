@@ -11,14 +11,12 @@ sections before changing the engine.
 
 Start here in a new session. Each item points at its full entry below.
 
-1. **Wrap designer, phase C part 2: "Customise this design" (#72).** Turn any of the 24
-   template covers into editable designer elements, so a writer starts from a professional
-   layout instead of the example. The work is one converter per design family: each of the
-   eight paints its front through its own renderer in `engine._COVER_DESIGNS`, and the back
-   and spine through `build_cover_wrap`. Start with `classic-frame` (the default) and
-   `photographic`, check each conversion against the template's own wrap PDF, then do the rest.
-   Entry point: a "Customise" button beside each template, landing in `/wrap-designer` with the
-   book picked.
+1. **Very long titles in three more families (#72 follow-up, small).** The three template
+   bugs "Customise this design" exposed are fixed (spine text, barcode label, photographic
+   title — see #72's phase C entry). The same scan with a five-line title still finds the
+   thriller-noir, stripe and typographic layouts growing the title downward until the
+   author line (or typographic's tagline) leaves the safe zone. Three-line titles are fine
+   everywhere and are tested; lift the cluster the way `_design_photographic` now does.
 2. **Wrap designer leftovers (#72):** justified blurbs, align / distribute for selected
    elements, and content presets for jacket flaps. Check SVG `letter-spacing` and the
    font-feature switches in WebKit before any macOS build.
@@ -88,6 +86,7 @@ test_rebuild.py   Rebuild all: one project's build answered in JSON, failures in
 test_rich_editor.py The rich editor, edited in a headless browser: round trips, Enter, paste.
 test_wrap_designer.py The wrap designer: routes, geometry, the PDF, and the editor in a browser.
 wrap_design.py    Freeform wrap designs (#72 beta): the design document, width tables, and its PDF.
+wrap_convert.py   "Customise this design" (#72): records what build_cover_wrap draws, as designer elements.
 checker.py        Continuity checker: tier-1 rule checks + tier-2 Claude Haiku analysis.
 templates/        Jinja2 UI: base, index (styles), editor (preset form + live preview),
                   generate, result, projects, project_edit, continuity_result.
@@ -2181,7 +2180,7 @@ tall flowable — a chapter opening's sink — no longer fitted: **the whole PDF
   fail on the old engine with the `LayoutError`.
 
 **72. A freeform wrap designer — design the whole cover yourself, in the app** *(large;
-several sessions; asked for 2026-10-02)* — **IN PROGRESS: phases A and B done, beta tab shipped**
+several sessions; asked for 2026-10-02)* — **IN PROGRESS: phases A–C done (C unreleased); D left**
 Templates (#16, #33) give a professional cover from a few fields, and #66 / #68 serve a writer
 who has a designer. Missing is the writer who wants to *design* the wrap themselves without
 leaving the app: place the art, set the title where they want it, run a band across the spine,
@@ -2329,6 +2328,62 @@ the app as its own **Wrap designer** tab (`/wrap-designer`), so it can be tried 
 - Tests: in the PDF, a 2× zoom pinned left and bottom draws exactly the 4×6" picture at the
   box's left and bottom edges, and is measured at 4×4"; in the browser, Ctrl+Z undoes a drag,
   Ctrl+Y redoes it, a deleted layer comes back, and a 2× zoom draws the picture twice as wide.
+
+**Phase C, second half — "Customise this design": SHIPPED (2026-10-02, unreleased).**
+- **One converter for every family, not eight.** The plan was a converter per design
+  family; instead `wrap_convert.py` runs the engine's own `build_cover_wrap` against a
+  *recording canvas* (`Recorder`, via the new `canv=` argument) and turns what it draws into
+  elements. So all 24 templates, every binding, and uploaded-art wraps (#66) convert the
+  same way, and a family added later converts with no new code — an unknown canvas call
+  raises, so the tests catch a painter that grows a new kind of drawing.
+- **The Recorder keeps PDF graphics state, quirks included.** ReportLab's colours carry
+  their own alpha (`setFillColor` after `setFillAlpha` undoes the alpha), and character
+  spacing set inside one text object stays in force for the next `drawCentredString` until a
+  restore. Both are modelled, because both change what the template prints.
+- **What becomes what.** Text: each run of lines in one face, size, tracking, colour and
+  alignment is one box, its words rejoined (a line break the next word would have fitted
+  past is kept as a real break), with a width that breaks it into exactly the template's
+  lines; a lone centred line gets room to grow to the safe zone, and a box only as tall as
+  its type, so a thin spine isn't flagged for leading it doesn't have. Blurb paragraph gaps
+  keep their 0.6-line height through a new `blank` text property. Pictures: cover-fit crops
+  become `zoom` / `fx` / `fy`; art outside the designer's folders (an author photo, an
+  EXIF-turned copy) is copied into `out/_wrap_designer/` as `imported-<hash>`. Everything
+  else is a new **`vector`** element: the template's own paths, ellipses and gradients,
+  grouped into a layer per piece and named from the engine function that drew it
+  (Background, Frame, Ornament, Shading, Vignette, Title panel). A vector stretches with its
+  box but keeps its line widths, and its properties list each of its colours for recolouring.
+  Anything that spans the sheet or a panel to the bleed is a `fill`, so it follows the
+  page count.
+- **Ways in:** a **Customise** link on every template on the Covers page and in a book's
+  template picker (`/wrap-designer?project=…&from=<template>`), and a **Start from a cover**
+  menu in the designer, which also offers "this book's own cover" (its template or its
+  uploaded art; not a saved wrap design, whose front is only a picture). `POST
+  /wrap-designer/customise` does the conversion with the book's meta plus its Send to print
+  copy (`_wrap_meta`, now shared with the print package), or stand-in text without a book.
+  One undo returns to the design from before.
+- **Fixed on the way:** `build_pdf` set opacity before colour, so a translucent shape
+  printed solid.
+- `test_wrap_designer.py`: all 24 templates × paperback / hardcover / jacket convert to a
+  design whose PDF matches the template's — every glyph within 0.02 pt and no visible pixel
+  difference (counted at 67 and 73 dpi and the smaller kept: a baseline on a half pixel snaps
+  either way over a thousandth of a point at one resolution only) — plus background art, an
+  emblem, a turned author photo and an uploaded-art front; words rejoined and paragraphs
+  kept; a converted frame moving with the spine; an edited title re-flowing; opacity in the
+  PDF; a stretched shape keeping its line weight; the route's refusals; and, in Chrome, a
+  Customise link opening as layers, a recolour, Proof agreeing box by box, and undo.
+- **Found by it, and fixed:** three places where the templates themselves printed outside the
+  safe zones, now caught by a test that converts every template in every binding at 150 and
+  320 pages and runs the designer's own safe-zone rules on it.
+  - *Spine text* ran past the 1/16" spine margin on every family (`_paint_spine` put the
+    baseline at `w * 0.10` with a 15 pt cap). `_spine_layout` now sizes title + author as one
+    block, ascent to descent, inside `WRAP_SPINE_SAFE` each side and centred; below 7 pt the
+    author is dropped, and below 4 pt the spine is left bare — `build_cover_wrap` reports
+    `spine_text: False` and the print package says the spine is too thin, not too short.
+  - *The barcode label* inherited the series line's tracking when no blurb reset it (a
+    `drawCentredString` after `_tracked_centre`); it is set with `_tracked_centre(..., 0)`.
+  - *The photographic title* grew downward from `title_y` and pushed the author below the
+    trim; the cluster now lifts to clear the studio footer by 0.35" (or the safe zone).
+    One- and two-line titles are unchanged.
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 

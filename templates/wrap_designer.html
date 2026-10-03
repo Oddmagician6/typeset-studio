@@ -50,6 +50,11 @@
   .wd-art{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
   .wd-note{margin:-6px 0 14px;font-size:13px;color:var(--muted)}
   #wd-save-status{font-size:12.5px;color:var(--muted)}
+  .wd-from{display:inline-flex;gap:6px;align-items:center}
+  .wd-from select{max-width:220px}
+  .wd-note:empty{display:none}
+  .wd-props .swatches{display:flex;flex-wrap:wrap;gap:6px}
+  .wd-props .swatches input{width:34px;height:28px;padding:2px}
   .beta{font-family:var(--mono);font-size:10px;letter-spacing:.12em;border:1px solid var(--red);
     color:var(--red);border-radius:2px;padding:1px 5px;vertical-align:middle;margin-left:8px}
 {% endblock %}
@@ -61,7 +66,9 @@
     <p>Lay out the whole printed cover (back, spine and front) to the exact size your printer
        needs. Drag things to move them, pull the orange corner to resize, and press
        <b>Proof</b> to build the real PDF. Pick a book to design its cover: <b>Save to book</b>
-       keeps the design with it, and Send to print then uses it.</p>
+       keeps the design with it, and Send to print then uses it. To start from a finished
+       layout, pick any cover under <b>Start from a cover</b> and press <b>Customise</b>: its
+       frame, type and pictures become layers you can move, edit and recolour.</p>
   </div>
 
   <div class="wd-bar">
@@ -86,6 +93,7 @@
     <label>Pages<input id="wd-pages" type="number" value="320" min="24" max="1000" step="10" style="width:90px"></label>
   </div>
   <p class="wd-note" id="wd-book-note" hidden></p>
+  <p class="wd-note" id="wd-from-msg" aria-live="polite"></p>
   <div class="wd-bar">
     <button class="btn btn-sm" id="wd-add-text" type="button">+ Text</button>
     <button class="btn btn-sm" id="wd-add-rect" type="button">+ Shape</button>
@@ -95,6 +103,15 @@
       <input id="wd-guides" type="checkbox" checked> Guides</label>
     <span class="grow"></span>
     <span id="wd-save-status"></span>
+    <span class="wd-from">
+      <select id="wd-from" aria-label="Start from a cover">
+        <option value="">Start from a cover…</option>
+        <option value="@book">This book’s own cover</option>
+        {% for t in templates %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+      </select>
+      <button class="btn btn-sm" id="wd-from-btn" type="button"
+              title="Turn this cover into layers you can move, edit and recolour">Customise</button>
+    </span>
     <button class="btn btn-sm btn-ghost" id="wd-reset" type="button">Start over</button>
     <span id="wd-save-group" style="display:none;gap:10px;align-items:center">
       <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:13px;color:var(--muted)">
@@ -140,7 +157,7 @@
     </aside>
   </div>
 
-  <script id="wd-config" type="application/json">{{ {'fonts': fonts, 'standIn': stand_in, 'retailers': retailers, 'startProject': start_project} | tojson }}</script>
+  <script id="wd-config" type="application/json">{{ {'fonts': fonts, 'standIn': stand_in, 'retailers': retailers, 'startProject': start_project, 'startFrom': start_from} | tojson }}</script>
   <script src="{{ url_for('static', filename='wrap_text.js') }}"></script>
   <script src="{{ url_for('static', filename='wrap_designer.js') }}"></script>
 {% endblock %}
