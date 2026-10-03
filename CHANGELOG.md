@@ -36,6 +36,26 @@ line here.
   stops short of the bleed, and a picture too small for the size it is placed
   at.
 
+### Fixed
+
+- **Saving a cover template no longer changes it.** The cover editor rebuilt
+  a template from its own fields on every save, so each design family's own
+  settings were thrown away: the geometric and typographic covers looked
+  different after a save with nothing changed, and the minimal, postcard,
+  stripe and vintage covers lost settings that only happened to match the
+  defaults. The editor's live preview showed the same wrong cover. Saves now
+  keep everything the editor has no field for.
+- **The vintage covers keep their spine author colour when saved**, and any
+  colour or font a dropdown doesn't list is kept rather than replaced by the
+  first one in the list.
+- **"From a book" in the cover editor's print wrap now takes the book's
+  printer, paper and binding,** as well as its back-cover and flap copy. It
+  used to fill only the trim and page count, so the wrap could be worked out
+  for KDP on white paper when the book was set for IngramSpark on cream, with
+  a spine the wrong width.
+- **A wrap downloaded from a cover named without Latin letters** (Тайга) is
+  now called "cover-wrap.pdf" rather than "-wrap.pdf".
+
 ---
 
 ## 1.2.9 — 3 October 2026

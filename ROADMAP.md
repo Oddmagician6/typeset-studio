@@ -18,16 +18,12 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Browser bug hunt on the cover editor and the style editor.** The method that found nine
-   real bugs in rich mode (#71): drive the real page in headless Chrome through the edits a
-   writer makes, against throwaway data folders, and keep the harness as a test
-   (`test_rich_editor.py` is the template).
-3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
+2. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
-4. **Tabletop RPG books (#74), when the designer is done:** typed blocks first (stat block,
+3. **Tabletop RPG books (#74), when the designer is done:** typed blocks first (stat block,
    read-aloud box, sidebar), two-column pagination after.
-5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
+4. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
    enabling it needs admin and a reboot) and a macOS build (needs a Mac). The code is already
    audited as portable; see the cross-platform notes in the strategy section. Deferred until
    the user decides on it; when they do, check the Wrap designer in WebKit first (SVG
@@ -2438,6 +2434,31 @@ the app as its own **Wrap designer** tab (`/wrap-designer`), so it can be tried 
     dpi checks, shapes, a group picked up by one click, snapping, the praise block, zoom, Proof).
   - **Left for later, by choice:** the WebKit (Safari) check of the editor, which only matters
     for a macOS build - deferred until a Mac build is decided on.
+- **Browser bug hunt on the cover and style editors: DONE (2026-10-03, unreleased).** The
+  #71 method - the real page in headless Chrome, throwaway folders, the harness kept as a
+  test - as `test_cover_editor.py` and `test_style_editor.py`. Invariants: a template or style
+  opened and saved unchanged is itself (all 24 covers, all 9 styles), and the cover editor's
+  preview is the cover the template prints (pixel-identical, all 24); then a writer's session
+  on one cover (family switch, empty/negative/huge numbers, art and emblem uploads through
+  the file pickers, "From a book", every binding's wrap preview, the download, a real Save
+  with a Cyrillic name holding HTML). Found and fixed in the cover editor:
+  - *Saving dropped every family's own block* (`blocks`, `typo`, `vintage`, `minimal`,
+    `stripe`, `postcard`) on 15 templates, and `kicker.leading`: `parse_cover_form` rebuilt
+    the template from the fields alone (only `photo` had a hidden-field rescue). Six
+    templates (geometric ×3, typographic ×3) visibly changed on an unchanged save; the live
+    preview, built from the same form, showed that wrong cover too. Now the page carries the
+    saved template as `base_json` and the fields are laid over it (`_overlay`), so whatever
+    the editor has no field for survives; `photo_json` is still read from older forms.
+  - *Dropdowns replaced values they don't list*: the vintage covers' `accent.color`
+    (`bg_bottom`, the spine author colour) became `gold`. Every select macro now keeps the
+    current value as an option (a font outside the library is marked as such).
+  - *"From a book" filled only trim, pages, title and author* - not the book's printer, paper
+    and binding (#65's Send to print settings), so the spine could be worked out for the
+    wrong stock, nor its back-cover and flap copy. `_projects_for_wrap` now carries them and
+    the picker applies them (retailer through its change handler, for the bleed).
+  - *The wrap download's name* slugged a non-ASCII cover name to nothing ("-jacket.pdf");
+    it falls back to "cover".
+  The style editor round-trips and previews cleanly.
 - **Long titles, every family (after 1.2.7).** The same scan with a 16-word title, plus a
   new check that front-cover lines don't run into each other, found the bug in all eight
   families, not just photographic: each hangs its title from a fixed line and grows it
