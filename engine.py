@@ -606,6 +606,30 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h):
                 for ln in lines):
             tsize -= 1
             lines = _wrap_tracked(title, cf['display'], tsize, maxw, trk)
+        # a long title must leave the author and ornament above whatever is set
+        # below them - the epigraph, the series line, the imprint - or the safe zone
+        ac, orn = tpl.get('accent', {}), tpl.get('ornament', {})
+        accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
+        floor = y0 + WRAP_SAFE * inch
+        ep = tpl.get('epigraph', {})
+        ep_y = lay.get('epigraph', ep.get('top', 0.375))
+        if (meta.get('cover_epigraph') or meta.get('epigraph')) and ep_y < title_y:
+            floor = max(floor, _floor_above(yat(ep_y), cf['italic'], ep.get('size', 10.5)))
+        if coll:
+            floor = max(floor, _floor_above(yat(cc.get('bottom', 0.115)), cf['serif'],
+                                            cc.get('size', 12.5) * 0.82))
+        if (meta.get('cover_studio') or meta.get('publisher') or '').strip():
+            st0 = tpl.get('studio', {})
+            floor = max(floor, _floor_above(yat(st0.get('y', 0.088)), cf['serif'],
+                                            st0.get('size', 8.5)))
+
+        def bottom(lns, size):
+            y = yat(title_y) - tt.get('leading', 46) * (size / tt.get('size', 40)) * (len(lns) - 1)
+            if accent:
+                y -= size * 0.42 + ac.get('size', 21) * 0.55 + ac.get('gap', 0.008) * h
+            return y - orn.get('gap', 0.05) * h - orn.get('size', 2.4) * 1.25
+
+        lines, tsize = _shrink_to_clear(title, cf['display'], tsize, maxw, trk, 14, bottom, floor)
         leading = tt.get('leading', 46) * (tsize / tt.get('size', 40))
         canv.setFillColor(_pal_color(tpl, tt.get('color', 'gold')))
         yy = yat(title_y)
@@ -742,24 +766,36 @@ def _design_photographic(canv, tpl, cf, meta, x0, y0, w, h):
                 for ln in lines):
             tsize -= 1
             lines = _wrap_tracked(title, cf['display'], tsize, inner_w, trk)
-        leading = tsize * _num(ph.get('title_leading', 1.08), 1.08)
         # The title grows downward from title_y, so a long one pushes the author
         # line toward the foot. Lift the whole cluster as far as it takes to
-        # keep its lowest line clear of the studio footer and inside the safe zone.
+        # keep its lowest line clear of the studio footer and inside the safe
+        # zone; a title too tall to fit between that and the series line at the
+        # top shrinks first.
         accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
-        bottom = title_y - leading * (len(lines) - 1)
-        if accent:
-            asize = _num(ph.get('author_size', 18), 18)
-            bottom -= tsize * 0.42 + asize * 1.1 + _depth(cf['display'], asize)[1]
-        else:
-            bottom -= _depth(cf['display'], tsize)[1]
+        asize = _num(ph.get('author_size', 18), 18)
+
+        def drop(lns, size):                     # first baseline to the cluster's foot
+            d = size * _num(ph.get('title_leading', 1.08), 1.08) * (len(lns) - 1)
+            if accent:
+                return d + size * 0.42 + asize * 1.1 + _depth(cf['display'], asize)[1]
+            return d + _depth(cf['display'], size)[1]
+
         floor = y0 + WRAP_SAFE * inch
         st = tpl.get('studio', {})
         if (meta.get('cover_studio') or meta.get('publisher') or '').strip():
-            floor = max(floor, y0 + h * _num(st.get('y', 0.06), 0.06)
-                        + _depth(cf['serif'], st.get('size', 8.5))[0] + 0.35 * inch)
-        if bottom < floor:
-            title_y += floor - bottom
+            floor = max(floor, _floor_above(y0 + h * _num(st.get('y', 0.06), 0.06),
+                                            cf['serif'], st.get('size', 8.5), 0.35 * inch))
+        ceiling = y0 + h - WRAP_SAFE * inch
+        cc0 = tpl.get('collection', {})
+        if meta.get('cover_collection'):
+            ceiling = (y0 + h * _num(ph.get('collection_y', 0.90), 0.90)
+                       - _depth(cf['serif'], cc0.get('size', 12.5))[1] - 0.3 * inch)
+        lines, tsize = _shrink_to_clear(
+            title, cf['display'], tsize, inner_w, trk, 16,
+            lambda lns, size: ceiling - _depth(cf['display'], size)[0] - drop(lns, size), floor)
+        leading = tsize * _num(ph.get('title_leading', 1.08), 1.08)
+        if title_y - drop(lines, tsize) < floor:
+            title_y = floor + drop(lines, tsize)
         canv.setFillColor(_pal_color(tpl, ph.get('title_color', 'ink')))
         yy = title_y
         for ln in lines:
@@ -820,6 +856,28 @@ def _fit_title_lines(text, font, size, max_w, tracking, min_size=16):
     return lines, size
 
 
+def _shrink_to_clear(title, font, size, max_w, tracking, min_size, bottom, floor):
+    """Shrink a title (already fitted to its width) until the cluster hanging
+    from it clears `floor`.
+
+    For the layouts that hang a title from a fixed line and set what follows
+    under it: a long title grows down into the lines below, or off the cover.
+    `bottom(lines, size)` is where the cluster's lowest ink sits at that size.
+    A title that already clears is returned unchanged. Returns (lines, size).
+    """
+    lines = _wrap_tracked(title, font, size, max_w, tracking)
+    while size > min_size and bottom(lines, size) < floor:
+        size -= 1
+        lines = _wrap_tracked(title, font, size, max_w, tracking)
+    return lines, size
+
+
+def _floor_above(y, font, size, gap=0.12 * inch):
+    """The lowest a cluster may reach to stay `gap` clear of a line of type
+    whose baseline is at `y`."""
+    return y + _depth(font, size)[0] + gap
+
+
 def _design_typographic(canv, tpl, cf, meta, x0, y0, w, h):
     """The title IS the cover: an oversized left-aligned display title filling the upper
     page, a heavy accent rule, a tagline, and author + series in tracked caps. No frame,
@@ -845,6 +903,32 @@ def _design_typographic(canv, tpl, cf, meta, x0, y0, w, h):
     trk = _num(ty.get('title_tracking', tt.get('tracking', 0.5)), 0.5)
     lines, tsize = _fit_title_lines(title, cf['display'], _num(ty.get('title_size', 96), 96),
                                     inner_w, trk, min_size=22)
+    # the title, rule and tagline hang from title_top; a long title must leave the
+    # tagline clear of the author line at the foot (or the imprint, or the edge)
+    kk = tpl.get('kicker', {})
+    kick = meta.get('cover_kicker') or ''
+    ksz = kk.get('size', 13)
+    nk = len(_wrap_tracked(kick, cf['italic'], ksz, inner_w, 0.2)) if kick else 0
+    accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
+    floor = y0 + WRAP_SAFE * inch
+    if accent:
+        floor = _floor_above(y0 + h * _num(ty.get('author_y', 0.10), 0.10), cf['display'],
+                             _num(ty.get('author_size', 20), 20))
+    elif (meta.get('cover_studio') or meta.get('publisher') or '').strip():
+        floor = _floor_above(y0 + h * _num(ty.get('studio_y', 0.055), 0.055), cf['serif'],
+                             tpl.get('studio', {}).get('size', 8.5))
+
+    def bottom(lns, size):
+        y = (y0 + h * _num(ty.get('title_top', 0.74), 0.74)
+             - size * _num(ty.get('title_leading', 0.98), 0.98) * (len(lns) - 1) - size * 0.42)
+        if nk:
+            y -= (_num(ty.get('kicker_gap', 30), 30) + kk.get('leading', 18) * (nk - 1)
+                  + _depth(cf['italic'], ksz)[1])
+        return y
+
+    if title:
+        lines, tsize = _shrink_to_clear(title, cf['display'], tsize, inner_w, trk, 22,
+                                        bottom, floor)
     leading = tsize * _num(ty.get('title_leading', 0.98), 0.98)
     canv.setFillColor(_pal_color(tpl, ty.get('title_color', 'gold')))
     yy = y0 + h * _num(ty.get('title_top', 0.74), 0.74)
@@ -921,8 +1005,23 @@ def _design_geometric(canv, tpl, cf, meta, x0, y0, w, h):
     trk = _num(tt.get('tracking', 0.8), 0.8)
     lines, tsize = _fit_title_lines(title, cf['display'], _num(bl.get('title_size', 40), 40),
                                     inner_w, trk, min_size=16)
+
+    # a long title must stay inside its band, or it runs into the series line
+    # above and the author below
+    def first_base(lns, size):
+        return y0 + h * band_mid + size * 1.06 * max(len(lns) - 1, 0) / 2.0 - size * 0.34
+
+    def room(lns, size):             # the tighter of the two margins inside the band
+        asc, desc = _depth(cf['display'], size)
+        top = first_base(lns, size) + asc
+        foot = first_base(lns, size) - size * 1.06 * max(len(lns) - 1, 0) - desc
+        pad = 0.1 * inch
+        return min(foot - (by0 + pad), (by0 + band_h - pad) - top)
+
+    if title:
+        lines, tsize = _shrink_to_clear(title, cf['display'], tsize, inner_w, trk, 16, room, 0.0)
     leading = tsize * 1.06
-    yy = y0 + h * band_mid + leading * max(len(lines) - 1, 0) / 2.0 - tsize * 0.34
+    yy = first_base(lines, tsize)
     canv.setFillColor(_pal_color(tpl, bl.get('title_color', 'ink')))
     for ln in lines:
         _tracked_centre(canv, cx, yy, ln, cf['display'], tsize, trk)
@@ -990,6 +1089,25 @@ def _design_vintage(canv, tpl, cf, meta, x0, y0, w, h):
     trk = _num(tt.get('tracking', 0.6), 0.6)
     lines, tsize = _fit_title_lines(title, cf['display'], _num(vg.get('title_size', 46), 46),
                                     inner_w, trk, min_size=18)
+    # the double rule follows the title down; a long title must leave it clear
+    # of the tagline in the middle (or of the author band at the foot)
+    kk = tpl.get('kicker', {})
+    tag = meta.get('cover_kicker') or meta.get('cover_epigraph') or meta.get('epigraph') or ''
+    if tag:
+        floor = _floor_above(y0 + h * _num(vg.get('tagline_y', 0.46), 0.46), cf['italic'],
+                             kk.get('size', 13))
+    else:
+        floor = (y0 + h * _num(vg.get('band_y', 0.06), 0.06)
+                 + h * _num(vg.get('band_height', 0.12), 0.12) + 0.3 * inch)
+
+    def bottom(lns, size):
+        return (y0 + h * _num(vg.get('title_y', 0.77), 0.77)
+                - size * _num(vg.get('title_leading', 1.05), 1.05) * (len(lns) - 1)
+                - size * 0.5 - 4.5 - _num(vg.get('rule_line', 2.2), 2.2))
+
+    if title:
+        lines, tsize = _shrink_to_clear(title, cf['display'], tsize, inner_w, trk, 18,
+                                        bottom, floor)
     leading = tsize * _num(vg.get('title_leading', 1.05), 1.05)
     yy = y0 + h * _num(vg.get('title_y', 0.77), 0.77)
     canv.setFillColor(_pal_color(tpl, vg.get('title_color', 'ink')))
@@ -1051,6 +1169,25 @@ def _design_minimal(canv, tpl, cf, meta, x0, y0, w, h):
     trk = _num(mn.get('title_tracking', 2.0), 2.0)
     lines, tsize = _fit_title_lines(title, cf['serif'], _num(mn.get('title_size', 30), 30),
                                     inner_w, trk, min_size=14)
+    # the rule and author follow the title down; a long title must leave them
+    # clear of the imprint at the foot (or the edge)
+    accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
+    floor = y0 + WRAP_SAFE * inch
+    if (meta.get('cover_studio') or meta.get('publisher') or '').strip():
+        st0 = tpl.get('studio', {})
+        floor = _floor_above(y0 + h * _num(st0.get('y', 0.06), 0.06), cf['serif'],
+                             st0.get('size', 8.5))
+
+    def bottom(lns, size):
+        y = (y0 + h * _num(mn.get('title_y', 0.60), 0.60)
+             - size * _num(mn.get('title_leading', 1.35), 1.35) * (len(lns) - 1) - size * 0.95)
+        if accent:
+            return y - _num(mn.get('author_gap', 26), 26) - _depth(
+                cf['serif'], _num(mn.get('author_size', 12), 12))[1]
+        return y
+
+    if title:
+        lines, tsize = _shrink_to_clear(title, cf['serif'], tsize, inner_w, trk, 14, bottom, floor)
     leading = tsize * _num(mn.get('title_leading', 1.35), 1.35)
     canv.setFillColor(_pal_color(tpl, mn.get('title_color', 'ink')))
     yy = y0 + h * _num(mn.get('title_y', 0.60), 0.60)
@@ -1118,6 +1255,25 @@ def _design_stripe(canv, tpl, cf, meta, x0, y0, w, h):
     trk = _num(sp.get('title_tracking', tt.get('tracking', 0.5)), 0.5)
     lines, tsize = _fit_title_lines(title, cf['display'], _num(sp.get('title_size', 44), 44),
                                     tw, trk, min_size=18)
+    # the author follows the title down; a long title must leave it clear of the
+    # imprint at the foot (or the edge)
+    accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
+    floor = y0 + WRAP_SAFE * inch
+    if (meta.get('cover_studio') or meta.get('publisher') or '').strip():
+        st0 = tpl.get('studio', {})
+        floor = _floor_above(y0 + h * _num(st0.get('y', 0.06), 0.06), cf['serif'],
+                             st0.get('size', 8.5))
+
+    def bottom(lns, size):
+        y = (y0 + h * _num(sp.get('title_y', 0.60), 0.60)
+             - size * _num(sp.get('title_leading', 1.04), 1.04) * (len(lns) - 1))
+        if accent:
+            return y - _num(sp.get('author_gap', 34), 34) - _depth(
+                cf['display'], _num(sp.get('author_size', 15), 15))[1]
+        return y - _depth(cf['display'], size)[1]
+
+    if title:
+        lines, tsize = _shrink_to_clear(title, cf['display'], tsize, tw, trk, 18, bottom, floor)
     leading = tsize * _num(sp.get('title_leading', 1.04), 1.04)
     canv.setFillColor(_pal_color(tpl, sp.get('title_color', 'ink')))
     yy = y0 + h * _num(sp.get('title_y', 0.60), 0.60)
@@ -1199,6 +1355,25 @@ def _design_postcard(canv, tpl, cf, meta, x0, y0, w, h):
     trk = _num(pc.get('title_tracking', tt.get('tracking', 0.8)), 0.8)
     lines, tsize = _fit_title_lines(title, cf['display'], _num(pc.get('title_size', 30), 30),
                                     inner_w, trk, min_size=14)
+    # the author follows the title down; a long title must leave it clear of
+    # the imprint at the foot (or the edge)
+    accent = (meta.get('cover_accent') or meta.get('author') or '').upper()
+    floor = y0 + WRAP_SAFE * inch
+    if (meta.get('cover_studio') or meta.get('publisher') or '').strip():
+        st0 = tpl.get('studio', {})
+        floor = _floor_above(y0 + h * _num(st0.get('y', 0.06), 0.06), cf['serif'],
+                             st0.get('size', 8.5))
+
+    def bottom(lns, size):
+        y = y0 + h * _num(pc.get('title_y', 0.29), 0.29) - size * 1.08 * (len(lns) - 1)
+        if accent:
+            return y - _num(pc.get('author_gap', 28), 28) - _depth(
+                cf['display'], _num(pc.get('author_size', 15), 15))[1]
+        return y - _depth(cf['display'], size)[1]
+
+    if title:
+        lines, tsize = _shrink_to_clear(title, cf['display'], tsize, inner_w, trk, 14,
+                                        bottom, floor)
     leading = tsize * 1.08
     canv.setFillColor(_pal_color(tpl, pc.get('title_color', 'ink')))
     yy = y0 + h * _num(pc.get('title_y', 0.29), 0.29)

@@ -456,6 +456,22 @@ try:
                 out.append(e['text'][:30])
         return out
 
+    def collisions(design, g, slack=0.02):
+        """Pairs of front-cover text whose type runs into each other: each box
+        from its first line's ascent to its last line's descent, in inches."""
+        from reportlab.pdfbase import pdfmetrics
+        boxes = []
+        for e in design['elements']:
+            if e['type'] != 'text' or e.get('anchor') != 'front' or e.get('rotate'):
+                continue
+            face = pdfmetrics.getFont(WDm.font_name(e['font'])).face
+            lay = WDm.text_layout(e)
+            x, y, w, _ = WDm.el_rect(g, e)
+            boxes.append((e['text'][:24], x, y + (lay[0][2] - face.ascent / 1000 * e['size']) / 72,
+                          x + w, y + (lay[-1][2] - face.descent / 1000 * e['size']) / 72))
+        return [(a[0], b[0]) for i, a in enumerate(boxes) for b in boxes[i + 1:]
+                if a[1] < b[3] and b[1] < a[3] and min(a[4], b[4]) - max(a[2], b[2]) > slack]
+
     interior = engine.register_fonts(A.DEFAULTS)
     off, count = [], 0
     for c in A.list_cover_templates():
@@ -488,6 +504,23 @@ try:
                     unsafe.append((c['id'], binding, pages, bad))
     check('every template keeps its text inside the safe zones, spine and flaps included, '
           'with a three-line title', not unsafe, unsafe[:6])
+    # A title as long as anyone will type: every family shrinks or lifts it to keep
+    # its lines inside the safe zone and off each other (they used to grow down
+    # through the epigraph, out of their band, or off the foot of the cover).
+    LONG = ('A Very Long Title That Somebody Insisted On Because Their Editor Was Away '
+            'On Holiday That Week')
+    trouble = []
+    dims = A._wrap_dims({'wrap_retailer': 'ingramspark'}, 320)
+    g320 = engine.wrap_geometry(dims)
+    for c in A.list_cover_templates():
+        cf = engine._register_cover_fonts(c['data'], interior)
+        for t in (META['title'], LONG):
+            design, _ = WC.from_template(c['data'], cf, dict(META, title=t), dims)
+            bad = outside_safe(design, g320) + collisions(design, g320)
+            if bad:
+                trouble.append((c['id'], t[:12], bad))
+    check('a very long title stays inside the safe zone and clear of the other lines, '
+          'in every template', not trouble, trouble[:6])
     thin = A._wrap_dims({'wrap_retailer': 'ingramspark'}, 60)
     tpl = A.load_cover_template('ashforge-house')
     res = engine.build_cover_wrap(tpl, engine._register_cover_fonts(tpl, interior), META, thin,
