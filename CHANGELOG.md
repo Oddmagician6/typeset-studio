@@ -8,7 +8,12 @@ line here.
 
 ---
 
-## Unreleased
+## 1.3.0 — 3 October 2026
+
+The Wrap designer is finished: a real ISBN barcode on the back cover, review
+quotes, ellipses and rules, layers you can lock, hide and group, snapping and
+zoom. And a round of fixes from a bug hunt in the cover editor, the worst of
+which quietly changed some cover templates whenever they were saved.
 
 ### Added
 

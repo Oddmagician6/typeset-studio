@@ -7,7 +7,7 @@ sections before changing the engine.
 
 ---
 
-## Next up — priority order (as of 1.2.9, 2026-10-03)
+## Next up — priority order (as of 1.3.0, 2026-10-03)
 
 Start here in a new session. Each item points at its full entry below.
 
