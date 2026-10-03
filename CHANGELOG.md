@@ -8,7 +8,11 @@ line here.
 
 ---
 
-## Unreleased
+## 1.2.8 — 2 October 2026
+
+A fix for long titles on every cover template: a title that wraps onto four
+or more lines now makes room for itself instead of running into the epigraph,
+the author line or the edge of the cover.
 
 ### Fixed
 
