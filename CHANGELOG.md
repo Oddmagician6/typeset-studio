@@ -8,7 +8,13 @@ line here.
 
 ---
 
-## Unreleased
+## 1.2.7 — 2 October 2026
+
+Any cover template can now be opened in the Wrap designer and made your own:
+Customise turns the whole wrap into layers you can move, edit and recolour,
+starting from exactly what the template prints. Three template layout bugs
+are fixed along the way: spine text, the barcode label, and long titles on
+photographic covers.
 
 ### Added
 
