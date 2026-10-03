@@ -1902,7 +1902,8 @@ def wrap_designer():
                                       for c in list_cover_templates()],
                            fonts=[f for f in list_fonts() if f.lower().endswith('.ttf')],
                            assets=assets, stand_in=WRAP_STAND_IN,
-                           retailers=WRAP_RETAILERS, papers=_PAPER, trims=TRIM_PRESETS)
+                           retailers=WRAP_RETAILERS, papers=_PAPER, trims=TRIM_PRESETS,
+                           barcode=engine.BARCODE, safe=engine.WRAP_SAFE)
 
 
 @app.route('/wrap-designer/geometry', methods=['POST'])
@@ -1926,6 +1927,19 @@ def wrap_designer_font(fname):
     if not path:
         abort(404)
     return send_from_directory(FONT_DIR, os.path.basename(path))
+
+
+@app.route('/wrap-designer/barcode', methods=['POST'])
+def wrap_designer_barcode():
+    """The bars and digits of a barcode box, worked out by the same code that
+    prints it (wrap_design.barcode_parts), so the editor draws what prints."""
+    el = request.get_json(silent=True) or {}
+    try:
+        w, h = float(el.get('w', 2.0)), float(el.get('h', 1.2))
+    except (TypeError, ValueError):
+        w, h = 2.0, 1.2
+    parts = wrap_design.barcode_parts(el, min(max(w, 0.2), 10.0), min(max(h, 0.2), 10.0))
+    return jsonify(dict(parts, font=wrap_design.barcode_font(el)))
 
 
 @app.route('/wrap-designer/art/<path:fname>')

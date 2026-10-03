@@ -7,13 +7,17 @@ sections before changing the engine.
 
 ---
 
-## Next up — priority order (as of 1.2.8, 2026-10-03)
+## Next up — priority order (as of 1.2.9, 2026-10-03)
 
 Start here in a new session. Each item points at its full entry below.
 
-1. **Before any macOS build: check the Wrap designer in WebKit (#72).** SVG `letter-spacing`
-   and the font-feature switches the editor relies on for print-true text are untested in
-   Safari's engine. Needs a Mac (see item 5).
+1. **Template art stops at the trim, not the bleed (found by the designer's new bleed check).**
+   `_paint_background` paints a template's background picture into the front *panel*, so on a
+   wrap the eighth-inch bleed round it is the gradient underneath: a sliver of it can show on
+   the fore-edge, head or tail when the cut wanders. Confirmed for photographic, postcard and
+   stripe with art set. The fix is to paint background art (and full-height bands like the
+   stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
+   output, so ask before fixing.
 2. **Browser bug hunt on the cover editor and the style editor.** The method that found nine
    real bugs in rich mode (#71): drive the real page in headless Chrome through the edits a
    writer makes, against throwaway data folders, and keep the harness as a test
@@ -25,7 +29,9 @@ Start here in a new session. Each item points at its full entry below.
    read-aloud box, sidebar), two-column pagination after.
 5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
    enabling it needs admin and a reboot) and a macOS build (needs a Mac). The code is already
-   audited as portable; see the cross-platform notes in the strategy section.
+   audited as portable; see the cross-platform notes in the strategy section. Deferred until
+   the user decides on it; when they do, check the Wrap designer in WebKit first (SVG
+   `letter-spacing` and the font-feature switches its print-true text relies on).
 
 **Cutting a release** (1.2.4, 1.2.5 and 1.2.6 all went out this way on 2026-10-02 — release
 once a coherent piece lands):
@@ -2174,8 +2180,8 @@ tall flowable — a chapter opening's sink — no longer fitted: **the whole PDF
   fail on the old engine with the `LayoutError`.
 
 **72. A freeform wrap designer — design the whole cover yourself, in the app** *(large;
-several sessions; asked for 2026-10-02)* — **IN PROGRESS: phases A–C done; D partly (align /
-distribute, flap presets) done; left: barcode box per printer, review-quote presets, a WebKit check**
+several sessions; asked for 2026-10-02)* — **DONE: phases A–D (D unreleased); a WebKit check is
+deferred until a macOS build is decided on**
 Templates (#16, #33) give a professional cover from a few fields, and #66 / #68 serve a writer
 who has a designer. Missing is the writer who wants to *design* the wrap themselves without
 leaving the app: place the art, set the title where they want it, run a band across the spine,
@@ -2400,6 +2406,38 @@ the app as its own **Wrap designer** tab (`/wrap-designer`), so it can be tried 
     (Customise already brings the template's flap text). `/wrap-designer/project/<pid>` now
     returns the flap copy and the author photo, imported where the designer can serve it
     (`wrap_convert.import_picture`, upright if it was stored turned).
+- **Phase D — the rest of the designer: SHIPPED (2026-10-03, unreleased).**
+  - *Barcode box per printer.* A `barcode` element (`wrap_design.barcode_parts` /
+    `draw_barcode`): white, `engine.BARCODE` sized, placed in the back panel's lower right
+    inside the safe margin, locked by default. Empty, it is the reserve the template wraps draw
+    (grey outline, "ISBN / barcode area" caption), so conversions still match pixel for pixel
+    and each converted design gets one (`wrap_convert._barcodes`). With an ISBN it is a real
+    EAN-13 (ISBN-10s converted, check digits verified), with an optional EAN-5 price add-on;
+    the encoder is our own so the editor can draw the same bars (`POST /wrap-designer/barcode`),
+    and is tested bar for bar against ReportLab's `Ean13BarcodeWidget` / `Ean5BarcodeWidget`.
+    Per printer: KDP may leave it empty (KDP prints its own); IngramSpark is told to give it the
+    ISBN. Checks: a usable ISBN, nothing over it (text under it too, which the white box would
+    hide), and the box inside the safe zone.
+  - *Review-quote presets:* one quote, or "Praise for <title>" and three, set in the design's
+    faces (the italic of its text face for quotes) and grouped, on the back panel.
+  - *Shapes:* `ellipse` and `rule` beside `rect`; `stroke` / `stroke_w` outlines; `color: ''`
+    for no fill (a shape with no colour key still fills black, as before). Pictures turn by
+    quarters (`turn`), fitted as they stand once turned and measured for resolution that way.
+  - *Layers:* lock (no canvas clicks or drags - pointer-events off - and skipped by nudge,
+    align and Delete), hide (off the screen and out of the PDF, and out of Proof's comparison),
+    and grouping (`group` id; a click on one picks up the group).
+  - *Snapping* while dragging, to the trim, folds, safe lines, panel and flap middles and every
+    other element's edges and middles, within six screen pixels, with a guide line; Alt drags
+    free. Replaces the old centre-only snap. *Zoom* 50-400%.
+  - *Live checks:* pictures and shapes that reach the trim but stop short of the bleed, and
+    pictures under 300 dpi at their placed size (the stand-in placeholder excepted), matching
+    `engine.image_cover_check`.
+  - Tested: server half (encoder vs ReportLab, ISBN parsing, the barcode in the PDF, ellipse,
+    rule, a quarter-turned picture the right way up, hidden text left out) and a browser pass
+    (the locked box, an ISBN typed in, a mistyped one, text over the box, hide, the bleed and
+    dpi checks, shapes, a group picked up by one click, snapping, the praise block, zoom, Proof).
+  - **Left for later, by choice:** the WebKit (Safari) check of the editor, which only matters
+    for a macOS build - deferred until a Mac build is decided on.
 - **Long titles, every family (after 1.2.7).** The same scan with a 16-word title, plus a
   new check that front-cover lines don't run into each other, found the bug in all eight
   families, not just photographic: each hangs its title from a fixed line and grows it

@@ -22,6 +22,11 @@ keeps a template blurb's paragraph gap).
 
 A `vector` element is drawing kept as paths - a template's frame, ornament or
 shading, from "Customise this design" (wrap_convert.py); see `draw_vector`.
+Shapes are `rect`, `ellipse` and `rule` (a line `w` long, `weight` points
+thick), with an optional `stroke` colour and `stroke_w` in points. A picture
+can be turned by quarters (`turn`: 0, 90, 180, 270, clockwise). A `barcode`
+is the ISBN box (see `barcode_parts`). Any element with `hidden` is left out
+of the PDF as it is left off the screen.
 
 Text is broken into lines by `engine._wrap_tracked`, measured with ReportLab's
 TTF advance widths. The editor (static/wrap_text.js) is sent those same tables
@@ -224,6 +229,15 @@ def focus_of(el, key):
         return 0.5
 
 
+def turn_of(el):
+    """A picture's quarter turn, clockwise: 0, 90, 180 or 270."""
+    try:
+        t = int(el.get('turn', 0)) % 360
+    except (TypeError, ValueError):
+        return 0
+    return t if t in (0, 90, 180, 270) else 0
+
+
 def image_fit(iw, ih, bw, bh, el):
     """How a picture fills its box: (width, height, x, y), x and y from the box's
     top-left, in the box's units.
@@ -250,22 +264,53 @@ def build_pdf(design, dims, out_path):
     lines = {}
     for el in design.get('elements', []):
         kind = el.get('type')
+        if el.get('hidden'):
+            continue
         x, y, w, h = el_rect(g, el)
         X, Ytop = x * inch, H - y * inch
         c.saveState()
         alpha = float(el.get('opacity', 1.0))
         c.setFillAlpha(alpha)
-        if kind == 'rect':
-            c.setFillColor(HexColor(el.get('color') or '#000000'), alpha=alpha)
-            c.rect(X, Ytop - h * inch, w * inch, h * inch, stroke=0, fill=1)
+        if kind in ('rect', 'ellipse') and w > 0 and h > 0:
+            # no colour at all is black, as shapes always were; '' or 'none' is no fill
+            fill = el['color'] if 'color' in el else (None if el.get('stroke') else '#000000')
+            fill = None if fill in ('', 'none') else fill
+            stroke = _stroke(c, el, alpha)
+            if fill:
+                c.setFillColor(HexColor(fill), alpha=alpha)
+            if fill or stroke:
+                if kind == 'rect':
+                    c.rect(X, Ytop - h * inch, w * inch, h * inch,
+                           stroke=1 if stroke else 0, fill=1 if fill else 0)
+                else:
+                    c.ellipse(X, Ytop - h * inch, X + w * inch, Ytop,
+                              stroke=1 if stroke else 0, fill=1 if fill else 0)
+        elif kind == 'rule' and w > 0:
+            c.setStrokeColor(HexColor(el.get('color') or '#000000'), alpha=alpha)
+            c.setLineWidth(rule_weight(el))
+            mid = Ytop - rule_weight(el) / 2.0
+            c.line(X, mid, X + w * inch, mid)
+        elif kind == 'barcode' and w > 0 and h > 0:
+            draw_barcode(c, el, X, Ytop, w * inch, h * inch)
         elif kind == 'image' and art_file(el.get('src')) and w > 0 and h > 0:
             img = ImageReader(art_file(el['src']))
             iw, ih = img.getSize()
+            turn = turn_of(el)
+            if turn in (90, 270):
+                iw, ih = ih, iw                  # fitted as it will stand once turned
             dw, dh, ox, oy = image_fit(iw, ih, w * inch, h * inch, el)
             p = c.beginPath()
             p.rect(X, Ytop - h * inch, w * inch, h * inch)
             c.clipPath(p, stroke=0, fill=0)
-            c.drawImage(img, X + ox, Ytop - oy - dh, dw, dh)
+            if turn:
+                # about the centre of where the turned picture sits; clockwise
+                # on the page is a negative turn in PDF space
+                c.translate(X + ox + dw / 2.0, Ytop - oy - dh / 2.0)
+                c.rotate(-turn)
+                uw, uh = (dh, dw) if turn in (90, 270) else (dw, dh)
+                c.drawImage(img, -uw / 2.0, -uh / 2.0, uw, uh)
+            else:
+                c.drawImage(img, X + ox, Ytop - oy - dh, dw, dh)
         elif kind == 'vector' and w > 0 and h > 0:
             draw_vector(c, el, X, Ytop, w * inch, h * inch)
         elif kind == 'text' and font_file(el.get('font')):
@@ -286,6 +331,185 @@ def build_pdf(design, dims, out_path):
     c.showPage()
     c.save()
     return lines
+
+
+def _stroke(c, el, alpha):
+    """Set a shape's outline, if it has one; return whether it does."""
+    col = el.get('stroke')
+    try:
+        sw = float(el.get('stroke_w', 1.0))
+    except (TypeError, ValueError):
+        sw = 1.0
+    if not col or sw <= 0:
+        return False
+    c.setStrokeColor(HexColor(col), alpha=alpha)
+    c.setLineWidth(sw)
+    return True
+
+
+def rule_weight(el):
+    """A rule's thickness in points."""
+    try:
+        return min(max(float(el.get('weight', 1.0)), 0.1), 36.0)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+# ---- the ISBN barcode -----------------------------------------------------------
+# EAN-13, the barcode on a book's back cover: the ISBN-13 itself, with an
+# optional five-digit add-on (EAN-5) to its right - the price code, which
+# IngramSpark expects (90000 means "no price printed"). Encoded here rather
+# than with ReportLab's widget so the editor can draw exactly the same bars:
+# `barcode_parts` is served to it as JSON.
+
+_L = ('0001101', '0011001', '0010011', '0111101', '0100011',
+      '0110001', '0101111', '0111011', '0110111', '0001011')
+_R = tuple(''.join('1' if b == '0' else '0' for b in code) for code in _L)
+_G = tuple(code[::-1] for code in _R)
+_PARITY13 = ('LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG',
+             'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL')
+_PARITY5 = ('GGLLL', 'GLGLL', 'GLLGL', 'GLLLG', 'LGGLL',
+            'LLGGL', 'LLLGG', 'LGLGL', 'LGLLG', 'LLGLG')
+_MM = 72.0 / 25.4                       # points per millimetre
+
+
+def isbn13(raw):
+    """(the ISBN-13 as 13 digits, None) or (None, why not). Takes an ISBN-13
+    or an ISBN-10 (turned into its 978 form), with or without hyphens."""
+    digits = ''.join(ch for ch in str(raw or '') if ch.isdigit() or ch in 'xX')
+    if len(digits) == 10:
+        body = digits[:9]
+        if not body.isdigit():
+            return None, 'An ISBN-10 has nine digits and a check character.'
+        tens = sum((10 - i) * int(d) for i, d in enumerate(body))
+        check = (11 - tens % 11) % 11
+        if digits[9].upper() != ('X' if check == 10 else str(check)):
+            return None, 'That ISBN-10 has the wrong check digit.'
+        digits = '978' + body
+        return digits + str(_ean_check(digits)), None
+    if len(digits) != 13 or not digits.isdigit():
+        return None, 'An ISBN has 13 digits (or 10, for an old one).'
+    if not digits.startswith(('978', '979')):
+        return None, 'A book ISBN starts 978 or 979.'
+    if int(digits[12]) != _ean_check(digits[:12]):
+        return None, 'That ISBN has the wrong check digit - one of the numbers is mistyped.'
+    return digits, None
+
+
+def _ean_check(twelve):
+    return (10 - sum(int(d) * (3 if i % 2 else 1) for i, d in enumerate(twelve)) % 10) % 10
+
+
+def _ean13_modules(code):
+    left = ''.join({'L': _L, 'G': _G}[par][int(d)]
+                   for par, d in zip(_PARITY13[int(code[0])], code[1:7]))
+    right = ''.join(_R[int(d)] for d in code[7:])
+    return '101' + left + '01010' + right + '101'
+
+
+def _ean5_modules(five):
+    d = [int(ch) for ch in five]
+    par = _PARITY5[(3 * (d[0] + d[2] + d[4]) + 9 * (d[1] + d[3])) % 10]
+    return '1011' + '01'.join({'L': _L, 'G': _G}[p][x] for p, x in zip(par, d))
+
+
+def barcode_parts(el, w_in, h_in):
+    """What a barcode box draws, in inches from its top-left (y down):
+    {'bars': [[x, y, w, h]], 'texts': [[text, x, baseline, size, anchor]],
+     'error': None or why the ISBN can't be used}. With no usable ISBN it is the
+    plain reserve: an empty box, captioned unless `caption` is false."""
+    out = {'bars': [], 'texts': [], 'error': None}
+    raw = str(el.get('isbn') or '').strip()
+    if not raw:
+        if el.get('caption', True):
+            out['texts'].append(['ISBN / barcode area', w_in / 2.0, h_in / 2.0 + 2 / 72.0,
+                                 7.5, 'middle'])
+        return out
+    code, err = isbn13(raw)
+    addon = ''.join(ch for ch in str(el.get('addon') or '') if ch.isdigit())
+    if not err and addon and len(addon) != 5:
+        err = 'The price code is five digits (90000 for none).'
+    if err:
+        out['error'] = err
+        return out
+    main = _ean13_modules(code)
+    extra = _ean5_modules(addon) if addon else ''
+    # quiet zones (11 and 7 modules), a 9-module gap before the add-on
+    span = 11 + len(main) + (9 + len(extra) if extra else 0) + 7
+    pad = 0.08
+    m = min(0.33 * _MM / 72.0, (w_in - 2 * pad) / span)   # module width, inches; 100% at most
+    digits = m * 9 * 72.0 / 1.0                             # digit size in points, ~9 modules
+    size = min(max(digits * 0.95, 6.0), 10.0)
+    top = pad + size / 72.0 * 1.25                          # room for "ISBN ..." above
+    bar_h = h_in - top - pad - size / 72.0 * 1.15           # room for the digits below
+    x0 = (w_in - span * m) / 2.0 + 11 * m
+    out['texts'].append(['ISBN ' + code, x0 + len(main) * m / 2.0, pad + size / 72.0 * 0.95,
+                         size, 'middle'])
+    guards = set(range(0, 3)) | set(range(45, 50)) | set(range(92, 95))
+    for i, j in _runs(main):                                # guard bars run 5 modules longer
+        out['bars'].append([x0 + i * m, top, (j - i) * m, bar_h + (m * 5 if i in guards else 0)])
+    base = top + bar_h + size / 72.0 * 0.95
+    out['texts'].append([code[0], x0 - m * 4, base, size, 'middle'])
+    out['texts'].append([code[1:7], x0 + m * (3 + 21), base, size, 'middle'])
+    out['texts'].append([code[7:], x0 + m * (50 + 21), base, size, 'middle'])
+    if extra:
+        ax = x0 + (len(main) + 9) * m
+        lift = size / 72.0 * 1.15                           # its digits sit above its bars
+        for i, j in _runs(extra):
+            out['bars'].append([ax + i * m, top + lift, (j - i) * m, bar_h + m * 5 - lift])
+        out['texts'].append([addon, ax + len(extra) * m / 2.0, top + lift - size / 72.0 * 0.25,
+                             size, 'middle'])
+    return out
+
+
+def _runs(pattern):
+    """(start, end) of each run of dark modules in a bar pattern."""
+    i = 0
+    while i < len(pattern):
+        if pattern[i] == '1':
+            j = i
+            while j < len(pattern) and pattern[j] == '1':
+                j += 1
+            yield i, j
+            i = j
+        else:
+            i += 1
+
+
+def barcode_font(el):
+    """The face a barcode's digits and label are set in: its own, or the first
+    regular face in the library."""
+    if font_file(el.get('font')):
+        return el['font']
+    lib = sorted(f for f in os.listdir(FONT_DIR) if f.lower().endswith('.ttf')) if FONT_DIR else []
+    return next((f for f in lib if 'Regular' in f), lib[0] if lib else None)
+
+
+def draw_barcode(c, el, X, Ytop, bw, bh):
+    """The barcode box: white, outlined in grey while it is only a reserve (as
+    the template wraps draw it), with the EAN-13 in black once it has an ISBN."""
+    parts = barcode_parts(el, bw / inch, bh / inch)
+    plain = not parts['bars']
+    c.setFillColorRGB(1, 1, 1)
+    if plain and el.get('outline', True):
+        c.setStrokeGray(0.6)
+        c.setLineWidth(0.6)
+        c.rect(X, Ytop - bh, bw, bh, stroke=1, fill=1)
+    else:
+        c.rect(X, Ytop - bh, bw, bh, stroke=0, fill=1)
+    c.setFillGray(0.55 if plain else 0.0)
+    for bx, by, bw_, bh_ in parts['bars']:
+        c.rect(X + bx * inch, Ytop - (by + bh_) * inch, bw_ * inch, bh_ * inch, stroke=0, fill=1)
+    face = barcode_font(el)
+    if not face:
+        return
+    for text, tx, base, size, _ in parts['texts']:
+        t = c.beginText(X + tx * inch - pdfmetrics.stringWidth(text, font_name(face), size) / 2.0,
+                        Ytop - base * inch)
+        t.setFont(font_name(face), size)
+        t.setCharSpace(0)
+        t.textOut(text)
+        c.drawText(t)
 
 
 def _vscale(el, bw, bh):
@@ -386,7 +610,7 @@ def stand_in_art(path):
 # ---- a design as a book's cover (phase B) -----------------------------------------
 
 def has_spine_text(design):
-    return any(el.get('type') == 'text' and el.get('anchor') == 'spine' and
+    return any(el.get('type') == 'text' and el.get('anchor') == 'spine' and not el.get('hidden') and
                str(el.get('text', '')).strip() for el in design.get('elements', []))
 
 
@@ -411,13 +635,14 @@ def placed_images(design, g):
     a resolution check measures each one against."""
     out = []
     for el in design.get('elements', []):
-        if el.get('type') != 'image':
+        if el.get('type') != 'image' or el.get('hidden'):
             continue
         path = art_file(el.get('src'))
         _, _, w, h = el_rect(g, el)
         if path and w > 0 and h > 0:
             z = zoom_of(el)
-            out.append((path, w * z, h * z))
+            # a quarter-turned picture spends its width on the box's height
+            out.append((path, h * z, w * z) if turn_of(el) in (90, 270) else (path, w * z, h * z))
     return out
 
 

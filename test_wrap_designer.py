@@ -325,6 +325,111 @@ def _wd_result4():
     return 'ok'
 
 
+SCRIPT5 = r'''
+var f = document.getElementById('f');
+f.onload = function () {
+  var w = f.contentWindow, d = f.contentDocument, out = {};
+  var wait = setInterval(function () {
+    if (!w.WD_READY) return;
+    clearInterval(wait);
+    var E = w.WD_EDITOR, svg = d.getElementById('wd-svg'), g = E.geometry();
+    var els = function () { return E.design().elements; };
+    var byId = function (id) { return els().find(function (e) { return e.id === id; }); };
+    var redraw = function () { d.getElementById('wd-guides').dispatchEvent(new w.Event('change')); };
+    var checks = function () { return d.getElementById('wd-checks').textContent; };
+    var bc = els().find(function (e) { return e.type === 'barcode'; });
+    out.barcode_locked = !!(bc && bc.locked);
+    out.checks_clear = checks();
+    // an ISBN typed into the box: real bars, drawn from the server's layout
+    Array.prototype.find.call(d.querySelectorAll('#wd-layers li'), function (li) {
+      return li.textContent.indexOf('Barcode area') !== -1;
+    }).click();
+    var isbn = d.querySelector('#wd-props input[type=text]');
+    isbn.value = '978-0-306-40615-7'; isbn.dispatchEvent(new w.Event('input'));
+    setTimeout(function () {
+      out.bars = svg.querySelectorAll('[data-id="' + bc.id + '"] rect').length - 1;
+      out.checks_isbn = checks();
+      bc.isbn = '9780306406158'; redraw();
+      setTimeout(function () {
+        out.checks_bad_isbn = checks();
+        bc.isbn = '9780306406157';
+        // something laid over the barcode is flagged
+        var t = byId('blurb'); t.y = bc.y; t.x = bc.x; redraw();
+        out.checks_over = checks();
+        t.x = 0.6; t.y = 1.0;
+        // hide: off the screen; the proof leaves it out and still agrees
+        d.querySelector('#wd-layers li button[data-act="hide"]').click();
+        var top = els()[els().length - 1];
+        out.hidden_gone = top.hidden === true && !svg.querySelector('[data-id="' + top.id + '"]');
+        top.hidden = false; delete top.hidden; redraw();
+        // a picture ending at the trim, placed big enough to print soft
+        els().push({id:'pic-x', type:'image', anchor:'front', x:0, y:0, w:g.panel_w, h:g.panel_h,
+                    src:'halves.png', zoom:1});
+        redraw();
+        setTimeout(function () {
+          out.checks_pic = checks();
+          els().pop();
+          // shapes
+          d.getElementById('wd-add-ellipse').click(); d.getElementById('wd-add-rule').click();
+          out.shapes = !!svg.querySelector('ellipse') && !!svg.querySelector('[data-id] line');
+          // group two, then a click on one takes both
+          var ids = ['title', 'author'];
+          E.select(ids);
+          var gb = d.querySelector('#wd-props [data-group="group"]');
+          out.group_offered = !!gb; if (gb) gb.click();
+          E.select([]);
+          var hb = svg.querySelector('[data-id="title"] rect').getBoundingClientRect();
+          svg.querySelector('[data-id="title"] rect').dispatchEvent(new w.PointerEvent('pointerdown',
+            {clientX:hb.left + 5, clientY:hb.top + 5, bubbles:true, pointerId:1, isPrimary:true}));
+          svg.dispatchEvent(new w.PointerEvent('pointerup', {clientX:hb.left + 5, clientY:hb.top + 5, bubbles:true, pointerId:1}));
+          out.group_click = d.getElementById('wd-props').textContent.indexOf('2 selected') !== -1;
+          // snapping: a box dropped a hair off the front's middle lands on it, unless Alt is held
+          E.select([]);
+          var box = {id:'snapme', type:'rect', anchor:'front', x:g.panel_w / 2 - 1 + 0.02, y:3, w:2, h:0.5, color:'#00ff00'};
+          els().push(box);
+          E.snapMove([box]);
+          out.snapped = Math.abs(box.x - (g.panel_w / 2 - 1)) < 1e-9;
+          // quotes: a praise block, grouped, inside the back's safe zone
+          var n0 = els().length;
+          E.quotePreset('praise').then(function () {
+            var added = els().slice(n0);
+            out.quotes = added.length;
+            out.quotes_grouped = added.every(function (e) { return e.group && e.group === added[0].group; });
+            out.quotes_inside = added.every(function (e) {
+              var b = E.bbox(e), z = E.safeBox(e);
+              return b[0] >= z[0] - 0.005 && b[0] + b[2] <= z[2] + 0.005 && b[1] >= z[1] - 0.005 && b[1] + b[3] <= z[3] + 0.005;
+            });
+            E.setZoom(2);
+            out.zoomed = svg.style.width === '200%';
+            E.setZoom(1);
+            redraw();
+            d.getElementById('wd-proof-btn').click();
+            var w2 = setInterval(function () {
+              var msg = d.getElementById('wd-proof-msg').textContent;
+              if (msg.indexOf('Built') !== 0 && msg.indexOf('These') !== 0 && msg.indexOf('The PDF') !== 0) return;
+              clearInterval(w2);
+              out.proof = msg;
+              var x = new XMLHttpRequest(); x.open('POST', '/_wd_result5', false); x.send(JSON.stringify(out));
+            }, 100);
+          });
+        }, 600);
+      }, 600);
+    }, 600);
+  }, 100);
+};'''
+result5 = {}
+
+@A.app.route('/_wd_harness5')
+def _wd_harness5():
+    return ('<!doctype html><meta charset="utf-8"><iframe id="f" src="/wrap-designer" '
+            'style="width:1300px;height:900px"></iframe><script>' + SCRIPT5 + '</script>')
+
+@A.app.route('/_wd_result5', methods=['POST'])
+def _wd_result5():
+    result5.update(json.loads(request.get_data(as_text=True)))
+    return 'ok'
+
+
 client = A.app.test_client()
 
 SETTINGS = {'pages': 320, 'wrap_retailer': 'kdp', 'wrap_paper': 'white',
@@ -769,6 +874,76 @@ try:
           and info['photo'] and client.get('/wrap-designer/art/' + info['photo']).status_code == 200,
           {k: info.get(k) for k in ('flap_blurb', 'flap_bio', 'photo')})
 
+    print('\n[the barcode, shapes, turns and hidden layers (phase D)]')
+    from reportlab.graphics.barcode import eanbc
+
+    def rl_bars(widget):
+        """ReportLab's own EAN encoding of a value, as a string of modules."""
+        m = widget.barWidth
+        rects = sorted((r.x, r.width) for r in widget.draw().contents
+                       if r.__class__.__name__ == 'Rect' and r.height > 5 and r.width < 4.5 * m)
+        pat = ['0'] * 300
+        for x_, w_ in rects:
+            for k in range(int(round((x_ - rects[0][0]) / m)), int(round((x_ - rects[0][0] + w_) / m))):
+                pat[k] = '1'
+        return ''.join(pat).rstrip('0')
+    codes = ('978030640615', '979123456789', '978186197271')
+    check('the EAN-13 bars are ReportLab\'s, bar for bar',
+          all(rl_bars(eanbc.Ean13BarcodeWidget(value=c)) ==
+              WDm._ean13_modules(c + str(WDm._ean_check(c))).strip('0') for c in codes))
+    check('and so is the price add-on',
+          all(rl_bars(eanbc.Ean5BarcodeWidget(value=v)) == WDm._ean5_modules(v).strip('0')
+              for v in ('90000', '52495', '12345')))
+    check('an ISBN-10 becomes its ISBN-13; a mistyped one is caught',
+          WDm.isbn13('0-306-40615-2') == ('9780306406157', None)
+          and WDm.isbn13('9780306406158')[1] and WDm.isbn13('12345')[1])
+    BC = {'id': 'bc', 'type': 'barcode', 'anchor': 'back', 'x': 3.75, 'y': 7.55, 'w': 2, 'h': 1.2,
+          'isbn': '9780306406157', 'addon': '90000', 'font': 'Spectral-Regular.ttf'}
+    parts = WDm.barcode_parts(BC, 2, 1.2)
+    served = client.post('/wrap-designer/barcode', json=BC).get_json()
+    check('a barcode with its price code: 30 bars and 16 more',
+          len(parts['bars']) == 46 and not parts['error'], (len(parts['bars']), parts['error']))
+    check('the editor is served the bars that print',
+          served['bars'] == parts['bars'] and served['texts'] == parts['texts'])
+    check('inside its box', all(0 <= b[0] and b[0] + b[2] <= 2 and 0 <= b[1] and b[1] + b[3] <= 1.2
+                                for b in parts['bars']))
+    bad = client.post('/wrap-designer/barcode', json=dict(BC, isbn='9780306406158')).get_json()
+    check('a mistyped ISBN is reported, not drawn', bad['error'] and not bad['bars'], bad['error'])
+    bp = os.path.join(tmp, 'barcode.pdf')
+    hid = dict(DESIGN['elements'][2], id='hid', hidden=True, text='HIDDEN WORDS')
+    shapes = [{'id': 'el', 'type': 'ellipse', 'anchor': 'front', 'x': 1, 'y': 1, 'w': 2, 'h': 1,
+               'color': '', 'stroke': '#ff0000', 'stroke_w': 2},
+              {'id': 'ru', 'type': 'rule', 'anchor': 'front', 'x': 1, 'y': 3, 'w': 2, 'weight': 4,
+               'color': '#0000ff'}]
+    WDm.build_pdf({'elements': [BC, hid] + shapes}, A._wrap_dims({}, 320), bp)
+    with fitz.open(bp) as doc:
+        txt = doc[0].get_text()
+        draws = doc[0].get_drawings()
+    check('the PDF carries the bars and the ISBN, and leaves the hidden text out',
+          'ISBN 9780306406157' in txt and '90000' in txt and 'HIDDEN' not in txt)
+    check('an outlined ellipse and a 4 pt rule are drawn as set',
+          any(d_.get('color') and abs(d_['color'][0] - 1) < 0.01 and abs(d_['width'] - 2) < 1e-6
+              for d_ in draws)
+          and any(d_.get('color') and abs(d_['color'][2] - 1) < 0.01 and abs(d_['width'] - 4) < 1e-6
+                  for d_ in draws))
+    # a picture half red (left) and half blue, turned a quarter clockwise: red on top
+    halves = Image.new('RGB', (200, 100), (255, 0, 0))
+    halves.paste((0, 0, 255), (100, 0, 200, 100))
+    halves.save(os.path.join(A.WRAP_DESIGN_DIR, 'halves.png'))
+    tp = os.path.join(tmp, 'turn.pdf')
+    gt = engine.wrap_geometry(A._wrap_dims({}, 320))
+    WDm.build_pdf({'elements': [{'id': 't', 'type': 'image', 'anchor': 'front', 'x': 1, 'y': 1,
+                                 'w': 1, 'h': 2, 'src': 'halves.png', 'turn': 90}]},
+                  A._wrap_dims({}, 320), tp)
+    with fitz.open(tp) as doc:
+        pix = doc[0].get_pixmap(dpi=40)
+    px_ = lambda xi, yi: pix.pixel(int((gt['front_x'] + xi) * 40), int((gt['edge'] + yi) * 40))
+    check('a picture turned a quarter clockwise prints that way up',
+          px_(1.5, 1.3)[0] > 200 and px_(1.5, 2.7)[2] > 200, (px_(1.5, 1.3), px_(1.5, 2.7)))
+    check('and is measured for resolution the way it stands',
+          WDm.placed_images({'elements': [{'type': 'image', 'anchor': 'front', 'x': 1, 'y': 1, 'w': 1,
+                                           'h': 2, 'src': 'halves.png', 'turn': 90}]}, gt)[0][1:] == (2, 1))
+
     browser = find_browser()
     print('\n[the editor, in a browser]')
     if not browser:
@@ -796,6 +971,11 @@ try:
                             '--user-data-dir=' + os.path.join(tmp, 'browser4'),
                             '--window-size=1400,1000', '--virtual-time-budget=60000', '--dump-dom',
                             f'http://127.0.0.1:{server.server_port}/_wd_harness4'],
+                           capture_output=True, timeout=300)
+            subprocess.run([browser, '--headless=new', '--disable-gpu', '--no-first-run',
+                            '--user-data-dir=' + os.path.join(tmp, 'browser5'),
+                            '--window-size=1400,1000', '--virtual-time-budget=60000', '--dump-dom',
+                            f'http://127.0.0.1:{server.server_port}/_wd_harness5'],
                            capture_output=True, timeout=300)
         finally:
             server.shutdown()
@@ -868,6 +1048,31 @@ try:
             check('and the PDF breaks them where the editor does',
                   result4['proof'].startswith('Built. All') and 'exactly' in result4['proof'],
                   result4['proof'])
+        check('the editor ran the barcode, layer, shape and preset checks', bool(result5))
+        if result5:
+            r5 = result5
+            check('a new design has a barcode box, locked', r5['barcode_locked'])
+            check('kept clear for KDP, which prints its own', 'KDP prints its barcode there' in r5['checks_clear'],
+                  r5['checks_clear'])
+            check('an ISBN typed into it draws the barcode', r5['bars'] == 30 and
+                  'carries the ISBN' in r5['checks_isbn'], (r5['bars'], r5['checks_isbn']))
+            check('a mistyped ISBN is caught as you type', 'wrong check digit' in r5['checks_bad_isbn'],
+                  r5['checks_bad_isbn'])
+            check('text laid over the barcode is flagged', 'In the way of the barcode area' in r5['checks_over'],
+                  r5['checks_over'])
+            check('a hidden layer leaves the screen', r5['hidden_gone'])
+            check('a picture that stops at the trim, and one too small for its size, are flagged',
+                  'stops short of the bleed' in r5['checks_pic'] and 'dpi' in r5['checks_pic'],
+                  r5['checks_pic'])
+            check('ellipses and rules can be added', r5['shapes'])
+            check('two grouped are picked up together by a click on one',
+                  r5['group_offered'] and r5['group_click'])
+            check('a box dropped near the front\'s middle snaps onto it', r5['snapped'])
+            check('"Praise for…" adds a heading and three quotes, grouped, inside the safe zone',
+                  r5['quotes'] == 7 and r5['quotes_grouped'] and r5['quotes_inside'], r5)
+            check('the cover zooms', r5['zoomed'])
+            check('and with all that, the PDF still breaks every box where the editor does',
+                  r5['proof'].startswith('Built. All') and 'exactly' in r5['proof'], r5['proof'])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

@@ -8,6 +8,36 @@ line here.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **A real ISBN barcode in the Wrap designer.** Every design has a barcode
+  box in the lower right of the back cover, where printers expect it, locked
+  so it isn't moved by accident. Type the book's ISBN (13 digits, or an old
+  10-digit one) and an optional five-digit price code, and the box prints the
+  barcode itself - which IngramSpark expects on your cover. On KDP you can
+  leave it empty and KDP prints its own there. A mistyped ISBN is caught as
+  you type, and anything laid over the box is flagged.
+- **Review quotes.** Add a review quote, or a "Praise for…" heading with
+  three quotes, to the back cover in your design's own faces, ready for your
+  reviews' words.
+- **More to draw with:** ellipses and rules alongside boxes, outlines on any
+  of them (or an outline alone, with no fill), and pictures you can turn by
+  quarters.
+- **Layers you can lock, hide and group.** Locked things can't be moved on
+  the cover by accident; hidden ones leave the screen and the printed file;
+  grouped ones are picked up together with a click.
+- **Snapping.** Things you drag catch on the folds, the trim, the safe lines,
+  the middle of each panel and the edges and middles of everything else, with
+  a guide line to show it. Hold Alt to drag freely.
+- **Zoom** in on the cover for fine work.
+- **More checks as you work:** a picture or shape that reaches the edge but
+  stops short of the bleed, and a picture too small for the size it is placed
+  at.
+
+---
+
 ## 1.2.9 — 3 October 2026
 
 The Wrap designer gains justified text, a way to select several things and
