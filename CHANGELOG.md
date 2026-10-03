@@ -8,7 +8,11 @@ line here.
 
 ---
 
-## Unreleased
+## 1.2.9 — 3 October 2026
+
+The Wrap designer gains justified text, a way to select several things and
+line them up or space them evenly, and one-click jacket flaps filled from
+the book's own copy.
 
 ### Added
 
