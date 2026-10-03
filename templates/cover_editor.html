@@ -87,6 +87,7 @@
 {% macro ck(label, name, value) %}
   <div class="field"><label>{{ label }}</label><span class="hint">palette colour</span>
     <select name="{{ name }}">
+      {% if value and value not in palette_keys %}<option value="{{ value }}" selected>{{ value }}</option>{% endif %}
       {% for k in palette_keys %}<option value="{{ k }}" {{ 'selected' if value==k }}>{{ k }}</option>{% endfor %}
     </select></div>
 {%- endmacro %}
@@ -99,6 +100,7 @@
 {% macro fsel(label, name, value) %}
   <div class="field"><label>{{ label }}</label>
     <select name="{{ name }}">
+      {% if value and value not in fonts %}<option value="{{ value }}" selected>{{ value }} (not in your font library)</option>{% endif %}
       {% for f in fonts %}<option value="{{ f }}" {{ 'selected' if value==f }}>{{ f }}</option>{% endfor %}
     </select></div>
 {%- endmacro %}
@@ -107,6 +109,7 @@
 {% macro fk(label, name, value) %}
   <div class="field"><label>{{ label }}</label><span class="hint">palette colour</span>
     <select name="{{ name }}">
+      {% if value and value not in fill_keys %}<option value="{{ value }}" selected>{{ value }}</option>{% endif %}
       {% for k in fill_keys %}<option value="{{ k }}" {{ 'selected' if value==k }}>{{ k }}</option>{% endfor %}
     </select></div>
 {%- endmacro %}
@@ -115,6 +118,7 @@
 {% macro sel(label, name, value, opts, hint='') %}
   <div class="field"><label>{{ label }}</label>{% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
     <select name="{{ name }}">
+      {% if value and value not in opts %}<option value="{{ value }}" selected>{{ value }}</option>{% endif %}
       {% for o in opts %}<option value="{{ o }}" {{ 'selected' if value==o }}>{{ o }}</option>{% endfor %}
     </select></div>
 {%- endmacro %}
@@ -178,8 +182,10 @@
             Colours come from the palette below; some families read extra fine-tuning from a
             per-design JSON block (<code>photo</code>/<code>typo</code>/<code>blocks</code>/<code>vintage</code>).</p>
         </div>
-        {# advanced photographic fine-tuning is JSON-only for now; round-trip it untouched #}
-        <input type="hidden" name="photo_json" value='{{ (c.photo or {})|tojson }}'>
+        {# the template as saved: the fields here are laid over it, so whatever the
+           editor has no field for - a family's own settings (photo, typo, blocks,
+           vintage, ...) - is kept by a save rather than dropped #}
+        <input type="hidden" name="base_json" value='{{ c|tojson }}'>
       </fieldset>
 
       <fieldset>
@@ -602,6 +608,18 @@
         if (!pr){ note.textContent = ''; return; }
         setField('wrap_trim_w', pr.trim_w);
         setField('wrap_trim_h', pr.trim_h);
+        setField('prev_w', pr.trim_w);
+        setField('prev_h', pr.trim_h);
+        // the book's printer, paper and binding: the spine is worked out from them
+        setField('wrap_paper', pr.paper);
+        setField('wrap_blurb', pr.blurb);
+        setField('wrap_flap_blurb', pr.flap_blurb);
+        setField('wrap_flap_bio', pr.flap_bio);
+        if (pr.retailer && retailerSel) {
+          retailerSel.value = pr.retailer;
+          retailerSel.dispatchEvent(new Event('change'));      // its bleed, and its notes
+        }
+        if (pr.binding && bindingSel) { bindingSel.value = pr.binding; updateBinding(); }
         setField('prev_title', pr.title);
         setField('prev_author', pr.author);
         setField('prev_studio', pr.publisher);
@@ -699,7 +717,9 @@
           var nm   = (document.querySelector('[name=name]').value || 'cover');
           var bv = bindingSel && bindingSel.value;
           var kind = bv === 'hardcover' ? '-case-wrap' : (bv === 'jacket' ? '-jacket' : '-wrap');
-          a.href = url; a.download = nm.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + kind + '.pdf';
+          // a name with no ASCII in it (Тайга) slugs to nothing: fall back to 'cover'
+          var slug = nm.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'cover';
+          a.href = url; a.download = slug + kind + '.pdf';
           document.body.appendChild(a); a.click(); a.remove();
           URL.revokeObjectURL(url);
           wstatus.textContent = 'Downloaded.';

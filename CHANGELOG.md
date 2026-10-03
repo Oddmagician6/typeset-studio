@@ -8,6 +8,56 @@ line here.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **A real ISBN barcode in the Wrap designer.** Every design has a barcode
+  box in the lower right of the back cover, where printers expect it, locked
+  so it isn't moved by accident. Type the book's ISBN (13 digits, or an old
+  10-digit one) and an optional five-digit price code, and the box prints the
+  barcode itself - which IngramSpark expects on your cover. On KDP you can
+  leave it empty and KDP prints its own there. A mistyped ISBN is caught as
+  you type, and anything laid over the box is flagged.
+- **Review quotes.** Add a review quote, or a "Praise for…" heading with
+  three quotes, to the back cover in your design's own faces, ready for your
+  reviews' words.
+- **More to draw with:** ellipses and rules alongside boxes, outlines on any
+  of them (or an outline alone, with no fill), and pictures you can turn by
+  quarters.
+- **Layers you can lock, hide and group.** Locked things can't be moved on
+  the cover by accident; hidden ones leave the screen and the printed file;
+  grouped ones are picked up together with a click.
+- **Snapping.** Things you drag catch on the folds, the trim, the safe lines,
+  the middle of each panel and the edges and middles of everything else, with
+  a guide line to show it. Hold Alt to drag freely.
+- **Zoom** in on the cover for fine work.
+- **More checks as you work:** a picture or shape that reaches the edge but
+  stops short of the bleed, and a picture too small for the size it is placed
+  at.
+
+### Fixed
+
+- **Saving a cover template no longer changes it.** The cover editor rebuilt
+  a template from its own fields on every save, so each design family's own
+  settings were thrown away: the geometric and typographic covers looked
+  different after a save with nothing changed, and the minimal, postcard,
+  stripe and vintage covers lost settings that only happened to match the
+  defaults. The editor's live preview showed the same wrong cover. Saves now
+  keep everything the editor has no field for.
+- **The vintage covers keep their spine author colour when saved**, and any
+  colour or font a dropdown doesn't list is kept rather than replaced by the
+  first one in the list.
+- **"From a book" in the cover editor's print wrap now takes the book's
+  printer, paper and binding,** as well as its back-cover and flap copy. It
+  used to fill only the trim and page count, so the wrap could be worked out
+  for KDP on white paper when the book was set for IngramSpark on cream, with
+  a spine the wrong width.
+- **A wrap downloaded from a cover named without Latin letters** (Тайга) is
+  now called "cover-wrap.pdf" rather than "-wrap.pdf".
+
+---
+
 ## 1.2.9 — 3 October 2026
 
 The Wrap designer gains justified text, a way to select several things and

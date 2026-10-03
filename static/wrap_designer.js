@@ -37,8 +37,7 @@
        leading:1.2, color:'#fbf3e2', align:'center', tracking:3},
       {id:'blurb', type:'text', anchor:'back', x:0.6, y:1.0, w:round(pw - 1.2), text:book.blurb || BLURB,
        font:pick('EBGaramond-Regular.ttf'), size:12.5, leading:1.4, color:'#efe7d6', align:'left', tracking:0},
-      {id:'barcode', type:'rect', anchor:'back', x:round(pw - 2.25), y:round(ph - 1.45), w:2, h:1.2,
-       color:'#ffffff', label:'Barcode area'}
+      barcodeBox(pw, ph)
     ];
     if (!geom || geom.spine_text)
       els.splice(5, 0, {id:'spine-text', type:'text', anchor:'spine', cx:0.11, y:0.6, w:round(ph - 1.2),
@@ -47,6 +46,14 @@
     return {elements: els};
   }
   function pick(f) { return CFG.fonts.indexOf(f) !== -1 ? f : CFG.fonts[0]; }
+  // The ISBN barcode box, where every printer expects it: the lower right of
+  // the back cover, inside the safe margin. Locked so it isn't nudged by accident.
+  function barcodeBox(pw, ph) {
+    var bw = CFG.barcode[0], bh = CFG.barcode[1], s = CFG.safe;
+    return {id:'barcode', type:'barcode', anchor:'back', x:round(pw - s - bw), y:round(ph - s - bh),
+            w:bw, h:bh, label:'Barcode area', caption:true, isbn:'', addon:'', locked:true,
+            font:pick('Spectral-Regular.ttf')};
+  }
 
   // ---- state ----------------------------------------------------------------
   var saved = null;
@@ -152,6 +159,7 @@
   }
   function bbox(el) {                   // on the sheet, inches: [x, y, w, h]
     var r = elRect(el);
+    if (el.type === 'rule') return [r[0], r[1], r[2], ruleWeight(el) / 72];
     if (el.type !== 'text') return r;
     var lay = layout(el), m = metrics[el.font];
     var h = textHeight(el, lay);
@@ -160,6 +168,9 @@
     if (!el.w && el.align === 'center') x -= w / 2; else if (!el.w && el.align === 'right') x -= w;
     return el.rotate === 90 ? [r[0] - h, r[1], h, w] : [x, r[1], w, h];
   }
+
+  function ruleWeight(el) { return clamp(el.weight == null ? 1 : el.weight, 0.1, 36, 1); }
+  function turnOf(el) { var t = (+el.turn || 0) % 360; return [0, 90, 180, 270].indexOf(t) !== -1 ? t : 0; }
 
   // ---- pictures -------------------------------------------------------------------
   // Cover-fit, then zoom (1 to 8), then the focal point fx/fy (0..1 across the
@@ -234,20 +245,26 @@
     svg.setAttribute('viewBox', '0 0 ' + g.wrap_w + ' ' + g.wrap_h);
     svg.innerHTML = '';
     design.elements.forEach(function (el) {
+      if (el.hidden) return;                // hidden: off the screen and out of the PDF
       var r = elRect(el), grp = node('g', {'class': 'el', 'data-id': el.id}, svg);
-      if (el.type === 'rect')
-        node('rect', {x:r[0], y:r[1], width:Math.max(r[2], 0), height:Math.max(r[3], 0), fill:el.color || '#000',
-                      opacity:el.opacity == null ? 1 : el.opacity}, grp);
+      if (el.locked) grp.setAttribute('pointer-events', 'none');   // clicks reach what is under it
+      if (el.type === 'rect' || el.type === 'ellipse') drawShape(el, r, grp);
+      else if (el.type === 'rule') drawRule(el, r, grp);
+      else if (el.type === 'barcode') drawBarcode(el, r, grp);
       else if (el.type === 'image') {
         var href = '/wrap-designer/art/' + encodeURIComponent(el.src), sz = imgSize(el.src);
         var op = el.opacity == null ? 1 : el.opacity;
         if (sz && r[2] > 0 && r[3] > 0) {
           // a nested <svg> is a clipping viewport: the picture sized and placed
-          // by imageFit, exactly as wrap_design.image_fit places it in the PDF
-          var f = imageFit(sz[0], sz[1], r[2], r[3], el);
+          // by imageFit, exactly as wrap_design.image_fit places it in the PDF -
+          // fitted as it stands once turned, then drawn turned about its centre
+          var turn = turnOf(el), side = turn === 90 || turn === 270;
+          var f = imageFit(side ? sz[1] : sz[0], side ? sz[0] : sz[1], r[2], r[3], el);
           var vp = node('svg', {x:r[0], y:r[1], width:r[2], height:r[3], overflow:'hidden'}, grp);
-          node('image', {x:f[2], y:f[3], width:f[0], height:f[1], href:href,
-                         preserveAspectRatio:'none', opacity:op}, vp);
+          var cx = f[2] + f[0] / 2, cy = f[3] + f[1] / 2, uw = side ? f[1] : f[0], uh = side ? f[0] : f[1];
+          node('image', {x:cx - uw / 2, y:cy - uh / 2, width:uw, height:uh, href:href,
+                         preserveAspectRatio:'none', opacity:op,
+                         transform:turn ? 'rotate(' + turn + ' ' + cx + ' ' + cy + ')' : ''}, vp);
         } else {
           node('image', {x:r[0], y:r[1], width:Math.max(r[2], 0), height:Math.max(r[3], 0), href:href,
                          preserveAspectRatio:'xMidYMid slice', opacity:op}, grp);
@@ -271,12 +288,121 @@
       }
     });
     if ($('wd-guides').checked) drawGuides();
+    if (snapLines) drawSnapLines();
     if (chosen().length) drawSelection();
     renderLayers();
     renderChecks();
     persist();
     markDirty();
     if (!drag && lastSnap !== null) scheduleCommit();
+  }
+
+  // A box or an ellipse: a fill (none for '' or 'none'; black if it has no
+  // colour at all, as shapes always were) and an optional outline - as
+  // wrap_design.build_pdf draws them.
+  function shapeFill(el) {
+    var f = ('color' in el) ? el.color : (el.stroke ? '' : '#000000');
+    return f && f !== 'none' ? f : 'none';
+  }
+  function drawShape(el, r, grp) {
+    var a = {fill:shapeFill(el), opacity:el.opacity == null ? 1 : el.opacity};
+    if (el.stroke && (el.stroke_w == null || +el.stroke_w > 0)) {
+      a.stroke = el.stroke; a['stroke-width'] = (el.stroke_w == null ? 1 : +el.stroke_w) / 72;
+    }
+    // a shape with no fill still has to be grabbable inside
+    if (a.fill === 'none') node('rect', {x:r[0], y:r[1], width:Math.max(r[2], 0), height:Math.max(r[3], 0),
+                                         fill:'transparent'}, grp);
+    if (el.type === 'ellipse')
+      node('ellipse', Object.assign(a, {cx:r[0] + r[2] / 2, cy:r[1] + r[3] / 2, rx:Math.max(r[2], 0) / 2,
+                                        ry:Math.max(r[3], 0) / 2}), grp);
+    else node('rect', Object.assign(a, {x:r[0], y:r[1], width:Math.max(r[2], 0), height:Math.max(r[3], 0)}), grp);
+  }
+  function drawRule(el, r, grp) {
+    var wt = ruleWeight(el) / 72, mid = r[1] + wt / 2;
+    node('rect', {x:r[0], y:mid - Math.max(wt, 0.1) / 2, width:Math.max(r[2], 0), height:Math.max(wt, 0.1),
+                  fill:'transparent'}, grp);
+    node('line', {x1:r[0], y1:mid, x2:r[0] + r[2], y2:mid, stroke:el.color || '#000000', 'stroke-width':wt,
+                  opacity:el.opacity == null ? 1 : el.opacity, 'pointer-events':'none'}, grp);
+  }
+
+  // The barcode box: its bars and digits worked out on the server by the code
+  // that prints them (wrap_design.barcode_parts), cached by what they depend on.
+  var codes = {};
+  function barcodeParts(el) {
+    var key = JSON.stringify([el.isbn || '', el.addon || '', el.w, el.h, el.caption !== false, el.font || '']);
+    if (codes[key] !== undefined) return codes[key];
+    codes[key] = null;
+    post('/wrap-designer/barcode', {isbn:el.isbn || '', addon:el.addon || '', w:el.w, h:el.h,
+                                    caption:el.caption !== false, font:el.font || ''})
+      .then(function (res) { codes[key] = res; return ensureFont(res.font); })
+      .then(render).catch(function () {});
+    return null;
+  }
+  function drawBarcode(el, r, grp) {
+    var parts = barcodeParts(el), plain = !parts || !parts.bars.length;
+    node('rect', {x:r[0], y:r[1], width:Math.max(r[2], 0), height:Math.max(r[3], 0), fill:'#ffffff',
+                  stroke:plain && el.outline !== false ? '#999999' : 'none', 'stroke-width':0.6 / 72}, grp);
+    if (!parts) return;
+    parts.bars.forEach(function (b) {
+      node('rect', {x:r[0] + b[0], y:r[1] + b[1], width:b[2], height:b[3], fill:'#000000',
+                    'pointer-events':'none'}, grp);
+    });
+    parts.texts.forEach(function (t) {
+      node('text', {x:r[0] + t[1], y:r[1] + t[2], 'font-size':t[3] / 72, 'text-anchor':'middle',
+                    'font-family':WD.family(parts.font || ''), fill:plain ? '#8c8c8c' : '#000000',
+                    'pointer-events':'none'}, grp).textContent = t[0];
+    });
+  }
+
+  // Snapping, while dragging: the dragged things' edges and middles catch on
+  // the trim, the folds, the safe lines, the panels' middles and the edges and
+  // middles of everything else, within a few screen pixels. Alt drags free.
+  var snapLines = null;
+  function snapTargets(moving) {
+    var xs = [], ys = [], s = geo.safe, e = g.edge;
+    xs.push(e, g.wrap_w - e, g.spine_x, g.spine_x + g.spine_w, g.spine_x + g.spine_w / 2);
+    ['back', 'front'].forEach(function (a) {
+      var o = origin(a)[0];
+      xs.push(o, o + g.panel_w, o + s, o + g.panel_w - s, o + g.panel_w / 2);
+    });
+    if (g.flap) xs.push(g.edge + s, g.back_x - s, g.front_x + g.panel_w + s, g.front_x + g.panel_w + g.flap - s,
+                        g.edge + g.flap / 2, g.front_x + g.panel_w + g.flap / 2);
+    ys.push(e, e + g.panel_h, e + s, e + g.panel_h - s, e + g.panel_h / 2);
+    design.elements.forEach(function (o) {
+      if (o.hidden || o.fill || moving.indexOf(o) !== -1) return;
+      var b = bbox(o);
+      xs.push(b[0], b[0] + b[2] / 2, b[0] + b[2]);
+      ys.push(b[1], b[1] + b[3] / 2, b[1] + b[3]);
+    });
+    return [xs, ys];
+  }
+  function snapMove(moving) {
+    var boxes = moving.map(bbox);
+    var u = [Math.min.apply(null, boxes.map(function (b) { return b[0]; })),
+             Math.min.apply(null, boxes.map(function (b) { return b[1]; })),
+             Math.max.apply(null, boxes.map(function (b) { return b[0] + b[2]; })),
+             Math.max.apply(null, boxes.map(function (b) { return b[1] + b[3]; }))];
+    var t = snapTargets(moving), tol = 6 * g.wrap_w / (svg.clientWidth || 1000);
+    var best = function (mine, targets) {
+      var hit = null;
+      mine.forEach(function (v) {
+        targets.forEach(function (tv) {
+          var d = tv - v;
+          if (Math.abs(d) <= tol && (!hit || Math.abs(d) < Math.abs(hit[0]))) hit = [d, tv];
+        });
+      });
+      return hit;
+    };
+    var bx = best([u[0], (u[0] + u[2]) / 2, u[2]], t[0]), by = best([u[1], (u[1] + u[3]) / 2, u[3]], t[1]);
+    moving.forEach(function (m) { moveBy(m, bx ? bx[0] : 0, by ? by[0] : 0, true); });
+    snapLines = (bx || by) ? {x:bx && bx[1], y:by && by[1]} : null;
+  }
+  function drawSnapLines() {
+    var gl = node('g', {'pointer-events':'none'}, svg);
+    if (snapLines.x != null) node('line', {x1:snapLines.x, y1:0, x2:snapLines.x, y2:g.wrap_h, stroke:'#d81b60',
+                                           'stroke-width':0.012}, gl);
+    if (snapLines.y != null) node('line', {x1:0, y1:snapLines.y, x2:g.wrap_w, y2:snapLines.y, stroke:'#d81b60',
+                                           'stroke-width':0.012}, gl);
   }
 
   // A `vector` element: a template's own shapes (frame, ornament, shading),
@@ -379,6 +505,9 @@
     if (el.type === 'text') return '"' + String(el.text).slice(0, 28) + '"';
     if (el.type === 'image') return (el.fill ? 'Picture (' + el.fill + ' cover)' : 'Picture') + ': ' + el.src;
     if (el.type === 'vector') return 'Shapes';
+    if (el.type === 'barcode') return 'Barcode area';
+    if (el.type === 'rule') return 'Rule';
+    if (el.type === 'ellipse') return 'Ellipse';
     return el.fill ? 'Colour (' + el.fill + ')' : 'Shape';
   }
   function renderLayers() {
@@ -387,10 +516,14 @@
     design.elements.slice().reverse().forEach(function (el) {        // top layer first
       var li = document.createElement('li');
       if (el.id === sel || also.indexOf(el.id) !== -1) li.className = 'on';
-      var span = document.createElement('span'); span.textContent = label(el); li.appendChild(span);
-      [['up', '↑', 'Bring forward'], ['down', '↓', 'Send backward'], ['del', '×', 'Delete']].forEach(function (b) {
+      if (el.hidden) li.className += ' off';
+      var span = document.createElement('span');
+      span.textContent = (el.group ? '◇ ' : '') + label(el); li.appendChild(span);
+      [['hide', el.hidden ? '◌' : '●', el.hidden ? 'Show (and print) it' : 'Hide it: off the screen and out of the PDF'],
+       ['lock', el.locked ? '■' : '□', el.locked ? 'Unlock' : 'Lock, so it can\'t be moved by accident'],
+       ['up', '↑', 'Bring forward'], ['down', '↓', 'Send backward'], ['del', '×', 'Delete']].forEach(function (b) {
         var btn = document.createElement('button'); btn.type = 'button';
-        btn.textContent = b[1]; btn.title = b[2];
+        btn.textContent = b[1]; btn.title = b[2]; btn.setAttribute('data-act', b[0]);
         btn.addEventListener('click', function (e) { e.stopPropagation(); layerAct(el, b[0]); });
         li.appendChild(btn);
       });
@@ -409,6 +542,8 @@
       also = also.filter(function (id) { return id !== el.id; });
       showProps();
     }
+    else if (act === 'hide') { if (el.hidden) delete el.hidden; else el.hidden = true; }
+    else if (act === 'lock') { if (el.locked) delete el.locked; else el.locked = true; }
     else if (act === 'up' && i < a.length - 1) { a[i] = a[i + 1]; a[i + 1] = el; }
     else if (act === 'down' && i > 0) { a[i] = a[i - 1]; a[i - 1] = el; }
     render();
@@ -442,6 +577,12 @@
     }
     var outside = [], missing = [];
     design.elements.forEach(function (el) {
+      if (el.hidden) return;
+      if (el.type === 'barcode') {
+        var zb = safeBox(el), bb0 = bbox(el);
+        if (bb0[0] < zb[0] - 0.005 || bb0[0] + bb0[2] > zb[2] + 0.005 || bb0[1] < zb[1] - 0.005 ||
+            bb0[1] + bb0[3] > zb[3] + 0.005) outside.push(label(el));
+      }
       if (el.type !== 'text') return;
       var m = metrics[el.font];
       if (m) {
@@ -459,9 +600,62 @@
     else out.push(['ok', 'All text is inside the safe zones.']);
     if (missing.length) out.push(['bad', 'Characters the font doesn\'t have, which would print blank: ' + missing.join('; ')]);
     if (spineText && g.spine_text) out.push(['ok', 'The spine is wide enough for text.']);
+    pictureChecks(out);
+    barcodeChecks(out);
     var ul = $('wd-checks');
     ul.innerHTML = '';
     out.forEach(function (c) { var li = document.createElement('li'); li.className = c[0]; li.textContent = c[1]; ul.appendChild(li); });
+  }
+
+  // Pictures and shapes you place that reach the trim but stop short of the
+  // bleed (a white sliver if the cut wanders), and pictures too small for the
+  // size they are placed at - measured as engine.image_cover_check measures them.
+  function pictureChecks(out) {
+    var short = [], soft = [], e = g.edge, W = g.wrap_w, H = g.wrap_h, near = 0.02, sheet = 0.005;
+    design.elements.forEach(function (el) {
+      if (el.hidden || ['image', 'rect', 'ellipse'].indexOf(el.type) === -1) return;
+      var b = bbox(el), x0 = b[0], y0 = b[1], x1 = b[0] + b[2], y1 = b[1] + b[3];
+      if ((x0 < e + near && x0 > sheet && x1 > e) || (x1 > W - e - near && x1 < W - sheet && x0 < W - e) ||
+          (y0 < e + near && y0 > sheet && y1 > e) || (y1 > H - e - near && y1 < H - sheet && y0 < H - e))
+        short.push(label(el));
+      if (el.type !== 'image' || !sizes[el.src] || el.src === CFG.standIn) return;   // the placeholder is a placeholder
+      var z = clamp(el.zoom == null ? 1 : el.zoom, 1, 8, 1), side = turnOf(el) === 90 || turnOf(el) === 270;
+      var nw = sizes[el.src][side ? 1 : 0], nh = sizes[el.src][side ? 0 : 1];
+      var dpi = Math.round(Math.min(nw / (b[2] * z), nh / (b[3] * z)));
+      if (dpi < 299) soft.push(label(el) + ' at ' + dpi + ' dpi' + (dpi < 201 ? ' (will print soft)' : ''));
+    });
+    if (short.length) out.push(['bad', 'Reaches the edge but stops short of the bleed, so a sliver of ' +
+                                       'what is underneath may show where it is cut: ' + short.join(', ')]);
+    if (soft.length) out.push(['bad', 'Pictures under the 300 dpi print wants at the size they are placed: ' +
+                                      soft.join('; ')]);
+  }
+  // The barcode box: nothing printed over it, a usable ISBN, and what this
+  // printer expects to find there.
+  function barcodeChecks(out) {
+    var codesIn = design.elements.filter(function (e) { return e.type === 'barcode' && !e.hidden; });
+    var printer = $('wd-retailer').value;
+    if (!codesIn.length) {
+      out.push(['bad', printer === 'kdp'
+        ? 'No barcode area: KDP prints its barcode in the lower right of the back cover, over whatever is there.'
+        : 'No barcode area: add one (+ Barcode) and give it the book\'s ISBN.']);
+      return;
+    }
+    // anything drawn on top of it; and text anywhere in it, which the white box
+    // would otherwise quietly cover
+    var bc = codesIn[0], bb = bbox(bc), at = design.elements.indexOf(bc);
+    var over = design.elements.filter(function (o, i) {
+      if (o === bc || o.hidden || o.fill || (i < at && o.type !== 'text')) return false;
+      var b = bbox(o);
+      return b[0] < bb[0] + bb[2] && bb[0] < b[0] + b[2] && b[1] < bb[1] + bb[3] && bb[1] < b[1] + b[3];
+    });
+    if (over.length) out.push(['bad', 'In the way of the barcode area: ' + over.map(label).join(', ')]);
+    var parts = barcodeParts(bc);
+    if (parts && parts.error) out.push(['bad', 'Barcode: ' + parts.error]);
+    else if (!(bc.isbn || '').trim() && printer === 'ingramspark')
+      out.push(['bad', 'IngramSpark expects the ISBN barcode printed on your cover: type the ISBN into the barcode box.']);
+    else if ((bc.isbn || '').trim()) out.push(['ok', 'The barcode carries the ISBN.']);
+    else out.push(['ok', printer === 'kdp' ? 'Barcode area kept clear: KDP prints its barcode there.'
+                                           : 'Barcode area kept clear for your printer\'s barcode.']);
   }
 
   // ---- interaction ----------------------------------------------------------------
@@ -476,10 +670,17 @@
       drag = {mode:'resize', el:el, p:p, w:el.w || 0, h:el.h || 0};
     } else {
       var grp = e.target.closest('.el'), hit = grp ? grp.getAttribute('data-id') : null;
-      if (e.shiftKey) { if (hit) toggle(hit); drag = null; showProps(); render(); return; }
-      if (!hit || (hit !== sel && also.indexOf(hit) === -1)) choose(hit);
+      var mates = hit ? groupOf(find(hit)) : [];
+      if (e.shiftKey) {
+        if (hit) mates.forEach(function (m) { toggle(m.id); });
+        drag = null; showProps(); render(); return;
+      }
+      if (!hit || (hit !== sel && also.indexOf(hit) === -1)) {
+        choose(hit);                        // a grouped thing brings its group
+        also = mates.map(function (m) { return m.id; }).filter(function (id) { return id !== hit; });
+      }
       else if (hit !== sel) { also.splice(also.indexOf(hit), 1); also.unshift(sel); sel = hit; }
-      var movers = chosen().filter(function (m) { return !m.fill; });
+      var movers = chosen().filter(function (m) { return !m.fill && !m.locked; });
       drag = movers.length ? {mode:'move', p:p, start:movers.map(function (m) {
         return {el:m, x:m.x || 0, y:m.y || 0, cx:m.cx};
       })} : null;
@@ -502,11 +703,20 @@
         if ('cx' in m) m.cx = st.cx + rdx; else m.x = st.x + rdx;
         m.y = st.y + rdy;
       });
-      if (drag.start.length === 1) snap(drag.start[0].el);
+      snapLines = null;
+      if (!e.altKey) snapMove(drag.start.map(function (st) { return st.el; }));
     }
     render();
   });
-  svg.addEventListener('pointerup', function () { if (drag) { drag = null; showProps(); commit(); } });
+  svg.addEventListener('pointerup', function () {
+    if (drag) { drag = null; snapLines = null; showProps(); render(); commit(); }
+  });
+  // everything sharing an element's group (just the element, if it has none)
+  function groupOf(el) {
+    if (!el) return [];
+    if (!el.group) return [el];
+    return design.elements.filter(function (o) { return o.group === el.group; });
+  }
   // `exact` for align and distribute, whose positions are worked out to line up
   // exactly; a nudge rounds, as typing a position does.
   function moveBy(el, dx, dy, exact) {
@@ -521,7 +731,7 @@
   // panel's safe area. Distribute spaces three or more evenly between the
   // outermost two. All by what you see: the boxes drawn round them.
   function align(how) {
-    var els = chosen().filter(function (e) { return !e.fill; });
+    var els = chosen().filter(function (e) { return !e.fill && !e.locked; });
     if (!els.length) return;
     var boxes = els.map(bbox), ref;
     if (els.length === 1) ref = safeBox(els[0]);
@@ -543,7 +753,7 @@
   }
   function distribute(axis) {
     var k = axis === 'x' ? 0 : 1;
-    var items = chosen().filter(function (e) { return !e.fill; })
+    var items = chosen().filter(function (e) { return !e.fill && !e.locked; })
       .map(function (el) { return {el:el, b:bbox(el)}; })
       .sort(function (p, q) { return p.b[k] - q.b[k]; });
     if (items.length < 3) return;
@@ -574,13 +784,6 @@
     });
   }
 
-  // centre a box on its panel when it comes within 0.08"
-  function snap(el) {
-    var pw = panelW(el.anchor);
-    if ('cx' in el) { if (Math.abs(el.cx) < 0.08) el.cx = 0; return; }
-    if (!el.w || el.rotate === 90) return;
-    if (Math.abs(el.x + el.w / 2 - pw / 2) < 0.08) el.x = round(pw / 2 - el.w / 2);
-  }
   document.addEventListener('keydown', function (e) {
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;   // their own undo
     if ((e.ctrlKey || e.metaKey) && !e.altKey) {
@@ -588,7 +791,7 @@
       if (k0 === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
       if (k0 === 'y' || (k0 === 'z' && e.shiftKey)) { e.preventDefault(); redo(); return; }
     }
-    var els = chosen();
+    var els = chosen().filter(function (el) { return !el.locked; });   // locked: only from the layers list
     if (!els.length) return;
     var step = e.shiftKey ? 0.1 : 0.01;
     if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -612,6 +815,7 @@
       many.textContent = n + ' selected. Drag or use the arrow keys to move them together.';
       box.appendChild(many);
       alignTools(box, n);
+      groupTools(box);
       return;
     }
     var id = document.createElement('div'); id.className = 'id';
@@ -628,9 +832,9 @@
       else if (kind !== 'textarea') inp.type = kind;
       if (kind === 'number') inp.step = 'any';
       if (kind === 'range') { inp.min = opts.min; inp.max = opts.max; inp.step = opts.step; }
-      inp.value = el[key] == null ? (kind === 'range' ? opts.dflt : '') : el[key];
+      inp.value = el[key] == null ? (kind === 'range' ? opts.dflt : kind === 'select' ? opts[0][0] : '') : el[key];
       inp.addEventListener('input', function () {
-        el[key] = (kind === 'number' || kind === 'range') ? (+inp.value || 0) : inp.value;
+        el[key] = (kind === 'number' || kind === 'range' || key === 'turn') ? (+inp.value || 0) : inp.value;
         (key === 'font' ? ensureFont(el.font) : Promise.resolve()).then(render);
       });
       wrap.appendChild(inp);
@@ -640,6 +844,12 @@
         if (row.children.length === 2) row = null;
       } else { row = null; box.appendChild(wrap); }
     };
+    var check = function (text, get, set) {
+      var wrap = document.createElement('label'); wrap.className = 'tick';
+      var inp = document.createElement('input'); inp.type = 'checkbox'; inp.checked = !!get();
+      inp.addEventListener('change', function () { set(inp.checked); showProps(); render(); });
+      wrap.appendChild(inp); wrap.appendChild(document.createTextNode(' ' + text)); box.appendChild(wrap);
+    };
     if (el.type === 'text') {
       add('Text', 'text', 'textarea');
       add('Font', 'font', 'select', CFG.fonts.map(function (f) { return [f, f.replace(/\.ttf$/i, '')]; }));
@@ -648,9 +858,30 @@
       add('Align', 'align', 'select', [['left', 'Left'], ['center', 'Centre'], ['right', 'Right'],
                                        ['justify', 'Justified']], true);
       add('Box width (in)', 'w', 'number', null, true); add('Colour', 'color', 'color', null, true);
-    } else if (el.type === 'rect') {
-      add('Colour', 'color', 'color', null, true); add('Opacity', 'opacity', 'number', null, true);
+    } else if (el.type === 'rect' || el.type === 'ellipse') {
+      var filled = shapeFill(el) !== 'none';
+      check('Filled', function () { return filled; }, function (on) {
+        el.color = on ? (el._fill || '#000000') : '';
+        if (!on && filled) el._fill = shapeFill(el);
+        if (!on && !el.stroke) el.stroke = '#000000';
+      });
+      if (filled) add('Fill', 'color', 'color', null, true);
+      add('Opacity', 'opacity', 'number', null, true);
+      add('Outline', 'stroke', 'color', null, true); add('Outline (pt, 0 for none)', 'stroke_w', 'number', null, true);
       if (!el.fill) { add('Width (in)', 'w', 'number', null, true); add('Height (in)', 'h', 'number', null, true); }
+    } else if (el.type === 'rule') {
+      add('Colour', 'color', 'color', null, true); add('Weight (pt)', 'weight', 'number', null, true);
+      add('Length (in)', 'w', 'number', null, true); add('Opacity', 'opacity', 'number', null, true);
+    } else if (el.type === 'barcode') {
+      add('ISBN', 'isbn', 'text', null, true); add('Price code (5 digits, optional)', 'addon', 'text', null, true);
+      var note = document.createElement('p'); note.className = 'note';
+      note.textContent = {
+        kdp: 'KDP prints a barcode here for you if this is left empty. Type the ISBN to print your own.',
+        ingramspark: 'IngramSpark wants the barcode on your cover: type the ISBN. A price code of 90000 means no price.'
+      }[$('wd-retailer').value] || 'Type the ISBN to print its barcode, or leave the box clear for your printer.';
+      box.appendChild(note);
+      if (!(el.isbn || '').trim()) check('Say "ISBN / barcode area" in the box', function () { return el.caption !== false; },
+                                         function (on) { el.caption = on; });
     } else if (el.type === 'image') {
       add('Zoom', 'zoom', 'range', {min:1, max:4, step:0.01, dflt:1});
       add('Show more of the left ' + String.fromCharCode(8596) + ' right', 'fx', 'range',
@@ -658,6 +889,8 @@
       add('Show more of the top ' + String.fromCharCode(8597) + ' bottom', 'fy', 'range',
           {min:0, max:1, step:0.01, dflt:0.5});
       add('Opacity', 'opacity', 'number', null, true);
+      add('Turn', 'turn', 'select', [['0', 'Upright'], ['90', 'A quarter, clockwise'], ['180', 'Upside down'],
+                                     ['270', 'A quarter, anticlockwise']], true);
       if (!el.fill) { add('Width (in)', 'w', 'number', null, true); add('Height (in)', 'h', 'number', null, true); }
     } else if (el.type === 'vector') {
       var cols = vectorColours(el);
@@ -676,7 +909,31 @@
       add('Opacity', 'opacity', 'number', null, true);
       if (!el.fill) { add('Width (in)', 'w', 'number', null, true); add('Height (in)', 'h', 'number', null, true); }
     }
-    if (!el.fill) alignTools(box, 1);
+    if (!el.fill && !el.locked) alignTools(box, 1);
+    if (el.locked) box.insertAdjacentHTML('beforeend', '<p class="note">Locked: unlock it in the layers ' +
+                                          'list (□) to move it on the cover.</p>');
+    if (el.group) groupTools(box);
+  }
+  // Group the selected things, so a click on any picks up all of them; or
+  // break a group up again.
+  function groupTools(box) {
+    var els = chosen(), row = document.createElement('div'); row.className = 'tools';
+    var grouped = els.some(function (e) { return e.group; });
+    var one = els.length > 1 && els.every(function (e) { return e.group && e.group === els[0].group; });
+    var mk = function (text, act) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-sm';
+      b.textContent = text; b.setAttribute('data-group', act);
+      b.addEventListener('click', function () {
+        var ids = act === 'ungroup' ? groupOf(find(sel)) : chosen();
+        if (act === 'group') { var gid = 'grp-' + (++seq); ids.forEach(function (e) { e.group = gid; }); }
+        else ids.forEach(function (e) { delete e.group; });
+        showProps(); render(); commit();
+      });
+      row.appendChild(b);
+    };
+    if (els.length > 1 && !one) mk('Group', 'group');
+    if (grouped) mk('Ungroup', 'ungroup');
+    if (row.children.length) box.appendChild(row);
   }
 
   // ---- adding things ------------------------------------------------------------
@@ -690,6 +947,72 @@
     addEl({type:'rect', anchor:'front', x:0.5, y:6.5, w:5, h:0.6, color:'#000000', opacity:0.4});
     render();
   });
+  $('wd-add-ellipse').addEventListener('click', function () {
+    addEl({type:'ellipse', anchor:'front', x:2, y:3, w:2, h:2, color:'', stroke:'#ffffff', stroke_w:1.5});
+    render();
+  });
+  $('wd-add-rule').addEventListener('click', function () {
+    addEl({type:'rule', anchor:'front', x:2, y:5, w:2, weight:1, color:'#ffffff'});
+    render();
+  });
+  $('wd-add-barcode').addEventListener('click', function () {
+    var have = design.elements.find(function (e) { return e.type === 'barcode'; });
+    if (have) { choose(have.id); showProps(); render(); return; }
+    var bc = barcodeBox(g.panel_w, g.panel_h);
+    bc.id = 'barcode-' + (++seq); design.elements.push(bc); choose(bc.id); showProps(); render();
+  });
+
+  // ---- review quotes ----------------------------------------------------------------
+  // A quote and its source, or a "Praise for" block of three, on the back cover:
+  // set in the design's own faces (the italic of its text face for the quotes,
+  // where the library has one) and grouped, so each moves as one.
+  var QUOTES = [['A gripping, beautifully written story that stays with you long after the last page.',
+                 'Name, Publication'],
+                ['Utterly absorbing. I could not put it down.', 'Name, Author of Another Book'],
+                ['Clever, moving and wonderfully strange.', 'Name, Publication']];
+  function italicOf(f) {
+    var it = f.replace(/-(Regular|Bold|Medium|Book)\.ttf$/i, '-Italic.ttf');
+    return CFG.fonts.indexOf(it) !== -1 ? it : f;
+  }
+  function quotePreset(kind) {
+    var f = designFaces(), s = geo.safe, col = round(g.panel_w - 2 * s - 0.5), x = round(s + 0.25);
+    var quotes = kind === 'praise' ? QUOTES : QUOTES.slice(0, 1), gid = 'grp-' + (++seq), els = [];
+    if (kind === 'praise') {
+      var book = $('wd-project').value ? currentBook : null;
+      els.push({type:'text', text:'PRAISE FOR ' + ((book && book.title) || 'MY BOOK').toUpperCase(), font:f.head,
+                size:11, tracking:2.4, leading:1.3, color:f.headColor, align:'center', gap:0.25});
+    }
+    quotes.forEach(function (q) {
+      els.push({type:'text', text:'\u201c' + q[0] + '\u201d', font:italicOf(f.body), size:12, tracking:0,
+                leading:1.35, color:f.bodyColor, align:'center', gap:0.06});
+      els.push({type:'text', text:'\u2014 ' + q[1], font:f.body, size:9, tracking:1, leading:1.3,
+                color:f.bodyColor, align:'center', gap:0.22});
+    });
+    return Promise.all(els.map(function (e) { return ensureFont(e.font); })).then(function () {
+      var y = 0.75;
+      els.forEach(function (e) {
+        var gap = e.gap; delete e.gap;
+        Object.assign(e, {anchor:'back', x:x, w:col, y:round(y), group:gid, id:'text-' + (++seq)});
+        y += bbox(e)[3] + gap;
+        design.elements.push(e);
+      });
+      choose(els[0].id); also = els.slice(1).map(function (e) { return e.id; });
+      showProps(); render(); commit();
+    });
+  }
+  $('wd-quote-one').addEventListener('click', function () { quotePreset('one'); });
+  $('wd-quote-praise').addEventListener('click', function () { quotePreset('praise'); });
+
+  // ---- zoom -----------------------------------------------------------------------------
+  var zoom = 1;
+  function setZoom(z) {
+    zoom = Math.min(Math.max(z, 0.5), 4);
+    svg.style.width = (zoom * 100) + '%';
+    $('wd-zoom-level').textContent = Math.round(zoom * 100) + '%';
+  }
+  $('wd-zoom-in').addEventListener('click', function () { setZoom(zoom * 1.25); });
+  $('wd-zoom-out').addEventListener('click', function () { setZoom(zoom / 1.25); });
+  $('wd-zoom-level').addEventListener('click', function () { setZoom(1); });
   function useArt(where) {
     var src = $('wd-art-pick').value;
     if (where === 'place') { addEl({type:'image', anchor:'front', x:1.5, y:2, w:3, h:3, src:src}); render(); return; }
@@ -888,7 +1211,7 @@
       if (!res.ok) { msg.className = 'bad'; msg.textContent = res.error; return; }
       var bad = [], count = 0;
       design.elements.forEach(function (el) {
-        if (el.type !== 'text' || !metrics[el.font]) return;
+        if (el.type !== 'text' || el.hidden || !metrics[el.font]) return;   // hidden isn't printed
         count++;
         var mine = layout(el).map(function (l) { return l[0]; });
         if (JSON.stringify(mine) !== JSON.stringify(res.lines[el.id])) bad.push(label(el));
@@ -940,5 +1263,6 @@
                        layout: layout, regeometry: regeometry, commit: commit, imageFit: imageFit,
                        undo: undo, redo: redo, customise: customise, bbox: bbox, safeBox: safeBox,
                        align: align, distribute: distribute, flapPreset: flapPreset,
+                       quotePreset: quotePreset, setZoom: setZoom, snapMove: snapMove,
                        select: function (ids) { choose(ids[0] || null); also = ids.slice(1); showProps(); render(); } };
 })();

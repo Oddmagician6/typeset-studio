@@ -785,6 +785,10 @@ def _projects_for_wrap():
     for item in list_projects():
         p = item['data']
         trim = _load_preset_or_default(p.get('preset', '')).get('trim', {})
+        # the book's Send to print settings too: the spine's width depends on the
+        # paper and binding, so a wrap filled from a book without them was cut
+        # for a different book (found by test_cover_editor.py)
+        pr = {**PRINT_DEFAULTS, **{k: p[k] for k in PRINT_DEFAULTS if k in p}}
         out.append({
             'id': item['id'],
             'name': p.get('name') or p.get('title') or item['id'],
@@ -794,6 +798,12 @@ def _projects_for_wrap():
             'title': p.get('title', ''),
             'author': p.get('author', ''),
             'publisher': p.get('publisher', ''),
+            'retailer': pr['print_retailer'] if pr['print_retailer'] in WRAP_RETAILERS else '',
+            'paper': pr['print_paper'] if pr['print_paper'] in _PAPER else '',
+            'binding': pr['print_binding'] if pr['print_binding'] in _WRAP_SUFFIX else '',
+            'blurb': pr['print_blurb'],
+            'flap_blurb': pr['print_flap_blurb'],
+            'flap_bio': pr['print_flap_bio'],
         })
     return out
 
@@ -1026,22 +1036,45 @@ def _hexf(form, key, default):
     return v if re.fullmatch(r'#[0-9a-fA-F]{6}', v) else default
 
 
-def _existing_photo(form):
-    """Preserve a template's advanced photographic `photo` block across a browser save.
-    The editor has no per-field photo controls yet, so it round-trips the whole block as
-    a hidden JSON field; absent/invalid -> {} (the renderer then uses its own defaults)."""
-    raw = (form.get('photo_json') or '').strip()
+def _json_field(form, name):
+    """A dict from a hidden JSON form field, or None if absent or not a dict."""
+    raw = (form.get(name) or '').strip()
     if not raw:
-        return {}
+        return None
     try:
         val = json.loads(raw)
-        return val if isinstance(val, dict) else {}
     except Exception:
-        return {}
+        return None
+    return val if isinstance(val, dict) else None
+
+
+def _overlay(base, top):
+    """`base` with `top` laid over it, dict by dict; anything else in `top` wins."""
+    out = dict(base)
+    for k, v in top.items():
+        out[k] = _overlay(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
 
 
 def parse_cover_form(form):
-    """Flat cover-editor form fields -> the nested covers/*.json schema."""
+    """Cover-editor form -> the nested covers/*.json schema.
+
+    The fields are laid over the template as it was saved (the form's hidden
+    `base_json`), so everything the editor has no field for survives a save:
+    each design family's own block (`photo`, `typo`, `blocks`, `vintage`,
+    `minimal`, `stripe`, `postcard`) and any key a hand-edited template adds.
+    Rebuilding from the fields alone dropped all of that (found by
+    test_cover_editor.py). A form without one (an older page, a script) starts
+    from the defaults, keeping a `photo_json` block as the editor once sent.
+    """
+    base = _json_field(form, 'base_json')
+    if base is None:
+        base = {'photo': _json_field(form, 'photo_json') or {}}
+    return _overlay(base, _cover_fields(form))
+
+
+def _cover_fields(form):
+    """What the cover editor's fields say, in the covers/*.json shape."""
     d = COVER_DEFAULTS
     return {
         'name': form.get('name', '').strip() or 'Untitled cover',
@@ -1117,9 +1150,6 @@ def parse_cover_form(form):
         },
         'design': (form.get('design', 'classic-frame')
                    if form.get('design', 'classic-frame') in COVER_DESIGNS else 'classic-frame'),
-        # advanced photographic fine-tuning (`photo` dict) is JSON-only for now; preserve
-        # it verbatim if a hand-authored template carries it so a browser save won't drop it.
-        'photo': _existing_photo(form),
         'layout': (form.get('layout', 'centered')
                    if form.get('layout', 'centered') in COVER_LAYOUTS else 'centered'),
         'background': {
@@ -1902,7 +1932,8 @@ def wrap_designer():
                                       for c in list_cover_templates()],
                            fonts=[f for f in list_fonts() if f.lower().endswith('.ttf')],
                            assets=assets, stand_in=WRAP_STAND_IN,
-                           retailers=WRAP_RETAILERS, papers=_PAPER, trims=TRIM_PRESETS)
+                           retailers=WRAP_RETAILERS, papers=_PAPER, trims=TRIM_PRESETS,
+                           barcode=engine.BARCODE, safe=engine.WRAP_SAFE)
 
 
 @app.route('/wrap-designer/geometry', methods=['POST'])
@@ -1926,6 +1957,19 @@ def wrap_designer_font(fname):
     if not path:
         abort(404)
     return send_from_directory(FONT_DIR, os.path.basename(path))
+
+
+@app.route('/wrap-designer/barcode', methods=['POST'])
+def wrap_designer_barcode():
+    """The bars and digits of a barcode box, worked out by the same code that
+    prints it (wrap_design.barcode_parts), so the editor draws what prints."""
+    el = request.get_json(silent=True) or {}
+    try:
+        w, h = float(el.get('w', 2.0)), float(el.get('h', 1.2))
+    except (TypeError, ValueError):
+        w, h = 2.0, 1.2
+    parts = wrap_design.barcode_parts(el, min(max(w, 0.2), 10.0), min(max(h, 0.2), 10.0))
+    return jsonify(dict(parts, font=wrap_design.barcode_font(el)))
 
 
 @app.route('/wrap-designer/art/<path:fname>')

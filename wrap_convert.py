@@ -728,14 +728,54 @@ def from_template(tpl, cf, meta, dims):
             if el:
                 elements.append(el)
     flush()
+    elements = _barcodes(elements)
     seen = {}
     for el in elements:
-        stem = {'text': 'text', 'image': 'picture', 'vector': 'shape'}.get(el['type'], 'el')
+        stem = {'text': 'text', 'image': 'picture', 'vector': 'shape',
+                'barcode': 'barcode'}.get(el['type'], 'el')
         seen[stem] = seen.get(stem, 0) + 1
         el['id'] = f'{stem}-{seen[stem]}'
         if el['type'] == 'vector' and el.get('anchor') in ('back', 'front', 'spine'):
             el['label'] = f"{el['label']} ({el['anchor']})"
-    for el in elements:
-        if el['type'] == 'text' and el['text'] == 'ISBN / barcode area':
-            el['label'] = 'Barcode label'
     return {'elements': elements}, sorted(set(notes))
+
+
+def _barcodes(elements):
+    """The template's barcode reserve - a white box outlined in grey with
+    "ISBN / barcode area" in it - as one `barcode` element, locked like the
+    designer's own, so it can take an ISBN. It draws the same box and label."""
+    out, i = [], 0
+    while i < len(elements):
+        el = elements[i]
+        nxt = elements[i + 1] if i + 1 < len(elements) else None
+        box = _reserve_box(el)
+        if box and nxt and nxt['type'] == 'text' and nxt['text'] == 'ISBN / barcode area':
+            x, y, w, h = box
+            out.append({'type': 'barcode', 'anchor': el['anchor'], 'x': _r(x), 'y': _r(y),
+                        'w': _r(w), 'h': _r(h), 'font': nxt['font'], 'locked': True,
+                        'label': 'Barcode area', 'caption': True, 'isbn': '', 'addon': ''})
+            i += 2
+            continue
+        out.append(el)
+        i += 1
+    return out
+
+
+def _reserve_box(el):
+    """(x, y, w, h) relative to its panel if `el` is the engine's barcode reserve:
+    one white rectangle with a thin grey outline, of the BARCODE size."""
+    if el['type'] != 'vector' or el.get('fill') or len(el.get('ops', [])) != 1:
+        return None
+    op = el['ops'][0]
+    st = op[-1]
+    if op[0] != 'path' or st.get('fill') != '#ffffff' or st.get('stroke') != '#999999':
+        return None
+    pts = [(sg[1], sg[2]) for sg in op[1] if sg[0] in ('M', 'L')]
+    x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    if abs(x1 - x0 - engine.BARCODE[0]) > 0.01 or abs(y1 - y0 - engine.BARCODE[1]) > 0.01:
+        return None
+    base_x = el.get('x', 0) if 'cx' not in el else None
+    if base_x is None:
+        return None
+    return base_x + x0, el['y'] + y0, x1 - x0, y1 - y0
