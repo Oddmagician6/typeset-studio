@@ -55,6 +55,8 @@
   .wd-note:empty{display:none}
   .wd-props .swatches{display:flex;flex-wrap:wrap;gap:6px}
   .wd-props .swatches input{width:34px;height:28px;padding:2px}
+  .wd-props .tools{display:flex;flex-wrap:wrap;gap:4px}
+  .wd-props .tools .btn{padding:3px 8px}
   .beta{font-family:var(--mono);font-size:10px;letter-spacing:.12em;border:1px solid var(--red);
     color:var(--red);border-radius:2px;padding:1px 5px;vertical-align:middle;margin-left:8px}
 {% endblock %}
@@ -152,6 +154,15 @@
           <button class="btn btn-sm" id="wd-art-front" type="button">Front cover</button>
           <button class="btn btn-sm" id="wd-art-back" type="button">Back cover</button>
           <button class="btn btn-sm" id="wd-art-place" type="button">Place</button>
+        </div>
+      </div>
+      <div class="wd-card" id="wd-flaps" hidden><h3>Jacket flaps</h3>
+        <p>Fill a flap with what a jacket carries there, set in your design's own faces and
+           colours, in place of what is on it now. The words come from the book's Send to
+           print settings.</p>
+        <div class="wd-art">
+          <button class="btn btn-sm" id="wd-flap-front" type="button">Front flap: jacket copy</button>
+          <button class="btn btn-sm" id="wd-flap-back" type="button">Back flap: about the author</button>
         </div>
       </div>
     </aside>

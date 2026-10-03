@@ -349,35 +349,49 @@ def _font_file(name, notes):
     return pick
 
 
+def _store(data, ext):
+    """Bytes saved into IMPORT_DIR under a name made from their hash; the name."""
+    name = 'imported-' + hashlib.sha1(data).hexdigest()[:12] + ext
+    dest = os.path.join(IMPORT_DIR, name)
+    if not os.path.exists(dest):
+        os.makedirs(IMPORT_DIR, exist_ok=True)
+        with open(dest, 'wb') as fh:
+            fh.write(data)
+    return name
+
+
+def _pil_png(pil):
+    import io
+    buf = io.BytesIO()
+    pil.convert('RGB').save(buf, 'PNG')
+    return buf.getvalue()
+
+
+def import_picture(path):
+    """A picture file as a name the designer can serve: as it is if it already
+    lives in one of the art folders, otherwise copied into IMPORT_DIR - upright,
+    if it is a photo stored on its side. None if there is no such file."""
+    if not path or not os.path.isfile(path):
+        return None
+    up = engine._upright(path)
+    if not isinstance(up, str):                       # turned: the upright copy
+        return _store(_pil_png(up), '.png')
+    base = os.path.basename(path)
+    found = wrap_design.art_file(base)
+    if found and os.path.samefile(found, path):
+        return base
+    with open(path, 'rb') as fh:
+        return _store(fh.read(), os.path.splitext(base)[1].lower())
+
+
 def _art_name(image, notes):
     """A picture's name in the designer's art folders, copying it in if it isn't there."""
     src = getattr(image, 'fileName', None)
     if isinstance(src, str) and os.path.isfile(src):
-        base = os.path.basename(src)
-        found = wrap_design.art_file(base)
-        if found and os.path.samefile(found, src):
-            return base
-        with open(src, 'rb') as fh:
-            data = fh.read()
-        name = 'imported-' + hashlib.sha1(data).hexdigest()[:12] + os.path.splitext(base)[1].lower()
-        dest = os.path.join(IMPORT_DIR, name)
-        if not os.path.exists(dest):
-            os.makedirs(IMPORT_DIR, exist_ok=True)
-            with open(dest, 'wb') as fh:
-                fh.write(data)
-        return name
+        return import_picture(src)
     pil = getattr(image, '_image', None)              # an upright copy of a turned photo
     if pil is not None:
-        import io
-        buf = io.BytesIO()
-        pil.convert('RGB').save(buf, 'PNG')
-        name = 'imported-' + hashlib.sha1(buf.getvalue()).hexdigest()[:12] + '.png'
-        dest = os.path.join(IMPORT_DIR, name)
-        if not os.path.exists(dest):
-            os.makedirs(IMPORT_DIR, exist_ok=True)
-            with open(dest, 'wb') as fh:
-                fh.write(buf.getvalue())
-        return name
+        return _store(_pil_png(pil), '.png')
     notes.append('A picture in the template could not be carried over.')
     return None
 

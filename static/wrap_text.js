@@ -86,5 +86,5 @@
   }
 
   global.WD = { family: family, loadFont: loadFont, metrics: metrics, width: width,
-                breakLines: breakLines, breakWith: breakWith, chars: chars };
+                breakLines: breakLines, breakWith: breakWith, chars: chars, splitlines: splitlines };
 })(window);

@@ -8,6 +8,27 @@ line here.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **Justified text in the Wrap designer.** Set a text box to Justified and
+  every line but the last of each paragraph runs the full width of the box,
+  on screen and in the printed PDF alike.
+- **Select several things at once, and line them up.** Shift+click on the
+  cover (or in the layers list) to pick more than one; drag them, nudge them
+  with the arrow keys or delete them together. **Line them up** by their left,
+  right, top or bottom edges or their centres, and space three or more evenly
+  across or down the cover. With one thing selected, the same buttons line it
+  up with its panel: centre a title on the front cover in one click.
+- **Ready-made jacket flaps.** On a dust jacket, the Wrap designer fills a
+  flap in one click: the title over the jacket copy on the front flap, and
+  "About the author" with the author photo and bio on the back, set in your
+  design's own faces and colours and taken from the book's Send to print
+  settings.
+
+---
+
 ## 1.2.8 — 2 October 2026
 
 A fix for long titles on every cover template: a title that wraps onto four

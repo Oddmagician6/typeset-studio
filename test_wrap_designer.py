@@ -233,6 +233,98 @@ def _wd_result3():
     return 'ok'
 
 
+SCRIPT4 = r'''
+var f = document.getElementById('f');
+f.onload = function () {
+  var w = f.contentWindow, d = f.contentDocument, out = {};
+  var wait = setInterval(function () {
+    if (!w.WD_READY) return;
+    clearInterval(wait);
+    var E = w.WD_EDITOR, svg = d.getElementById('wd-svg');
+    var byId = function (id) { return E.design().elements.find(function (e) { return e.id === id; }); };
+    var box = function (id) { return E.bbox(byId(id)); };
+    // justify the blurb: the editor's word positions, for the server to compare
+    byId('blurb').align = 'justify';
+    E.commit();
+    d.getElementById('wd-guides').dispatchEvent(new w.Event('change'));
+    out.justified = byId('blurb');
+    out.justified_layout = E.layout(byId('blurb'));
+    // Shift+click adds to the selection; a drag then moves both
+    var fire = function (type, el, shift, dx) {
+      var b = el.getBoundingClientRect(), x = b.left + b.width / 2 + (dx || 0), y = b.top + b.height / 2;
+      (type === 'pointerdown' ? el : svg).dispatchEvent(new w.PointerEvent(type, {clientX:x, clientY:y,
+        bubbles:true, pointerId:1, isPrimary:true, shiftKey:!!shift}));
+    };
+    var hitOf = function (id) { return svg.querySelector('[data-id="' + id + '"] rect'); };
+    var t0 = box('title'), b0 = box('blurb');
+    fire('pointerdown', hitOf('title')); fire('pointerup', hitOf('title'));
+    fire('pointerdown', hitOf('blurb'), true); fire('pointerup', hitOf('blurb'));
+    out.two_selected = d.getElementById('wd-props').textContent.indexOf('2 selected') !== -1;
+    // measured once: the editor redraws on pointerdown, so the node goes stale
+    var hb = hitOf('title').getBoundingClientRect(), cx = hb.left + hb.width / 2, cy = hb.top + hb.height / 2;
+    var ev = function (type, x, target) {
+      target.dispatchEvent(new w.PointerEvent(type, {clientX:x, clientY:cy, bubbles:true, pointerId:1, isPrimary:true}));
+    };
+    ev('pointerdown', cx, hitOf('title')); ev('pointermove', cx + 60, svg); ev('pointerup', cx + 60, svg);
+    var t1 = box('title'), b1 = box('blurb');
+    out.moved_together = Math.abs((t1[0] - t0[0]) - (b1[0] - b0[0])) < 1e-9 && t1[0] - t0[0] > 0.05;
+    // three lined up by their left edges, then spaced evenly down
+    byId('gone').y = 6.5;                       // room between them to share out
+    E.select(['title', 'blurb', 'gone']);
+    E.align('left');
+    var L = ['title', 'blurb', 'gone'].map(function (id) { return box(id)[0]; });
+    out.aligned_left = Math.max.apply(null, L) - Math.min.apply(null, L) < 1e-6;
+    E.distribute('y');
+    var bs = ['title', 'blurb', 'gone'].map(box).sort(function (p, q) { return p[1] - q[1]; });
+    out.gaps = [bs[1][1] - (bs[0][1] + bs[0][3]), bs[2][1] - (bs[1][1] + bs[1][3])];
+    out.tool_count = d.querySelectorAll('#wd-props [data-align]').length;
+    // one alone: centred on its panel's safe area
+    E.select(['title']);
+    E.align('center');
+    var tb = box('title'), z = E.safeBox(byId('title'));
+    out.centred_on_panel = Math.abs((tb[0] + tb[2] / 2) - (z[0] + z[2]) / 2) < 1e-6;
+    // a jacket: the flap presets
+    d.getElementById('wd-binding').value = 'jacket';
+    d.getElementById('wd-binding').dispatchEvent(new w.Event('change'));
+    E.regeometry().then(function () {
+      out.flaps_card = !d.getElementById('wd-flaps').hidden;
+      var n0 = E.design().elements.length;
+      return E.flapPreset('front').then(function () { return E.flapPreset('back'); }).then(function () {
+        var added = E.design().elements.slice(n0), g = E.geometry();
+        out.flap_added = added.map(function (e) { return e.type + ':' + (e.text || e.src).slice(0, 40); });
+        out.flap_inside = added.every(function (e) {
+          var b = E.bbox(e), s = E.safeBox(e);
+          return b[0] >= s[0] - 0.005 && b[0] + b[2] <= s[2] + 0.005 && b[1] >= s[1] - 0.005 && b[1] + b[3] <= s[3] + 0.005;
+        });
+        out.on_flaps = added.every(function (e) {
+          var b = E.bbox(e), mid = b[0] + b[2] / 2;
+          return mid < g.back_x || mid > g.front_x + g.panel_w;
+        });
+        d.getElementById('wd-proof-btn').click();
+        var w2 = setInterval(function () {
+          var msg = d.getElementById('wd-proof-msg').textContent;
+          if (msg.indexOf('Built') !== 0 && msg.indexOf('These') !== 0 && msg.indexOf('The PDF') !== 0) return;
+          clearInterval(w2);
+          out.proof = msg;
+          var x = new XMLHttpRequest(); x.open('POST', '/_wd_result4', false); x.send(JSON.stringify(out));
+        }, 100);
+      });
+    });
+  }, 100);
+};'''
+result4 = {}
+
+@A.app.route('/_wd_harness4')
+def _wd_harness4():
+    return ('<!doctype html><meta charset="utf-8"><iframe id="f" src="/wrap-designer?project='
+            + PID + '" style="width:1300px;height:900px"></iframe><script>' + SCRIPT4 + '</script>')
+
+@A.app.route('/_wd_result4', methods=['POST'])
+def _wd_result4():
+    result4.update(json.loads(request.get_data(as_text=True)))
+    return 'ok'
+
+
 client = A.app.test_client()
 
 SETTINGS = {'pages': 320, 'wrap_retailer': 'kdp', 'wrap_paper': 'white',
@@ -637,6 +729,46 @@ try:
     page = client.get('/wrap-designer?from=photo-dusk').get_data(as_text=True)
     check('the designer is told which template to start from', '"startFrom": "photo-dusk"' in page)
 
+    print('\n[justify, align, flaps (phase C leftovers)]')
+    JUST = dict(DESIGN['elements'][3], id='j', align='justify',
+                text=BLURB + '\n\nA second paragraph, short.')
+    jl = WDm.text_layout(JUST)
+    left = WDm.text_layout(dict(JUST, align='left'))
+    box = JUST['w'] * 72
+    check('justified text breaks into the same lines as left-aligned',
+          [l[0] for l in jl] == [l[0] for l in left])
+    ends = WDm.para_ends(JUST, [l[0] for l in jl])
+    spread = [l for l, e in zip(jl, ends) if not e and l[3]]
+    check('every line but a paragraph\'s last is spread to the full measure',
+          spread and all(abs(l[3][-1][1] + WDm.line_width(l[3][-1][0], JUST) - box) < 1e-6
+                         for l in spread) and len(spread) == ends.count(False), len(spread))
+    check("a paragraph's last line is left as it is",
+          all(l[3] is None for l, e in zip(jl, ends) if e))
+    jp = os.path.join(tmp, 'justify.pdf')
+    WDm.build_pdf({'elements': [JUST]}, A._wrap_dims({}, 320), jp)
+    gj = engine.wrap_geometry(A._wrap_dims({}, 320))
+    with fitz.open(jp) as doc:
+        words = doc[0].get_text('words')
+    first = spread[0][3]
+    x0 = (WDm.el_rect(gj, JUST)[0]) * 72
+    got = sorted(w_ for w_ in words if w_[4] in (first[0][0], first[-1][0]))
+    check('the PDF sets a justified line\'s first word at the left and its last at the right edge',
+          got and abs(min(w_[0] for w_ in got) - x0) < 0.5
+          and abs(max(w_[2] for w_ in got) - (x0 + box)) < 0.5, got[:2])
+
+    photo2 = os.path.join(A.PROJECT_MS_DIR, 'author-photo.jpg')
+    Image.new('RGB', (300, 400), (90, 120, 150)).save(photo2)
+    p = A.load_project(PID)
+    A.save_project_file(PID, dict(p, print_flap_blurb='Jacket copy for the front flap.',
+                                  print_flap_bio='Ellinor Vale lives by the sea.',
+                                  print_back_file='author-photo.jpg'))
+    info = client.get(f'/wrap-designer/project/{PID}').get_json()
+    check("a book's flap copy and author photo reach the designer",
+          info['flap_blurb'] == 'Jacket copy for the front flap.'
+          and info['flap_bio'] == 'Ellinor Vale lives by the sea.'
+          and info['photo'] and client.get('/wrap-designer/art/' + info['photo']).status_code == 200,
+          {k: info.get(k) for k in ('flap_blurb', 'flap_bio', 'photo')})
+
     browser = find_browser()
     print('\n[the editor, in a browser]')
     if not browser:
@@ -659,6 +791,11 @@ try:
                             '--user-data-dir=' + os.path.join(tmp, 'browser'),
                             '--window-size=1400,1000', '--virtual-time-budget=60000', '--dump-dom',
                             f'http://127.0.0.1:{server.server_port}/_wd_harness3'],
+                           capture_output=True, timeout=300)
+            subprocess.run([browser, '--headless=new', '--disable-gpu', '--no-first-run',
+                            '--user-data-dir=' + os.path.join(tmp, 'browser4'),
+                            '--window-size=1400,1000', '--virtual-time-budget=60000', '--dump-dom',
+                            f'http://127.0.0.1:{server.server_port}/_wd_harness4'],
                            capture_output=True, timeout=300)
         finally:
             server.shutdown()
@@ -701,6 +838,36 @@ try:
                   result3['proof'].startswith('Built. All') and 'exactly' in result3['proof'],
                   result3['proof'])
             check('undo goes back to the design from before', result3['undone'])
+        check('the editor ran the align, justify and flap checks', bool(result4))
+        if result4:
+            mine = WDm.text_layout(result4['justified'])
+            theirs = result4['justified_layout']
+            same = len(mine) == len(theirs) and all(
+                a[0] == b[0] and abs(a[1] - b[1]) < 1e-6 and (a[3] is None) == (b[3] is None)
+                and (a[3] is None or all(x[0] == y[0] and abs(x[1] - y[1]) < 1e-6
+                                         for x, y in zip(a[3], b[3])))
+                for a, b in zip(mine, theirs))
+            check('the editor spreads a justified line exactly as the PDF does, word by word', same)
+            check('Shift+click selects a second thing', result4['two_selected'])
+            check('and a drag moves both by the same distance', result4['moved_together'])
+            check('three line up by their left edges', result4['aligned_left'])
+            check('and space evenly down the cover',
+                  abs(result4['gaps'][0] - result4['gaps'][1]) < 1e-6, result4['gaps'])
+            check('with the spacing tools offered for three or more', result4['tool_count'] == 8,
+                  result4['tool_count'])
+            check('one alone centres on its panel', result4['centred_on_panel'])
+            check('a jacket offers the flap presets', result4['flaps_card'])
+            added = result4['flap_added']
+            check("they lay out the book's flap copy, bio and photo",
+                  any('Jacket copy for the front flap' in a for a in added)
+                  and any('Ellinor Vale lives by the sea' in a for a in added)
+                  and any(a.startswith('image:imported-') for a in added)
+                  and 'text:ABOUT THE AUTHOR' in added, added)
+            check('on the flaps, inside their safe zones',
+                  result4['on_flaps'] and result4['flap_inside'])
+            check('and the PDF breaks them where the editor does',
+                  result4['proof'].startswith('Built. All') and 'exactly' in result4['proof'],
+                  result4['proof'])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
