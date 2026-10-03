@@ -8,6 +8,37 @@ line here.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **Customise any cover template in the Wrap designer.** Every template now
+  has a **Customise** button (on the Covers page and in a book's template
+  picker), and the Wrap designer has a **Start from a cover** menu that also
+  offers the book's own cover, uploaded art included. The whole wrap opens as
+  layers you can edit: the title, author line and blurb as text boxes that
+  re-flow when you change them, the pictures as pictures, and the frames,
+  ornaments, bands and shading as shapes you can move, stretch and recolour.
+  It starts out exactly as the template prints, for all 24 templates in every
+  binding, and one Undo takes you back to the design you had.
+
+### Fixed
+
+- **Shape opacity in the Wrap designer now reaches the PDF.** A
+  see-through band showed as see-through on screen but printed solid.
+- **Spine text stays inside the spine.** The title and author on a template
+  wrap's spine are now sized and centred to keep 1/16" clear of each fold, as
+  printers ask; on a spine too thin to hold type inside that margin they're
+  left off, and Send to print says why.
+- **The barcode label stays in its box.** On a dust jacket, or any back cover
+  without a blurb, "ISBN / barcode area" was letter-spaced like the series line
+  and ran out past the white box.
+- **Long titles on photographic covers keep the author on the page.** A title
+  that wrapped to three lines pushed the author line off the bottom of the
+  cover; the title and author now move up together to clear the imprint line.
+
+---
+
 ## 1.2.6 — 2 October 2026
 
 The Wrap designer can now make your book's actual cover: save a design to a

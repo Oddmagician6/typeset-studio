@@ -107,7 +107,9 @@
             The fields below add the smaller lines around them.</p>
           <div class="row">
             <div class="field wide"><label>Template</label>
-              <span class="hint">pick a house style below, grouped by design</span>
+              <span class="hint">pick a house style below, grouped by design — or
+                <b>Customise</b> one to lay it out your own way in the Wrap designer
+                (it uses this book’s saved details, so save first)</span>
               {% set ctpl = proj.get('cover_template','') %}
               {% set has_sel = cover_templates|selectattr('id','equalto',ctpl)|list %}
               {% for g in cover_groups %}
@@ -125,6 +127,8 @@
                         <img src="{{ url_for('cover_thumb', cid=c.id) }}"
                              alt="{{ c.data.name }}" loading="lazy">
                         <span class="cap">{{ c.data.name }}</span>
+                        <a class="custom" href="{{ url_for('wrap_designer', project=pid, **{'from': c.id}) }}"
+                           title="Open this design in the Wrap designer, as layers you can move and edit">Customise</a>
                       </label>
                     {% endfor %}
                   </div>

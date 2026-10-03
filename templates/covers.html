@@ -74,6 +74,8 @@
               <div class="actions">
                 <a class="btn btn-primary btn-sm" href="{{ url_for('generate') }}">Set a book</a>
                 <a class="btn btn-sm" href="{{ url_for('cover_editor', cid=item.id) }}">Edit</a>
+                <a class="btn btn-sm" href="{{ url_for('wrap_designer', **{'from': item.id}) }}"
+                   title="Open the whole wrap in the Wrap designer, as layers you can move and edit">Customise</a>
                 <form class="inline-form" method="post" action="{{ url_for('cover_clone', cid=item.id) }}">
                   <button class="btn btn-sm" type="submit">Duplicate</button>
                 </form>

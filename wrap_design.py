@@ -14,10 +14,14 @@ measurement, as for the template wraps.
       {"id": "spine", "type": "text", "anchor": "spine", "cx": 0.11, "rotate": 90, ...}
     ]}
 
-`fill` on a rect or image covers that panel out to the bleed (`front`, `back`,
-`spine`, `sheet`) and ignores x/y/w/h. `cx` places an element from the centre
-of its panel instead of its left edge. `rotate: 90` sets text reading top to
-bottom, for a spine.
+`fill` on a rect, image or vector covers that panel out to the bleed (`front`,
+`back`, `spine`, `sheet`) and ignores x/y/w/h. `cx` places an element from the
+centre of its panel instead of its left edge. `rotate: 90` sets text reading
+top to bottom, for a spine; `blank` is how tall an empty line in it is (0.6
+keeps a template blurb's paragraph gap).
+
+A `vector` element is drawing kept as paths - a template's frame, ornament or
+shading, from "Customise this design" (wrap_convert.py); see `draw_vector`.
 
 Text is broken into lines by `engine._wrap_tracked`, measured with ReportLab's
 TTF advance widths. The editor (static/wrap_text.js) is sent those same tables
@@ -143,8 +147,9 @@ def text_layout(el):
     size, lead = el['size'], el.get('leading', 1.2)
     asc = face.ascent / 1000.0 * size
     box = el.get('w', 0) * 72.0
-    out = []
-    for i, line in enumerate(break_lines(el)):
+    blank = blank_of(el)
+    out, down = [], 0.0
+    for line in break_lines(el):
         lw = line_width(line, el)
         align = el.get('align', 'left')
         if align == 'center':
@@ -153,8 +158,18 @@ def text_layout(el):
             dx = (box - lw) if box else -lw
         else:
             dx = 0.0
-        out.append((line, dx, asc + i * size * lead))
+        out.append((line, dx, asc + down))
+        down += size * lead * (blank if not line.strip() else 1.0)
     return out
+
+
+def blank_of(el):
+    """How tall an empty line is, in lines: 1 by default; a template's blurb
+    leaves 0.6 of a line between paragraphs, and a design made from it keeps that."""
+    try:
+        return min(max(float(el.get('blank', 1.0)), 0.0), 2.0)
+    except (TypeError, ValueError):
+        return 1.0
 
 
 def zoom_of(el):
@@ -200,9 +215,10 @@ def build_pdf(design, dims, out_path):
         x, y, w, h = el_rect(g, el)
         X, Ytop = x * inch, H - y * inch
         c.saveState()
-        c.setFillAlpha(float(el.get('opacity', 1.0)))
+        alpha = float(el.get('opacity', 1.0))
+        c.setFillAlpha(alpha)
         if kind == 'rect':
-            c.setFillColor(HexColor(el.get('color') or '#000000'))
+            c.setFillColor(HexColor(el.get('color') or '#000000'), alpha=alpha)
             c.rect(X, Ytop - h * inch, w * inch, h * inch, stroke=0, fill=1)
         elif kind == 'image' and art_file(el.get('src')) and w > 0 and h > 0:
             img = ImageReader(art_file(el['src']))
@@ -212,13 +228,15 @@ def build_pdf(design, dims, out_path):
             p.rect(X, Ytop - h * inch, w * inch, h * inch)
             c.clipPath(p, stroke=0, fill=0)
             c.drawImage(img, X + ox, Ytop - oy - dh, dw, dh)
+        elif kind == 'vector' and w > 0 and h > 0:
+            draw_vector(c, el, X, Ytop, w * inch, h * inch)
         elif kind == 'text' and font_file(el.get('font')):
             layout = text_layout(el)
             lines[el.get('id', '')] = [ln for ln, _, _ in layout]
             c.translate(X, Ytop)
             if el.get('rotate') == 90:                        # reads top to bottom
                 c.rotate(-90)
-            c.setFillColor(HexColor(el.get('color') or '#000000'))
+            c.setFillColor(HexColor(el.get('color') or '#000000'), alpha=alpha)
             for line, dx, base in layout:
                 t = c.beginText(dx, -base)
                 t.setFont(font_name(el['font']), el['size'])
@@ -229,6 +247,80 @@ def build_pdf(design, dims, out_path):
     c.showPage()
     c.save()
     return lines
+
+
+def _vscale(el, bw, bh):
+    """Scale from a vector element's own drawing (`vw` x `vh` inches) to its box."""
+    try:
+        vw, vh = float(el.get('vw') or 0), float(el.get('vh') or 0)
+    except (TypeError, ValueError):
+        vw = vh = 0.0
+    return (bw / (vw * inch) if vw > 0 else 1.0), (bh / (vh * inch) if vh > 0 else 1.0)
+
+
+def draw_vector(c, el, X, Ytop, bw, bh):
+    """A `vector` element: shapes a template drew, kept as its own paths.
+
+    `ops` are in inches from the box's top-left (y down) at the size `vw` x `vh`
+    they were drawn at; a resized box stretches the paths but not the line
+    widths, as the editor does. Each op carries its own fill / stroke style:
+        ['path', [['M', x, y], ['L', x, y], ['C', x1, y1, x2, y2, x, y], ['Z']], style]
+        ['ellipse', cx, cy, rx, ry, style]
+        ['grad', x, y, w, h, top colour, bottom colour, y of top, y of bottom, style]
+    """
+    sx, sy = _vscale(el, bw, bh)
+
+    def P(x, y):
+        return X + float(x) * inch * sx, Ytop - float(y) * inch * sy
+
+    for op in el.get('ops') or []:
+        if not isinstance(op, list) or not op or not isinstance(op[-1], dict):
+            continue
+        st = op[-1]
+        try:
+            c.saveState()
+            fill, stroke = st.get('fill'), st.get('stroke')
+            op_a = float(el.get('opacity', 1.0))
+            # a ReportLab colour sets its own alpha, so the alpha goes in with it
+            if fill:
+                c.setFillColor(HexColor(fill), alpha=op_a * float(st.get('fa', 1.0)))
+            if stroke:
+                c.setStrokeColor(HexColor(stroke), alpha=op_a * float(st.get('sa', 1.0)))
+                c.setLineWidth(float(st.get('lw', 1.0)))
+                c.setLineCap(int(st.get('cap', 0)))
+                c.setLineJoin(int(st.get('join', 0)))
+                if st.get('dash'):
+                    c.setDash([float(v) for v in st['dash']])
+            if op[0] == 'path':
+                p = c.beginPath()
+                for seg in op[1]:
+                    if seg[0] == 'M':
+                        p.moveTo(*P(seg[1], seg[2]))
+                    elif seg[0] == 'L':
+                        p.lineTo(*P(seg[1], seg[2]))
+                    elif seg[0] == 'C':
+                        p.curveTo(*P(seg[1], seg[2]), *P(seg[3], seg[4]), *P(seg[5], seg[6]))
+                    elif seg[0] == 'Z':
+                        p.close()
+                c.drawPath(p, stroke=1 if stroke else 0, fill=1 if fill else 0)
+            elif op[0] == 'ellipse':
+                cx, cy = P(op[1], op[2])
+                rx, ry = float(op[3]) * inch * sx, float(op[4]) * inch * sy
+                c.ellipse(cx - rx, cy - ry, cx + rx, cy + ry,
+                          stroke=1 if stroke else 0, fill=1 if fill else 0)
+            elif op[0] == 'grad':
+                x0, y0 = P(op[1], op[2])
+                x1, y1 = P(float(op[1]) + float(op[3]), float(op[2]) + float(op[4]))
+                p = c.beginPath()
+                p.rect(x0, y1, x1 - x0, y0 - y1)
+                c.clipPath(p, stroke=0, fill=0)
+                c.setFillAlpha(op_a * float(st.get('fa', 1.0)))
+                c.linearGradient(x0, P(0, op[7])[1], x0, P(0, op[8])[1],
+                                 [HexColor(op[5]), HexColor(op[6])], extend=True)
+        except (TypeError, ValueError, IndexError, KeyError):
+            pass                         # a malformed op is skipped, not the wrap
+        finally:
+            c.restoreState()
 
 
 def stand_in_art(path):
