@@ -142,24 +142,62 @@ def el_rect(g, el):
 
 
 def text_layout(el):
-    """[(line, x offset, baseline offset)] in points from the element's top-left."""
+    """[(line, x offset, baseline offset, words)] in points from the element's
+    top-left. `words` is None, or for a justified line [(word, x offset)]: the
+    line's words spread to fill the box."""
     face = pdfmetrics.getFont(font_name(el['font'])).face
     size, lead = el['size'], el.get('leading', 1.2)
     asc = face.ascent / 1000.0 * size
     box = el.get('w', 0) * 72.0
     blank = blank_of(el)
+    align = el.get('align', 'left')
+    lines = break_lines(el)
+    ends = para_ends(el, lines) if align == 'justify' and box else None
     out, down = [], 0.0
-    for line in break_lines(el):
+    for i, line in enumerate(lines):
         lw = line_width(line, el)
-        align = el.get('align', 'left')
+        words = None
         if align == 'center':
             dx = (box - lw) / 2.0 if box else -lw / 2.0
         elif align == 'right':
             dx = (box - lw) if box else -lw
         else:
             dx = 0.0
-        out.append((line, dx, asc + down))
+            if ends and not ends[i]:
+                words = justify(line, el, box)
+        out.append((line, dx, asc + down, words))
         down += size * lead * (blank if not line.strip() else 1.0)
+    return out
+
+
+def para_ends(el, lines):
+    """Whether each of a text box's lines ends its paragraph - the lines a
+    justified box leaves ragged. Broken a paragraph at a time with the engine's
+    own breaker, which is how `break_lines` broke them."""
+    ends = []
+    for para in (str(el.get('text', '')).splitlines() or ['']):
+        n = len(engine._wrap_tracked(para, font_name(el['font']), el['size'],
+                                     el['w'] * 72.0, el.get('tracking', 0.0)))
+        ends += [False] * (n - 1) + [True]
+    return ends if len(ends) == len(lines) else [True] * len(lines)
+
+
+def justify(line, el, box):
+    """[(word, x offset)] spreading a line's words across `box` points: the
+    room left over shared equally between the spaces. None when there is
+    nothing to spread (one word, or a line already as wide as the box)."""
+    words = line.split(' ')
+    lw = line_width(line, el)
+    if len(words) < 2 or lw >= box:
+        return None
+    extra = (box - lw) / (len(words) - 1)
+    tr, font, size = el.get('tracking', 0.0), font_name(el['font']), el['size']
+    out, k = [], 0
+    for i, wd in enumerate(words):
+        prefix = line[:k]                  # where the word starts in the set line
+        out.append((wd, pdfmetrics.stringWidth(prefix, font, size) + tr * len(prefix)
+                    + extra * i))
+        k += len(wd) + 1
     return out
 
 
@@ -232,17 +270,18 @@ def build_pdf(design, dims, out_path):
             draw_vector(c, el, X, Ytop, w * inch, h * inch)
         elif kind == 'text' and font_file(el.get('font')):
             layout = text_layout(el)
-            lines[el.get('id', '')] = [ln for ln, _, _ in layout]
+            lines[el.get('id', '')] = [ln for ln, _, _, _ in layout]
             c.translate(X, Ytop)
             if el.get('rotate') == 90:                        # reads top to bottom
                 c.rotate(-90)
             c.setFillColor(HexColor(el.get('color') or '#000000'), alpha=alpha)
-            for line, dx, base in layout:
-                t = c.beginText(dx, -base)
-                t.setFont(font_name(el['font']), el['size'])
-                t.setCharSpace(el.get('tracking', 0.0))
-                t.textOut(line)
-                c.drawText(t)
+            for line, dx, base, words in layout:
+                for run, x in (words or [(line, dx)]):
+                    t = c.beginText(x, -base)
+                    t.setFont(font_name(el['font']), el['size'])
+                    t.setCharSpace(el.get('tracking', 0.0))
+                    t.textOut(run)
+                    c.drawText(t)
         c.restoreState()
     c.showPage()
     c.save()

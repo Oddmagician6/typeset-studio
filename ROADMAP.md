@@ -7,13 +7,13 @@ sections before changing the engine.
 
 ---
 
-## Next up — priority order (as of 1.2.7, 2026-10-02)
+## Next up — priority order (as of 1.2.8, 2026-10-03)
 
 Start here in a new session. Each item points at its full entry below.
 
-1. **Wrap designer leftovers (#72):** justified blurbs, align / distribute for selected
-   elements, and content presets for jacket flaps. Check SVG `letter-spacing` and the
-   font-feature switches in WebKit before any macOS build.
+1. **Before any macOS build: check the Wrap designer in WebKit (#72).** SVG `letter-spacing`
+   and the font-feature switches the editor relies on for print-true text are untested in
+   Safari's engine. Needs a Mac (see item 5).
 2. **Browser bug hunt on the cover editor and the style editor.** The method that found nine
    real bugs in rich mode (#71): drive the real page in headless Chrome through the edits a
    writer makes, against throwaway data folders, and keep the harness as a test
@@ -2174,7 +2174,8 @@ tall flowable — a chapter opening's sink — no longer fitted: **the whole PDF
   fail on the old engine with the `LayoutError`.
 
 **72. A freeform wrap designer — design the whole cover yourself, in the app** *(large;
-several sessions; asked for 2026-10-02)* — **IN PROGRESS: phases A–C done (C unreleased); D left**
+several sessions; asked for 2026-10-02)* — **IN PROGRESS: phases A–C done; D partly (align /
+distribute, flap presets) done; left: barcode box per printer, review-quote presets, a WebKit check**
 Templates (#16, #33) give a professional cover from a few fields, and #66 / #68 serve a writer
 who has a designer. Missing is the writer who wants to *design* the wrap themselves without
 leaving the app: place the art, set the title where they want it, run a band across the spine,
@@ -2378,6 +2379,27 @@ the app as its own **Wrap designer** tab (`/wrap-designer`), so it can be tried 
   - *The photographic title* grew downward from `title_y` and pushed the author below the
     trim; the cluster now lifts to clear the studio footer by 0.35" (or the safe zone).
     One- and two-line titles are unchanged.
+- **Leftovers — justify, align / distribute, flap presets: SHIPPED (2026-10-03, unreleased).**
+  - *Justify* is a fourth `align`. Lines break exactly as left-aligned; `text_layout` adds
+    each line's words with their x offsets (`justify`), and `para_ends` - which breaks a
+    paragraph at a time with the engine's breaker - leaves each paragraph's last line ragged.
+    The PDF draws a justified line word by word (Tw word spacing is unreliable with
+    ReportLab's TTF subsets); the editor mirrors both functions, and the browser test
+    compares their word positions to 1e-6 pt.
+  - *Multi-select:* `sel` stays the element the properties panel shows; Shift+click (canvas
+    or layers) toggles others into `also`. A drag rounds its distance once, so everything
+    moves by the same amount; arrows nudge and Delete deletes the lot. *Align* (left, centre,
+    right, top, middle, bottom) works on the boxes drawn round things: several line up with
+    each other, one alone with its panel's safe area (`safeBox`, now shared with the checks,
+    flaps included). *Distribute* (three or more) shares the free space equally between the
+    outermost two. Aligned positions are exact, not rounded to 0.001".
+  - *Flap presets:* a Jacket flaps card, shown only when the binding has flaps, lays out
+    what `engine._paint_flap` lays out - title over jacket copy (justified) in front, "About
+    the author", photo and bio behind - in the design's largest face for headings and its
+    longest text's face for copy, with their colours. A preset replaces what is on that flap
+    (Customise already brings the template's flap text). `/wrap-designer/project/<pid>` now
+    returns the flap copy and the author photo, imported where the designer can serve it
+    (`wrap_convert.import_picture`, upright if it was stored turned).
 - **Long titles, every family (after 1.2.7).** The same scan with a 16-word title, plus a
   new check that front-cover lines don't run into each other, found the bug in all eight
   families, not just photographic: each hangs its title from a fixed line and grows it

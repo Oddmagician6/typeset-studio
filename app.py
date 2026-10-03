@@ -1986,9 +1986,15 @@ def _clean_design(design):
 def wrap_designer_project(pid):
     proj = load_project(pid)
     p = {**PRINT_DEFAULTS, **{k: proj[k] for k in PRINT_DEFAULTS if k in proj}}
+    # what a jacket's flaps carry, for the designer's flap presets: the copy and
+    # the author photo from Send to print, the photo where the designer can serve it
+    wrap_convert.IMPORT_DIR = WRAP_DESIGN_DIR
+    photo = wrap_convert.import_picture(_wrap_meta({}, p)['cover_back_image']) or ''
     return jsonify(design=proj.get('wrap_design'), settings=_project_wrap_settings(proj),
                    title=proj.get('title') or proj.get('name', ''), author=proj.get('author', ''),
-                   blurb=p['print_blurb'], pages_known=bool(proj.get('last_page_count')),
+                   blurb=p['print_blurb'], flap_blurb=p['print_flap_blurb'],
+                   flap_bio=p['print_flap_bio'], photo=photo,
+                   pages_known=bool(proj.get('last_page_count')),
                    is_cover=proj.get('cover_mode') == 'wrap',
                    saved=proj.get('wrap_design_saved', ''))
 

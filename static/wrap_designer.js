@@ -53,6 +53,7 @@
   try { saved = JSON.parse(localStorage.getItem(STORE) || 'null'); } catch (e) { saved = null; }
   var design = (saved && saved.design && saved.design.elements) ? saved.design : starter();
   var g = null, geo = null, sel = null, metrics = {}, drag = null, seq = Date.now() % 100000;
+  var also = [];                        // further selected ids, shift-clicked alongside `sel`
   var SETTINGS = ['wd-project', 'wd-name', 'wd-retailer', 'wd-paper', 'wd-binding', 'wd-trim', 'wd-pages'];
   if (saved && saved.settings) SETTINGS.forEach(function (id) {
     if (saved.settings[id] != null && $(id)) $(id).value = saved.settings[id];
@@ -69,6 +70,19 @@
              wrap_trim_w: +t[0], wrap_trim_h: +t[1] };
   }
   function find(id) { return design.elements.find(function (e) { return e.id === id; }); }
+  // Selection: `sel` is the one the properties panel shows; Shift+click adds
+  // others to `also`, for moving, aligning and deleting together.
+  function choose(id) { sel = id; also = []; }
+  function chosen() {
+    return (sel ? [sel] : []).concat(also).map(find).filter(function (e) { return e; });
+  }
+  function toggle(id) {
+    if (id === sel) { sel = also.shift() || null; return; }
+    var i = also.indexOf(id);
+    if (i !== -1) also.splice(i, 1);
+    else if (sel) also.push(id);
+    else sel = id;
+  }
   function round(v) { return Math.round(v * 1000) / 1000; }
 
   // ---- geometry (mirrors wrap_design.py) ---------------------------------------
@@ -96,13 +110,38 @@
                      : String(el.text).split(/\r?\n/);
     var asc = m.ascent / 1000 * el.size, box = (el.w || 0) * 72, down = 0;
     var step = el.size * (el.leading || 1.2), blank = blankOf(el);
-    return lines.map(function (ln) {
-      var lw = WD.width(ln, m, el.size, el.tracking || 0), dx = 0;
+    var ends = el.align === 'justify' && box ? paraEnds(el, m, lines) : null;
+    return lines.map(function (ln, i) {
+      var lw = WD.width(ln, m, el.size, el.tracking || 0), dx = 0, words = null;
       if (el.align === 'center') dx = box ? (box - lw) / 2 : -lw / 2;
       else if (el.align === 'right') dx = box ? box - lw : -lw;
-      var out = [ln, dx, asc + down];
+      else if (ends && !ends[i]) words = justify(ln, el, m, box);
+      var out = [ln, dx, asc + down, words];
       down += step * (ln.trim() ? 1 : blank);
       return out;
+    });
+  }
+  // Whether each line ends its paragraph: a justified box leaves those ragged.
+  // Mirrors wrap_design.para_ends.
+  function paraEnds(el, m, lines) {
+    var ends = [], paras = WD.splitlines(String(el.text));
+    if (!paras.length) paras = [''];
+    paras.forEach(function (p) {
+      var n = WD.breakLines(p, m, el.size, el.w * 72, el.tracking || 0).length;
+      for (var k = 1; k < n; k++) ends.push(false);
+      ends.push(true);
+    });
+    return ends.length === lines.length ? ends : lines.map(function () { return true; });
+  }
+  // [(word, x)] spreading a line across the box, as wrap_design.justify.
+  function justify(ln, el, m, box) {
+    var words = ln.split(' '), tr = el.tracking || 0, lw = WD.width(ln, m, el.size, tr);
+    if (words.length < 2 || lw >= box) return null;
+    var extra = (box - lw) / (words.length - 1), k = 0;
+    return words.map(function (wd, i) {
+      var prefix = ln.slice(0, k);
+      k += wd.length + 1;
+      return [wd, WD.width(prefix, m, el.size, 0) + tr * WD.chars(prefix).length + extra * i];
     });
   }
   // an empty line's height in lines (a template's blurb leaves 0.6 between paragraphs)
@@ -168,7 +207,8 @@
   }
   function restore(snap) {
     lastSnap = snap; design = JSON.parse(snap);
-    if (sel && !find(sel)) sel = null;
+    also = also.filter(find);
+    if (sel && !find(sel)) sel = also.shift() || null;
     showProps(); loadFonts().then(render); undoButtons();
   }
   function undo() {
@@ -221,15 +261,17 @@
         var bb = bbox(el);
         node('rect', {x:bb[0], y:bb[1], width:bb[2], height:bb[3], fill:'transparent'}, grp);
         lay.forEach(function (l) {
-          node('text', {x:l[1] / 72, y:l[2] / 72, 'font-family':WD.family(el.font),
-                        'font-size':el.size / 72, 'letter-spacing':(el.tracking || 0) / 72,
-                        fill:el.color, 'fill-opacity':el.opacity == null ? 1 : el.opacity,
-                        'xml:space':'preserve', 'pointer-events':'none'}, t).textContent = l[0];
+          (l[3] || [[l[0], l[1]]]).forEach(function (run) {      // a justified line, word by word
+            node('text', {x:run[1] / 72, y:l[2] / 72, 'font-family':WD.family(el.font),
+                          'font-size':el.size / 72, 'letter-spacing':(el.tracking || 0) / 72,
+                          fill:el.color, 'fill-opacity':el.opacity == null ? 1 : el.opacity,
+                          'xml:space':'preserve', 'pointer-events':'none'}, t).textContent = run[0];
+          });
         });
       }
     });
     if ($('wd-guides').checked) drawGuides();
-    if (sel && find(sel)) drawSelection();
+    if (chosen().length) drawSelection();
     renderLayers();
     renderChecks();
     persist();
@@ -317,9 +359,14 @@
   }
 
   function drawSelection() {
-    var el = find(sel), bb = bbox(el), gs = node('g', {'pointer-events':'none'}, svg);
-    node('rect', {x:bb[0], y:bb[1], width:bb[2], height:bb[3], fill:'none', stroke:'#ff6f00', 'stroke-width':0.022}, gs);
-    if (!el.fill) {
+    var els = chosen(), gs = node('g', {'pointer-events':'none'}, svg);
+    els.forEach(function (e) {
+      var b = bbox(e);
+      node('rect', {x:b[0], y:b[1], width:b[2], height:b[3], fill:'none', stroke:'#ff6f00', 'stroke-width':0.022,
+                    'stroke-dasharray':e.id === sel ? '' : '0.06 0.04'}, gs);
+    });
+    var el = find(sel), bb = el && bbox(el);
+    if (el && els.length === 1 && !el.fill) {
       var hs = 0.14;
       node('rect', {x:bb[0] + bb[2] - hs / 2, y:bb[1] + bb[3] - hs / 2, width:hs, height:hs, fill:'#ff6f00',
                     'data-handle':'1', style:'cursor:nwse-resize'}, svg);
@@ -339,7 +386,7 @@
     ul.innerHTML = '';
     design.elements.slice().reverse().forEach(function (el) {        // top layer first
       var li = document.createElement('li');
-      if (el.id === sel) li.className = 'on';
+      if (el.id === sel || also.indexOf(el.id) !== -1) li.className = 'on';
       var span = document.createElement('span'); span.textContent = label(el); li.appendChild(span);
       [['up', '↑', 'Bring forward'], ['down', '↓', 'Send backward'], ['del', '×', 'Delete']].forEach(function (b) {
         var btn = document.createElement('button'); btn.type = 'button';
@@ -347,21 +394,45 @@
         btn.addEventListener('click', function (e) { e.stopPropagation(); layerAct(el, b[0]); });
         li.appendChild(btn);
       });
-      li.addEventListener('click', function () { sel = el.id; showProps(); render(); });
+      li.addEventListener('click', function (e) {
+        if (e.shiftKey) toggle(el.id); else choose(el.id);
+        showProps(); render();
+      });
       ul.appendChild(li);
     });
   }
   function layerAct(el, act) {
     var i = design.elements.indexOf(el), a = design.elements;
-    if (act === 'del') { a.splice(i, 1); if (sel === el.id) sel = null; showProps(); }
+    if (act === 'del') {
+      a.splice(i, 1);
+      if (sel === el.id) sel = also.shift() || null;
+      also = also.filter(function (id) { return id !== el.id; });
+      showProps();
+    }
     else if (act === 'up' && i < a.length - 1) { a[i] = a[i + 1]; a[i + 1] = el; }
     else if (act === 'down' && i > 0) { a[i] = a[i - 1]; a[i - 1] = el; }
     render();
   }
 
+  // The safe area an element is held to, on the sheet: [x0, y0, x1, y1]. Its
+  // panel's, inset by the safe margin (the spine's own, smaller one on the
+  // spine); on a jacket, the flap's when the element sits out on a flap.
+  function safeBox(el) {
+    var s = geo.safe, a = el.anchor && el.anchor !== 'sheet' ? el.anchor : 'front';
+    var bb = bbox(el), o = origin(a), pw = panelW(a);
+    var inset = a === 'spine' ? Math.min(geo.spine_safe, pw / 2) : s;
+    var x0 = o[0] + inset, x1 = o[0] + pw - inset;
+    var mid = bb[0] + bb[2] / 2;
+    if (g.flap && mid < g.back_x) { x0 = g.edge + s; x1 = g.back_x - s; }
+    else if (g.flap && mid > g.front_x + g.panel_w) {
+      x0 = g.front_x + g.panel_w + s; x1 = g.front_x + g.panel_w + g.flap - s;
+    }
+    return [x0, g.edge + s, x1, g.edge + g.panel_h - s];
+  }
+
   // What a printer would object to, worked out as you go.
   function renderChecks() {
-    var out = [], s = geo.safe, spineSafe = geo.spine_safe;
+    var out = [];
     (geo.warnings || []).forEach(function (w) { out.push(['bad', w]); });
     var spineText = design.elements.some(function (e) { return e.type === 'text' && e.anchor === 'spine'; });
     if (spineText && !g.spine_text) {
@@ -380,17 +451,8 @@
         if (gone.length) missing.push(label(el) + ' (' + Array.from(new Set(gone)).join(' ') + ')');
       }
       if (!el.anchor || el.anchor === 'sheet') return;
-      var bb = bbox(el), o = origin(el.anchor), pw = panelW(el.anchor);
-      var inset = el.anchor === 'spine' ? spineSafe : s;
-      var x0 = o[0] + (el.anchor === 'spine' ? Math.min(inset, pw / 2) : inset);
-      var x1 = o[0] + pw - (el.anchor === 'spine' ? Math.min(inset, pw / 2) : inset);
-      var mid = bb[0] + bb[2] / 2;          // on a jacket, text out on a flap is held to the flap
-      if (g.flap && mid < g.back_x) { x0 = g.edge + s; x1 = g.back_x - s; }
-      else if (g.flap && mid > g.front_x + g.panel_w) {
-        x0 = g.front_x + g.panel_w + s; x1 = g.front_x + g.panel_w + g.flap - s;
-      }
-      var y0 = o[1] + s, y1 = o[1] + g.panel_h - s, eps = 0.005;
-      if (bb[0] < x0 - eps || bb[0] + bb[2] > x1 + eps || bb[1] < y0 - eps || bb[1] + bb[3] > y1 + eps)
+      var bb = bbox(el), z = safeBox(el), eps = 0.005;
+      if (bb[0] < z[0] - eps || bb[0] + bb[2] > z[2] + eps || bb[1] < z[1] - eps || bb[1] + bb[3] > z[3] + eps)
         outside.push(label(el));
     });
     if (outside.length) out.push(['bad', 'Outside the safe zone, may be trimmed: ' + outside.join(', ')]);
@@ -413,10 +475,14 @@
       var el = find(sel);
       drag = {mode:'resize', el:el, p:p, w:el.w || 0, h:el.h || 0};
     } else {
-      var grp = e.target.closest('.el');
-      sel = grp ? grp.getAttribute('data-id') : null;
-      var el2 = sel && find(sel);
-      drag = el2 && !el2.fill ? {mode:'move', el:el2, p:p, x:el2.x || 0, y:el2.y || 0, cx:el2.cx} : null;
+      var grp = e.target.closest('.el'), hit = grp ? grp.getAttribute('data-id') : null;
+      if (e.shiftKey) { if (hit) toggle(hit); drag = null; showProps(); render(); return; }
+      if (!hit || (hit !== sel && also.indexOf(hit) === -1)) choose(hit);
+      else if (hit !== sel) { also.splice(also.indexOf(hit), 1); also.unshift(sel); sel = hit; }
+      var movers = chosen().filter(function (m) { return !m.fill; });
+      drag = movers.length ? {mode:'move', p:p, start:movers.map(function (m) {
+        return {el:m, x:m.x || 0, y:m.y || 0, cx:m.cx};
+      })} : null;
       showProps();
     }
     try { svg.setPointerCapture(e.pointerId); } catch (err) {}
@@ -424,18 +490,90 @@
   });
   svg.addEventListener('pointermove', function (e) {
     if (!drag) return;
-    var p = toInches(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, el = drag.el;
+    var p = toInches(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, el = drag.el;    // el: a resize
     if (drag.mode === 'resize') {
       el.w = Math.max(0.2, round(drag.w + (el.rotate === 90 ? dy : dx)));
       if (el.type !== 'text') el.h = Math.max(0.2, round(drag.h + dy));
     } else {
-      if ('cx' in el) el.cx = round(drag.cx + dx); else el.x = round(drag.x + dx);
-      el.y = round(drag.y + dy);
-      snap(el);
+      // the distance rounded once, so everything dragged moves by the same amount
+      var rdx = round(dx), rdy = round(dy);
+      drag.start.forEach(function (st) {
+        var m = st.el;
+        if ('cx' in m) m.cx = st.cx + rdx; else m.x = st.x + rdx;
+        m.y = st.y + rdy;
+      });
+      if (drag.start.length === 1) snap(drag.start[0].el);
     }
     render();
   });
   svg.addEventListener('pointerup', function () { if (drag) { drag = null; showProps(); commit(); } });
+  // `exact` for align and distribute, whose positions are worked out to line up
+  // exactly; a nudge rounds, as typing a position does.
+  function moveBy(el, dx, dy, exact) {
+    if (el.fill) return;
+    var r = exact ? function (v) { return v; } : round;
+    if ('cx' in el) el.cx = r(el.cx + dx); else el.x = r((el.x || 0) + dx);
+    el.y = r((el.y || 0) + dy);
+  }
+
+  // Align and distribute. Several selected line up with each other (their
+  // outer edges, or the middle of the span); one alone lines up with its
+  // panel's safe area. Distribute spaces three or more evenly between the
+  // outermost two. All by what you see: the boxes drawn round them.
+  function align(how) {
+    var els = chosen().filter(function (e) { return !e.fill; });
+    if (!els.length) return;
+    var boxes = els.map(bbox), ref;
+    if (els.length === 1) ref = safeBox(els[0]);
+    else ref = [Math.min.apply(null, boxes.map(function (b) { return b[0]; })),
+                Math.min.apply(null, boxes.map(function (b) { return b[1]; })),
+                Math.max.apply(null, boxes.map(function (b) { return b[0] + b[2]; })),
+                Math.max.apply(null, boxes.map(function (b) { return b[1] + b[3]; }))];
+    els.forEach(function (el, i) {
+      var b = boxes[i], dx = 0, dy = 0;
+      if (how === 'left') dx = ref[0] - b[0];
+      else if (how === 'center') dx = (ref[0] + ref[2]) / 2 - (b[0] + b[2] / 2);
+      else if (how === 'right') dx = ref[2] - (b[0] + b[2]);
+      else if (how === 'top') dy = ref[1] - b[1];
+      else if (how === 'middle') dy = (ref[1] + ref[3]) / 2 - (b[1] + b[3] / 2);
+      else if (how === 'bottom') dy = ref[3] - (b[1] + b[3]);
+      moveBy(el, dx, dy, true);
+    });
+    render(); commit();
+  }
+  function distribute(axis) {
+    var k = axis === 'x' ? 0 : 1;
+    var items = chosen().filter(function (e) { return !e.fill; })
+      .map(function (el) { return {el:el, b:bbox(el)}; })
+      .sort(function (p, q) { return p.b[k] - q.b[k]; });
+    if (items.length < 3) return;
+    var first = items[0].b, last = items[items.length - 1].b;
+    var used = items.reduce(function (t, it) { return t + it.b[k + 2]; }, 0);
+    var gap = (last[k] + last[k + 2] - first[k] - used) / (items.length - 1), at = first[k];
+    items.forEach(function (it) {
+      moveBy(it.el, k === 0 ? at - it.b[0] : 0, k === 1 ? at - it.b[1] : 0, true);
+      at += it.b[k + 2] + gap;
+    });
+    render(); commit();
+  }
+  function alignTools(box, n) {
+    var h = document.createElement('label');
+    h.textContent = n > 1 ? 'Line them up' : 'Line up with the panel';
+    box.appendChild(h);
+    var row = document.createElement('div'); row.className = 'tools'; box.appendChild(row);
+    var tools = [['left', 'Left'], ['center', 'Centre'], ['right', 'Right'],
+                 ['top', 'Top'], ['middle', 'Middle'], ['bottom', 'Bottom']];
+    if (n > 2) tools.push(['x', 'Space across'], ['y', 'Space down']);
+    tools.forEach(function (t) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-sm';
+      b.textContent = t[1]; b.setAttribute('data-align', t[0]);
+      b.addEventListener('click', function () {
+        if (t[0] === 'x' || t[0] === 'y') distribute(t[0]); else align(t[0]);
+      });
+      row.appendChild(b);
+    });
+  }
+
   // centre a box on its panel when it comes within 0.08"
   function snap(el) {
     var pw = panelW(el.anchor);
@@ -450,24 +588,32 @@
       if (k0 === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
       if (k0 === 'y' || (k0 === 'z' && e.shiftKey)) { e.preventDefault(); redo(); return; }
     }
-    if (!sel) return;
-    var el = find(sel);
-    if (!el) return;
-    var step = e.shiftKey ? 0.1 : 0.01, k = 'cx' in el ? 'cx' : 'x';
-    if (e.key === 'Delete' || e.key === 'Backspace') { layerAct(el, 'del'); e.preventDefault(); return; }
-    if (el.fill) return;
-    if (e.key === 'ArrowLeft') el[k] = round((el[k] || 0) - step);
-    else if (e.key === 'ArrowRight') el[k] = round((el[k] || 0) + step);
-    else if (e.key === 'ArrowUp') el.y = round((el.y || 0) - step);
-    else if (e.key === 'ArrowDown') el.y = round((el.y || 0) + step);
-    else return;
+    var els = chosen();
+    if (!els.length) return;
+    var step = e.shiftKey ? 0.1 : 0.01;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      els.forEach(function (el) { layerAct(el, 'del'); }); e.preventDefault(); return;
+    }
+    var d = {ArrowLeft:[-step, 0], ArrowRight:[step, 0], ArrowUp:[0, -step], ArrowDown:[0, step]}[e.key];
+    if (!d) return;
+    els.forEach(function (el) { moveBy(el, d[0], d[1]); });
     e.preventDefault(); render();
   });
 
   function showProps() {
-    var box = $('wd-props'), el = sel && find(sel);
+    var box = $('wd-props'), el = sel && find(sel), n = chosen().length;
     box.innerHTML = '<h3>Selected</h3>';
-    if (!el) { box.insertAdjacentHTML('beforeend', '<p>Click something on the cover.</p>'); return; }
+    if (!el) {
+      box.insertAdjacentHTML('beforeend', '<p>Click something on the cover. Shift+click to pick more than one.</p>');
+      return;
+    }
+    if (n > 1) {
+      var many = document.createElement('div'); many.className = 'id';
+      many.textContent = n + ' selected. Drag or use the arrow keys to move them together.';
+      box.appendChild(many);
+      alignTools(box, n);
+      return;
+    }
     var id = document.createElement('div'); id.className = 'id';
     id.textContent = label(el) + (el.anchor ? ' · on the ' + el.anchor : '');
     box.appendChild(id);
@@ -499,7 +645,8 @@
       add('Font', 'font', 'select', CFG.fonts.map(function (f) { return [f, f.replace(/\.ttf$/i, '')]; }));
       add('Size (pt)', 'size', 'number', null, true); add('Line spacing', 'leading', 'number', null, true);
       add('Letter spacing (pt)', 'tracking', 'number', null, true);
-      add('Align', 'align', 'select', [['left', 'Left'], ['center', 'Centre'], ['right', 'Right']], true);
+      add('Align', 'align', 'select', [['left', 'Left'], ['center', 'Centre'], ['right', 'Right'],
+                                       ['justify', 'Justified']], true);
       add('Box width (in)', 'w', 'number', null, true); add('Colour', 'color', 'color', null, true);
     } else if (el.type === 'rect') {
       add('Colour', 'color', 'color', null, true); add('Opacity', 'opacity', 'number', null, true);
@@ -529,10 +676,11 @@
       add('Opacity', 'opacity', 'number', null, true);
       if (!el.fill) { add('Width (in)', 'w', 'number', null, true); add('Height (in)', 'h', 'number', null, true); }
     }
+    if (!el.fill) alignTools(box, 1);
   }
 
   // ---- adding things ------------------------------------------------------------
-  function addEl(el) { el.id = el.type + '-' + (++seq); design.elements.push(el); sel = el.id; showProps(); }
+  function addEl(el) { el.id = el.type + '-' + (++seq); design.elements.push(el); choose(el.id); showProps(); }
   $('wd-add-text').addEventListener('click', function () {
     addEl({type:'text', anchor:'front', x:1, y:4, w:4, text:'New text', font:pick('EBGaramond-Regular.ttf'),
            size:20, leading:1.2, color:'#ffffff', align:'center', tracking:0});
@@ -546,11 +694,11 @@
     var src = $('wd-art-pick').value;
     if (where === 'place') { addEl({type:'image', anchor:'front', x:1.5, y:2, w:3, h:3, src:src}); render(); return; }
     var el = design.elements.find(function (e) { return e.type === 'image' && e.fill === where; });
-    if (el) { el.src = src; sel = el.id; showProps(); }
+    if (el) { el.src = src; choose(el.id); showProps(); }
     else {                                          // just above that panel's colour
       var bg = design.elements.findIndex(function (e) { return e.type === 'rect' && e.fill === where; });
       var img = {id:'image-' + (++seq), type:'image', fill:where, src:src};
-      design.elements.splice(bg + 1, 0, img); sel = img.id; showProps();
+      design.elements.splice(bg + 1, 0, img); choose(img.id); showProps();
     }
     render();
   }
@@ -571,10 +719,66 @@
   });
   $('wd-reset').addEventListener('click', function () {
     if (!confirm('Start over with the example design? Your current design will be replaced.')) return;
-    design = starter($('wd-project').value ? currentBook : null, g); sel = null; showProps();
+    design = starter($('wd-project').value ? currentBook : null, g); choose(null); showProps();
     loadFonts().then(render);
   });
   $('wd-guides').addEventListener('change', render);
+
+  // ---- jacket flaps ---------------------------------------------------------------
+  // What a dust jacket carries on its flaps, laid out the way the template wraps
+  // lay them out (engine._paint_flap): the title over the jacket copy in front,
+  // "About the author" over the photo and bio at the back. Set in the design's
+  // own faces and colours - its largest type for headings, its longest for text.
+  var FLAP_COPY = 'The jacket copy goes here: what the book is about, in a paragraph or two ' +
+    'that a reader takes in with the book open in their hands.';
+  var FLAP_BIO = 'A few lines about the author: where they live, what else they have written, ' +
+    'and why they wrote this one.';
+  function designFaces() {
+    var texts = design.elements.filter(function (e) { return e.type === 'text' && e.font; });
+    var head = texts.slice().sort(function (a, b) { return b.size - a.size; })[0];
+    var body = texts.slice().sort(function (a, b) { return String(b.text).length - String(a.text).length; })[0];
+    return {head: head ? head.font : pick('EBGaramond-Bold.ttf'), headColor: head ? head.color : '#fbf3e2',
+            body: body ? body.font : pick('EBGaramond-Regular.ttf'), bodyColor: body ? body.color : '#efe7d6'};
+  }
+  function flapPreset(side) {
+    if (!g.flap) return Promise.resolve();
+    var f = designFaces(), book = $('wd-project').value ? currentBook : null;
+    var pad = Math.max(geo.safe, Math.min(0.42, g.flap * 0.14)), col = round(g.flap - 2 * pad);
+    var anchor = side === 'front' ? 'front' : 'back';
+    var x = round(side === 'front' ? g.panel_w + pad : -g.flap + pad);
+    var head = {type:'text', anchor:anchor, x:x, y:0.75, w:col, leading:1.3, align:'center'};
+    if (side === 'front')
+      Object.assign(head, {text:((book && book.title) || 'My Book').toUpperCase(), font:f.head, size:13,
+                           tracking:1.2, color:f.headColor});
+    else
+      Object.assign(head, {text:'ABOUT THE AUTHOR', font:f.body, size:8, tracking:2.6, color:f.headColor});
+    var body = {type:'text', anchor:anchor, x:x, w:col, font:f.body, size:9.5, leading:1.42,
+                color:f.bodyColor, align:'justify', tracking:0,
+                text:side === 'front' ? (book && (book.flap_blurb || book.blurb)) || FLAP_COPY
+                                      : (book && book.flap_bio) || FLAP_BIO};
+    var photo = side === 'back' && book && book.photo ? {type:'image', anchor:anchor, src:book.photo} : null;
+    return Promise.all([ensureFont(head.font), ensureFont(body.font)]).then(function () {
+      // the preset fills the flap: what was on it goes (one undo brings it back)
+      var onFlap = function (e) {
+        if (e.fill) return false;
+        var b = bbox(e), mid = b[0] + b[2] / 2;
+        return side === 'front' ? mid > g.front_x + g.panel_w : mid < g.back_x;
+      };
+      design.elements = design.elements.filter(function (e) { return !onFlap(e); });
+      [head, photo, body].forEach(function (el) { if (el) el.id = el.type + '-' + (++seq); });
+      var y = head.y + bbox(head)[3] + 0.2;
+      if (photo) {
+        photo.w = round(Math.min(1.5, col)); photo.h = round(photo.w * 1.25);
+        photo.x = round(x + (col - photo.w) / 2); photo.y = round(y); y += photo.h + 0.2;
+      }
+      body.y = round(y);
+      [head, photo, body].forEach(function (el) { if (el) design.elements.push(el); });
+      choose(head.id); also = [photo, body].filter(Boolean).map(function (el) { return el.id; });
+      showProps(); render(); commit();
+    });
+  }
+  $('wd-flap-front').addEventListener('click', function () { flapPreset('front'); });
+  $('wd-flap-back').addEventListener('click', function () { flapPreset('back'); });
 
   // ---- start from a template ("Customise this design") ------------------------------
   // The template's wrap - or the book's own cover - converted by the server into
@@ -588,7 +792,7 @@
       .then(function (res) {
         if (!res.ok) { msg.textContent = res.error; return; }
         commit();
-        design = res.design; sel = null; showProps();
+        design = res.design; choose(null); showProps();
         return loadFonts().then(function () {
           render(); commit();
           msg.textContent = 'Started from ' + res.name + (pid ? ', not saved to the book yet.' : '.') +
@@ -639,7 +843,7 @@
           + (b.is_cover ? ' This design is the book’s cover.' : '');
         savedJSON = b.design ? JSON.stringify(b.design) : null;
         currentBook = b;
-        sel = null; showProps();
+        choose(null); showProps();
         $('wd-save-status').textContent = b.saved ? 'Saved ' + b.saved.replace('T', ' ') : 'Not saved to this book yet';
         // the geometry first, so an example design can be laid out for this book
         return fetchGeometry().then(function () {
@@ -668,7 +872,10 @@
       .then(function (r) { return r.json(); });
   }
   function fetchGeometry() {
-    return post('/wrap-designer/geometry', settings()).then(function (res) { geo = res; g = res.geometry; });
+    return post('/wrap-designer/geometry', settings()).then(function (res) {
+      geo = res; g = res.geometry;
+      $('wd-flaps').hidden = !g.flap;      // flap presets only where there are flaps
+    });
   }
   function regeometry() { return fetchGeometry().then(render); }
   SETTINGS.forEach(function (id) { $(id).addEventListener('change', function () { persist(); regeometry(); }); });
@@ -731,5 +938,7 @@
   // for the browser test: the live design and the geometry it is drawn against
   window.WD_EDITOR = { design: function () { return design; }, geometry: function () { return g; },
                        layout: layout, regeometry: regeometry, commit: commit, imageFit: imageFit,
-                       undo: undo, redo: redo, customise: customise, bbox: bbox };
+                       undo: undo, redo: redo, customise: customise, bbox: bbox, safeBox: safeBox,
+                       align: align, distribute: distribute, flapPreset: flapPreset,
+                       select: function (ids) { choose(ids[0] || null); also = ids.slice(1); showProps(); render(); } };
 })();
