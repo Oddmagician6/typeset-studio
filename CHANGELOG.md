@@ -8,6 +8,23 @@ line here.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Wrap designs made before 1.3.0 keep their barcode box.** A design saved
+  in 1.2.5–1.2.9 opened in 1.3.0 saying "No barcode area", its box couldn't
+  take an ISBN, and "+ Barcode" stacked a second box on top. The old box is
+  now recognised and becomes the barcode box when the design opens - from a
+  book or from the designer's own working copy - and prints just as it did.
+- **Books from the first releases have their covers back.** A book made
+  before cover choices existed (1.0) kept its uploaded cover art, but from
+  1.2.3 it was treated as having no cover, and saving it on the Edit page
+  made that permanent. It is page 1 again.
+- **Right-hand chapter starts stay on** when an older book is saved on the
+  Edit page. A book that had never set them was built with them on but shown
+  with the box unticked, so saving it switched them off.
+
 ## 1.3.0 — 3 October 2026
 
 The Wrap designer is finished: a real ISBN barcode on the back cover, review

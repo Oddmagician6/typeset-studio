@@ -850,7 +850,7 @@ def list_projects():
         if fn.endswith('.json'):
             try:
                 with open(os.path.join(PROJECT_DIR, fn), encoding='utf-8') as f:
-                    data = json.load(f)
+                    data = upgrade_project(json.load(f))
                 items.append({'id': fn[:-5], 'data': data})
             except Exception:
                 pass
@@ -862,7 +862,23 @@ def load_project(pid):
     if not os.path.exists(path):
         abort(404)
     with open(path, encoding='utf-8') as f:
-        return json.load(f)
+        return upgrade_project(json.load(f))
+
+
+def upgrade_project(proj):
+    """A book saved by an older version, read as this one would have saved it.
+
+    - No `cover_mode` (books from before designed covers): the uploaded cover,
+      if there is one, was page 1 - every version used `cover_file` whatever the
+      mode until 1.2.3 made "none" mean none. Without this such a book lost its
+      cover, and an unchanged save on the Edit page made that permanent.
+    - A wrap design from before 1.3.0: see `wrap_design.upgrade`.
+    """
+    if 'cover_mode' not in proj:
+        proj['cover_mode'] = 'image' if proj.get('cover_file') else 'none'
+    if proj.get('wrap_design'):
+        proj['wrap_design'] = wrap_design.upgrade(proj['wrap_design'])
+    return proj
 
 
 def save_project_file(pid, data):
@@ -1972,6 +1988,14 @@ def wrap_designer_barcode():
     return jsonify(dict(parts, font=wrap_design.barcode_font(el)))
 
 
+@app.route('/wrap-designer/upgrade', methods=['POST'])
+def wrap_designer_upgrade():
+    """A design the browser kept from an older version, brought up to date by
+    the same code that upgrades a book's (wrap_design.upgrade)."""
+    design = _clean_design((request.get_json(silent=True) or {}).get('design'))
+    return jsonify(ok=design is not None, design=design)
+
+
 @app.route('/wrap-designer/art/<path:fname>')
 def wrap_designer_art(fname):
     path = wrap_design.art_file(fname)
@@ -2023,7 +2047,7 @@ def _clean_design(design):
     els = [e for e in design['elements'] if isinstance(e, dict)]
     if len(els) > 400 or len(json.dumps(els)) > 1_000_000:
         return None
-    return {'elements': els}
+    return wrap_design.upgrade({'elements': els})
 
 
 @app.route('/wrap-designer/project/<pid>')

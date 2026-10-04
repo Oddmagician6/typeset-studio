@@ -18,12 +18,14 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
+2. **Bug hunt plan, items 1–12 below, in order.** Item 1 is a 1.3.0 regression (designs saved
+   before 1.3.0 lose their barcode area) and should come first.
+3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
-3. **Tabletop RPG books (#74), when the designer is done:** typed blocks first (stat block,
+4. **Tabletop RPG books (#74), when the designer is done:** typed blocks first (stat block,
    read-aloud box, sidebar), two-column pagination after.
-4. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
+5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
    enabling it needs admin and a reboot) and a macOS build (needs a Mac). The code is already
    audited as portable; see the cross-platform notes in the strategy section. Deferred until
    the user decides on it; when they do, check the Wrap designer in WebKit first (SVG
@@ -48,6 +50,133 @@ once a coherent piece lands):
    --draft=false --latest`. Notes follow the previous release's shape.
 5. Confirm `app._pick_release(app._fetch_json(app.UPDATE_FEED))` returns the new version.
    GitHub caches that unauthenticated call for about a minute, so retry before suspecting it.
+6. Freeze what the release writes, so later versions are tested against it: the steps are
+   in `test_fixtures/make_fixtures.py`'s docstring (a worktree at the new tag); add
+   `vx.y.z` to `RELEASES` in `test_upgrade.py` and commit the fixtures.
+
+## Bug hunt plan — the rest of the app, most needed first (2026-10-03, after 1.3.0)
+
+Built from a survey, not a hunch: **27 of the 65 routes have no test that touches them**, the
+browser-tested pages are only the rich editor (#71), the cover and style editors and the
+wrap designer, and the two hunts so far say where bugs live - in forms that save more than
+they show, in data written by an older version, and in what two things doing the same job
+disagree about. Ranked by (harm if it breaks) x (chance it's broken) x (how little covers it).
+Each hunt ends with its harness kept as a test, as #71 and the editor hunt did. macOS is out
+of scope until the user decides on it.
+
+**Method, every time:** the real page in headless Chrome against throwaway data folders
+(`test_cover_editor.py` is the model: an iframe harness posting results back, a fetch counter
+rather than "the picture changed" to wait on previews, no importing one test module from
+another); invariants first (round trips, agreement between two code paths), then a writer's
+session of awkward input; fix what is found, and note what isn't a bug.
+
+1. **Data from older versions** *(found while planning: a 1.3.0 regression)*. Wrap designs
+   saved in 1.2.5–1.2.9 keep the barcode area as `{type: 'rect', label: 'Barcode area'}`, so
+   1.3.0 warns "No barcode area", can't take an ISBN in the old box, and "+ Barcode" stacks a
+   second one on it - migrate the old box to a `barcode` element when a design opens (browser
+   and server). Then sweep the rest of the upgrade path the same way: project JSON written by
+   1.0–1.2 (keys added since: `print_*`, `wrap_design`, `cover_mode: 'wrap'`, matter keys),
+   cover templates saved by the pre-1.3.0 editor (family blocks already lost - can't restore,
+   but say so?), styles missing newer keys, a design kept only in localStorage. *Harness:*
+   a folder of fixtures frozen from each release tag (`git show vX:...`), opened by the
+   current app; nothing may warn falsely, crash, or change on an unchanged save.
+   - **Done (2026-10-04): the barcode regression.** `wrap_design.upgrade` turns the old box
+     into a `barcode` element - the 1.2.5–1.2.9 white rect (printed as before: no outline, no
+     caption) and also the 1.2.7–1.2.9 "Customise" reserve, a grey-outlined `vector` plus a
+     separate "ISBN / barcode area" text (outline and caption kept). Run by `load_project`
+     (so every reader of a book's design gets it), by Save, and by `/wrap-designer/upgrade`
+     for a working copy kept in localStorage. Left alone: a design that already has a
+     barcode (a 1.3.0 user's "+ Barcode" beside the old box) and an old box recoloured.
+     `test_upgrade.py` with `test_fixtures/v1.2.9/` (the Customise fixture made by 1.2.9's
+     own code in a worktree at the tag): prints match to 1/255 at the outline, and in
+     headless Chrome all three cases open with one box, no false warning, and take an ISBN.
+   - **Done (2026-10-04): the rest of the sweep.** `test_fixtures/make_fixtures.py` drives a
+     release's own pages from a worktree at its tag (each form submitted as the page offered
+     it) and freezes the books, styles and covers it wrote; done for 1.0.0 (741f6f1), 1.1.0
+     (5fe5744), 1.2.0, 1.2.3, 1.2.6, 1.2.9 and 1.3.0 - **run it at every release** and add
+     the folder to `RELEASES` in `test_upgrade.py`. The current app opens each: every page,
+     a build, Send to print, and the Edit page, style editor and cover editor saved
+     unchanged (books compared by what they mean, styles and covers by their pixels). Also
+     run over copies of the eight real books in `projects/` (never the originals). Found
+     and fixed, both in the new `upgrade_project` (run by `load_project` and
+     `list_projects`) or the Edit page:
+     - **Books from before cover modes lost their uploaded cover** (since 1.2.3). 1.0.0's
+       Edit page had no mode, only the file, and until 801c205 (1.2.3) the file was used
+       whatever the mode; that fix made an absent mode mean none. Three real books here
+       (avenn, good-gardens, kinslayer) had silently lost theirs, and an unchanged Edit
+       save would have made it permanent. No `cover_mode` now reads as `image` with a
+       `cover_file`, `none` without. An explicit `none` beside a file is left alone (the
+       writer's choice, or can't be told from one).
+     - **A book without `right_hand_starts` had it switched off by an unchanged Edit
+       save** - the build defaults it on, the checkbox off. The checkbox now defaults on.
+     Not bugs, noted: styles and covers saved by every release set and draw identically;
+     an installed app seeds only *missing* styles, so a 1.0/1.1 user keeps that release's
+     genre styles (without the bundled faces of #44 or the ornaments of #56) - by design,
+     as overwriting would lose their edits, and they build cleanly. Cover templates whose
+     family settings the pre-1.3.0 editor dropped draw exactly as they did after that
+     save (checked against 1.2.9's own render for all six families), so nothing changes
+     under the writer; restoring a clone's settings from its bundled source would change
+     a cover they have been using, so it is **the user's call, not done**. Left for item 3:
+     the Edit page stores `print_retailer` and friends unvalidated (an unknown value then
+     shows as the first option and is replaced on the next save).
+2. **The manuscript editor beyond rich mode** - the writer's own words, so the worst harm.
+   Untested: plain (Markdown) mode in the browser, switching modes mid-edit, the preview pane
+   (`/project/<pid>/write/preview`), the unsaved-changes guard on leaving, autosave timing,
+   **the same book open in two tabs** (does the second save overwrite the first silently?),
+   a very large manuscript (speed, and the 1 MB-ish request limits), paste of huge or odd text.
+   `test_history.py` covers the snapshots server-side; nothing covers the page.
+3. **The book Edit page** (`project_edit.html`) - every book goes through it, and it is the
+   biggest form in the app. It updates the book in place (unlike the cover editor's old
+   rebuild), but it has the dropdown hazard just fixed there: a book whose style or cover
+   template has been deleted can't show it, so a save silently switches to the first option
+   (`preset`), or clears it (`cover_template`, a radio). Invariant: open and save unchanged =
+   the same book, for books in every cover mode (none / designed / image / wrap) and with
+   print settings, matter and uploads set. Then: replacing the manuscript (the snapshot
+   first), cover and back-image upload and clear, mode switching, the Customise links.
+4. **Setting a book: the first-run path** (`generate.html`, `/generate`, `/project/create`,
+   `/project/new-draft`). Its two previews - `/generate/preview` and `/generate/epub-preview`
+   - have no test at all. A new user's first ten minutes: an empty data folder, a .docx and a
+   .md upload, an empty or huge or non-UTF-8 file, every format option, creating a project
+   from the result, a blank new draft.
+5. **Shared state between requests.** The server is threaded, and fonts are registered with
+   ReportLab under global names: every cover template's faces as `Cover-display` /
+   `Cover-serif` / `Cover-italic`, every style's as `{family}-{role}`. Two covers drawn at once
+   (the gallery asks for many thumbnails in parallel; a preview while thumbnails load) can
+   take each other's fonts - invisible today only because all 24 bundled templates use the
+   Book faces; a template given other fonts in the editor would show it. Same for two styles
+   sharing a family name with different files, and for module globals set per request
+   (`wrap_convert.IMPORT_DIR`). *Harness:* render pairs concurrently in threads and check the
+   embedded font names in each PDF. Fix with names keyed by the font file, or a render lock.
+6. **The font and figure libraries** (`/fonts*`, `/figures*` - upload and delete untested).
+   Bad uploads (not a font, a .otf with CFF outlines, a duplicate name, a huge image), and
+   **deleting something in use**: a font a style, cover template or wrap design names, a
+   figure a manuscript uses. Today that degrades silently (a missing font falls back to
+   Times; a design element is skipped). It should warn before deleting, and the checks
+   should say what went missing. Also the file-serving routes (`/download`, `/out`,
+   `/figures/file`): refuse anything outside their folder.
+7. **Send to print / publish, large print, the ebook** - the outputs that reach a printer or a
+   store. The package is well tested server-side; untested are the page itself
+   (`print_package.html`: the checks as shown, the download, a re-run), `/large-print/<pid>`
+   (no test at all), and the EPUB through the browser preview. Worth an epubcheck run on
+   every bundled style's EPUB if epubcheck can be had offline.
+8. **Housekeeping: clone and delete** for books, styles and cover templates (none tested).
+   Does deleting a book remove its manuscript, history, cover files and saved design, or leave
+   orphans? Does cloning carry the wrap design and print settings? Can a style or template a
+   book still uses be deleted without a word? Rebuild all, and thumbnail caches going stale.
+9. **A damaged data folder.** A corrupted JSON file (project, style, cover), a missing
+   manuscript or cover file, an unreadable image, very long and non-ASCII names, a read-only
+   or full disk. The app should say what is wrong where it is wrong, never a bare 500, and
+   one broken file must not take a whole list page down.
+10. **The style editor's pickers in the browser** - trim presets, ornament picker, chapter
+    art, figure pickers, font selects with a missing font. The round trip and preview are now
+    tested (`test_style_editor.py`); `test_chapter_art.py` and `test_ornaments.py` cover the
+    engine side.
+11. **Small pages, partly covered:** the continuity checker's page (the checker is tested,
+    `/project/<pid>/continuity` isn't), About and the update check's button (`/about/check`),
+    the cover specs page and its template PDF.
+12. **The wrap designer's remaining edges** - already the most tested page: resizing a turned
+    picture, a rule or the barcode; snapping while zoomed; undo across presets and
+    Customise; a design with hundreds of elements (the 400-element save limit).
 
 ## What this app is
 

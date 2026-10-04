@@ -512,6 +512,82 @@ def draw_barcode(c, el, X, Ytop, bw, bh):
         c.drawText(t)
 
 
+def reserve_box(el):
+    """(x, y, w, h) relative to its panel if `el` is the engine's barcode reserve
+    kept as drawing: one white rectangle with a thin grey outline, of the BARCODE
+    size - what "Customise this design" makes of a template's reserve."""
+    if el.get('type') != 'vector' or el.get('fill') or len(el.get('ops') or []) != 1:
+        return None
+    op = el['ops'][0]
+    st = op[-1]
+    if op[0] != 'path' or st.get('fill') != '#ffffff' or st.get('stroke') != '#999999':
+        return None
+    pts = [(sg[1], sg[2]) for sg in op[1] if sg[0] in ('M', 'L')]
+    if not pts:
+        return None
+    x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    if abs(x1 - x0 - engine.BARCODE[0]) > 0.01 or abs(y1 - y0 - engine.BARCODE[1]) > 0.01:
+        return None
+    base_x = el.get('x', 0) if 'cx' not in el else None
+    if base_x is None:
+        return None
+    return base_x + x0, el.get('y', 0) + y0, x1 - x0, y1 - y0
+
+
+# ---- designs saved by older versions ------------------------------------------------
+
+def upgrade(design):
+    """A design saved before 1.3.0, brought up to date; anything else unchanged.
+
+    Before 1.3.0 there was no `barcode` element. The designer's own box was a
+    white `rect` labelled "Barcode area" (1.2.5-1.2.9), and "Customise this
+    design" kept a template's reserve as a grey-outlined `vector` with its
+    "ISBN / barcode area" caption as a separate text (1.2.7-1.2.9). Either
+    becomes a `barcode` element, so it can take an ISBN and the designer's
+    checks find it. Each prints as it did: the plain rect without an outline
+    or caption, the template's reserve with both. A design that already has a
+    barcode (one added in 1.3.0 beside the old box) is left alone, so the two
+    aren't stacked."""
+    if not isinstance(design, dict) or not isinstance(design.get('elements'), list):
+        return design
+    els = design['elements']
+    if any(isinstance(e, dict) and e.get('type') == 'barcode' for e in els):
+        return design
+    out = [dict(e) if isinstance(e, dict) else e for e in els]
+    for i, el in enumerate(out):
+        if (isinstance(el, dict) and el.get('type') == 'rect' and el.get('label') == 'Barcode area'
+                and not el.get('fill') and not el.get('stroke')
+                and str(el.get('color', '')).lower() in ('#ffffff', '#fff')):
+            bc = {k: v for k, v in el.items() if k not in ('type', 'color', 'stroke', 'stroke_w')}
+            bc.update(type='barcode', caption=False, outline=False, isbn='', addon='', locked=True)
+            out[i] = bc
+            return dict(design, elements=out)
+    for i, el in enumerate(out):
+        box = reserve_box(el) if isinstance(el, dict) else None
+        if not box:
+            continue
+        bx, by, bw, bh = box
+        cap = next((t for t in out if isinstance(t, dict) and t.get('type') == 'text'
+                    and t.get('text') == 'ISBN / barcode area' and t.get('anchor') == el.get('anchor')
+                    and 'cx' not in t
+                    and bx <= t.get('x', 0) + t.get('w', 0) / 2.0 <= bx + bw
+                    and by <= t.get('y', 0) <= by + bh), None)
+        if cap is None:
+            continue
+        ids = {e.get('id') for e in out if isinstance(e, dict)}
+        out[i] = {'id': 'barcode' if 'barcode' not in ids else el.get('id', 'barcode'),
+                  'type': 'barcode', 'anchor': el.get('anchor', 'back'),
+                  'x': round(bx, 6), 'y': round(by, 6), 'w': round(bw, 6), 'h': round(bh, 6),
+                  'font': cap.get('font'), 'locked': True, 'label': 'Barcode area',
+                  'caption': not cap.get('hidden'), 'isbn': '', 'addon': ''}
+        if el.get('hidden'):
+            out[i]['hidden'] = True
+        out.remove(cap)
+        return dict(design, elements=out)
+    return design
+
+
 def _vscale(el, bw, bh):
     """Scale from a vector element's own drawing (`vw` x `vh` inches) to its box."""
     try:
