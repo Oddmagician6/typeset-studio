@@ -24,6 +24,13 @@ line here.
 - **Right-hand chapter starts stay on** when an older book is saved on the
   Edit page. A book that had never set them was built with them on but shown
   with the box unticked, so saving it switched them off.
+- **Cover templates damaged by the old cover editor get their look back.**
+  Before 1.3.0, saving a geometric, typographic, vintage, minimal, stripe or
+  postcard cover in the editor dropped that design's own settings, so it
+  quietly fell back to plain defaults. A bundled template, or a copy of one
+  still named "… (copy)", now has what it lost restored from the original -
+  only what was missing, never anything you changed. (A vintage cover's
+  accent colour, which the old editor switched to gold, is left as it is.)
 
 ## 1.3.0 — 3 October 2026
 

@@ -116,7 +116,12 @@ session of awkward input; fix what is found, and note what isn't a bug.
      family settings the pre-1.3.0 editor dropped draw exactly as they did after that
      save (checked against 1.2.9's own render for all six families), so nothing changes
      under the writer; restoring a clone's settings from its bundled source would change
-     a cover they have been using, so it is **the user's call, not done**. Left for item 3:
+     a cover they have been using - **the user said yes**: `repair_cover_template` (run by
+     `load_cover_template` and `list_cover_templates`, saving once) fills a family template's
+     missing keys from the bundled one it is (same id, or its name less " (copy)"), never
+     overwriting a set value; renamed or New-made templates are untraceable and left. The
+     vintage accent colour the old dropdown turned gold is left (can't be told from a
+     choice). Fixtures: `test_fixtures/v1.2.9/damaged-covers/`, made by 1.2.9's editor. Left for item 3:
      the Edit page stores `print_retailer` and friends unvalidated (an unknown value then
      shows as the first option and is replaced on the next save).
 2. **The manuscript editor beyond rich mode** - the writer's own words, so the worst harm.
