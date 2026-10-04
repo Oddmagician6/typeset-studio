@@ -7,7 +7,7 @@ sections before changing the engine.
 
 ---
 
-## Next up — priority order (as of 1.3.0, 2026-10-03)
+## Next up — priority order (as of 2026-10-04, after 1.3.0)
 
 Start here in a new session. Each item points at its full entry below.
 
@@ -18,8 +18,14 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 1–12 below, in order.** Item 1 is a 1.3.0 regression (designs saved
-   before 1.3.0 lose their barcode area) and should come first.
+2. **Bug hunt plan, items 2–12 below, in order — next is item 2, the manuscript editor**
+   (plain mode in the browser, mode switching, preview, the leave guard, autosave, the same
+   book in two tabs, a huge manuscript). Item 1 (data from older versions) is done and merged
+   (e9cf1ff, 6f59be1), with fixes **unreleased**: they wait in CHANGELOG's `## Unreleased`
+   for the next version. Its harness is the model for the rest: `test_upgrade.py`, and
+   `test_fixtures/make_fixtures.py` (now release step 6). The books in `projects/` are the
+   user's test data, not real work - probe copies anyway. Carried to item 3: the Edit page
+   saves `print_retailer` (and the other selects) unvalidated.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
