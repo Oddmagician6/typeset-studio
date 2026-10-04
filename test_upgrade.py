@@ -445,6 +445,40 @@ try:
     now = meaning(A.load_project('bare'))
     changed = {k: (was[k], now.get(k)) for k in was if was[k] != now.get(k)}
     check('saved unchanged on Edit, it is the same book', not changed, changed)
+
+    # cover templates the pre-1.3.0 editor saved without their family's settings
+    # (test_fixtures/v1.2.9/damaged-covers: bundled ones cloned and saved by 1.2.9)
+    print('\ncover templates damaged by the old cover editor')
+    A.COVER_DIR = os.path.join(tmp, 'damaged-covers')
+    A.COVER_THUMB_DIR = os.path.join(A.OUT_DIR, '_damaged_thumbs')
+    shutil.copytree(os.path.join(HERE, 'test_fixtures', 'v1.2.9', 'damaged-covers'), A.COVER_DIR)
+    os.makedirs(A.COVER_THUMB_DIR, exist_ok=True)
+    draw = lambda t: page_pixels(A.DEFAULTS, '# One\n\nText.', cover_mode='designed',
+                                 cover_template='x', cover_template_data=t)[:1]
+    # a copy the writer renamed can't be traced, and one they changed keeps the change
+    with open(os.path.join(A.COVER_DIR, 'geometric-block-copy.json'), encoding='utf-8') as f:
+        geo = json.load(f)
+    A.save_cover_template('renamed', dict(geo, name='My own cover'))
+    A.save_cover_template('changed', dict(geo, title=dict(geo['title'], size=99.0)))
+    listed = {it['id']: it['data'] for it in A.list_cover_templates()}
+    for fn in sorted(os.listdir(os.path.join(HERE, 'test_fixtures', 'v1.2.9', 'damaged-covers'))):
+        cid, bundled = fn[:-5], fn[:-len('-copy.json')]
+        with open(os.path.join(HERE, 'covers', bundled + '.json'), encoding='utf-8') as f:
+            src = json.load(f)
+        block = A.FAMILY_BLOCKS[src['design']]
+        with open(os.path.join(A.COVER_DIR, fn), encoding='utf-8') as f:
+            saved = json.load(f)
+        check(f'{bundled} (copy): its {block} settings are back, and saved',
+              listed[cid].get(block) == src[block] and saved.get(block) == src[block])
+        if bundled != 'vintage-pulp':
+            check(f'{bundled} (copy): it draws as the template it was copied from',
+                  draw(saved) == draw(src))
+    check("vintage-pulp (copy): all but the accent colour the old editor's dropdown changed",
+          listed['vintage-pulp-copy']['accent']['color'] == 'gold'
+          and listed['vintage-pulp-copy']['kicker'].get('leading') == src['kicker'].get('leading'))
+    check('a copy renamed by the writer is left as it is', 'blocks' not in listed['renamed'])
+    check('a setting the writer changed is kept', listed['changed']['title']['size'] == 99.0
+          and 'blocks' in listed['changed'])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

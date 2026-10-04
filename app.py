@@ -715,7 +715,7 @@ def list_cover_templates():
         if fn.endswith('.json'):
             try:
                 with open(os.path.join(COVER_DIR, fn), encoding='utf-8') as f:
-                    data = json.load(f)
+                    data = repair_cover_template(fn[:-5], json.load(f))
                 items.append({'id': fn[:-5], 'data': data})
             except Exception:
                 pass
@@ -748,7 +748,58 @@ def load_cover_template(cid):
     if not os.path.exists(path):
         return None
     with open(path, encoding='utf-8') as f:
-        return json.load(f)
+        return repair_cover_template(cid, json.load(f))
+
+
+# Each design family's own settings, which the cover editor before 1.3.0
+# dropped on every save (with kicker.leading): the cover then fell back to the
+# family's defaults - a different-looking cover.
+FAMILY_BLOCKS = {'geometric': 'blocks', 'typographic': 'typo', 'vintage': 'vintage',
+                 'minimal': 'minimal', 'stripe': 'stripe', 'postcard': 'postcard'}
+
+
+def repair_cover_template(cid, tpl):
+    """A template that lost its family's settings to the old editor, given back
+    what it lost from the bundled template it is: the same id (a bundled one
+    edited in place), or a copy of it by name ("X (copy)", as Clone names it).
+    Only missing settings are filled in, never ones the writer set, and the
+    repaired file is saved, so it happens once. A template that can't be traced
+    to a bundled one (renamed, or made from New) is left as it is."""
+    block = FAMILY_BLOCKS.get(tpl.get('design')) if isinstance(tpl, dict) else None
+    if not block or block in tpl:
+        return tpl
+    name = str(tpl.get('name', ''))
+    while name.endswith(' (copy)'):
+        name = name[:-len(' (copy)')]
+    src_dir = resource_path('covers')
+    source = None
+    for fn in sorted(os.listdir(src_dir)) if os.path.isdir(src_dir) else []:
+        if not fn.endswith('.json'):
+            continue
+        try:
+            with open(os.path.join(src_dir, fn), encoding='utf-8') as f:
+                cand = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if block in cand and cand.get('design') == tpl.get('design') and \
+                (fn[:-5] == secure_filename(cid) or cand.get('name') == name):
+            source = cand
+            break
+    if source is None:
+        return tpl
+
+    def fill(dst, src):
+        for k, v in src.items():
+            if k not in dst:
+                dst[k] = json.loads(json.dumps(v))
+            elif isinstance(v, dict) and isinstance(dst[k], dict):
+                fill(dst[k], v)
+    fill(tpl, source)
+    try:
+        save_cover_template(cid, tpl)
+    except OSError:
+        pass
+    return tpl
 
 
 def save_cover_template(cid, data):
