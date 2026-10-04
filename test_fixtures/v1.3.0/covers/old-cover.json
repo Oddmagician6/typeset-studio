@@ -1,0 +1,91 @@
+{
+  "accent": {
+    "color": "teal",
+    "gap": 0.008,
+    "size": 21.0,
+    "tracking": 1.4
+  },
+  "background": {
+    "image": "",
+    "overlay": {
+      "color": "bg_bottom",
+      "opacity": 0.0
+    },
+    "vignette": 0.0
+  },
+  "border": {
+    "color": "gold",
+    "corner": 0.5,
+    "corner_line": 1.3,
+    "gap": 0.055,
+    "inset": 0.42,
+    "line": 1.0
+  },
+  "collection": {
+    "bottom": 0.115,
+    "color": "gold",
+    "size": 12.5,
+    "top": 0.7,
+    "tracking": 3.4
+  },
+  "description": "",
+  "design": "classic-frame",
+  "emblems": [],
+  "epigraph": {
+    "color": "muted",
+    "leading": 15.0,
+    "size": 10.5,
+    "top": 0.375,
+    "tracking": 0.2,
+    "width": 0.62
+  },
+  "fonts": {
+    "display": "Book-Bold.ttf",
+    "italic": "Book-Italic.ttf",
+    "serif": "Book-Regular.ttf"
+  },
+  "kicker": {
+    "color": "muted",
+    "size": 11.0,
+    "tracking": 0.4,
+    "y": 0.665
+  },
+  "layout": "centered",
+  "name": "Old Cover",
+  "ornament": {
+    "color": "gold",
+    "gap": 0.05,
+    "rule": 0.8,
+    "rule_len": 0.8,
+    "size": 2.4,
+    "spacing": 9.0
+  },
+  "palette": {
+    "bg_bottom": "#080d15",
+    "bg_top": "#101a29",
+    "gold": "#c6a866",
+    "ink": "#ece3d0",
+    "muted": "#8b93a3",
+    "teal": "#5fb2b2"
+  },
+  "panel": {
+    "bottom": 0.34,
+    "color": "bg_bottom",
+    "enabled": false,
+    "opacity": 0.55,
+    "top": 0.66
+  },
+  "studio": {
+    "color": "muted",
+    "size": 8.5,
+    "tracking": 2.4,
+    "y": 0.088
+  },
+  "title": {
+    "color": "gold",
+    "leading": 46.0,
+    "size": 40.0,
+    "tracking": 0.6,
+    "y": 0.585
+  }
+}

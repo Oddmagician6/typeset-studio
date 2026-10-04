@@ -1,0 +1,10 @@
+{"elements": [
+{"id": "bg-back", "type": "rect", "fill": "back", "color": "#20283b"},
+{"id": "bg-spine", "type": "rect", "fill": "spine", "color": "#7d2a26"},
+{"id": "front-art", "type": "image", "fill": "front", "src": "stand-in-dusk.png"},
+{"id": "title", "type": "text", "anchor": "front", "x": 0.5, "y": 0.9, "w": 5, "text": "The Salt Road", "font": "EBGaramond-Bold.ttf", "size": 46, "leading": 1.05, "color": "#fbf3e2", "align": "center", "tracking": 0.5},
+{"id": "author", "type": "text", "anchor": "front", "x": 0.5, "y": 7.9, "w": 5, "text": "ELLINOR VALE", "font": "Spectral-Regular.ttf", "size": 16, "leading": 1.2, "color": "#fbf3e2", "align": "center", "tracking": 3},
+{"id": "spine-text", "type": "text", "anchor": "spine", "cx": 0.11, "y": 0.6, "w": 7.8, "rotate": 90, "text": "THE SALT ROAD   ELLINOR VALE", "font": "Spectral-Regular.ttf", "size": 12, "leading": 1.2, "color": "#fbf3e2", "align": "center", "tracking": 1.5},
+{"id": "blurb", "type": "text", "anchor": "back", "x": 0.6, "y": 1.0, "w": 4.8, "text": "A road of salt.", "font": "EBGaramond-Regular.ttf", "size": 12.5, "leading": 1.4, "color": "#efe7d6", "align": "left", "tracking": 0},
+{"id": "barcode", "type": "rect", "anchor": "back", "x": 3.75, "y": 7.55, "w": 2, "h": 1.2, "color": "#ffffff", "label": "Barcode area"}
+]}

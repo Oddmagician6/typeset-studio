@@ -1238,15 +1238,21 @@
     return Promise.all(used.filter(function (f, i) { return used.indexOf(f) === i; }).map(ensureFont));
   }
   var start = CFG.startProject || '';
-  var startPromise;
-  if (start && Array.prototype.some.call($('wd-project').options, function (o) { return o.value === start; })) {
-    $('wd-project').value = start;
-    startPromise = openBook(start, saved && saved.settings && saved.settings['wd-project'] === start);
-  } else if ($('wd-project').value) {
-    startPromise = openBook($('wd-project').value, true);   // carry on with the local working copy
-  } else {
-    startPromise = loadFonts().then(regeometry);
-  }
+  // a working copy kept by an older version (its barcode box was a plain rect)
+  // is brought up to date by the server first, as a book's design is
+  var upgraded = (saved && saved.design && saved.design.elements)
+    ? post('/wrap-designer/upgrade', {design: design})
+        .then(function (res) { if (res.ok) design = res.design; }).catch(function () {})
+    : Promise.resolve();
+  var startPromise = upgraded.then(function () {
+    if (start && Array.prototype.some.call($('wd-project').options, function (o) { return o.value === start; })) {
+      $('wd-project').value = start;
+      return openBook(start, saved && saved.settings && saved.settings['wd-project'] === start);
+    }
+    if ($('wd-project').value)
+      return openBook($('wd-project').value, true);   // carry on with the local working copy
+    return loadFonts().then(regeometry);
+  });
   startPromise.then(function () {
     resetHistory();
     var from = CFG.startFrom;             // arrived from a template's "Customise"

@@ -218,7 +218,7 @@
               <option value="none"      {{ 'selected' if proj.front_matter == 'none' }}>None — start on the story</option>
             </select></div>
         </div>
-        <div class="check"><input type="checkbox" id="rhs" name="right_hand_starts" {{ 'checked' if proj.right_hand_starts }}>
+        <div class="check"><input type="checkbox" id="rhs" name="right_hand_starts" {{ 'checked' if proj.get('right_hand_starts', True) }}>
           <label for="rhs">Add blank pages so the story and each chapter start on a right-hand page</label></div>
         <div class="check"><input type="checkbox" id="toc" name="include_toc" {{ 'checked' if proj.get('include_toc') }}>
           <label for="toc">Include a table of contents</label></div>
