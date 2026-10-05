@@ -18,14 +18,15 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 2–12 below, in order — next is item 2, the manuscript editor**
-   (plain mode in the browser, mode switching, preview, the leave guard, autosave, the same
-   book in two tabs, a huge manuscript). Item 1 (data from older versions) is done and merged
-   (e9cf1ff, 6f59be1), with fixes **unreleased**: they wait in CHANGELOG's `## Unreleased`
-   for the next version. Its harness is the model for the rest: `test_upgrade.py`, and
-   `test_fixtures/make_fixtures.py` (now release step 6). The books in `projects/` are the
-   user's test data, not real work - probe copies anyway. Carried to item 3: the Edit page
-   saves `print_retailer` (and the other selects) unvalidated.
+2. **Bug hunt plan, items 3–12 below, in order — next is item 3, the book Edit page**
+   (open and save unchanged = the same book, in every cover mode; a deleted style or cover
+   template; the selects saved unvalidated, `print_retailer` and friends). Items 1 (data
+   from older versions: e9cf1ff, 6f59be1) and 2 (the manuscript editor) are done and merged,
+   with fixes **unreleased**: they wait in CHANGELOG's `## Unreleased` for the next version.
+   Harnesses to copy: `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step
+   6), and `test_manuscript_editor.py` (a real-time headless browser: virtual time never
+   gives a page its animation frames). The books in `projects/` are the user's test data,
+   not real work - probe copies anyway.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
@@ -136,6 +137,43 @@ session of awkward input; fix what is found, and note what isn't a bug.
    **the same book open in two tabs** (does the second save overwrite the first silently?),
    a very large manuscript (speed, and the 1 MB-ish request limits), paste of huge or odd text.
    `test_history.py` covers the snapshots server-side; nothing covers the page.
+   - **Done (2026-10-05).** `test_manuscript_editor.py` (+ `.js`): the save route through the
+     test client, then the real page in headless Chrome, one throwaway book per scenario.
+     Found and fixed:
+     - **No book over ~100,000 words could be saved** (fewer in curly quotes): Flask 3.1
+       caps a form field at 500 KB (`MAX_FORM_MEMORY_SIZE`), so every save got a 413 and
+       the page said "Save failed". Raised to 64 MB; preview had the same cap.
+     - **Two tabs: the later save silently wrote over the other's work** (and said
+       "Saved"). The page now carries `rev` (`_ms_rev`, a hash of the text it opened or last
+       saved) and sends it as `base`; a save from a stale copy gets a 409 and its text is
+       kept in History (`conflict`). The page stops autosaving and offers "Open the saved
+       version" or "Keep this version instead" (`overwrite=1`, the disk text kept as
+       `overwritten`). Also catches a manuscript replaced on the Edit page. Pages without
+       `base` save as before.
+     - **Leaving lost edits:** rich mode only marked itself dirty at its 500 ms sync, so
+       leaving inside that went unsaved (also rich edit, switch to Markdown, leave); and the
+       `pagehide` beacon is refused over 64 KB, so on any real book a quick leave lost the
+       edit. Typeset / Book settings / Projects now `flush()` first (Typeset used to build
+       the last autosave); other exits send the beacon if it fits, else `beforeunload`
+       asks.
+     - **Saves could overlap** (two in flight, the older landing last) and a failed one
+       was never retried. Now one at a time, retried every 8 s with the reason shown.
+     - **Restore dropped unsaved typing** (it snapshotted the disk, not the page). It
+       flushes first.
+     - **Markdown mode's Table button did nothing; Ctrl+F in rich mode searched stale
+       text**; the live word count was ASCII-only (Cyrillic counted 0 until a reload); a
+       manuscript starting with a blank line lost it (the parser eats the newline after
+       `<textarea>`).
+     - **Typing lag on a long book:** ~280 ms a keystroke at 150k words in Markdown mode
+       (word count, outline and a full highlight repaint each time). Count and outline
+       now wait 250 ms; the highlight is a block per line, cached, and only changed lines
+       are repainted (~140 ms, most of it the textarea itself). Checked: the painted text
+       lines up with the textarea to the pixel on the sample, a 150k-word novel, awkward
+       text and the local manuscripts, opened and after an edit (an empty line inside a
+       `~~~` block first painted at zero height - caught by that check).
+     Not bugs: a 1 MB paste in rich mode (150 ms, saved whole, `<`/`&`/stars kept); rich
+     mode's speed on a novel (~110 ms a sync, after its 500 ms debounce); the preview builds
+     the whole book (0.6 s at 90k words) and shows six pages.
 3. **The book Edit page** (`project_edit.html`) - every book goes through it, and it is the
    biggest form in the app. It updates the book in place (unlike the cover editor's old
    rebuild), but it has the dropdown hazard just fixed there: a book whose style or cover
