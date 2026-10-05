@@ -31,6 +31,34 @@ line here.
   still named "… (copy)", now has what it lost restored from the original -
   only what was missing, never anything you changed. (A vintage cover's
   accent colour, which the old editor switched to gold, is left as it is.)
+- **Long books save.** The writing page couldn't save a manuscript past about
+  100,000 words: every save was refused, and the page only said "Save
+  failed". Books of any length save now.
+- **The same book open in two tabs no longer loses work.** The tab that saved
+  last silently wrote over the other's changes. Now a tab that is behind stops
+  saving and says so, keeps what it has in History, and lets you choose: open
+  the saved version, or keep this one (the other then goes to History). The
+  same happens if the manuscript is replaced on the Edit page while the
+  writing page is open.
+- **Nothing typed is lost on leaving the writing page.** Leaving within half a
+  second of typing in rich mode, or straight after an edit to a book longer
+  than a few chapters, could lose the edit. Typeset, Book settings and
+  Projects now save before they go; any other way out saves too or, when a
+  book is too long to send while closing, asks first.
+- **Typeset builds what is on the page**, including the sentence just typed;
+  it used to build the last autosave.
+- **A save that fails is tried again**, and the page says why, instead of
+  showing "Save failed" once and giving up.
+- **Going back to an earlier version keeps unsaved typing** in History rather
+  than dropping it.
+- **Typing in a long book in Markdown mode is about twice as quick:** the
+  word count and chapter list wait for a pause, and only the changed lines are
+  repainted.
+- **Smaller fixes on the writing page:** the Table button works in Markdown
+  mode; Ctrl+F in rich mode finds what was just typed (it searched the text
+  from before the last edits); and the word count counts words in Cyrillic,
+  Greek and other scripts while you type (it showed none until the page was
+  reloaded).
 
 ## 1.3.0 — 3 October 2026
 

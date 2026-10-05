@@ -13,6 +13,7 @@ import re
 import sys
 import json
 import base64
+import hashlib
 import shutil
 import logging
 import time
@@ -271,6 +272,11 @@ manuscript.FIGURE_DIR = FIGURE_DIR    # where .docx images are extracted to
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 app.secret_key = 'typeset-studio-local'
+# The manuscript editor posts the whole book as one form field, and Flask's
+# default cap on a field is 500 KB - about 100,000 words, fewer in curly
+# quotes - past which every save was refused. One writer on their own
+# machine; the cap only has to stop a runaway request.
+app.config['MAX_FORM_MEMORY_SIZE'] = 64 * 1024 * 1024
 
 
 def issue_rows(rows):
@@ -3400,17 +3406,46 @@ def project_write(pid):
     text = _project_manuscript_text(proj)
     parsed = manuscript.parse_markdown(text, smartquotes=False)
     return render_template('manuscript_editor.html', pid=pid, proj=proj, text=text,
-                           words=_wordcount(text), chapters=len(parsed['chapters']))
+                           rev=_ms_rev(text), words=_wordcount(text),
+                           chapters=len(parsed['chapters']))
+
+
+def _ms_rev(text):
+    """Which version of a manuscript an editor page is working from.
+
+    The page sends it back with every save, so a save made from an older copy -
+    the same book open in a second tab, or left open while the Edit page
+    replaced the manuscript - is noticed instead of silently writing over the
+    newer text.
+    """
+    return hashlib.sha1(_norm_newlines(text).encode('utf-8')).hexdigest()[:16]
 
 
 @app.route('/project/<pid>/write/save', methods=['POST'])
 def project_write_save(pid):
     proj = load_project(pid)
+    if 'text' not in request.form:
+        # never write an empty manuscript because a request came without one
+        return jsonify({'ok': False, 'error': 'Nothing to save.'}), 400
     # Normalise the line endings, and write them through untranslated.
     # A browser encodes a textarea's newlines as CRLF on submit, and a Windows
     # text-mode write then turns each of those into CR CR LF — so every autosave
     # grew the file another carriage return. Both halves are fixed here.
-    text = _norm_newlines(request.form.get('text', ''))
+    text = _norm_newlines(request.form['text'])
+    # Saved from an older copy of the manuscript than the one on disk? Then
+    # something else changed it since this page loaded (another tab, the Edit
+    # page), and writing would throw that away. Refuse, but keep what this page
+    # sent in History, so neither version is lost; the page lets the writer pick.
+    # `overwrite` is that choice made: the newer text goes to History instead.
+    # A page from before revisions sends no `base` and saves as it always did.
+    base = request.form.get('base')
+    current = _project_manuscript_text(proj, report_import=False)
+    if base is not None and base != _ms_rev(current) and text != _norm_newlines(current):
+        if request.form.get('overwrite') != '1':
+            snapshot_manuscript(pid, text, reason='conflict', force=True)
+            return jsonify({'ok': False, 'conflict': True,
+                            'snapshots': list_snapshots(pid)}), 409
+        snapshot_manuscript(pid, current, reason='overwritten', force=True)
     new_file = pid + '.md'
     _atomic_write_text(os.path.join(PROJECT_MS_DIR, new_file), text)
     snapshot_manuscript(pid, text)
@@ -3428,6 +3463,7 @@ def project_write_save(pid):
     save_project_file(pid, proj)
     parsed = manuscript.parse_markdown(text, smartquotes=False)
     return jsonify({'ok': True, 'saved_at': datetime.now().strftime('%H:%M:%S'),
+                    'rev': _ms_rev(text),
                     'words': _wordcount(text), 'chapters': len(parsed['chapters'])})
 
 
@@ -3469,7 +3505,8 @@ def project_history_restore(pid, stamp):
     proj['updated'] = datetime.now().isoformat(timespec='seconds')
     save_project_file(pid, proj)
     parsed = manuscript.parse_markdown(text, smartquotes=False)
-    return jsonify({'ok': True, 'text': text, 'words': _wordcount(text),
+    return jsonify({'ok': True, 'text': text, 'rev': _ms_rev(text),
+                    'words': _wordcount(text),
                     'chapters': len(parsed['chapters']),
                     'snapshots': list_snapshots(pid)})
 

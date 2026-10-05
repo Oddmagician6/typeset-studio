@@ -113,6 +113,10 @@
   .history .snap button.armed{color:#fff;background:var(--red);border-color:var(--red)}
   .history .hi-empty{font-size:12.5px;color:var(--muted);padding:2px}
   .history .tag{font-family:var(--mono);font-size:10px;color:var(--faint);text-transform:uppercase}
+  .conflict{border:1px solid var(--red);background:var(--surface);border-radius:3px;
+    padding:12px 14px;margin:0 0 12px;font-size:13.5px;line-height:1.5}
+  .conflict[hidden]{display:none}
+  .conflict .cf-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
   /* --- WYSIWYG (rich) surface: a view over the same content, synced to #ms --- */
   .mode-toggle{font-weight:700}
   .mode-toggle.on{border-color:var(--red)!important;color:var(--red-deep)!important}
@@ -205,16 +209,26 @@
     </div>
     <div class="savebar">
       <button type="button" id="save-btn" class="btn btn-sm">Save</button>
-      <a class="btn btn-sm" href="{{ url_for('project_edit', pid=pid) }}">Book settings</a>
-      <form class="inline-form" method="post" action="{{ url_for('project_generate', pid=pid) }}">
+      <a class="btn btn-sm" data-save-first href="{{ url_for('project_edit', pid=pid) }}">Book settings</a>
+      <form class="inline-form" id="typeset-form" method="post" action="{{ url_for('project_generate', pid=pid) }}">
         <button class="btn btn-primary btn-sm" type="submit">Typeset</button>
       </form>
-      <a class="btn btn-sm" href="{{ url_for('projects') }}">Projects</a>
+      <a class="btn btn-sm" data-save-first href="{{ url_for('projects') }}">Projects</a>
     </div>
   </div>
 
   <div class="work">
     <div class="pane">
+      <div class="conflict" id="conflict" hidden role="alert">
+        <strong>This manuscript was changed somewhere else</strong> - in another tab or
+        window, or by the book's Edit page - since this page opened, so this page has
+        stopped saving rather than write over it. Nothing is lost: what you have here is
+        kept in History.
+        <div class="cf-acts">
+          <button type="button" class="btn btn-sm" id="cf-load">Open the saved version</button>
+          <button type="button" class="btn btn-sm" id="cf-mine">Keep this version instead</button>
+        </div>
+      </div>
       <div class="toolbar">
         <button type="button" id="mode-toggle" class="mode-toggle"
                 title="Switch between rich (WYSIWYG) and Markdown editing">✍ Rich</button>
@@ -251,7 +265,10 @@
 
       <div class="ms-wrap" id="ms-wrap">
         <div class="ms-backdrop" aria-hidden="true"><div id="ms-hl" class="ms-highlights"></div></div>
-        <textarea id="ms" spellcheck="true">{{ text }}</textarea>
+        {#- the parser drops a newline straight after <textarea>, so give it one:
+            a manuscript that starts with a blank line keeps it #}
+        <textarea id="ms" spellcheck="true">
+{{ text }}</textarea>
         <div id="ms-rich" class="ms-rich" contenteditable="true" spellcheck="true"></div>
       </div>
 
@@ -313,9 +330,18 @@
       var SAVE_URL = "{{ url_for('project_write_save', pid=pid) }}";
       var PV_URL   = "{{ url_for('project_write_preview', pid=pid) }}";
       var timer = null, dirty = false;
+      var rev = "{{ rev }}";           // the version on disk this page is working from
+      var saving = null;               // the save in flight, one at a time
+      var conflict = false, leaving = false;
 
       function status(t){ document.getElementById('save-status').textContent = t; }
-      function countWords(s){ var m = s.match(/[\w'’-]+/g); return m ? m.length : 0; }
+      // as the server counts (`\b[\w'’-]+\b`): every run of letters, digits,
+      // apostrophes and hyphens with a letter or digit in it. JS's \w is ASCII
+      // only, so Cyrillic or Greek counted as no words at all until a reload
+      function countWords(s){
+        var m = s.match(/[\p{L}\p{N}_]+(?:['’-]+[\p{L}\p{N}_]+)*/gu);
+        return m ? m.length : 0;
+      }
 
       function updateStats(){ document.getElementById('st-words').textContent = countWords(ta.value); }
 
@@ -402,28 +428,93 @@
         });
       }
 
-      async function save(){
+      // One save at a time: two in flight could land out of order, the older
+      // text last. A save asked for while one runs waits for it. Resolves true
+      // once what was on the page when it was asked for is on disk.
+      function save(opts){
+        var overwrite = !!(opts && opts.overwrite);
+        clearTimeout(timer);
+        if (saving) return saving.then(function(){ return save(opts); });
+        if (richPending){ richPending = false; dirty = true; }
         richToTextarea();
+        if (conflict && !overwrite) return Promise.resolve(false);
+        if (!dirty && !overwrite) return Promise.resolve(true);
+        var text = ta.value;
         dirty = false;
         status('Saving…');
-        try {
-          var fd = new FormData(); fd.append('text', ta.value);
-          var r = await fetch(SAVE_URL, {method:'POST', body:fd});
-          var j = await r.json();
-          if (j.ok){
-            status('Saved ' + j.saved_at);
-            document.getElementById('st-ch').textContent = j.chapters;
-            loadHistory();           // a save may have kept a new version
+        saving = (async function(){
+          try {
+            var fd = new FormData();
+            fd.append('text', text); fd.append('base', rev);
+            if (overwrite) fd.append('overwrite', '1');
+            var r = await fetch(SAVE_URL, {method:'POST', body:fd});
+            var j = null;
+            try { j = await r.json(); } catch(e){}
+            if (j && j.ok){
+              rev = j.rev;
+              status('Saved ' + j.saved_at);
+              document.getElementById('st-ch').textContent = j.chapters;
+              if (ta.value === text) document.getElementById('st-words').textContent = j.words;
+              loadHistory();           // a save may have kept a new version
+              return true;
+            }
+            dirty = true;
+            if (j && j.conflict){
+              showConflict();
+              if (j.snapshots) renderHistory(j.snapshots);
+              return false;
+            }
+            status('Not saved: ' + ((j && j.error) || ('the app answered ' + r.status))
+                   + ' - trying again');
+          } catch(e){
+            dirty = true;
+            status('Not saved: is Typeset Studio still running? Trying again');
           }
-          else status('Save failed');
-        } catch(e){ status('Save failed'); }
+          // keep trying while the page is open; leaving warns while this is unsaved
+          timer = setTimeout(save, 8000);
+          return false;
+        })();
+        saving = saving.then(function(ok){ saving = null; return ok; },
+                             function(){ saving = null; return false; });
+        return saving;
       }
+
+      function showConflict(){
+        conflict = true;
+        clearTimeout(timer);
+        document.getElementById('conflict').hidden = false;
+        status('Not saved: changed elsewhere');
+      }
+      document.getElementById('cf-load').addEventListener('click', async function(){
+        // The text here went to History when the clash was found; send it once
+        // more for anything typed since (kept as another version if it differs),
+        // then load what is on disk.
+        if (richPending){ richPending = false; dirty = true; }
+        richToTextarea();
+        if (dirty){
+          var fd = new FormData(); fd.append('text', ta.value); fd.append('base', rev);
+          try { await fetch(SAVE_URL, {method:'POST', body:fd}); } catch(e){}
+        }
+        leaving = true;
+        location.reload();
+      });
+      document.getElementById('cf-mine').addEventListener('click', async function(){
+        conflict = false;
+        if (await save({overwrite: true})) document.getElementById('conflict').hidden = true;
+      });
+
+      // Everything typed so far is on disk (true), or it couldn't be (false).
+      function flush(){ clearTimeout(richSyncTimer); return save(); }
 
       // -- history: the versions kept behind this draft
       var HIST_URL = "{{ url_for('project_history', pid=pid) }}";
       var histBox = document.getElementById('history');
 
       var histShown = '';
+      var REASONS = {restore: 'before going back',
+                     replaced: 'before a new manuscript was uploaded',
+                     conflict: 'not saved - changed elsewhere',
+                     overwritten: 'saved over from another window'};
       function renderHistory(snaps, force){
         // Autosave refreshes this list; repainting it when nothing has changed
         // would throw away a half-made decision (a Restore waiting on "Sure?")
@@ -445,7 +536,7 @@
           when.textContent = s.when;
           if (s.reason !== 'edit'){
             var tag = document.createElement('span'); tag.className = 'tag';
-            tag.textContent = ' ' + (s.reason === 'restore' ? 'before going back' : s.reason);
+            tag.textContent = ' ' + (REASONS[s.reason] || s.reason);
             when.appendChild(tag);
           }
           var words = document.createElement('span'); words.className = 'words';
@@ -465,11 +556,16 @@
             }
             clearTimeout(armed); armed = null;
             btn.textContent = 'Restoring…';
+            // what's typed but not yet saved goes to disk first (and so to
+            // History, which keeps the text a restore replaces), not into the void
+            if (!(await flush())){ btn.textContent = 'Restore'; btn.classList.remove('armed'); return; }
             try {
               var r = await fetch(HIST_URL + '/' + s.stamp + '/restore', {method: 'POST'});
               var j = await r.json();
               if (!j.ok){ status(j.error || 'Restore failed'); return; }
               clearTimeout(timer); dirty = false;      // don't autosave over it
+              clearTimeout(richSyncTimer); richPending = false;
+              rev = j.rev;
               ta.value = j.text;
               if (richMode) renderRich();     // repaint the rich surface too
               updateStats(); buildOutline(); scheduleHighlight();
@@ -491,10 +587,14 @@
         } catch(e){ /* the panel is a convenience; the files are the safety */ }
       }
 
+      // The word count and the chapter list read the whole book, so they wait
+      // for a pause in the typing; on a long novel, doing it every keystroke
+      // made typing lag.
+      var statsTimer = null;
       function changed(){
         dirty = true;
-        updateStats();
-        buildOutline();
+        clearTimeout(statsTimer);
+        statsTimer = setTimeout(function(){ updateStats(); buildOutline(); }, 250);
         scheduleHighlight();
         status('Editing…');
         clearTimeout(timer);
@@ -560,6 +660,7 @@
         },
         list:    function(){ insertBlock('\n~~~ list\n\n~~~\n\n'); },
         quote:   function(){ insertBlock('\n~~~ quote\n\n~~~\n\n'); },
+        table:   function(){ insertBlock('\n~~~ table\nColumn | Column\n | \n~~~\n\n'); },
         find:    function(){ openFind(); },
       };
       document.querySelectorAll('.toolbar button').forEach(function(b){
@@ -577,13 +678,48 @@
       });
       document.getElementById('save-btn').addEventListener('click', save);
 
-      // flush on leaving the page
-      window.addEventListener('pagehide', function(){
+      // Leaving the page. The app's own ways out (Typeset, Book settings,
+      // Projects) save first and then go: Typeset used to build the text as last
+      // autosaved, without the sentence just typed.
+      document.querySelectorAll('[data-save-first]').forEach(function(a){
+        a.addEventListener('click', async function(e){
+          if (e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;   // a new tab
+          e.preventDefault();
+          if (await flush()){ leaving = true; location.href = a.href; }
+        });
+      });
+      var tsForm = document.getElementById('typeset-form');
+      tsForm.addEventListener('submit', async function(e){
+        if (leaving) return;
+        e.preventDefault();
+        if (await flush()){ leaving = true; tsForm.submit(); }
+      });
+      // Any other way out (the menu, closing the tab): send what's unsaved as a
+      // beacon - but a browser refuses one over 64 KB, which a whole book is
+      // past by chapter three, and that lost the edit without a word. So when
+      // the beacon can't carry it, or a save is still on its way, or the page
+      // is in a clash, the browser asks before leaving.
+      function sendBeacon(){
+        if (!navigator.sendBeacon || conflict) return false;
+        var fd = new FormData(); fd.append('text', ta.value); fd.append('base', rev);
+        try { return navigator.sendBeacon(SAVE_URL, fd); } catch(e){ return false; }
+      }
+      function catchUpRich(){
+        if (richPending){ richPending = false; dirty = true; }
         richToTextarea();
-        if (dirty && navigator.sendBeacon){
-          var fd = new FormData(); fd.append('text', ta.value);
-          navigator.sendBeacon(SAVE_URL, fd);
-        }
+      }
+      window.addEventListener('beforeunload', function(e){
+        if (leaving) return;
+        catchUpRich();
+        if (!dirty && !saving) return;
+        if (!saving && sendBeacon()){ dirty = false; return; }
+        e.preventDefault();
+        e.returnValue = '';
+      });
+      window.addEventListener('pagehide', function(){
+        if (leaving) return;
+        catchUpRich();
+        if (dirty && sendBeacon()) dirty = false;
       });
 
       // page preview
@@ -708,7 +844,11 @@
       document.getElementById('f-all').addEventListener('click', replaceAll);
       document.getElementById('f-close').addEventListener('click', closeFind);
       document.addEventListener('keydown', function(e){
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f'){ e.preventDefault(); openFind(); }
+        // find works on the Markdown, so in rich mode it switches over first, as
+        // the Find button does; it searched the text from before the last edits
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f'){
+          e.preventDefault(); if (richMode) exitRich(); openFind();
+        }
       });
 
       // -- styled-Markdown highlight overlay (textarea stays the source of truth) --
@@ -723,29 +863,55 @@
         s = s.replace(/(^|[^_\w>])_([^_\n]+)_/g, '$1<span class="hl-i">_$2_</span>');
         return s;
       }
-      function buildHighlightHTML(text){
-        var lines = text.split('\n'), out = [], inFence = false;
+      // One painted line per manuscript line, cached by its text: a line wraps
+      // on its own in the textarea too, so a block per line lays out the same.
+      var hlCache = new Map();
+      function lineHTML(ln, inFence){
+        var key = (inFence ? '1' : '0') + ln, h = hlCache.get(key);
+        if (h !== undefined) return h;
+        var e = esc(ln);
+        if (!ln) h = '<br>';                      // an empty line keeps its height
+        else if (/^\s*~~~/.test(ln)) h = '<span class="hl-fence">' + e + '</span>';
+        else if (inFence) h = '<span class="hl-doc">' + e + '</span>';
+        else if (/^===/.test(ln)) h = '<span class="hl-part">' + e + '</span>';
+        else if (/^##\s/.test(ln)) h = '<span class="hl-sub">' + e + '</span>';
+        else if (/^#\s/.test(ln)) h = '<span class="hl-ch">' + e + '</span>';
+        else if (SCENE_RE.test(ln)) h = '<span class="hl-scene">' + e + '</span>';
+        else h = hlInline(e);
+        if (hlCache.size > 100000) hlCache.clear();
+        hlCache.set(key, h);
+        return h;
+      }
+      function highlightLines(text){
+        var lines = text.split('\n'), out = new Array(lines.length), inFence = false;
         for (var i = 0; i < lines.length; i++){
-          var ln = lines[i], e = esc(ln);
-          if (/^\s*~~~/.test(ln)){ out.push('<span class="hl-fence">' + e + '</span>'); inFence = !inFence; continue; }
-          if (inFence){ out.push('<span class="hl-doc">' + e + '</span>'); continue; }
-          if (/^===/.test(ln)){ out.push('<span class="hl-part">' + e + '</span>'); continue; }
-          if (/^##\s/.test(ln)){ out.push('<span class="hl-sub">' + e + '</span>'); continue; }
-          if (/^#\s/.test(ln)){ out.push('<span class="hl-ch">' + e + '</span>'); continue; }
-          if (SCENE_RE.test(ln)){ out.push('<span class="hl-scene">' + e + '</span>'); continue; }
-          out.push(hlInline(e));
+          out[i] = lineHTML(lines[i], inFence);
+          if (/^\s*~~~/.test(lines[i])) inFence = !inFence;
         }
-        var html = out.join('\n');
-        // trailing empty line needs a character so the backdrop keeps its height
-        if (text.length === 0 || text.charCodeAt(text.length - 1) === 10) html += ' ';
-        return html;
+        return out;
       }
       function syncHlScroll(){
         hl.style.transform = 'translate(' + (-ta.scrollLeft) + 'px,' + (-ta.scrollTop) + 'px)';
       }
+      // Repaint only the lines that changed. Repainting the whole book on every
+      // keystroke cost a long novel the best part of a tenth of a second each.
+      var hlShown = [];
       function renderHighlights(){
         hl.style.width = ta.clientWidth + 'px';   // match wrap width incl. any scrollbar
-        hl.innerHTML = buildHighlightHTML(ta.value);
+        var next = highlightLines(ta.value), n = next.length, m = hlShown.length;
+        var a = 0, b = 0;
+        while (a < n && a < m && next[a] === hlShown[a]) a++;
+        while (b < n - a && b < m - a && next[n - 1 - b] === hlShown[m - 1 - b]) b++;
+        var kids = hl.children, ref = kids[m - b] || null;
+        for (var k = m - b - 1; k >= a; k--) hl.removeChild(kids[k]);
+        var frag = document.createDocumentFragment();
+        for (k = a; k < n - b; k++){
+          var div = document.createElement('div');
+          div.innerHTML = next[k];
+          frag.appendChild(div);
+        }
+        hl.insertBefore(frag, ref);
+        hlShown = next;
         syncHlScroll();
       }
       function scheduleHighlight(){
@@ -761,7 +927,7 @@
       var rich = document.getElementById('ms-rich');
       var modeBtn = document.getElementById('mode-toggle');
       var richMode = false;
-      var richSyncTimer = null;
+      var richSyncTimer = null, richPending = false;
 
       function richToTextarea(){
         if (richMode) ta.value = DocModel.toMarkdown(WYS.read(rich));
@@ -776,7 +942,9 @@
           rich.appendChild(p);
         }
       }
-      function syncFromRich(){ richToTextarea(); changed(); }
+      function syncFromRich(){
+        clearTimeout(richSyncTimer); richPending = false; richToTextarea(); changed();
+      }
 
       function enterRich(){
         renderRich();
@@ -789,7 +957,12 @@
         rich.focus();
       }
       function exitRich(){
+        // an edit not yet synced is committed here: once out of rich mode
+        // nothing else would notice it before the page was left
+        var pend = richPending;
+        clearTimeout(richSyncTimer); richPending = false;
         richToTextarea();
+        if (pend) changed();
         richMode = false;
         msWrap.classList.remove('rich-on');
         modeBtn.textContent = '✍ Rich';
@@ -804,6 +977,9 @@
         // `[^label]` becomes a note reference as its closing bracket is typed
         if (e.inputType === 'insertText' && e.data === ']') WYS.noteInputRule(rich);
         status('Editing…');
+        // unsaved from this keystroke, not from the sync half a second on:
+        // leaving inside that half second lost the edit
+        richPending = true;
         clearTimeout(richSyncTimer);
         richSyncTimer = setTimeout(syncFromRich, 500);
       });
