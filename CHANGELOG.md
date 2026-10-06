@@ -8,7 +8,15 @@ line here.
 
 ---
 
-## Unreleased
+## 1.3.1 — 6 October 2026
+
+A release of fixes from a bug hunt through the whole app, page by page. Work saved
+by older versions opens as it was meant; long books save, and the same book open in
+two tabs no longer loses words; uploads, deletes and a damaged data folder are
+handled with care and say what they did; large print, the ebook and the style editor
+do what they show; the continuity check reads the whole book and only asks Claude
+when you do; and the wrap designer’s edges - locked boxes, small barcodes, undo -
+behave.
 
 ### Fixed
 
