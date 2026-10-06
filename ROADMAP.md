@@ -18,15 +18,16 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 7–12 below, in order — next is item 7, Send to print /
-   publish, large print and the ebook** (the package page itself, `/large-print/<pid>`
-   with no test at all, the EPUB preview). Items 1-6 are done and merged, with fixes
+2. **Bug hunt plan, items 8–12 below, in order — next is item 8, housekeeping: clone and
+   delete** for books, styles and cover templates (orphaned files; what a clone carries;
+   deleting a style or template a book uses). Items 1-7 are done and merged, with fixes
    **unreleased**: they wait in CHANGELOG's `## Unreleased`. Harnesses to copy:
    `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
    `test_manuscript_editor.py`, `test_project_edit.py` and `test_first_run.py` (real-time
    headless browser: virtual time never gives a page its animation frames; harness routes
    registered at import, before any request), `test_shared_state.py` (threads, a real
-   threaded server, `Paused` to hold a build mid-way), `test_libraries.py`. The books in
+   threaded server, `Paused` to hold a build mid-way), `test_libraries.py`,
+   `test_outputs.py` (an offline structural EPUB validator: `validate`). The books in
    `projects/` are the user's test data - probe copies anyway.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
@@ -350,6 +351,37 @@ session of awkward input; fix what is found, and note what isn't a bug.
    (`print_package.html`: the checks as shown, the download, a re-run), `/large-print/<pid>`
    (no test at all), and the EPUB through the browser preview. Worth an epubcheck run on
    every bundled style's EPUB if epubcheck can be had offline.
+   - **Done (2026-10-05).** `test_outputs.py` (it fails 39 checks on the code before the
+     fix). epubcheck can't be had offline here (no Java), so the test carries a structural
+     validator of its own: container and mimetype, OPF metadata, manifest against the zip,
+     media types, spine, nav, XHTML namespace, ids unique per document, every link to a
+     file and an id that exist - over every style, the sample and an awkward manuscript.
+     Found and fixed:
+     - **Large print only enlarged what the style sizes**: the title page (13/15pt), the
+       copyright page (8.5pt), epigraph and the epistolary blocks' headers and innards
+       stayed small (all hard-coded in the engine or derived below the body size). A style
+       now carries `min_text_size` (large print: 16) and every `ParagraphStyle` made while
+       it builds is raised to it, leading in proportion - `engine.ParagraphStyle` wraps
+       ReportLab's and reads a per-thread floor (`_FLOOR`) that `build_pdf` sets. Canvas
+       text (running heads, folios) keeps its own size. The copyright block, anchored
+       2.4" up, then spilled onto a second page: it is raised just enough when it would
+       (one that fits doesn't move). Ordinary books render pixel-identically (all nine
+       styles, old against new, a long copyright included). The style editor shows the
+       floor as "Smallest text" and writes it only when set - it rebuilds a style from its
+       fields, so the key would otherwise have been dropped on the first save.
+     - **Block-header attributes went in raw** (`from`, `to`, `date`, `author`, `to` of a
+       telegram, `headline`, `source`, `classification`): the PDF read `<C>` as a tag and
+       dropped it, the EPUB chapter was malformed XML. Escaped after any upper-casing
+       (`_ep_esc`; `_text_to_html` in the EPUB). Poem titles and figure alt were already.
+     - **Two chapters with one title shared a slug anchor**: the PDF's named destination
+       was the last of them, the EPUB's map the first, and the other was unreachable.
+       `manuscript.book_anchors` gives a later one `slug-2`, `slug-3`; both builders use it.
+     The Send to print / publish page shows exactly the spec sheet's checks, lists the
+     zip's files, downloads it, and a re-run keeps the earlier package - no bugs. Noted,
+     not changed: chapter titles with no ASCII letters ("Глава") get no title anchor, only
+     `#chapter-N`, and accents drop letters ("Café" -> `caf`) - changing it would move
+     links writers already have; a link in a chapter's first paragraph is still lost under
+     the decorative openings (#49's limit); PDF links reach only from a later paragraph.
 8. **Housekeeping: clone and delete** for books, styles and cover templates (none tested).
    Does deleting a book remove its manuscript, history, cover files and saved design, or leave
    orphans? Does cloning carry the wrap design and print settings? Can a style or template a

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 # resolves to the same chapter in both outputs.
 import matter as _matter
 import ornaments as _orn
-from manuscript import (chapter_anchors as _ms_anchors, LINK_RE as _LINK_RE,
+from manuscript import (book_anchors as _ms_book_anchors, LINK_RE as _LINK_RE,
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts,
                         CELL_SEP as _MS_CELL)
@@ -715,37 +715,41 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
             # Per-type header element
             if btype == 'letter':
                 parts = []
-                if attrs.get('from') and attrs.get('to'):
-                    parts.append(f'{attrs["from"]} to {attrs["to"]}')
-                elif attrs.get('from'):
-                    parts.append(attrs['from'])
-                elif attrs.get('to'):
-                    parts.append(f'To: {attrs["to"]}')
-                if attrs.get('date'):
-                    parts.append(attrs['date'])
+                # attribute values are plain text, escaped: `from="A & B"`
+                # made the whole chapter file malformed
+                a = {k: _text_to_html(v) for k, v in attrs.items()}
+                if a.get('from') and a.get('to'):
+                    parts.append(f'{a["from"]} to {a["to"]}')
+                elif a.get('from'):
+                    parts.append(a['from'])
+                elif a.get('to'):
+                    parts.append(f'To: {a["to"]}')
+                if a.get('date'):
+                    parts.append(a['date'])
                 if parts:
                     lines.append(f'    <header>{" · ".join(parts)}</header>')
             elif btype == 'journal':
-                parts = [p for p in (attrs.get('date', ''), attrs.get('author', '')) if p]
+                parts = [_text_to_html(p) for p in (attrs.get('date', ''), attrs.get('author', ''))
+                         if p]
                 if parts:
                     lines.append(f'    <header>{" · ".join(parts)}</header>')
             elif btype == 'telegram':
                 lines.append('    <header>TELEGRAM</header>')
                 if attrs.get('to'):
-                    lines.append(f'    <p class="no-indent">To: {attrs["to"].upper()}</p>')
+                    lines.append(f'    <p class="no-indent">To: {_text_to_html(attrs["to"].upper())}</p>')
             elif btype == 'newspaper':
-                hl = attrs.get('headline', '')
-                src = attrs.get('source', '')
-                date = attrs.get('date', '')
+                hl = _text_to_html(attrs.get('headline', '').upper())
+                src = _text_to_html(attrs.get('source', ''))
+                date = _text_to_html(attrs.get('date', ''))
                 byline_parts = [p for p in (src, date) if p]
-                hdr = (f'<span class="headline">{hl.upper()}</span>' if hl else '') + \
+                hdr = (f'<span class="headline">{hl}</span>' if hl else '') + \
                       (f'<span class="byline">{" · ".join(byline_parts)}</span>' if byline_parts else '')
                 if hdr:
                     lines.append(f'    <header>{hdr}</header>')
             elif btype == 'redacted':
                 classification = attrs.get('classification', '')
                 if classification:
-                    lines.append(f'    <header>{classification.upper()}</header>')
+                    lines.append(f'    <header>{_text_to_html(classification.upper())}</header>')
             elif btype == 'poem':
                 ptitle = attrs.get('title', '')
                 if ptitle:
@@ -1151,8 +1155,8 @@ def build_epub(manuscript, preset, out_path, meta):
 
     # anchor -> chapter file, so `[see](#slug)` resolves across the spine
     _BUILD.anchors = anchors = {}
-    for _i, _ch in enumerate(chapters, start=1):
-        for _a in _ms_anchors(_ch, _i):
+    for _i, _names in enumerate(_ms_book_anchors(chapters), start=1):
+        for _a in _names:
             anchors.setdefault(_a, f'chapter{_i:03d}.xhtml')
 
     level = meta.get('front_matter', 'full')

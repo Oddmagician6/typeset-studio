@@ -1046,6 +1046,14 @@ def _f(form, key, default):
 
 
 def parse_preset_form(form):
+    out = _preset_fields(form)
+    floor = _f(form, 'min_text_size', 0.0)
+    if floor > 0:                 # written only when set: other styles are as they were
+        out['min_text_size'] = min(floor, 72.0)
+    return out
+
+
+def _preset_fields(form):
     return {
         'name': form.get('name', '').strip() or 'Untitled style',
         'description': form.get('description', '').strip(),
@@ -1521,6 +1529,9 @@ def make_large_print(preset):
     body['justify'] = False          # ragged right is the recommendation
     body['hyphenate'] = False        # broken words are the hardest to track
     body['indent'] = round(body.get('indent', 0.3) * 1.2, 2)
+    # and nothing to read smaller than that: the title and copyright pages,
+    # letters, telegrams and notes have sizes of their own (8.5pt copyright)
+    lp['min_text_size'] = LARGE_PRINT_MIN_SIZE
 
     if lp.get('trim', {}).get('w', 6.0) < LARGE_PRINT_TRIM[0]:
         lp['trim'] = {'w': LARGE_PRINT_TRIM[0], 'h': LARGE_PRINT_TRIM[1]}

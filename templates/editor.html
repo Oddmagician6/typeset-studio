@@ -141,6 +141,9 @@
               <input type="number" step="0.25" id="f-blead" name="b_leading" value="{{ p.body.leading }}"></div>
             <div class="field num"><label>First-line indent</label><span class="hint">inches</span>
               <input type="number" step="0.05" name="b_indent" value="{{ p.body.indent }}"></div>
+            <div class="field num"><label>Smallest text</label><span class="hint">points · 0 for none</span>
+              <input type="number" step="0.5" min="0" name="min_text_size" value="{{ p.min_text_size or 0 }}"
+                     title="Nothing in the book is set smaller - title and copyright pages, letters, notes. Large print uses 16."></div>
           </div>
           <div class="row">
             <div class="check"><input type="checkbox" id="f-just" name="b_justify" {{ 'checked' if p.body.justify }}>
