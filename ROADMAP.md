@@ -18,8 +18,8 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan: item 12 below is the last — the wrap designer's remaining edges.**
-   Items 1-11 are done and merged (item 8's open question answered and done), with fixes
+2. **Bug hunt plan: all 12 items done** (item 12, the wrap designer's edges, on 2026-10-06).
+   Items 1-12 are done and merged (item 8's open question answered and done), with fixes
    **unreleased**: they wait in CHANGELOG's `## Unreleased`. Harnesses to copy:
    `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
    `test_manuscript_editor.py`, `test_project_edit.py` and `test_first_run.py` (real-time
@@ -31,7 +31,8 @@ Start here in a new session. Each item points at its full entry below.
    `test_damaged_data.py` (damaged files; `Sec-Fetch-Mode` from a real browser),
    `test_style_pickers.py` (a step list in one iframe; a submitting step moves on before
    it clicks, since the page it lands on runs the next step), `test_small_pages.py`
-   (stubbed feed and Claude call; a temporary settings.json, not the real one). The books in
+   (stubbed feed and Claude call; a temporary settings.json, not the real one),
+   `test_wrap_edges.py` (steps awaited in one async function in the iframe). The books in
    `projects/` are the user's test data - probe copies anyway.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
@@ -552,6 +553,32 @@ session of awkward input; fix what is found, and note what isn't a bug.
     picture, a rule or the barcode; snapping while zoomed; undo across presets and
     Customise; a design with hundreds of elements (the 400-element save limit). Seen in
     item 10: the Pages field is `min=24 step=10`, so its arrows snap to 24, 34 … 324.
+     - **Done (2026-10-06).** `test_wrap_edges.py` (the page in headless Chrome in real time,
+       as the undo waits on timers). Found and fixed:
+     - **A locked element still had its resize corner**, so the locked barcode could be
+       pulled out of shape. `drawSelection` draws no handle for a locked element and
+       `pointerdown` won't start a resize on one.
+     - **A barcode box with an ISBN resized small drew bars of negative height** (upside
+       down, over the digits) with no error. `barcode_parts` now gives an `error` (no bars;
+       says the least size) when there is no room for bars, and a `warning`, shown in the
+       checks but still printed, below 80% of the EAN-13 module (`BARCODE_MIN_MODULE`) or
+       with bars under half an inch (`BARCODE_MIN_BARS`). The only printed change: a box
+       with no room for bars prints as the empty outlined reserve instead of the inverted
+       bars.
+     - **Resizing a rule wrote a meaningless `h`** (a rule's height is its weight).
+     - **Quick actions shared one undo step**: the 400 ms commit debounce took typing and a
+       preset clicked straight after (or add-then-nudge) as one. Every discrete action now
+       `commit()`s first; arrow nudges in a row stay one step (`nudging`); several deleted
+       with the Delete key stay one step (`layerAct(..., more)`).
+     - **Past 400 elements, Save said "That design could not be read."** `_design_too_big`
+       says how many and the limit (`wrap_design.MAX_ELEMENTS` / `MAX_JSON`), and the
+       checks list says so before saving.
+     - **Pages field**: `step=2` (arrows 320, 322 …).
+     Not bugs: a turned picture resizes its (unturned) box, the picture refitted inside;
+     snapping holds its six screen pixels from 50% to 400% zoom (`svg.clientWidth` follows
+     the zoom); undo and redo step through Customise, Start over and the flap and quote
+     presets; 401 elements render in 17 ms and drag at ~38 ms a move; the busiest template
+     Customises to 18 elements (15 KB), far under the limits.
 
 ## What this app is
 

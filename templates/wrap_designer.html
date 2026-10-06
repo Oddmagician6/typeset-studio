@@ -100,7 +100,7 @@
     <label>Trim<select id="wd-trim">
       {% for w, h, name in trims %}<option value="{{ w }}x{{ h }}"{% if w == 6.0 and h == 9.0 %} selected{% endif %}>{{ '%g' % w }} × {{ '%g' % h }} in — {{ name }}</option>{% endfor %}
     </select></label>
-    <label>Pages<input id="wd-pages" type="number" value="320" min="24" max="1000" step="10" style="width:90px"></label>
+    <label>Pages<input id="wd-pages" type="number" value="320" min="24" max="1000" step="2" style="width:90px"></label>
   </div>
   <p class="wd-note" id="wd-book-note" hidden></p>
   <p class="wd-note" id="wd-from-msg" aria-live="polite"></p>
@@ -192,7 +192,7 @@
     </aside>
   </div>
 
-  <script id="wd-config" type="application/json">{{ {'fonts': fonts, 'standIn': stand_in, 'retailers': retailers, 'startProject': start_project, 'startFrom': start_from, 'barcode': barcode, 'safe': safe} | tojson }}</script>
+  <script id="wd-config" type="application/json">{{ {'fonts': fonts, 'standIn': stand_in, 'retailers': retailers, 'startProject': start_project, 'startFrom': start_from, 'barcode': barcode, 'safe': safe, 'maxElements': max_elements} | tojson }}</script>
   <script src="{{ url_for('static', filename='wrap_text.js') }}"></script>
   <script src="{{ url_for('static', filename='wrap_designer.js') }}"></script>
 {% endblock %}
