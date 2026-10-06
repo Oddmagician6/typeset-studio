@@ -236,6 +236,21 @@ line here.
 - **A style that can't fit its page says so in words**: "A space on page 2
   doesn't fit in the room a page has for text…", not a message about
   `Flowable <Spacer at 0x…>`.
+- **Wrap designer: a locked element can't be resized by accident.** Locking
+  stopped a drag but not the orange resize corner, so the locked barcode box
+  could still be pulled out of shape.
+- **Wrap designer: a barcode box made too small says so.** Shrunk with an ISBN
+  in it, the bars came out upside down over the digits. Now a box too small for
+  bars says how big to make it, and one small enough that the barcode may not
+  scan is flagged in the checks.
+- **Wrap designer: each action is its own undo.** Typing and then adding a
+  preset, or adding something and nudging it straight away, made one undo step,
+  so Undo took both back. Deleting several things at once still undoes in one.
+- **Wrap designer: Save says why a very large design was refused.** Past 400
+  elements it said "That design could not be read"; it now says how many it
+  has, and the checks say so before you save.
+- **Wrap designer: the Pages arrows step by 2**, not by 10 from 24 (24, 34 …
+  324).
 
 ## 1.3.0 — 3 October 2026
 

@@ -2802,7 +2802,8 @@ def wrap_designer():
                            fonts=[f for f in list_fonts() if f.lower().endswith('.ttf')],
                            assets=assets, stand_in=WRAP_STAND_IN,
                            retailers=WRAP_RETAILERS, papers=_PAPER, trims=TRIM_PRESETS,
-                           barcode=engine.BARCODE, safe=engine.WRAP_SAFE)
+                           barcode=engine.BARCODE, safe=engine.WRAP_SAFE,
+                           max_elements=wrap_design.MAX_ELEMENTS)
 
 
 @app.route('/wrap-designer/geometry', methods=['POST'])
@@ -2892,13 +2893,24 @@ def _wrap_front_path(proj):
     return path
 
 
+def _design_too_big(els):
+    """Why a design is past what may be saved, or ''."""
+    if len(els) > wrap_design.MAX_ELEMENTS:
+        return (f'The design was not saved: it has {len(els)} elements, and a design can '
+                f'have at most {wrap_design.MAX_ELEMENTS}. Delete some and save again.')
+    if len(json.dumps(els)) > wrap_design.MAX_JSON:
+        return ('The design was not saved: it is too large (its text and shapes come to over '
+                f'{wrap_design.MAX_JSON // 1_000_000} MB). Delete some elements and save again.')
+    return ''
+
+
 def _clean_design(design):
     """A design from the browser, kept to what the model knows: a list of plain
     elements, sized within reason. Anything else is refused, not repaired."""
     if not isinstance(design, dict) or not isinstance(design.get('elements'), list):
         return None
     els = [e for e in design['elements'] if isinstance(e, dict)]
-    if len(els) > 400 or len(json.dumps(els)) > 1_000_000:
+    if _design_too_big(els):
         return None
     return wrap_design.upgrade({'elements': els})
 
@@ -2926,7 +2938,9 @@ def wrap_designer_save(pid):
     body = request.get_json(silent=True) or {}
     design = _clean_design(body.get('design'))
     if design is None:
-        return jsonify(ok=False, error='That design could not be read.')
+        els = (body.get('design') or {}).get('elements') if isinstance(body.get('design'), dict) else None
+        big = _design_too_big([e for e in els if isinstance(e, dict)]) if isinstance(els, list) else ''
+        return jsonify(ok=False, error=big or 'That design could not be read.')
     s = body.get('settings') or {}
     if s.get('wrap_retailer') in WRAP_RETAILERS:
         proj['print_retailer'] = s['wrap_retailer']

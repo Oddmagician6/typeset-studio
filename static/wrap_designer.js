@@ -202,8 +202,13 @@
     $('wd-redo').disabled = !future.length;
   }
   function resetHistory() { past = []; future = []; lastSnap = snapshot(); undoButtons(); }
+  // Each action is its own undo step: one starting closes the step before it
+  // (typing, a slider) rather than waiting for that to settle. Arrow-key nudges
+  // in a row make one step.
+  var nudging = false;
   function commit() {
     clearTimeout(commitTimer);
+    nudging = false;
     var now = snapshot();
     if (lastSnap === null) { lastSnap = now; return; }
     if (now === lastSnap) return;
@@ -492,7 +497,7 @@
                     'stroke-dasharray':e.id === sel ? '' : '0.06 0.04'}, gs);
     });
     var el = find(sel), bb = el && bbox(el);
-    if (el && els.length === 1 && !el.fill) {
+    if (el && els.length === 1 && !el.fill && !el.locked) {    // locked: not resized by accident either
       var hs = 0.14;
       node('rect', {x:bb[0] + bb[2] - hs / 2, y:bb[1] + bb[3] - hs / 2, width:hs, height:hs, fill:'#ff6f00',
                     'data-handle':'1', style:'cursor:nwse-resize'}, svg);
@@ -534,7 +539,8 @@
       ul.appendChild(li);
     });
   }
-  function layerAct(el, act) {
+  function layerAct(el, act, more) {    // more: one of several deleted together, one undo step
+    if (!more) commit();
     var i = design.elements.indexOf(el), a = design.elements;
     if (act === 'del') {
       a.splice(i, 1);
@@ -600,6 +606,9 @@
     else out.push(['ok', 'All text is inside the safe zones.']);
     if (missing.length) out.push(['bad', 'Characters the font doesn\'t have, which would print blank: ' + missing.join('; ')]);
     if (spineText && g.spine_text) out.push(['ok', 'The spine is wide enough for text.']);
+    if (design.elements.length > CFG.maxElements)
+      out.push(['bad', 'This design has ' + design.elements.length + ' elements and a design can have at most ' +
+                       CFG.maxElements + ', so it cannot be saved to a book: delete some.']);
     fontChecks(out);
     pictureChecks(out);
     barcodeChecks(out);
@@ -662,6 +671,7 @@
     if (over.length) out.push(['bad', 'In the way of the barcode area: ' + over.map(label).join(', ')]);
     var parts = barcodeParts(bc);
     if (parts && parts.error) out.push(['bad', 'Barcode: ' + parts.error]);
+    else if (parts && parts.warning) out.push(['bad', 'Barcode: ' + parts.warning]);
     else if (!(bc.isbn || '').trim() && printer === 'ingramspark')
       out.push(['bad', 'IngramSpark expects the ISBN barcode printed on your cover: type the ISBN into the barcode box.']);
     else if ((bc.isbn || '').trim()) out.push(['ok', 'The barcode carries the ISBN.']);
@@ -675,10 +685,11 @@
     return pt.matrixTransform(svg.getScreenCTM().inverse());
   }
   svg.addEventListener('pointerdown', function (e) {
+    commit();                               // what came before is its own undo step
     var p = toInches(e);
     if (e.target.getAttribute('data-handle')) {
       var el = find(sel);
-      drag = {mode:'resize', el:el, p:p, w:el.w || 0, h:el.h || 0};
+      drag = el && !el.locked ? {mode:'resize', el:el, p:p, w:el.w || 0, h:el.h || 0} : null;
     } else {
       var grp = e.target.closest('.el'), hit = grp ? grp.getAttribute('data-id') : null;
       var mates = hit ? groupOf(find(hit)) : [];
@@ -705,7 +716,7 @@
     var p = toInches(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, el = drag.el;    // el: a resize
     if (drag.mode === 'resize') {
       el.w = Math.max(0.2, round(drag.w + (el.rotate === 90 ? dy : dx)));
-      if (el.type !== 'text') el.h = Math.max(0.2, round(drag.h + dy));
+      if (el.type !== 'text' && el.type !== 'rule') el.h = Math.max(0.2, round(drag.h + dy));   // a rule's is its weight
     } else {
       // the distance rounded once, so everything dragged moves by the same amount
       var rdx = round(dx), rdy = round(dy);
@@ -742,6 +753,7 @@
   // panel's safe area. Distribute spaces three or more evenly between the
   // outermost two. All by what you see: the boxes drawn round them.
   function align(how) {
+    commit();
     var els = chosen().filter(function (e) { return !e.fill && !e.locked; });
     if (!els.length) return;
     var boxes = els.map(bbox), ref;
@@ -763,6 +775,7 @@
     render(); commit();
   }
   function distribute(axis) {
+    commit();
     var k = axis === 'x' ? 0 : 1;
     var items = chosen().filter(function (e) { return !e.fill && !e.locked; })
       .map(function (el) { return {el:el, b:bbox(el)}; })
@@ -806,11 +819,14 @@
     if (!els.length) return;
     var step = e.shiftKey ? 0.1 : 0.01;
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      els.forEach(function (el) { layerAct(el, 'del'); }); e.preventDefault(); return;
+      commit();
+      els.forEach(function (el) { layerAct(el, 'del', true); }); e.preventDefault(); return;
     }
     var d = {ArrowLeft:[-step, 0], ArrowRight:[step, 0], ArrowUp:[0, -step], ArrowDown:[0, step]}[e.key];
     if (!d) return;
+    if (!nudging) commit();
     els.forEach(function (el) { moveBy(el, d[0], d[1]); });
+    nudging = true;
     e.preventDefault(); render();
   });
 
@@ -858,7 +874,7 @@
     var check = function (text, get, set) {
       var wrap = document.createElement('label'); wrap.className = 'tick';
       var inp = document.createElement('input'); inp.type = 'checkbox'; inp.checked = !!get();
-      inp.addEventListener('change', function () { set(inp.checked); showProps(); render(); });
+      inp.addEventListener('change', function () { commit(); set(inp.checked); showProps(); render(); commit(); });
       wrap.appendChild(inp); wrap.appendChild(document.createTextNode(' ' + text)); box.appendChild(wrap);
     };
     if (el.type === 'text') {
@@ -939,6 +955,7 @@
       var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-sm';
       b.textContent = text; b.setAttribute('data-group', act);
       b.addEventListener('click', function () {
+        commit();
         var ids = act === 'ungroup' ? groupOf(find(sel)) : chosen();
         if (act === 'group') { var gid = 'grp-' + (++seq); ids.forEach(function (e) { e.group = gid; }); }
         else ids.forEach(function (e) { delete e.group; });
@@ -952,7 +969,7 @@
   }
 
   // ---- adding things ------------------------------------------------------------
-  function addEl(el) { el.id = el.type + '-' + (++seq); design.elements.push(el); choose(el.id); showProps(); }
+  function addEl(el) { commit(); el.id = el.type + '-' + (++seq); design.elements.push(el); choose(el.id); showProps(); }
   $('wd-add-text').addEventListener('click', function () {
     addEl({type:'text', anchor:'front', x:1, y:4, w:4, text:'New text', font:pick('EBGaramond-Regular.ttf'),
            size:20, leading:1.2, color:'#ffffff', align:'center', tracking:0});
@@ -971,6 +988,7 @@
     render();
   });
   $('wd-add-barcode').addEventListener('click', function () {
+    commit();
     var have = design.elements.find(function (e) { return e.type === 'barcode'; });
     if (have) { choose(have.id); showProps(); render(); return; }
     var bc = barcodeBox(g.panel_w, g.panel_h);
@@ -990,6 +1008,7 @@
     return CFG.fonts.indexOf(it) !== -1 ? it : f;
   }
   function quotePreset(kind) {
+    commit();
     var f = designFaces(), s = geo.safe, col = round(g.panel_w - 2 * s - 0.5), x = round(s + 0.25);
     var quotes = kind === 'praise' ? QUOTES : QUOTES.slice(0, 1), gid = 'grp-' + (++seq), els = [];
     if (kind === 'praise') {
@@ -1029,6 +1048,7 @@
   $('wd-zoom-out').addEventListener('click', function () { setZoom(zoom / 1.25); });
   $('wd-zoom-level').addEventListener('click', function () { setZoom(1); });
   function useArt(where) {
+    commit();
     var src = $('wd-art-pick').value;
     if (where === 'place') { addEl({type:'image', anchor:'front', x:1.5, y:2, w:3, h:3, src:src}); render(); return; }
     var el = design.elements.find(function (e) { return e.type === 'image' && e.fill === where; });
@@ -1057,6 +1077,7 @@
   });
   $('wd-reset').addEventListener('click', function () {
     if (!confirm('Start over with the example design? Your current design will be replaced.')) return;
+    commit();
     design = starter($('wd-project').value ? currentBook : null, g); choose(null); showProps();
     loadFonts().then(render);
   });
@@ -1080,6 +1101,7 @@
   }
   function flapPreset(side) {
     if (!g.flap) return Promise.resolve();
+    commit();
     var f = designFaces(), book = $('wd-project').value ? currentBook : null;
     var pad = Math.max(geo.safe, Math.min(0.42, g.flap * 0.14)), col = round(g.flap - 2 * pad);
     var anchor = side === 'front' ? 'front' : 'back';

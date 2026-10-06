@@ -374,6 +374,13 @@ _PARITY13 = ('LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG',
 _PARITY5 = ('GGLLL', 'GLGLL', 'GLLGL', 'GLLLG', 'LGGLL',
             'LLGGL', 'LLLGG', 'LGLGL', 'LGLLG', 'LLGLG')
 _MM = 72.0 / 25.4                       # points per millimetre
+BARCODE_MIN_MODULE = 0.8 * 0.33 / 25.4  # inches: EAN-13 at 80%, the smallest it allows
+BARCODE_MIN_BARS = 0.5                  # inches of bar: shorter is a gamble at the till
+
+# The most elements a design may have, and its size as JSON: far past any
+# template (the busiest converts to 18), short of a design no one could edit.
+MAX_ELEMENTS = 400
+MAX_JSON = 1_000_000
 
 
 def isbn13(raw):
@@ -419,8 +426,9 @@ def _ean5_modules(five):
 def barcode_parts(el, w_in, h_in):
     """What a barcode box draws, in inches from its top-left (y down):
     {'bars': [[x, y, w, h]], 'texts': [[text, x, baseline, size, anchor]],
-     'error': None or why the ISBN can't be used}. With no usable ISBN it is the
-    plain reserve: an empty box, captioned unless `caption` is false."""
+     'error': None or why the ISBN can't be used}, and 'warning' when the box is
+    small enough that the code may not scan. With no usable ISBN it is the plain
+    reserve: an empty box, captioned unless `caption` is false."""
     out = {'bars': [], 'texts': [], 'error': None}
     raw = str(el.get('isbn') or '').strip()
     if not raw:
@@ -445,6 +453,21 @@ def barcode_parts(el, w_in, h_in):
     size = min(max(digits * 0.95, 6.0), 10.0)
     top = pad + size / 72.0 * 1.25                          # room for "ISBN ..." above
     bar_h = h_in - top - pad - size / 72.0 * 1.15           # room for the digits below
+    # a box resized too small: below 80% of the standard module (the least
+    # EAN-13 allows) or with stubby bars it may not scan; with no room for bars
+    # at all it can't be drawn
+    need_w = span * BARCODE_MIN_MODULE + 2 * pad
+    need_h = h_in - bar_h + BARCODE_MIN_BARS
+    if bar_h <= 0:
+        out['error'] = ('The box is too small for a barcode: make it at least '
+                        f'{need_w:.2f}" wide and {need_h:.2f}" tall.')
+        return out
+    if m < BARCODE_MIN_MODULE - 1e-9:
+        out['warning'] = ('The box is too narrow for a barcode that scans reliably: make it at '
+                          f'least {need_w:.2f}" wide.')
+    elif bar_h < BARCODE_MIN_BARS - 1e-9:
+        out['warning'] = ('The bars are too short to scan reliably: make the box at least '
+                          f'{need_h:.2f}" tall.')
     x0 = (w_in - span * m) / 2.0 + 11 * m
     out['texts'].append(['ISBN ' + code, x0 + len(main) * m / 2.0, pad + size / 72.0 * 0.95,
                          size, 'middle'])
