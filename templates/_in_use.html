@@ -1,0 +1,24 @@
+{# The "is in use" panel a delete shows before removing what books still name.
+   Expects `confirm` = {name, label, uses, action, back, after}. #}
+{% if confirm %}
+  <div class="inuse-panel" id="in-use">
+    <h2>{{ confirm.label }} is in use</h2>
+    <p>{{ confirm.after }}</p>
+    <ul>{% for u in confirm.uses %}<li>{{ u }}</li>{% endfor %}</ul>
+    <div class="inuse-acts">
+      <form class="inline-form" method="post" action="{{ confirm.action }}">
+        <input type="hidden" name="confirm" value="1">
+        <button class="btn btn-ghost btn-sm" type="submit">Delete it anyway</button>
+      </form>
+      <a class="btn btn-primary btn-sm" href="{{ confirm.back }}">Keep it</a>
+    </div>
+  </div>
+  <style>
+    .inuse-panel{background:var(--surface);border:1px solid var(--accent,#b0472a);border-radius:3px;
+      box-shadow:var(--shadow);padding:16px 22px 18px;margin:0 0 22px}
+    .inuse-panel h2{font-family:var(--serif);font-size:19px;margin:0 0 4px}
+    .inuse-panel p{color:var(--muted);font-size:13.5px;margin:0 0 10px}
+    .inuse-panel ul{margin:0 0 14px;padding-left:20px;line-height:1.6}
+    .inuse-acts{display:flex;gap:12px;align-items:center}
+  </style>
+{% endif %}
