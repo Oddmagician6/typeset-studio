@@ -18,8 +18,8 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 11–12 below, in order — next is item 11, the small pages.**
-   Items 1-10 are done and merged (item 8's open question answered and done), with fixes
+2. **Bug hunt plan: item 12 below is the last — the wrap designer's remaining edges.**
+   Items 1-11 are done and merged (item 8's open question answered and done), with fixes
    **unreleased**: they wait in CHANGELOG's `## Unreleased`. Harnesses to copy:
    `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
    `test_manuscript_editor.py`, `test_project_edit.py` and `test_first_run.py` (real-time
@@ -30,7 +30,8 @@ Start here in a new session. Each item points at its full entry below.
    `test_housekeeping.py` (a browser harness that answers `confirm()` itself),
    `test_damaged_data.py` (damaged files; `Sec-Fetch-Mode` from a real browser),
    `test_style_pickers.py` (a step list in one iframe; a submitting step moves on before
-   it clicks, since the page it lands on runs the next step). The books in
+   it clicks, since the page it lands on runs the next step), `test_small_pages.py`
+   (stubbed feed and Claude call; a temporary settings.json, not the real one). The books in
    `projects/` are the user's test data - probe copies anyway.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
@@ -520,6 +521,33 @@ session of awkward input; fix what is found, and note what isn't a bug.
 11. **Small pages, partly covered:** the continuity checker's page (the checker is tested,
     `/project/<pid>/continuity` isn't), About and the update check's button (`/about/check`),
     the cover specs page and its template PDF.
+     - **Done (2026-10-06).** `test_small_pages.py`. Found and fixed:
+     - **The continuity check's name variants compared only the first 200 capitalised
+       words** (`[:200]` in first-seen order): in a novel the sentence openers and early
+       names use those up within a few chapters, so a name misspelt later was never
+       looked at. Every candidate is compared now, without the n² cost:
+       `checker._similar_pairs` indexes each word by its deletion neighbourhood (a 0.85
+       ratio means at most 0.26 of either word's letters deleted to a common string),
+       exactly the pairs brute force finds (tested), 0.15s on a 160k-word book with
+       3,000 names; past 25 the list says how many more.
+     - **Claude's continuity half sent the book whenever `ANTHROPIC_API_KEY` was set** -
+       150 words of every chapter to Anthropic, though About promises the app talks to
+       nobody unless asked (a writer may have the key in their environment for anything
+       else). It now runs only from an "Ask Claude as well" button on the report, which
+       says what is sent. The call has a 60s timeout and one retry (the page waits on it),
+       and reads the reply's text block by type, not `content[0]`.
+     - **The continuity route kept its own manuscript reader**: now
+       `_project_manuscript_text` like the editor and builds; an empty book says so.
+     - **With update checks on, a page render could wait on the network**: the context
+       processor's "cached answer only" called `check_for_update()`, which fetched once a
+       day inside the render (up to 6s) - and a failed fetch recorded nothing, so offline
+       *every* page waited. `update_for_page()` shows the cached answer and runs a due
+       check in its own thread (one at a time); a failure is `update_failed_at`, retried
+       after `UPDATE_RETRY` (an hour). Settings read-change-writes take `_SETTINGS_LOCK`
+       now that a thread writes them too.
+     Not bugs, noted: the cover specs page and template PDF hold at every binding and
+     retailer for 2"-20" trims and 1-2,000 pages (324 requests); their junk-input cases
+     were already in `test_cover_specs.py`.
 12. **The wrap designer's remaining edges** - already the most tested page: resizing a turned
     picture, a rule or the barcode; snapping while zoomed; undo across presets and
     Customise; a design with hundreds of elements (the 400-element save limit). Seen in

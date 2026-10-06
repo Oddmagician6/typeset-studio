@@ -443,6 +443,7 @@ UPDATE_TAG_RE = re.compile(r'^(?:typeset[-_ ]?studio[-_ ]?)?v?(\d+(?:\.\d+)*)$',
 # to switch on. Flip this to True to make new installs check by default.
 UPDATE_CHECK_DEFAULT = False
 UPDATE_INTERVAL = 86400          # at most one check a day
+UPDATE_RETRY = 3600              # after a failed one (offline), try again in an hour
 SETTINGS_PATH = os.path.join(DATA_DIR, 'settings.json')
 
 
@@ -459,6 +460,12 @@ def load_settings():
 
 def save_settings(data):
     _atomic_write_text(SETTINGS_PATH, json.dumps(data, indent=2))
+
+
+# Held around every read-change-write of settings.json: the update check now
+# runs in its own thread, and its write must not undo a toggle or a deletion
+# written meanwhile.
+_SETTINGS_LOCK = threading.RLock()
 
 
 def update_checks_on():
@@ -529,24 +536,66 @@ def check_for_update(force=False, fetch=None):
     """
     if not (force or update_checks_on()):
         return None
-    settings = load_settings()
-    now = time.time()
-    if not force and now - float(settings.get('update_checked_at') or 0) < UPDATE_INTERVAL:
-        cached = settings.get('update_latest')
-        return {'version': cached, 'url': settings.get('update_url') or UPDATE_PAGE,
-                'newer': bool(cached and is_newer(cached))} if cached else None
+    if not force and not _update_due():
+        return cached_update()
     try:
         data = (fetch or _fetch_json)(UPDATE_FEED)
     except Exception:
         data = None
     found = _pick_release(data)
-    if not found:
-        return None
-    latest, url = found
-    settings.update({'update_checked_at': now, 'update_latest': latest,
-                     'update_url': url})
-    save_settings(settings)
+    with _SETTINGS_LOCK:
+        settings = load_settings()
+        if not found:
+            # remembered, or every page asked again (and waited) while offline
+            settings['update_failed_at'] = time.time()
+            save_settings(settings)
+            return None
+        latest, url = found
+        settings.update({'update_checked_at': time.time(), 'update_latest': latest,
+                         'update_url': url})
+        settings.pop('update_failed_at', None)
+        save_settings(settings)
     return {'version': latest, 'url': url, 'newer': is_newer(latest)}
+
+
+def _update_due():
+    settings, now = load_settings(), time.time()
+    try:
+        checked = float(settings.get('update_checked_at') or 0)
+        failed = float(settings.get('update_failed_at') or 0)
+    except (TypeError, ValueError):
+        checked = failed = 0
+    return now - checked >= UPDATE_INTERVAL and now - failed >= UPDATE_RETRY
+
+
+def cached_update():
+    """What the last check found, without asking again."""
+    settings = load_settings()
+    cached = settings.get('update_latest')
+    if not cached or not isinstance(cached, str):
+        return None
+    return {'version': cached, 'url': settings.get('update_url') or UPDATE_PAGE,
+            'newer': is_newer(cached)}
+
+
+_UPDATE_RUNNING = threading.Lock()
+
+
+def update_for_page():
+    """The update answer a page shows. A page never waits on the network: a
+    check that is due runs in its own thread (one at a time) and the page shows
+    what is known. It used to run inside the render - up to six seconds on every
+    page, every time, while offline."""
+    if not update_checks_on():
+        return None
+    if _update_due() and _UPDATE_RUNNING.acquire(blocking=False):
+        def run():
+            try:
+                check_for_update()
+            finally:
+                _UPDATE_RUNNING.release()
+        threading.Thread(target=run, daemon=True).start()
+    return cached_update()
 
 
 def _data_folder(name):
@@ -561,12 +610,13 @@ def _deleted_defaults(name):
 
 
 def _set_deleted_defaults(name, ids):
-    settings = load_settings()
-    got = settings.get('deleted_defaults')
-    got = got if isinstance(got, dict) else {}
-    got[name] = sorted(ids)
-    settings['deleted_defaults'] = got
-    save_settings(settings)
+    with _SETTINGS_LOCK:
+        settings = load_settings()
+        got = settings.get('deleted_defaults')
+        got = got if isinstance(got, dict) else {}
+        got[name] = sorted(ids)
+        settings['deleted_defaults'] = got
+        save_settings(settings)
 
 
 def _bundled_ids(name):
@@ -583,7 +633,8 @@ def note_default_deleted(name, ident):
     start doesn't copy it back. The user decided (2026-10-06): a delete sticks,
     and "Restore defaults" brings them back."""
     if ident in _bundled_ids(name):
-        _set_deleted_defaults(name, _deleted_defaults(name) | {ident})
+        with _SETTINGS_LOCK:
+            _set_deleted_defaults(name, _deleted_defaults(name) | {ident})
 
 
 def restorable_defaults(name):
@@ -1802,7 +1853,7 @@ def _inject_cover_templates():
             'matter_keys': matter.KEYS,
             'app_version': APP_VERSION,
             # a cached answer only — no page render ever waits on the network
-            'update_info': (check_for_update() if update_checks_on() else None),
+            'update_info': update_for_page(),
             'scene_break_label': scene_break_label}
 
 
@@ -1825,7 +1876,7 @@ def about():
     settings = load_settings()
     return render_template('about.html', version=APP_VERSION,
                            checks_on=update_checks_on(),
-                           update=check_for_update(),
+                           update=update_for_page(),
                            checked_at=settings.get('update_checked_at'),
                            feed=UPDATE_FEED, page=UPDATE_PAGE)
 
@@ -1833,13 +1884,14 @@ def about():
 @app.route('/about/updates', methods=['POST'])
 def about_updates():
     """Turn the version check on or off. Off also forgets what it learned."""
-    settings = load_settings()
     on = request.form.get('update_check') == '1'
-    settings['update_check'] = on
-    if not on:
-        for k in ('update_checked_at', 'update_latest', 'update_url'):
-            settings.pop(k, None)
-    save_settings(settings)
+    with _SETTINGS_LOCK:
+        settings = load_settings()
+        settings['update_check'] = on
+        if not on:
+            for k in ('update_checked_at', 'update_latest', 'update_url', 'update_failed_at'):
+                settings.pop(k, None)
+        save_settings(settings)
     flash('Update checks are on. Typeset Studio will look once a day.' if on else
           'Update checks are off. Nothing leaves this machine.')
     return redirect(url_for('about'))
@@ -5284,44 +5336,34 @@ def project_print_package(pid):
 @app.route('/project/<pid>/continuity', methods=['POST'])
 def project_continuity(pid):
     proj = load_project(pid)
-
-    ms_type = proj.get('manuscript_type', 'file')
     ms_file = proj.get('manuscript_file', '')
-    raw = None
-
-    if ms_type == 'sample':
-        raw = open(SAMPLE, encoding='utf-8').read()
-    elif ms_file:
-        ms_path = os.path.join(PROJECT_MS_DIR, ms_file)
-        if not os.path.exists(ms_path):
-            flash('Manuscript file not found — please replace it via Edit.')
-            return redirect(url_for('projects'))
-        if ms_file.lower().endswith('.docx'):
-            try:
-                raw = manuscript.import_docx(ms_path)
-            except Exception as exc:
-                logging.error('docx import failed: %s', traceback.format_exc())
-                flash(f'Could not read the Word file: {exc}')
-                return redirect(url_for('projects'))
-        else:
-            raw = _read_text_file(ms_path)
-
-    if not raw:
-        flash('No manuscript found for this project.')
+    if proj.get('manuscript_type', 'file') != 'sample' and ms_file and             not os.path.exists(os.path.join(PROJECT_MS_DIR, ms_file)):
+        flash('Manuscript file not found — please replace it via Edit.')
+        return redirect(url_for('projects'))
+    # the same reader as the editor and the builds, so the report is of the
+    # text they use (this route used to keep its own copy of it)
+    raw = _project_manuscript_text(proj, report_import=False)
+    if not raw.strip():
+        flash('This book has no text yet, so there is nothing to check.')
         return redirect(url_for('projects'))
 
     parsed = manuscript.parse_markdown(raw, smartquotes=proj.get('smartquotes', True))
-
     issues_t1 = checker.run_tier1(parsed)
 
-    api_key   = os.environ.get('ANTHROPIC_API_KEY', '')
-    issues_t2 = checker.run_tier2(parsed, api_key) if api_key else []
+    # Claude's half sends an excerpt of every chapter to Anthropic, so it runs
+    # only when asked on this page - never because a key happens to be set in
+    # the environment. This app talks to nobody unless you ask it to.
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+    asked = bool(api_key) and request.form.get('ask_claude') == '1'
+    issues_t2 = checker.run_tier2(parsed, api_key) if asked else []
 
     return render_template('continuity_result.html',
                            proj=proj, pid=pid,
                            issues_t1=issues_t1,
                            issues_t2=issues_t2,
-                           api_enabled=bool(api_key))
+                           api_enabled=bool(api_key), asked=asked,
+                           excerpt_words=checker.EXCERPT_WORDS,
+                           chapters=len(parsed['chapters']))
 
 
 _BOOK_FILES = ('manuscript_file', 'cover_file', 'print_back_file', 'wrap_front_file')

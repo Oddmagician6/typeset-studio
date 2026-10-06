@@ -126,37 +126,90 @@ def _check_name_variants(parsed: dict) -> list:
                 if word not in token_first_loc:
                     token_first_loc[word] = loc
 
-    # Only examine tokens that appear 2+ times to reduce sentence-start noise
-    candidates = [t for t, c in token_count.items() if c >= 2][:200]
+    # Only examine tokens that appear 2+ times to reduce sentence-start noise.
+    # Every one of them: this was the first 200 seen, which a novel's sentence
+    # openers and early names use up within a few chapters, so a name misspelt
+    # later in the book was never looked at.
+    candidates = [t for t, c in token_count.items() if c >= 2]
+    order = {t: i for i, t in enumerate(candidates)}
+    pairs = [tuple(sorted(p, key=order.get))                  # first seen first
+             for p in _similar_pairs(candidates, _VARIANT_RATIO)]
 
     issues = []
-    seen_pairs: set = set()
-
-    for i, a in enumerate(candidates):
-        for b in candidates[i + 1:]:
-            if abs(len(a) - len(b)) > 4:
-                continue
-            a_low, b_low = a.lower(), b.lower()
-            if a_low == b_low:
-                continue
-            if difflib.SequenceMatcher(None, a_low, b_low).ratio() >= 0.85:
-                pair = frozenset({a, b})
-                if pair not in seen_pairs:
-                    seen_pairs.add(pair)
-                    issues.append({
-                        'label':    f'Name variant: “{a}” / “{b}”',
-                        'severity': 'warn',
-                        'detail':   (
-                            f'“{a}” appears {token_count[a]}×'
-                            f' (first at {token_first_loc[a]}); '
-                            f'“{b}” appears {token_count[b]}×'
-                            f' (first at {token_first_loc[b]}). '
-                            f'Possible misspelling of the same name.'
-                        ),
-                        'location': token_first_loc[a],
-                        'tier': 1,
-                    })
+    for a, b in sorted(pairs, key=lambda p: (order[p[0]], order[p[1]]))[:_MAX_VARIANTS]:
+        issues.append({
+            'label':    f'Name variant: “{a}” / “{b}”',
+            'severity': 'warn',
+            'detail':   (
+                f'“{a}” appears {token_count[a]}×'
+                f' (first at {token_first_loc[a]}); '
+                f'“{b}” appears {token_count[b]}×'
+                f' (first at {token_first_loc[b]}). '
+                f'Possible misspelling of the same name.'
+            ),
+            'location': token_first_loc[a],
+            'tier': 1,
+        })
+    if len(pairs) > _MAX_VARIANTS:
+        issues.append({
+            'label':    f'{len(pairs) - _MAX_VARIANTS} more name variants',
+            'severity': 'info',
+            'detail':   'Only the first are listed, in the order the names appear.',
+            'location': '',
+            'tier': 1,
+        })
     return issues
+
+
+_MAX_VARIANTS = 25
+_VARIANT_RATIO = 0.85
+
+
+def _deletions(word, k):
+    """Every string `word` becomes with up to `k` letters deleted."""
+    out, layer = {word}, {word}
+    for _ in range(k):
+        layer = {w[:i] + w[i + 1:] for w in layer for i in range(len(w))}
+        out |= layer
+    return out
+
+
+def _similar_pairs(words, ratio):
+    """The pairs whose lower-cased difflib ratio is at least `ratio` (0.85).
+
+    Comparing every pair was millions of SequenceMatcher calls in a long book.
+    But a ratio of 2M/(la+lb) >= 0.85 means the two words share M letters in
+    order, and getting there deletes at most 0.26 of either word's letters
+    (the lengths can't differ by more than ~26%). So each word is indexed by
+    every string it becomes with up to 0.27 x its length deleted, and only
+    words sharing such a key are measured. Words over 16 letters (rare, and a
+    blow-up in keys) are measured against all.
+    """
+    index = collections.defaultdict(set)
+    long_words = []
+    for w in words:
+        low = w.lower()
+        if len(low) > 16:
+            long_words.append(w)
+            continue
+        for key in _deletions(low, int(0.27 * len(low))):
+            index[key].add(w)
+    maybe = set()
+    for group in index.values():
+        if len(group) > 1:
+            g = sorted(group)
+            maybe.update((a, b) for i, a in enumerate(g) for b in g[i + 1:])
+    for w in long_words:
+        maybe.update(tuple(sorted((w, o))) for o in words if o != w)
+    out, sm = [], difflib.SequenceMatcher(None)
+    for a, b in maybe:
+        al, bl = a.lower(), b.lower()
+        if al == bl:
+            continue
+        sm.set_seqs(al, bl)
+        if sm.ratio() >= ratio:
+            out.append((a, b))
+    return out
 
 
 def _check_pov_drift(parsed: dict) -> list:
@@ -280,7 +333,10 @@ Do not include markdown fencing, explanation, or anything outside the JSON array
 """
 
 
-def _build_summary(parsed: dict, words_per_chapter: int = 150) -> str:
+EXCERPT_WORDS = 150        # of each chapter, sent to Claude (the report page says so)
+
+
+def _build_summary(parsed: dict, words_per_chapter: int = EXCERPT_WORDS) -> str:
     lines = [f'{len(parsed["chapters"])} chapters total\n']
     for ch_idx, ch in enumerate(parsed['chapters']):
         part = ch.get('part')
@@ -320,14 +376,15 @@ def run_tier2(parsed: dict, api_key: str) -> list:
     user_msg = f'Manuscript summary:\n\n{summary}\n\nIdentify all continuity issues.'
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        # the page waits for this: a minute, one retry, then say so
+        client = anthropic.Anthropic(api_key=api_key, timeout=60.0, max_retries=1)
         response = client.messages.create(
             model=model,
             max_tokens=2048,
             system=_SYSTEM_PROMPT,
             messages=[{'role': 'user', 'content': user_msg}],
         )
-        raw = response.content[0].text.strip()
+        raw = ''.join(b.text for b in response.content if b.type == 'text').strip()
         # Tolerate accidental markdown fencing
         raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
         raw = re.sub(r'\s*```$',          '', raw, flags=re.MULTILINE)
