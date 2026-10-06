@@ -84,6 +84,26 @@ line here.
   old one, and out-of-range values are brought into range.
 - **A book's settings are saved all at once**, so an interrupted save can no
   longer leave a half-written file that no page can open.
+- **Saving a Set-a-book result as a project keeps the right manuscript.**
+  Uploads were stored under their own file names, so setting a second
+  "book.docx" before saving the first result gave the first project the
+  second book's text. Each upload now keeps a file of its own.
+- **Set a book and its previews check what you give them:** a file that isn't
+  a manuscript (a PDF, say), an empty one, a Word file that won't open or has
+  no words, and cover art that isn't a real .jpg or .png are refused with a
+  message saying which, instead of building nonsense or failing halfway. A
+  cover file left in the picker is ignored when the book uses a designed
+  cover.
+- **Books titled in other scripts get sensible names.** A book called "Война
+  и мир" was saved as a project named "style" and built as
+  "style-….pdf"; it is now "book", and a draft "draft". Accented titles keep
+  their letters ("Été" is "ete", not "t"). The same fix names cover and wrap
+  downloads.
+- **Typesetting a book whose style is missing says so** - a draft made before
+  any style existed, or a book whose style was deleted - instead of showing a
+  bare "Not Found" page. Send to print says the same.
+- **Save as project only takes files from Set a book's own uploads.** It
+  copied whatever file the page named.
 
 ## 1.3.0 — 3 October 2026
 

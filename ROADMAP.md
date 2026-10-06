@@ -18,16 +18,14 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 4–12 below, in order — next is item 4, Setting a book / first
-   run** (`generate.html`, `/generate` and its two untested previews, `/project/create`,
-   new draft; empty, huge and non-UTF-8 uploads - item 3 already gave `/generate` the
-   shared decoder and safe upload names, so check them there end to end). Items 1-3 are
-   done and merged, with fixes **unreleased**: they wait in CHANGELOG's `## Unreleased`.
-   Harnesses to copy: `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release
-   step 6), `test_manuscript_editor.py` and `test_project_edit.py` (real-time headless
-   browser: virtual time never gives a page its animation frames; harness routes must be
-   registered at import, before any request). The books in `projects/` are the user's
-   test data, not real work - probe copies anyway.
+2. **Bug hunt plan, items 5–12 below, in order — next is item 5, shared state between
+   requests** (fonts registered under global names on a threaded server; module globals
+   set per request). Items 1-4 are done and merged, with fixes **unreleased**: they wait in
+   CHANGELOG's `## Unreleased`. Harnesses to copy: `test_upgrade.py` with
+   `test_fixtures/make_fixtures.py` (release step 6), `test_manuscript_editor.py`,
+   `test_project_edit.py` and `test_first_run.py` (real-time headless browser: virtual time
+   never gives a page its animation frames; harness routes registered at import, before
+   any request). The books in `projects/` are the user's test data - probe copies anyway.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
@@ -226,6 +224,36 @@ session of awkward input; fix what is found, and note what isn't a bug.
    - have no test at all. A new user's first ten minutes: an empty data folder, a .docx and a
    .md upload, an empty or huge or non-UTF-8 file, every format option, creating a project
    from the result, a blank new draft.
+   - **Done (2026-10-05).** `test_first_run.py`: a book Set with every option and saved as
+     a project builds the same pages (upload, paste, sample, cover art, a Word file named
+     in Cyrillic); both previews from every source, and the page preview is pixel for
+     pixel the pages Set a book builds; awkward uploads; no styles and no books at all; and
+     the real page in headless Chrome (choose a file, both previews, Set, Save as project).
+     Found and fixed:
+     - **Uploads stored under their own names in `uploads/`**: a second "book.docx" Set
+       before the first result was saved replaced it, so that project got the second
+       book. `_manuscript_upload` / `_cover_upload` (shared by `/generate` and both
+       previews) store each under a unique stamped name; text as UTF-8.
+     - **No checks on what was uploaded**: a PDF as the manuscript was read as text and
+       set as noise; an empty file, a broken .docx, a .docx with no words (an empty
+       heading imports as a bare `#`), cover art that isn't an image (failed later as a
+       build error). Each is refused with a message naming the file; cover art is only
+       read when the cover mode uses it.
+     - **`slugify`'s default is "style"**, so a Cyrillic title made project id `style` and
+       `style-<stamp>.pdf` (the `or 'project'` / `or 'draft'` after it never ran), and
+       accents dropped their letters ("Été" -> "t"). `_slug_or_blank` folds accents
+       (NFKD); books fall back to "book", drafts to "draft", cover/wrap downloads to
+       "cover"/"wrap-design".
+     - **A missing style was a bare 404** on Typeset (a draft made with no styles; a
+       deleted style) and in Send to print: `_style_problem` says what to do.
+     - **`/project/create` copied any file it was given** as `ms_path` / `cover_path`; now
+       only files inside `UPLOAD_DIR` (`_in_folder`).
+     - The previews parsed the manuscript twice, and didn't normalise pasted newlines.
+     Not bugs: a 4 MB manuscript previews in under a second (two chapters); the result
+     page's hidden fields carry every setting through to the project. Left: `uploads/`
+     and `out/` grow with every Set a book (item 8, housekeeping); after a refused upload
+     the page keeps the typed fields but the file pickers are empty (a browser can't
+     refill them).
 5. **Shared state between requests.** The server is threaded, and fonts are registered with
    ReportLab under global names: every cover template's faces as `Cover-display` /
    `Cover-serif` / `Cover-italic`, every style's as `{family}-{role}`. Two covers drawn at once

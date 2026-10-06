@@ -686,8 +686,17 @@ COVER_PALETTE_KEYS = ['gold', 'teal', 'ink', 'muted']
 
 
 def _slug_or_blank(name):
-    """`slugify` without a default, for callers that supply their own."""
-    return re.sub(r'[^a-z0-9]+', '-', (name or '').lower()).strip('-')
+    """`slugify` without a default, for callers that supply their own.
+
+    Accents are folded first ("Été" -> "ete"; they used to vanish with the
+    letter, "t"). A name in another script has nothing left, so the caller's
+    default applies - which must fit the thing named: `slugify`'s own "style"
+    named a book titled in Cyrillic "style" and its PDF "style-....pdf".
+    """
+    import unicodedata
+    folded = ''.join(c for c in unicodedata.normalize('NFKD', name or '')
+                     if not unicodedata.combining(c))
+    return re.sub(r'[^a-z0-9]+', '-', folded.lower()).strip('-')
 
 
 def slugify(name):
@@ -2221,7 +2230,7 @@ def wrap_designer_build():
     breaks (for the editor to check against its own), and a download link."""
     body = request.get_json(silent=True) or {}
     dims, warnings = _wrap_design_dims(body.get('settings') or {})
-    slug = slugify(body.get('name') or 'wrap-design') or 'wrap-design'
+    slug = _slug_or_blank(body.get('name')) or 'wrap-design'
     fn = f'{slug}-wrap-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pdf'
     path = os.path.join(OUT_DIR, fn)
     try:
@@ -2259,7 +2268,7 @@ def cover_wrap():
                     pass
     kind = {'hardcover': '-case-wrap', 'jacket': '-jacket'}.get(
         request.form.get('wrap_binding'), '-wrap')
-    name = slugify(request.form.get('name', 'cover')) + kind + '.pdf'
+    name = (_slug_or_blank(request.form.get('name')) or 'cover') + kind + '.pdf'
     return Response(data, mimetype='application/pdf',
                     headers={'Content-Disposition': f'attachment; filename="{name}"'})
 
@@ -2393,7 +2402,7 @@ def style_cover_specs_template(pid):
             data = f.read()
     finally:
         os.remove(tmp)
-    fn = f'{slugify(name)}-{spec["binding"]}-{spec["pages"]}pp-cover-template.pdf'
+    fn = f'{_slug_or_blank(name) or "cover"}-{spec["binding"]}-{spec["pages"]}pp-cover-template.pdf'
     return Response(data, mimetype='application/pdf',
                     headers={'Content-Disposition': f'attachment; filename="{fn}"'})
 
@@ -2550,6 +2559,78 @@ def figure_file(name):
     return send_from_directory(FIGURE_DIR, secure_filename(name))
 
 
+class _PreviewError(Exception):
+    """A message meant for the user, not a stack trace."""
+
+
+def _manuscript_upload(up, folder):
+    """Store an uploaded manuscript in `folder` under a name of its own and read
+    it. Returns (path, text); raises _PreviewError with what to do instead.
+
+    The name is unique: Set a book stored uploads under their own names, so a
+    second "book.docx" replaced the first while its result page was still open,
+    and saving that result as a project took the wrong manuscript. A text file
+    is stored as UTF-8 (see `_decode_text`), so the project gets clean text.
+    """
+    ext = _upload_ext(up)
+    if ext not in MANUSCRIPT_EXTS:
+        raise _PreviewError(f'“{up.filename}” isn\'t a manuscript - use a .docx, '
+                            '.md or .txt file.')
+    data = up.read()
+    if ext != '.docx':
+        text = _norm_newlines(_decode_text(data))
+        if not text.strip():
+            raise _PreviewError(f'“{up.filename}” is empty.')
+        data = text.encode('utf-8')
+    os.makedirs(folder, exist_ok=True)
+    fd, path = tempfile.mkstemp(dir=folder, prefix=datetime.now().strftime('%Y%m%d-%H%M%S-'),
+                                suffix='-' + _safe_upload_name(up.filename, 'manuscript'))
+    with os.fdopen(fd, 'wb') as f:
+        f.write(data)
+    if ext != '.docx':
+        return path, text
+    rep, why = {}, ''
+    try:
+        text = manuscript.import_docx(path, report=rep)
+        if not _wordcount(text):           # an empty heading imports as a bare "#"
+            why = f'“{up.filename}” has no text in it.'
+    except ModuleNotFoundError:
+        why = 'python-docx is not installed. Run: pip install python-docx'
+    except Exception as exc:
+        logging.error('docx import failed: %s', traceback.format_exc())
+        why = f'“{up.filename}” couldn\'t be read as a Word document ({exc}).'
+    if why:
+        os.remove(path)
+        raise _PreviewError(why)
+    if folder == UPLOAD_DIR:          # Set a book reports the import; previews don't
+        _flash_import(rep)
+    return path, text
+
+
+def _cover_upload(cov, folder):
+    """Store uploaded cover art in `folder`; raises _PreviewError unless it is a
+    real .jpg or .png (anything else failed later, as a build error)."""
+    data = cov.read()
+    if _upload_ext(cov) not in IMAGE_EXTS or not _is_image(data):
+        raise _PreviewError(f'The cover “{cov.filename}” isn\'t a .jpg or .png picture.')
+    os.makedirs(folder, exist_ok=True)
+    fd, path = tempfile.mkstemp(dir=folder, prefix=datetime.now().strftime('%Y%m%d-%H%M%S-'),
+                                suffix='-' + _safe_upload_name(cov.filename, 'cover'))
+    with os.fdopen(fd, 'wb') as f:
+        f.write(data)
+    return path
+
+
+def _in_folder(path, folder):
+    """Is `path` a file inside `folder`? (Save as project is handed paths by the
+    page, and copied whatever file it was given.)"""
+    try:
+        real, top = os.path.realpath(path), os.path.realpath(folder)
+        return os.path.commonpath([real, top]) == top and os.path.isfile(real)
+    except (ValueError, OSError):
+        return False
+
+
 @app.route('/generate', methods=['GET', 'POST'])
 def generate():
     presets = list_presets()
@@ -2570,25 +2651,22 @@ def generate():
     ms_type = 'file'
 
     up = request.files.get('manuscript')
-    if up and up.filename:
-        fn = _safe_upload_name(up.filename, 'manuscript')
-        dest = os.path.join(UPLOAD_DIR, fn)
-        up.save(dest)
-        ms_path, ms_type = dest, 'file'
-        if fn.lower().endswith('.docx'):
-            try:
-                rep = {}
-                raw = manuscript.import_docx(dest, report=rep)
-                _flash_import(rep)
-            except ModuleNotFoundError:
-                flash('python-docx is not installed. Run: pip install python-docx')
-                return render_template('generate.html', presets=presets, form=form)
-            except Exception as exc:
-                logging.error('docx import failed: %s', traceback.format_exc())
-                flash(f'Could not read the Word file: {exc}')
-                return render_template('generate.html', presets=presets, form=form)
-        else:
-            raw = _read_text_file(dest)
+    cov = request.files.get('cover')
+    cover_mode = form.get('cover_mode', 'none')
+    cover_path = ''
+    try:
+        if up and up.filename:
+            ms_path, raw = _manuscript_upload(up, UPLOAD_DIR)
+            ms_type = 'file'
+        # only the art this book uses: a file left in the picker after
+        # switching to a designed cover is not a reason to refuse the book
+        if cover_mode == 'image' and cov and cov.filename:
+            cover_path = _cover_upload(cov, UPLOAD_DIR)
+    except _PreviewError as exc:
+        flash(str(exc))
+        return render_template('generate.html', presets=presets, form=form)
+    if raw is not None:
+        pass
     elif form.get('pasted', '').strip():
         raw = _norm_newlines(form['pasted'])
         stamp_p = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -2603,17 +2681,6 @@ def generate():
     if not raw:
         flash('Add a manuscript: upload a file, paste text, or use the sample.')
         return render_template('generate.html', presets=presets, form=form)
-
-    # optional cover art
-    cover_mode = form.get('cover_mode', 'none')
-    cover_path = ''
-    cov = request.files.get('cover')
-    if cov and cov.filename:
-        cfn = _safe_upload_name(cov.filename, 'cover')
-        cover_path = os.path.join(UPLOAD_DIR, cfn)
-        cov.save(cover_path)
-    if cover_mode == 'none':
-        cover_path = ''
 
     cover_template = form.get('cover_template', '') or 'ashforge-house'
     cover_template_data = load_cover_template(cover_template) if cover_mode == 'designed' else None
@@ -2643,7 +2710,7 @@ def generate():
         **{k: form.get(k, '').strip() for k in matter.KEYS},
     }
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-    base  = slugify(meta['title'] or 'book')
+    base  = _slug_or_blank(meta['title']) or 'book'
 
     ms = manuscript.parse_markdown(raw, smartquotes=meta['smartquotes'])
 
@@ -2737,10 +2804,6 @@ PREVIEW_MAX_CHAPTERS = 2
 PREVIEW_MAX_PAGES    = 8
 
 
-class _PreviewError(Exception):
-    """A message meant for the user, not a stack trace."""
-
-
 def _book_from_compose_form(tmp_files):
     """Read the compose form into (preset, manuscript, meta, total, truncated).
 
@@ -2758,22 +2821,10 @@ def _book_from_compose_form(tmp_files):
     raw = None
     up = request.files.get('manuscript')
     if up and up.filename:
-        fn = _safe_upload_name(up.filename, 'manuscript')
-        fd, tmp_ms = tempfile.mkstemp(suffix='_' + fn)
-        os.close(fd)
-        up.save(tmp_ms)
+        tmp_ms, raw = _manuscript_upload(up, tempfile.gettempdir())
         tmp_files.append(tmp_ms)
-        if fn.lower().endswith('.docx'):
-            try:
-                raw = manuscript.import_docx(tmp_ms)
-            except ModuleNotFoundError:
-                raise _PreviewError('python-docx is not installed. Run: pip install python-docx')
-            except Exception as exc:
-                raise _PreviewError(f'Could not read the Word file: {exc}')
-        else:
-            raw = _read_text_file(tmp_ms)
     elif form.get('pasted', '').strip():
-        raw = form['pasted']
+        raw = _norm_newlines(form['pasted'])
     elif form.get('use_sample'):
         raw = open(SAMPLE, encoding='utf-8').read()
 
@@ -2784,15 +2835,9 @@ def _book_from_compose_form(tmp_files):
     cover_mode = form.get('cover_mode', 'none')
     cover_path = ''
     cov = request.files.get('cover')
-    if cov and cov.filename:
-        cfn = _safe_upload_name(cov.filename, 'cover')
-        fd, tmp_cov = tempfile.mkstemp(suffix='_' + cfn)
-        os.close(fd)
-        cov.save(tmp_cov)
-        tmp_files.append(tmp_cov)
-        cover_path = tmp_cov
-    if cover_mode == 'none':
-        cover_path = ''
+    if cover_mode == 'image' and cov and cov.filename:
+        cover_path = _cover_upload(cov, tempfile.gettempdir())
+        tmp_files.append(cover_path)
     cover_template = form.get('cover_template', '') or 'ashforge-house'
     cover_template_data = load_cover_template(cover_template) if cover_mode == 'designed' else None
 
@@ -2819,12 +2864,6 @@ def _book_from_compose_form(tmp_files):
         'smartquotes':    'smartquotes' in form,
         **{k: form.get(k, '').strip() for k in matter.KEYS},
     }
-
-    ms = manuscript.parse_markdown(raw, smartquotes=meta['smartquotes'])
-    chapters_total = len(ms['chapters'])
-    truncated = chapters_total > PREVIEW_MAX_CHAPTERS
-    if truncated:
-        ms = {'chapters': ms['chapters'][:PREVIEW_MAX_CHAPTERS]}
 
     ms = manuscript.parse_markdown(raw, smartquotes=meta['smartquotes'])
     chapters_total = len(ms['chapters'])
@@ -3002,19 +3041,21 @@ def projects():
 def project_create():
     form = request.form
     name = form.get('project_name', '').strip() or form.get('title', '').strip() or 'Untitled'
-    proj_id = unique_project_id(slugify(name) or 'project')
+    proj_id = unique_project_id(_slug_or_blank(name) or 'book')
 
     ms_src  = form.get('ms_path', '')
     ms_type = form.get('ms_type', 'file')
+    if ms_type not in ('file', 'pasted', 'sample'):
+        ms_type = 'file'
     ms_file = ''
-    if ms_type != 'sample' and ms_src and os.path.exists(ms_src):
+    if ms_type != 'sample' and ms_src and _in_folder(ms_src, UPLOAD_DIR):
         ext = os.path.splitext(ms_src)[1]
         ms_file = proj_id + ext
         shutil.copy2(ms_src, os.path.join(PROJECT_MS_DIR, ms_file))
 
     cover_src  = form.get('cover_path', '')
     cover_file = ''
-    if cover_src and os.path.exists(cover_src):
+    if cover_src and _in_folder(cover_src, UPLOAD_DIR):
         ext = os.path.splitext(cover_src)[1]
         cover_file = proj_id + '-cover' + ext
         shutil.copy2(cover_src, os.path.join(PROJECT_MS_DIR, cover_file))
@@ -3513,7 +3554,7 @@ def read_snapshot(pid, stamp):
 @app.route('/project/new-draft', methods=['POST'])
 def project_new_draft():
     name = request.form.get('name', '').strip() or 'Untitled draft'
-    pid = unique_project_id(slugify(name) or 'draft')
+    pid = unique_project_id(_slug_or_blank(name) or 'draft')
     presets = list_presets()
     ms_file = pid + '.md'
     with open(os.path.join(PROJECT_MS_DIR, ms_file), 'w',
@@ -3694,6 +3735,19 @@ def project_write_preview(pid):
             pass
 
 
+def _style_problem(proj):
+    """Why a book can't be built with its style, or ''. A missing style was a
+    bare 404 page: a draft made before any style existed, or a book whose
+    style has since been deleted."""
+    style = proj.get('preset') or ''
+    if not style:
+        return 'This book has no style yet - pick one in its settings (Edit).'
+    if not os.path.exists(os.path.join(PRESET_DIR, secure_filename(style) + '.json')):
+        return (f'This book’s style “{style}” is missing (deleted?) - pick another '
+                'in its settings (Edit).')
+    return ''
+
+
 def _build_project(pid, proj):
     """Build a saved project in its own format(s) and record the result on it.
 
@@ -3703,6 +3757,9 @@ def _build_project(pid, proj):
     `warnings` are things the writer should hear about on a build that did
     succeed — an EPUB that failed beside a good PDF, a press build that fell back.
     """
+    err = _style_problem(proj)
+    if err:
+        return {'error': err}
     preset = load_preset(proj['preset'])
     raw, err = _project_source(proj)
     if err:
@@ -3710,7 +3767,7 @@ def _build_project(pid, proj):
     meta, cover_path = _project_meta(proj)
     ms_parsed = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-    base  = slugify(meta['title'] or proj.get('name', 'book'))
+    base  = _slug_or_blank(meta['title']) or _slug_or_blank(proj.get('name')) or 'book'
     fmt   = proj.get('format', 'pdf')
     res = {'error': '', 'warnings': [], 'preset': preset, 'meta': meta,
            'cover_path': cover_path, 'ms_parsed': ms_parsed, 'fmt': fmt,
@@ -3962,6 +4019,9 @@ def build_print_package(proj, scope='print'):
     """
     publish = scope == 'publish'
     p = {**PRINT_DEFAULTS, **{k: proj[k] for k in PRINT_DEFAULTS if k in proj}}
+    err = _style_problem(proj)
+    if err:
+        raise PrintPackageError(err)
     preset = load_preset(proj['preset'])
     raw, err = _project_source(proj)
     if err:
