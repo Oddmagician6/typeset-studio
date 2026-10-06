@@ -39,6 +39,7 @@
     <p>Each style is a complete recipe for a book's interior. Duplicate one to make a customer's
        own version, then tweak only what you need.</p>
   </div>
+  {% with what='style', folder='presets' %}{% include '_restore_defaults.html' %}{% endwith %}
 
   {% macro openlabel(s) -%}
     {%- if s=='dropcap' -%}drop cap

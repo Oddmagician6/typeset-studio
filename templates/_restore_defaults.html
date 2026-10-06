@@ -1,0 +1,21 @@
+{# The bundled styles or cover templates the user deleted: a delete sticks (the
+   app no longer copies them back at each start), and this brings them back.
+   Expects `restorable` = [(id, name)] from `restorable_defaults`, `what` and
+   `folder` ('presets' / 'covers'). #}
+{% if restorable %}
+  <div class="restore-bar">
+    <span>{{ restorable|length }} of the {{ what }}s that came with the app
+      {{ 'was' if restorable|length == 1 else 'were' }} deleted:
+      {% for _, name in restorable %}<b>{{ name }}</b>{{ ', ' if not loop.last }}{% endfor %}.</span>
+    <form method="post" action="{{ url_for('restore_defaults', name=folder) }}">
+      <button class="btn btn-sm" type="submit">Restore defaults</button>
+    </form>
+  </div>
+  <style>
+    .restore-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin:0 0 22px;
+      padding:10px 16px;border:1px dashed var(--rule-strong);border-radius:3px;font-size:13.5px;
+      color:var(--muted)}
+    .restore-bar b{color:var(--ink);font-weight:600}
+    .restore-bar form{margin:0}
+  </style>
+{% endif %}
