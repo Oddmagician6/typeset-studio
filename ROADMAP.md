@@ -39,6 +39,8 @@ Start here in a new session. Each item points at its full entry below.
    (Tier 5D, only if a store refuses EPUB 3).
 4. **Tabletop RPG books (#74), when the designer is done:** typed blocks first (stat block,
    read-aloud box, sidebar), two-column pagination after.
+   **Children's books (#75)** sit beside it: early-reader presets are cheap and could come
+   first; picture books wait on full-bleed interior pages (Tier 5E) and a per-page designer.
 5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
    enabling it needs admin and a reboot) and a macOS build (needs a Mac). The code is already
    audited as portable; see the cross-platform notes in the strategy section. Deferred until
@@ -2435,6 +2437,39 @@ doc_model / WYSIWYG round-trip:
   art and logos are WotC's own, and a preset should look like the genre rather than copy
   those books. Sequence after the wrap designer (#72); start with the typed blocks, which are
   cheap and useful in single column, before taking on two-column pagination.
+
+- **75. Children's books: picture books and early readers** — **FUTURE** *(large; noted
+  2026-10-06 at the user's request, not scheduled)*. Another big self-publishing market, and
+  a different kind of book from everything the app sets now: a **picture book** is laid out
+  page by page (art on every page, often across the spread, a few lines of text placed on or
+  beside it), not flowed from a manuscript. Two ends, very different in cost:
+  - **Early readers and chapter books** (ages 6-10) *are* flowed text: large type (14-18pt),
+    open leading, short chapters and spot illustrations. Mostly **presets** plus what exists -
+    figures (#46), chapter art (#59), the large-print floor (`min_text_size`) - and cheap: do
+    this first.
+  - **Full-bleed interior pages** are the prerequisite for picture books: the imposition work
+    deferred in Tier 5E (the document built at trim + 0.125" on the outer edges, every margin,
+    frame and folio re-checked, with the recto/verso checklist in Conventions). Nothing else
+    on this list works without it.
+  - **A page designer for picture books.** Not a manuscript at all but a list of pages or
+    spreads, each with its art and positioned text boxes - the wrap designer's model (#72) per
+    page: the same SVG editor, width tables that break lines where the PDF does, safe-zone,
+    bleed and dpi checks. A book is 24-48 pages, in multiples of the printer's signature
+    (KDP's minimum is 24; offset printers want multiples of 8), with copyright and dedication
+    usually on page 1 or 2 rather than front matter pages. Art across the gutter needs a
+    warning on perfect-bound paperbacks (the fold eats the middle); hardcover lies flatter.
+  - **Trims and paper:** square and landscape picture-book trims (8.5 x 8.5, 8 x 8, 10 x 8,
+    11 x 8.5) added to `TRIM_PRESETS`; colour interiors in Send to print (KDP standard and
+    premium colour, IngramSpark colour), whose paper thickness the spine already models as
+    `color` in `_PAPER`.
+  - **The ebook:** a reflowable EPUB can't hold a picture book; it needs **fixed-layout
+    EPUB 3** (each page a fixed-size page, text placed over art). A separate output path from
+    `epub.py`'s; scope it last, and check what KDP accepts at the time (its Kids' Book Creator
+    route, versus fixed-layout EPUB uploads).
+  *Questions for the user before starting:* picture books or early readers first; whether
+  picture-book text is typed in the page designer or drawn into the art by the illustrator
+  (many self-published books do the latter, which makes the designer mostly a placement and
+  checking tool); and whether a fixed-layout ebook is wanted at all.
 
 These grow *what* the app does; per the strategy note below, **packaging still grows *who* uses
 it**, and remains the bigger lever for a free+donate app. Rank poetry ≈ anthologies (cheap,
