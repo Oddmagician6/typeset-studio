@@ -222,6 +222,17 @@ line here.
   no longer in its library is marked "(not in your … library)" in its list, and
   Preview names what it drew without, where it used to fall back to Times in
   silence.
+- **The continuity check finds misspelt names anywhere in the book.** It only
+  ever compared the first couple of hundred capitalised words, so in a novel a
+  name spelt differently after the first few chapters was never noticed.
+- **The continuity check's Claude analysis runs only when you ask.** With an
+  Anthropic API key set, it used to send the start of every chapter to
+  Anthropic each time you opened the report. Now there's an "Ask Claude as
+  well" button, which says what will be sent.
+- **Pages no longer wait on the update check.** With update checks on, a page
+  could take several seconds to open while the app asked for the latest
+  version - and while offline, every page did. The check now runs in the
+  background, and after a failed one it waits an hour before trying again.
 - **A style that can't fit its page says so in words**: "A space on page 2
   doesn't fit in the room a page has for text…", not a message about
   `Flowable <Spacer at 0x…>`.

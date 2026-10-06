@@ -74,6 +74,8 @@
         <span class="head-label">Claude Analysis</span>
         {% if not api_enabled %}
           <span class="badge badge-info">Disabled</span>
+        {% elif not asked %}
+          <span class="badge badge-info">Not run</span>
         {% elif issues_t2 and issues_t2[0].severity == 'info' %}
           <span class="badge badge-warn">Error</span>
         {% elif t2_warns %}
@@ -90,6 +92,21 @@
           <span class="chk-label">Not enabled</span>
           <span class="chk-detail">
             Set <code>ANTHROPIC_API_KEY</code> in your environment and restart to enable deep semantic analysis (character descriptions, timelines, location conflicts).
+          </span>
+        </li>
+        {% elif not asked %}
+        <li>
+          <span class="icon info-clr">ℹ</span>
+          <span class="chk-label">Only when you ask</span>
+          <span class="chk-detail">
+            Claude reads the first {{ excerpt_words }} words of each of the {{ chapters }}
+            chapter{{ 's' if chapters != 1 }} - sent to Anthropic with your API key - and
+            looks for contradictions between them (descriptions, timelines, places).
+            Nothing is sent until you press the button.
+            <form method="post" action="{{ url_for('project_continuity', pid=pid) }}" style="margin-top:10px">
+              <input type="hidden" name="ask_claude" value="1">
+              <button class="btn btn-sm" type="submit">Ask Claude as well</button>
+            </form>
           </span>
         </li>
         {% elif issues_t2 %}
