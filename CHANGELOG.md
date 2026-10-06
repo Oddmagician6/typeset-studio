@@ -158,6 +158,22 @@ line here.
   one link name, so the second couldn't be reached, and the PDF and the ebook
   disagreed about which chapter a link went to. The first keeps its name
   (`#1984`); the next is `#1984-2`.
+- **Delete always asks first.** A book, style or cover template with an
+  apostrophe or quote in its name ("O'Brien's Road") was deleted at once,
+  without the "are you sure?" - and a deleted book can't be brought back.
+- **Deleting a book takes everything that was only its own** - its History,
+  back-cover image, wrap front and thumbnail too, not just the manuscript and
+  cover. A new book later given the same name used to inherit the old one's
+  History, where Restore offered the deleted book's text. Files another book
+  also uses are kept, and so are the PDFs and packages it built.
+- **Deleting a style or cover template that books use says which books, and
+  asks.** Afterwards those books say what's missing: a book whose cover
+  template was deleted used to build with no cover and no word about it.
+- **Cover gallery tiles stay current**: they are redrawn when a font they use
+  leaves the library or after an update that draws covers differently, not
+  only when the template is edited.
+- **A new book, style or template never takes the name of a file that is
+  there but damaged**, which it would have saved over.
 
 ## 1.3.0 — 3 October 2026
 

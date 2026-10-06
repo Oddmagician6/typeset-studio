@@ -390,7 +390,7 @@ def _min_inside(pages, table):
     return None
 
 
-def _missing_checks(figures=(), cover_fonts=(), design_missing=()):
+def _missing_checks(figures=(), cover_fonts=(), design_missing=(), template_gone=''):
     """Check rows for what a book names but the libraries no longer have."""
     def listed(names):
         names = sorted(set(names))
@@ -404,6 +404,10 @@ def _missing_checks(figures=(), cover_fonts=(), design_missing=()):
         out.append({'label': 'Cover fonts', 'ok': False, 'detail': (
             f'Not in the font library, so the cover is set in the book’s own faces '
             f'instead: {listed(cover_fonts)}')})
+    if template_gone:
+        out.append({'label': 'Cover', 'ok': False, 'detail': (
+            f'The cover template “{template_gone}” has been deleted, so this book has no '
+            f'cover - pick another, or upload art, on its Edit page')})
     for what, names in design_missing or ():
         out.append({'label': 'Cover wrap', 'ok': False, 'detail': f'{what}: {listed(names)}'})
     return out
@@ -430,7 +434,8 @@ def _preflight(build_result, preset, page_count):
                               if build_result.get('fonts_embedded')
                               else 'Standard PDF fonts not embedded — platforms may reject')})
     checks += _missing_checks(build_result.get('figures_missing'),
-                              build_result.get('cover_fonts_missing'))
+                              build_result.get('cover_fonts_missing'),
+                              template_gone=build_result.get('cover_template_gone', ''))
 
     if build_result.get('has_cover'):
         checks.append({
@@ -847,7 +852,7 @@ def save_cover_template(cid, data):
 
 def unique_cover_id(base):
     cid, n = base, 2
-    existing = {i['id'] for i in list_cover_templates()}
+    existing = {i['id'] for i in list_cover_templates()} | _ids_in(COVER_DIR)
     while cid in existing:
         cid = f'{base}-{n}'
         n += 1
@@ -927,7 +932,7 @@ def save_preset(pid, data):
 
 def unique_id(base):
     pid, n = base, 2
-    existing = {i['id'] for i in list_presets()}
+    existing = {i['id'] for i in list_presets()} | _ids_in(PRESET_DIR)
     while pid in existing:
         pid = f'{base}-{n}'
         n += 1
@@ -1029,9 +1034,24 @@ def _drop_out(name, folder=None):
             pass
 
 
+def _ids_in(folder, ext='.json'):
+    """The ids a folder's files take, readable or not: a listing skips a file
+    it can't parse, and an id picked from that would be saved over it."""
+    try:
+        return {f[:-len(ext)] for f in os.listdir(folder) if f.endswith(ext)}
+    except OSError:
+        return set()
+
+
 def unique_project_id(base):
     pid, n = base, 2
-    existing = {i['id'] for i in list_projects()}
+    # a history folder left by a book deleted before 1.3.1 would otherwise be
+    # handed to the next book of that name, and its Restore offer the old text
+    try:
+        leftovers = set(os.listdir(HISTORY_DIR))
+    except OSError:
+        leftovers = set()
+    existing = {i['id'] for i in list_projects()} | _ids_in(PROJECT_DIR) | leftovers
     while pid in existing:
         pid = f'{base}-{n}'
         n += 1
@@ -1428,8 +1448,8 @@ def favicon():
 
 
 @app.route('/')
-def index():
-    return render_template('index.html', presets=list_presets())
+def index(confirm=None):
+    return render_template('index.html', presets=list_presets(), confirm=confirm)
 
 
 def ornament_tiles():
@@ -1572,19 +1592,36 @@ def large_print(pid):
     return redirect(url_for('editor', pid=new_id))
 
 
+def _books_using(key, value):
+    """The names of the books whose `key` is `value` (their style, their cover template)."""
+    return [f'the book “{it["data"].get("name") or it["data"].get("title") or it["id"]}”'
+            for it in list_projects() if value and it['data'].get(key) == value]
+
+
 @app.route('/delete/<pid>', methods=['POST'])
 def delete(pid):
-    path = os.path.join(PRESET_DIR, secure_filename(pid) + '.json')
-    if os.path.exists(path):
-        os.remove(path)
-        flash('Style deleted.')
+    pid = secure_filename(pid)
+    path = os.path.join(PRESET_DIR, pid + '.json')
+    if not pid or not os.path.exists(path):
+        flash('That style is already gone.')
+        return redirect(url_for('index'))
+    uses = _books_using('preset', pid)
+    if uses and request.form.get('confirm') != '1':
+        name = _load_preset_or_default(pid).get('name') or pid
+        return index(confirm={
+            'label': f'The style “{name}”', 'uses': uses,
+            'action': url_for('delete', pid=pid), 'back': url_for('index'),
+            'after': 'Deleted, these books can’t be typeset until you pick another style '
+                     'on their Edit page (which will say so).'})
+    os.remove(path)
+    flash('Style deleted.' + (' The books that used it need another style.' if uses else ''))
     return redirect(url_for('index'))
 
 
 # ------------------------------------------------------- cover template routes
 @app.route('/covers')
-def covers():
-    return render_template('covers.html', covers=list_cover_templates())
+def covers(confirm=None):
+    return render_template('covers.html', covers=list_cover_templates(), confirm=confirm)
 
 
 @app.route('/cover/new')
@@ -1636,11 +1673,56 @@ def cover_clone(cid):
 
 @app.route('/cover/delete/<cid>', methods=['POST'])
 def cover_delete(cid):
-    path = os.path.join(COVER_DIR, secure_filename(cid) + '.json')
-    if os.path.exists(path):
-        os.remove(path)
-        flash('Cover template deleted.')
+    cid = secure_filename(cid)
+    path = os.path.join(COVER_DIR, cid + '.json')
+    if not cid or not os.path.exists(path):
+        flash('That cover template is already gone.')
+        return redirect(url_for('covers'))
+    uses = _books_using('cover_template', cid)
+    if uses and request.form.get('confirm') != '1':
+        name = (load_cover_template(cid) or {}).get('name') or cid
+        return covers(confirm={
+            'label': f'The cover template “{name}”', 'uses': uses,
+            'action': url_for('cover_delete', cid=cid), 'back': url_for('covers'),
+            'after': 'Deleted, these books have no cover until you pick another template '
+                     'or upload art on their Edit page; their checks will say so.'})
+    os.remove(path)
+    _drop_cover_thumbs(cid)
+    flash('Cover template deleted.' + (' The books that used it need another cover.'
+                                       if uses else ''))
     return redirect(url_for('covers'))
+
+
+def _cover_thumb_key(src, tpl):
+    """What a gallery tile is drawn from: the template, the font and art files
+    it names (a font deleted from the library changes the cover), and the app's
+    version (an update that draws covers differently). Keyed by the template's
+    time alone, a tile kept showing what it was the day it was cached."""
+    parts = [APP_VERSION, str(os.path.getmtime(src))]
+    names = list((tpl.get('fonts') or {}).values()) if isinstance(tpl.get('fonts'), dict) else []
+    for fn in names:
+        p = fn if os.path.isabs(str(fn)) else os.path.join(FONT_DIR, str(fn))
+        parts.append(f'{fn}:{os.path.getmtime(p) if os.path.exists(p) else "-"}')
+    ems = tpl.get('emblems') if isinstance(tpl.get('emblems'), list) else []
+    for v in [tpl.get('background')] + ems:
+        img = v.get('image') if isinstance(v, dict) else None
+        if isinstance(img, str) and img.strip():
+            p = engine._cover_asset_path(img.strip()) or ''
+            parts.append(f'{img}:{os.path.getmtime(p) if p and os.path.exists(p) else "-"}')
+    return hashlib.sha1('|'.join(parts).encode('utf-8')).hexdigest()[:12]
+
+
+def _drop_cover_thumbs(cid):
+    """Remove every cached tile of a template."""
+    try:
+        for f in os.listdir(COVER_THUMB_DIR):
+            if f == cid + '.png' or f.startswith(cid + '~'):
+                try:
+                    os.remove(os.path.join(COVER_THUMB_DIR, f))
+                except OSError:
+                    pass
+    except OSError:
+        pass
 
 
 def _cover_thumb_bytes(cid):
@@ -1651,8 +1733,11 @@ def _cover_thumb_bytes(cid):
     src = os.path.join(COVER_DIR, cid + '.json')
     if not cid or not os.path.exists(src):
         return None
-    cache = os.path.join(COVER_THUMB_DIR, cid + '.png')
-    if os.path.exists(cache) and os.path.getmtime(cache) >= os.path.getmtime(src):
+    tpl = load_cover_template(cid)
+    if tpl is None:
+        return None
+    cache = os.path.join(COVER_THUMB_DIR, f'{cid}~{_cover_thumb_key(src, tpl)}.png')
+    if os.path.exists(cache):
         try:
             with open(cache, 'rb') as f:
                 return f.read()
@@ -1661,9 +1746,6 @@ def _cover_thumb_bytes(cid):
     try:
         import fitz
     except ImportError:
-        return None
-    tpl = load_cover_template(cid)
-    if tpl is None:
         return None
     preset = dict(DEFAULTS)
     preset['trim'] = {'w': 6.0, 'h': 9.0}
@@ -1686,6 +1768,7 @@ def _cover_thumb_bytes(cid):
         pix = doc[0].get_pixmap(matrix=fitz.Matrix(0.9, 0.9), alpha=False)
         png = pix.tobytes('png')
         doc.close()
+        _drop_cover_thumbs(cid)               # the tiles it supersedes
         try:
             _atomic_write_bytes(cache, png)   # a tile asked for twice at once
         except OSError:
@@ -4629,21 +4712,53 @@ def project_continuity(pid):
                            api_enabled=bool(api_key))
 
 
+_BOOK_FILES = ('manuscript_file', 'cover_file', 'print_back_file', 'wrap_front_file')
+
+
+def _book_files(proj):
+    """The files in the manuscripts folder a book names."""
+    return {os.path.basename(str(proj.get(k) or '')) for k in _BOOK_FILES} - {''}
+
+
 @app.route('/project/<pid>/delete', methods=['POST'])
 def project_delete(pid):
-    try:
-        proj = load_project(pid)
-        for field in ('manuscript_file', 'cover_file'):
-            fn = proj.get(field, '')
-            if fn:
-                fp = os.path.join(PROJECT_MS_DIR, fn)
-                if os.path.exists(fp):
-                    os.remove(fp)
-    except Exception:
-        pass
-    path = os.path.join(PROJECT_DIR, secure_filename(pid) + '.json')
-    if os.path.exists(path):
-        os.remove(path)
+    """Delete a book and everything that is only its own.
+
+    It used to take the manuscript and cover and leave the back-cover image,
+    the wrap's front, the page thumbnail and the whole History folder behind;
+    and the next book given the same name inherited that History, whose
+    Restore then offered the deleted book's text. Files another book also
+    names are kept. What the book built (in the output folder) stays - those
+    are downloads the writer may still want.
+    """
+    pid = secure_filename(pid)
+    path = os.path.join(PROJECT_DIR, pid + '.json')
+    with _PROJECT_LOCK:
+        proj = None
+        if pid and os.path.exists(path):
+            try:
+                with open(path, encoding='utf-8') as f:
+                    proj = json.load(f)
+            except (OSError, ValueError):
+                proj = None
+        if isinstance(proj, dict):
+            others = set()
+            for it in list_projects():
+                if it['id'] != pid:
+                    others |= _book_files(it['data'])
+            for fn in _book_files(proj) - others:
+                try:
+                    os.remove(os.path.join(PROJECT_MS_DIR, fn))
+                except OSError:
+                    pass
+        if pid and os.path.exists(path):
+            os.remove(path)
+        if pid:
+            shutil.rmtree(_history_folder(pid), ignore_errors=True)
+            try:
+                os.remove(os.path.join(PROJECT_THUMB_DIR, pid + '.png'))
+            except OSError:
+                pass
     flash('Project deleted.')
     return redirect(url_for('projects'))
 

@@ -31,6 +31,7 @@
 {% endblock %}
 
 {% block body %}
+  {% include '_in_use.html' %}
   <div class="pagehead">
     <div class="eyebrow">Composing styles</div>
     <h1>Styles</h1>
@@ -75,7 +76,8 @@
             </form>
             <span class="sep"></span>
             <form class="inline-form" method="post" action="{{ url_for('delete', pid=item.id) }}"
-                  onsubmit="return confirm('Delete the “{{ p.name }}” style? This cannot be undone.');">
+                  data-ask="Delete the “{{ p.name }}” style? This cannot be undone."
+                  onsubmit="return confirm(this.dataset.ask);">
               <button class="btn btn-ghost btn-sm" type="submit">Delete</button>
             </form>
           </div>

@@ -4615,6 +4615,9 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
         'font_details':   fonts['details'],
         'fonts_embedded': not fonts['fallback'],
         'figures_missing': figures_missing(manuscript, preset),
+        'cover_template_gone': (meta.get('cover_template') or '?')
+                               if meta.get('cover_mode') == 'designed'
+                               and not meta.get('cover_template_data') else '',
         'cover_fonts_missing': cover_fonts_missing(cover['template'])
                                if cover and cover.get('mode') == 'designed' else [],
         'press':          bool(press),

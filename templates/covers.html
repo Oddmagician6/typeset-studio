@@ -32,6 +32,7 @@
 {% endblock %}
 
 {% block body %}
+  {% include '_in_use.html' %}
   <div class="pagehead">
     <div class="eyebrow">Cover design</div>
     <h1>Covers</h1>
@@ -81,7 +82,8 @@
                 </form>
                 <span class="sep"></span>
                 <form class="inline-form" method="post" action="{{ url_for('cover_delete', cid=item.id) }}"
-                      onsubmit="return confirm('Delete the “{{ c.name }}” cover template? This cannot be undone.');">
+                      data-ask="Delete the “{{ c.name }}” cover template? This cannot be undone."
+                  onsubmit="return confirm(this.dataset.ask);">
                   <button class="btn btn-ghost btn-sm" type="submit">Delete</button>
                 </form>
               </div>

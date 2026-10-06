@@ -143,7 +143,8 @@
             {% endif %}
             <span class="sep"></span>
             <form class="inline-form" method="post" action="{{ url_for('project_delete', pid=item.id) }}"
-                  onsubmit="return confirm('Delete the project “{{ p.name }}”? This cannot be undone.');">
+                  data-ask="Delete the project “{{ p.name }}”? This cannot be undone."
+                  onsubmit="return confirm(this.dataset.ask);">
               <button class="btn btn-ghost btn-sm" type="submit">Delete</button>
             </form>
           </div>

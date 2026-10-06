@@ -18,16 +18,19 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 8–12 below, in order — next is item 8, housekeeping: clone and
-   delete** for books, styles and cover templates (orphaned files; what a clone carries;
-   deleting a style or template a book uses). Items 1-7 are done and merged, with fixes
+2. **Bug hunt plan, items 9–12 below, in order — next is item 9, a damaged data
+   folder** (corrupt JSON, missing files, unreadable images, read-only or full disk: say
+   what is wrong where, never a bare 500). **Open question for the user from item 8:**
+   should deleting a bundled style or cover template stick in the installed app? See
+   item 8's note. Items 1-8 are done and merged, with fixes
    **unreleased**: they wait in CHANGELOG's `## Unreleased`. Harnesses to copy:
    `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
    `test_manuscript_editor.py`, `test_project_edit.py` and `test_first_run.py` (real-time
    headless browser: virtual time never gives a page its animation frames; harness routes
    registered at import, before any request), `test_shared_state.py` (threads, a real
    threaded server, `Paused` to hold a build mid-way), `test_libraries.py`,
-   `test_outputs.py` (an offline structural EPUB validator: `validate`). The books in
+   `test_outputs.py` (an offline structural EPUB validator: `validate`),
+   `test_housekeeping.py` (a browser harness that answers `confirm()` itself). The books in
    `projects/` are the user's test data - probe copies anyway.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
@@ -386,6 +389,35 @@ session of awkward input; fix what is found, and note what isn't a bug.
    Does deleting a book remove its manuscript, history, cover files and saved design, or leave
    orphans? Does cloning carry the wrap design and print settings? Can a style or template a
    book still uses be deleted without a word? Rebuild all, and thumbnail caches going stale.
+   - **Done (2026-10-05).** `test_housekeeping.py` (test client, and headless Chrome for the
+     prompts). Found and fixed:
+     - **Delete didn't ask for a name with a quote in it**: the books, styles and covers
+       pages put the name inside an inline `confirm('…')`, so "O'Brien's Road" broke the
+       handler and the form submitted at once - confirmed in a browser on the old code.
+       They read `data-ask` now (as the Fonts and Figures pages since item 6).
+     - **Deleting a book left its History, back image, wrap front and thumbnail**, and
+       `unique_project_id` then handed its id to the next book of that name, which
+       inherited the History (Restore offered the deleted book's text). `project_delete`
+       removes every file the book names (`_BOOK_FILES`) unless another book names it too,
+       the History folder and the thumbnail; its outputs stay. New ids also avoid leftover
+       History folders (from deletes before this) and every `.json` on disk, readable or
+       not - `unique_id`/`unique_cover_id` too (`_ids_in`), so nothing lands on a damaged file.
+     - **Deleting a style or template books use said nothing**: an "is in use" panel
+       (`templates/_in_use.html`, `_books_using`) asks first. A book whose designed
+       template is gone built with no cover silently; `build_pdf` reports
+       `cover_template_gone` and the checks say so. (A missing style already said so.)
+     - **Gallery tiles were keyed by the template's mtime alone**: a font deleted from the
+       library, or an update that draws covers differently, left the old picture.
+       `_cover_thumb_key` hashes the app version, the template's mtime and the font,
+       background and emblem files it names; one tile per template (`_drop_cover_thumbs`),
+       removed with it.
+     Not bugs: style and cover clones carry every key; Rebuild all reports a book whose
+     style is gone. There is no "duplicate a book" - a feature, not a bug. **Asked, not
+     changed:** the installed app's `_seed_defaults` copies back any bundled style, cover
+     template or font that is missing at each start, so deleting a bundled style or
+     template is undone at the next launch (the prompt says "cannot be undone"). Keeping
+     a list of deleted bundled names would make it stick, but then there's no way back
+     to the original - the user's call.
 9. **A damaged data folder.** A corrupted JSON file (project, style, cover), a missing
    manuscript or cover file, an unreadable image, very long and non-ASCII names, a read-only
    or full disk. The app should say what is wrong where it is wrong, never a bare 500, and
