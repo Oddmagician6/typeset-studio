@@ -29,13 +29,13 @@ except ImportError:
 
 import matter as _matter
 import ornaments as _orn
-from manuscript import (_inline as _ms_inline, chapter_anchors as _ms_anchors,
+from manuscript import (_inline as _ms_inline, book_anchors as _ms_book_anchors,
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts,
                         CELL_SEP as _MS_CELL)
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER, TA_RIGHT
-from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle as _RLParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -58,6 +58,23 @@ FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
 COVER_ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'covers', 'assets')
 # Interior figures (~~~ figure src="…"). Same arrangement as the cover assets.
 FIGURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
+
+# The smallest text a style allows (`min_text_size`), for the build running on
+# this thread: a large-print style sets 16pt, and every paragraph style made
+# while it builds - the title and copyright pages, letters, telegrams, notes,
+# whatever has a size of its own - is brought up to it, leading in proportion.
+# Running heads and folios are drawn straight on the page and keep their own.
+_FLOOR = threading.local()
+
+
+class ParagraphStyle(_RLParagraphStyle):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        floor = getattr(_FLOOR, 'size', 0)
+        if floor and 0 < self.fontSize < floor:
+            grow = floor / self.fontSize
+            self.fontSize = floor
+            self.leading = self.leading * grow
 
 
 # ---------------------------------------------------------------- cover helpers
@@ -2706,8 +2723,15 @@ def _ep_dfont(fonts, dateline_style):
     return fonts['bold'] if dateline_style in ('bold', 'smallcaps') else fonts['italic']
 
 
+def _ep_esc(s):
+    """A block header's attribute value as text, not markup: `from="A & B"`
+    or `to="<C>"` were handed to ReportLab raw, which read `<C>` as a tag and
+    dropped it. Escaped after any upper-casing (`&amp;` would become `&AMP;`)."""
+    return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
 def _ep_dtext(s, dateline_style):
-    return s.upper() if dateline_style == 'smallcaps' else s
+    return _ep_esc(s.upper() if dateline_style == 'smallcaps' else s)
 
 
 def _render_letter_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
@@ -2824,7 +2848,7 @@ def _render_telegram_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
     rows    = [[Paragraph('TELEGRAM', banner_s)]]
     n_hdr   = 1
     if to_val:
-        rows.append([Paragraph(f'To: {to_val.upper()}', meta_s)])
+        rows.append([Paragraph(f'To: {_ep_esc(to_val.upper())}', meta_s)])
         n_hdr = 2
     for _, text in block_paras:
         rows.append([Paragraph(_ep_plain(text).upper(), body_s)])
@@ -2869,12 +2893,12 @@ def _render_newspaper_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
 
     headline = attrs.get('headline', '').strip()
     if headline:
-        out += [Paragraph(headline.upper(), hl_s), Spacer(1, 3)]
+        out += [Paragraph(_ep_esc(headline.upper()), hl_s), Spacer(1, 3)]
 
     byline_parts = [p for p in (attrs.get('source', '').strip(),
                                  attrs.get('date',   '').strip()) if p]
     if byline_parts:
-        out += [Paragraph('  ·  '.join(byline_parts), byline_s), Spacer(1, 4)]
+        out += [Paragraph(_ep_esc('  ·  '.join(byline_parts)), byline_s), Spacer(1, 4)]
 
     out += [HRule(), Spacer(1, 6)]
     for _, text in block_paras:
@@ -2905,7 +2929,7 @@ def _render_redacted_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
     classification = attrs.get('classification', '').strip()
     rows = []
     if classification:
-        rows.append([Paragraph(classification.upper(), class_s)])
+        rows.append([Paragraph(_ep_esc(classification.upper()), class_s)])
     for _, text in block_paras:
         t = _hyphenate_markup(text, hyph) if hyph else text
         rows.append([Paragraph(t, body_s)])
@@ -3915,8 +3939,15 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             text_h = (preset['trim']['h'] - preset['margins']['top']
                       - preset['margins']['bottom']) * inch
             top_gap = max(text_h - 2.4 * inch, 0.5 * inch)
-            return [BlankMarker(), Spacer(1, top_gap),
-                    Paragraph(cp.replace('\n', '<br/>'), small), PageBreak()]
+            para = Paragraph(cp.replace('\n', '<br/>'), small)
+            # a block taller than that room (large print sets it at 16pt) is
+            # raised just enough to stay on its page; one that fits doesn't move
+            text_w = (preset['trim']['w'] - preset['margins']['inside']
+                      - preset['margins']['outside']) * inch
+            need = para.wrap(text_w, text_h)[1] + 6
+            if top_gap + need > text_h:
+                top_gap = max(text_h - need, 0)
+            return [BlankMarker(), Spacer(1, top_gap), para, PageBreak()]
 
         if level == 'full':
             story += [Spacer(1, 2.2 * inch), Paragraph(meta.get('title', ''), half), PageBreak()]
@@ -3959,6 +3990,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     current_part_num = None
 
     _numbers = _ms_numbers(manuscript['chapters'])
+    _anchors = _ms_book_anchors(manuscript['chapters'])
     for idx, ch in enumerate(manuscript['chapters'], start=1):
         ch_part     = ch.get('part')
         ch_part_num = ch_part['number'] if ch_part else None
@@ -3996,7 +4028,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         if art and art_pos == 'above':
             story.extend(art)
         # Destinations for in-book links: `[see](#chapter-2)` or the title's slug.
-        anchors = ''.join(f'<a name="{a}"/>' for a in _ms_anchors(ch, idx))
+        anchors = ''.join(f'<a name="{a}"/>' for a in _anchors[idx - 1])
         if c.get('show_number', True) and _numbers[idx - 1] is not None:
             label = c.get('number_format', 'Chapter {n}').format(n=_numbers[idx - 1])
             story.append(Paragraph(anchors + label, st['chap_num']))
@@ -4339,10 +4371,7 @@ _INBOOK_LINK_RE = re.compile(r'<a href="#([^"]*)">(.*?)</a>', re.S)
 
 def _inbook_anchors(chapters):
     """Every `#anchor` this book plants a destination for."""
-    known = set()
-    for idx, ch in enumerate(chapters, 1):
-        known.update(_ms_anchors(ch, idx))
-    return known
+    return {a for names in _ms_book_anchors(chapters) for a in names}
 
 
 def _unlink_dead(text, known, dead):
@@ -4400,17 +4429,24 @@ def build_pdf(manuscript, preset, out_path, meta, press=False):
     the CMYK conversion failed, and a print interior wants a coverless block
     either way — the page count it reports is what a spine gets cut from.
     """
-    if not press:
-        return _build_pdf(manuscript, preset, out_path, meta)
     try:
-        return _build_pdf(manuscript, preset, out_path, meta, press=True)
-    except ValueError as exc:
-        if 'color' not in str(exc).lower():
-            raise
-        res = _build_pdf(manuscript, preset, out_path, _coverless(meta))
-        res['press'] = False
-        res['press_error'] = str(exc)
-        return res
+        _FLOOR.size = float(preset.get('min_text_size') or 0)
+    except (TypeError, ValueError):
+        _FLOOR.size = 0
+    try:
+        if not press:
+            return _build_pdf(manuscript, preset, out_path, meta)
+        try:
+            return _build_pdf(manuscript, preset, out_path, meta, press=True)
+        except ValueError as exc:
+            if 'color' not in str(exc).lower():
+                raise
+            res = _build_pdf(manuscript, preset, out_path, _coverless(meta))
+            res['press'] = False
+            res['press_error'] = str(exc)
+            return res
+    finally:
+        _FLOOR.size = 0
 
 
 def _build_pdf(manuscript, preset, out_path, meta, press=False):

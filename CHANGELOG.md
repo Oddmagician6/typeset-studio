@@ -143,6 +143,21 @@ line here.
 - **Fonts and figures with spaces or quotes in their names** (put in the
   folder by hand) can be shown and removed; a quote in a font's name no
   longer let Remove skip its "are you sure?".
+- **Large print is large throughout.** A large-print style set the body at
+  16pt, but the title page, the copyright page (8.5pt), the epigraph and the
+  letters, telegrams and newspaper cuttings kept their own smaller sizes. Now
+  nothing to read is set under 16pt (running heads and page numbers keep
+  their own), and the copyright page, now larger, still fits on its page. The
+  style editor shows this as **Smallest text**, under Body text, so it can be
+  changed - and it is no longer lost when a large-print style is saved.
+- **Letters, journals, telegrams, newspaper cuttings and redacted files with
+  "&" or "<" in their headers** (`from="A & B"`) print as typed. The PDF
+  dropped anything in angle brackets, and the ebook's chapter came out
+  malformed - a store would reject the file.
+- **Two chapters with the same title can each be linked to.** They shared
+  one link name, so the second couldn't be reached, and the PDF and the ebook
+  disagreed about which chapter a link went to. The first keeps its name
+  (`#1984`); the next is `#1984-2`.
 
 ## 1.3.0 — 3 October 2026
 

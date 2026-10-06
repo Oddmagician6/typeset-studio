@@ -586,6 +586,29 @@ def chapter_anchors(chapter, idx):
     return names
 
 
+def book_anchors(chapters):
+    """`chapter_anchors` for every chapter of a book, each name used once.
+
+    Two chapters with one title ("1984" twice, "Interlude" in each part) gave
+    both the same `#slug`: the PDF sent a link to the last of them, the EPUB to
+    the first, and the other could not be linked at all. The first keeps the
+    plain slug; a later one is `slug-2`, `slug-3`.
+    """
+    taken, out = set(), []
+    for idx, ch in enumerate(chapters, 1):
+        names = []
+        for name in chapter_anchors(ch, idx):
+            if name in taken:
+                n = 2
+                while f'{name}-{n}' in taken:
+                    n += 1
+                name = f'{name}-{n}'
+            taken.add(name)
+            names.append(name)
+        out.append(names)
+    return out
+
+
 def _slug(name):
     return slugify(name) or 'image'
 
