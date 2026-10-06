@@ -104,6 +104,26 @@ line here.
   bare "Not Found" page. Send to print says the same.
 - **Save as project only takes files from Set a book's own uploads.** It
   copied whatever file the page named.
+- **Fonts change when you change them.** The app held on to the first font
+  it had used under a name until it was restarted: a cover template given
+  new fonts kept the faces of the first cover drawn that session, a style
+  whose fonts were changed but whose family name stayed kept its old ones, and
+  a font file replaced in the library was still printed (and measured in the
+  Wrap designer) as the old one. Each font is now its own file, as it is now.
+- **Covers and books drawn at the same time keep their own fonts** - the
+  cover gallery draws many at once, and could print one cover in another's
+  faces. Two ebooks exported at once kept their own in-book links too; one
+  could point into the other's chapters.
+- **A save made while a book builds is kept.** Typeset and Send to print
+  wrote the book back as it was when they started, so settings saved or the
+  first writing-page save of a Word book made meanwhile in another tab were
+  undone (the book then showed its old text). A book deleted while it built
+  no longer comes back.
+- **Two builds of a book in the same second write two files**, rather than
+  both writing one; a build that fails leaves no empty file behind.
+- **Snapshots taken at the same moment each keep their own text** in History.
+- **A broken font uploaded under a name a good font once had** is refused, as
+  any broken font is.
 
 ## 1.3.0 — 3 October 2026
 
