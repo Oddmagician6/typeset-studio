@@ -199,17 +199,68 @@ def cover_fonts_missing(tpl):
     return sorted(set(out))
 
 
+_READABLE = {}
+
+
+def picture_unreadable(path):
+    """True for a file that is there but isn't a picture anything can draw (cut
+    short, damaged, or not an image at all). Such a file was left off a cover, or
+    printed as a "missing image" box, while every check called it present."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False                 # not there: the "missing" checks say so
+    key = (path, st.st_mtime_ns, st.st_size)
+    if key not in _READABLE:
+        try:
+            from reportlab.lib.utils import ImageReader
+            iw, ih = ImageReader(path).getSize()
+            with open(path, 'rb') as f:
+                jpeg = f.read(3) == b'\xff\xd8\xff'
+            # a JPEG goes into the PDF as it is, never decoded, so it draws
+            # whenever its header reads; anything else is decoded to be drawn
+            if _HAVE_PIL and not jpeg:
+                try:
+                    with PILImage.open(path) as im:
+                        im.load()
+                except PILImage.DecompressionBombError:
+                    pass             # merely very large: that is not damage
+            _READABLE[key] = iw > 0 and ih > 0
+        except Exception:
+            _READABLE[key] = False
+    return not _READABLE[key]
+
+
+def cover_art_missing(tpl):
+    """The pictures a cover template names (its background art and emblems)
+    that are gone or can't be read: the cover is drawn without them."""
+    tpl = tpl or {}
+    names = [((tpl.get('background') or {}).get('image') or '').strip()]
+    ems = tpl.get('emblems')
+    names += [(em.get('image') or '').strip() for em in ems or []
+              if isinstance(em, dict)] if isinstance(ems, list) else []
+    out = []
+    for name in names:
+        if not name:
+            continue
+        path = _cover_asset_path(name)
+        if not path or not os.path.exists(path) or picture_unreadable(path):
+            out.append(os.path.basename(name))
+    return sorted(set(out))
+
+
 def figures_missing(ms, preset):
     """The figure files a book names (its `~~~ figure` blocks and its style's
-    chapter-opening art) that aren't in the figure library. Each prints as a
-    "missing image" box, which is easy to miss in a long proof."""
+    chapter-opening art) that aren't in the figure library, or can't be read.
+    Each prints as a "missing image" box, which is easy to miss in a long proof."""
     want = [chapter_art_src(preset)]
     for ch in ms.get('chapters', []):
         for block in ch.get('blocks', []):
             if block[0] == 'doc_block' and len(block) >= 3 \
                     and block[2].get('_type') == 'figure':
                 want.append((block[2].get('src') or '').strip())
-    return sorted({s for s in want if s and not _figure_asset_path(s)})
+    return sorted({s for s in want if s and (not _figure_asset_path(s)
+                                              or picture_unreadable(_figure_asset_path(s)))})
 
 
 def _register_cover_fonts(tpl, interior):
@@ -4620,6 +4671,8 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
                                and not meta.get('cover_template_data') else '',
         'cover_fonts_missing': cover_fonts_missing(cover['template'])
                                if cover and cover.get('mode') == 'designed' else [],
+        'cover_art_missing': cover_art_missing(cover['template'])
+                             if cover and cover.get('mode') == 'designed' else [],
         'press':          bool(press),
         'has_cover':      cover is not None,
     }

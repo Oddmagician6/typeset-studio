@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Typeset Studio{% endblock %}
+
+{% block style %}
+  .problem{max-width:720px;background:var(--surface);border:1px solid var(--accent,#b0472a);
+    border-radius:3px;box-shadow:var(--shadow);padding:20px 24px 22px}
+  .problem h1{font-family:var(--serif);font-size:24px;margin:0 0 8px}
+  .problem .msg{font-size:15px;margin:0 0 14px;word-break:break-word}
+  .problem p{color:var(--muted);font-size:14px;margin:0 0 12px;max-width:62ch}
+  .problem .acts{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:16px}
+{% endblock %}
+
+{% block body %}
+  <div class="problem" id="problem">
+    <h1>{{ title }}</h1>
+    <p class="msg">{{ message }}</p>
+    {% if damaged %}
+      {% if damaged.kept %}
+        <p>{{ damaged.kept }} of its settings can still be read. <b>Repair</b> keeps those and
+          sets the rest to their defaults; the damaged file is kept beside it.</p>
+      {% else %}
+        <p>None of its settings can be read back. <b>Repair</b> starts {{ damaged.what }} afresh
+          under the same name; the damaged file is kept beside it.</p>
+      {% endif %}
+      {% if damaged.kind == 'book' %}
+        <p>{% if damaged.manuscript %}The manuscript, <b>{{ damaged.manuscript }}</b>, is safe:
+          it is a separate file, and the repaired book will use it.
+          {% else %}The manuscript is a separate file and is not touched by this; you may need to
+          choose it again on the book's Edit page.{% endif %}</p>
+      {% endif %}
+      <div class="acts">
+        <form class="inline-form" method="post"
+              action="{{ url_for('damaged_repair', kind=damaged.kind, ident=damaged.id) }}">
+          <button class="btn btn-primary btn-sm" type="submit">Repair</button>
+        </form>
+        <form class="inline-form" method="post"
+              action="{{ url_for('project_delete', pid=damaged.id) if damaged.kind == 'book'
+                         else url_for('delete', pid=damaged.id) if damaged.kind == 'style'
+                         else url_for('cover_delete', cid=damaged.id) }}"
+              data-ask="Delete {{ damaged.what }} “{{ damaged.id }}”? This cannot be undone."
+              onsubmit="return confirm(this.dataset.ask);">
+          <button class="btn btn-ghost btn-sm" type="submit">Delete it</button>
+        </form>
+        <a class="btn btn-sm" href="{{ back }}">Go back</a>
+      </div>
+    {% else %}
+      <div class="acts"><a class="btn btn-sm" href="{{ back }}">Go back</a></div>
+    {% endif %}
+  </div>
+{% endblock %}

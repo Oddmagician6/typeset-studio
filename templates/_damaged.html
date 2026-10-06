@@ -1,0 +1,22 @@
+{# Files of this page's kind that can't be read: named, not silently left out.
+   Expects `damaged` = [{kind, id, file, problem}] from `damaged_files`. #}
+{% if damaged %}
+  <div class="damaged-panel" id="damaged">
+    <h2>{{ damaged|length }} {{ 'file' if damaged|length == 1 else 'files' }} can't be read</h2>
+    <ul>{% for d in damaged %}
+      <li><b>{{ d.file }}</b> {{ d.problem }}
+        <form class="inline-form" method="post"
+              action="{{ url_for('damaged_repair', kind=d.kind, ident=d.id) }}">
+          <button class="btn btn-sm" type="submit">Repair</button>
+        </form></li>
+    {% endfor %}</ul>
+  </div>
+  <style>
+    .damaged-panel{background:var(--surface);border:1px solid var(--accent,#b0472a);border-radius:3px;
+      box-shadow:var(--shadow);padding:14px 22px 14px;margin:0 0 22px}
+    .damaged-panel h2{font-family:var(--serif);font-size:18px;margin:0 0 6px}
+    .damaged-panel ul{margin:0;padding-left:20px;line-height:1.7;font-size:14px}
+    .damaged-panel li{margin:4px 0}
+    .damaged-panel .inline-form{display:inline;margin-left:8px}
+  </style>
+{% endif %}
