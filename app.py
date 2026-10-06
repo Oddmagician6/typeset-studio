@@ -12,6 +12,7 @@ import os
 import re
 import sys
 import json
+import math
 import base64
 import hashlib
 import shutil
@@ -940,8 +941,9 @@ def upgrade_project(proj):
 
 def save_project_file(pid, data):
     path = os.path.join(PROJECT_DIR, secure_filename(pid) + '.json')
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    # all at once: a plain write that was interrupted left a half-written book
+    # that no page could open
+    _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def unique_project_id(base):
@@ -1831,10 +1833,10 @@ def cover_asset_upload():
     f = request.files.get('asset')
     if not f or not f.filename:
         return jsonify({'ok': False, 'error': 'No file provided.'})
-    ext = os.path.splitext(secure_filename(f.filename))[1].lower()
+    ext = _upload_ext(f)
     if ext not in IMAGE_EXTS:
         return jsonify({'ok': False, 'error': 'Use a .jpg or .png image.'})
-    base = secure_filename(os.path.splitext(f.filename)[0]) or 'asset'
+    base = os.path.splitext(_safe_upload_name(f.filename, 'asset'))[0]
     fn, dest, i = base + ext, os.path.join(COVER_ASSET_DIR, base + ext), 1
     while os.path.exists(dest):
         fn = f'{base}-{i}{ext}'
@@ -1857,7 +1859,7 @@ def _save_back_image(f):
     """Save an uploaded back-cover image (photo/logo) to a temp file. Returns path or None."""
     if not f or not f.filename:
         return None
-    ext = os.path.splitext(secure_filename(f.filename))[1].lower()
+    ext = _upload_ext(f)
     if ext not in ('.jpg', '.jpeg', '.png'):
         return None
     fd, tmp = tempfile.mkstemp(suffix=ext)
@@ -2408,7 +2410,7 @@ def fonts_upload():
     for up in request.files.getlist('fonts'):
         if not up or not up.filename:
             continue
-        fn = secure_filename(up.filename)
+        fn = _safe_upload_name(up.filename, 'font')
         if not fn.lower().endswith(FONT_EXTS):
             skipped.append(f'{up.filename} (not a .ttf/.otf)')
             continue
@@ -2477,7 +2479,7 @@ def list_figures():
 
 def _save_figure(up):
     """Validate and store one uploaded illustration. Returns (filename, error)."""
-    fn = secure_filename(up.filename or '')
+    fn = _safe_upload_name(up.filename, 'figure')
     if not fn.lower().endswith(FIGURE_EXTS):
         return None, f'{up.filename} (not a .jpg/.png/.gif)'
     dest = os.path.join(FIGURE_DIR, fn)
@@ -2569,7 +2571,7 @@ def generate():
 
     up = request.files.get('manuscript')
     if up and up.filename:
-        fn = secure_filename(up.filename)
+        fn = _safe_upload_name(up.filename, 'manuscript')
         dest = os.path.join(UPLOAD_DIR, fn)
         up.save(dest)
         ms_path, ms_type = dest, 'file'
@@ -2586,7 +2588,7 @@ def generate():
                 flash(f'Could not read the Word file: {exc}')
                 return render_template('generate.html', presets=presets, form=form)
         else:
-            raw = open(dest, encoding='utf-8', errors='replace').read()
+            raw = _read_text_file(dest)
     elif form.get('pasted', '').strip():
         raw = _norm_newlines(form['pasted'])
         stamp_p = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -2607,7 +2609,7 @@ def generate():
     cover_path = ''
     cov = request.files.get('cover')
     if cov and cov.filename:
-        cfn = secure_filename(cov.filename)
+        cfn = _safe_upload_name(cov.filename, 'cover')
         cover_path = os.path.join(UPLOAD_DIR, cfn)
         cov.save(cover_path)
     if cover_mode == 'none':
@@ -2756,7 +2758,7 @@ def _book_from_compose_form(tmp_files):
     raw = None
     up = request.files.get('manuscript')
     if up and up.filename:
-        fn = secure_filename(up.filename)
+        fn = _safe_upload_name(up.filename, 'manuscript')
         fd, tmp_ms = tempfile.mkstemp(suffix='_' + fn)
         os.close(fd)
         up.save(tmp_ms)
@@ -2769,7 +2771,7 @@ def _book_from_compose_form(tmp_files):
             except Exception as exc:
                 raise _PreviewError(f'Could not read the Word file: {exc}')
         else:
-            raw = open(tmp_ms, encoding='utf-8', errors='replace').read()
+            raw = _read_text_file(tmp_ms)
     elif form.get('pasted', '').strip():
         raw = form['pasted']
     elif form.get('use_sample'):
@@ -2783,7 +2785,7 @@ def _book_from_compose_form(tmp_files):
     cover_path = ''
     cov = request.files.get('cover')
     if cov and cov.filename:
-        cfn = secure_filename(cov.filename)
+        cfn = _safe_upload_name(cov.filename, 'cover')
         fd, tmp_cov = tempfile.mkstemp(suffix='_' + cfn)
         os.close(fd)
         cov.save(tmp_cov)
@@ -3056,6 +3058,87 @@ def project_create():
     return redirect(url_for('projects'))
 
 
+MANUSCRIPT_EXTS = ('.docx', '.md', '.markdown', '.txt')
+
+
+def _upload_ext(f):
+    """An upload's extension, lower case, from the name as sent.
+
+    Not from `secure_filename`: it drops every non-ASCII letter, so "Роман.docx"
+    came out as "docx", with no extension at all - stored as such, a Word file
+    was then read as text.
+    """
+    ext = os.path.splitext(f.filename or '')[1].lower()
+    return ext if re.fullmatch(r'\.[a-z0-9]{1,8}', ext) else ''
+
+
+def _safe_upload_name(filename, fallback):
+    """A safe file name for an upload that keeps its extension. A name with no
+    ASCII letters ("Глава.docx") has no stem left after `secure_filename`, so it
+    becomes `fallback` plus a few characters from a hash of the real name - two
+    such uploads still get two files."""
+    ext = os.path.splitext(filename or '')[1]    # its case kept, as before
+    if not re.fullmatch(r'[.][A-Za-z0-9]{1,8}', ext):
+        ext = ''
+    stem = secure_filename(os.path.splitext(filename or '')[0])
+    if not stem:
+        stem = fallback + '-' + hashlib.sha1((filename or '').encode('utf-8')).hexdigest()[:6]
+    return stem + ext
+
+
+def _is_image(data):
+    try:
+        from PIL import Image
+        Image.open(io.BytesIO(data)).verify()
+        return True
+    except Exception:
+        return False
+
+
+def _choice(form, key, allowed, current, default):
+    """A select's value, if it is one of its options - or the value the book
+    already has, which the page keeps as an option of its own even when this
+    version doesn't know it (a style since deleted, a printer from a newer
+    version). Anything else keeps what the book had."""
+    v = form.get(key, current)
+    if v in allowed or (v and v == current):
+        return v
+    return current if current in allowed else default
+
+
+def _num(form, key, current, lo, hi):
+    """A number field: not a number, or not finite, keeps the old value (NaN and
+    Infinity used to be written into the book's JSON); out of range is clamped."""
+    try:
+        v = float(form.get(key, ''))
+    except (TypeError, ValueError):
+        return current
+    if not math.isfinite(v):
+        return current
+    return min(max(v, lo), hi)
+
+
+def _replace_file(pid, data, name, old):
+    """Write an upload into the book's folder and drop the file it replaces."""
+    _atomic_write_bytes(os.path.join(PROJECT_MS_DIR, name), data)
+    if old and old != name:
+        old_path = os.path.join(PROJECT_MS_DIR, old)
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+
+
+EDIT_CHOICES = {
+    'format':        (('pdf', 'epub', 'both'), 'pdf'),
+    'front_matter':  (('full', 'title', 'copyright', 'none'), 'full'),
+    'cover_color':   (('light', 'dark'), 'light'),
+    'cover_mode':    (('none', 'designed', 'image', 'wrap'), 'none'),
+    'print_binding': (('paperback', 'hardcover', 'jacket'), 'paperback'),
+}
+
+
 @app.route('/project/<pid>/edit', methods=['GET', 'POST'])
 def project_edit(pid):
     proj = load_project(pid)
@@ -3063,72 +3146,82 @@ def project_edit(pid):
 
     if request.method == 'POST':
         form = request.form
+        problems = []          # uploads refused; the rest of the form still saves
 
         # Optional manuscript replacement
         up = request.files.get('manuscript')
         if up and up.filename:
-            fn  = secure_filename(up.filename)
-            ext = os.path.splitext(fn)[1]
-            dest = os.path.join(PROJECT_MS_DIR, pid + ext)
-            # the draft about to be replaced is the one most worth keeping — an
-            # upload here overwrites work that may exist nowhere else
-            snapshot_manuscript(pid, _project_manuscript_text(proj, report_import=False),
-                                reason='replaced', force=True)
-            up.save(dest)
-            # Remove old file if extension changed
-            old = proj.get('manuscript_file', '')
-            if old and old != pid + ext:
-                old_path = os.path.join(PROJECT_MS_DIR, old)
-                if os.path.exists(old_path):
-                    os.remove(old_path)
-            proj['manuscript_file'] = pid + ext
-            proj['manuscript_type'] = 'file'
+            ext, data = _upload_ext(up), up.read()
+            why = ''
+            if ext not in MANUSCRIPT_EXTS:
+                why = "isn't a manuscript - use a .docx, .md or .txt file"
+            elif ext == '.docx':
+                fd, tmp = tempfile.mkstemp(suffix='.docx', dir=PROJECT_MS_DIR)
+                with os.fdopen(fd, 'wb') as f:
+                    f.write(data)
+                try:
+                    if not manuscript.import_docx(tmp).strip():
+                        why = 'has no text in it'
+                except Exception:
+                    why = "couldn't be read as a Word document"
+                finally:
+                    os.remove(tmp)
+            else:
+                # stored as UTF-8, whatever it came in as (see _decode_text)
+                text = _norm_newlines(_decode_text(data))
+                if not text.strip():
+                    why = 'is empty'
+                data = text.encode('utf-8')
+            if why:
+                problems.append(f'The manuscript was not replaced: “{up.filename}” {why}.')
+            else:
+                # the draft about to be replaced is the one most worth keeping —
+                # an upload here overwrites work that may exist nowhere else
+                snapshot_manuscript(pid, _project_manuscript_text(proj, report_import=False),
+                                    reason='replaced', force=True)
+                _replace_file(pid, data, pid + ext, proj.get('manuscript_file', ''))
+                proj['manuscript_file'] = pid + ext
+                proj['manuscript_type'] = 'file'
 
-        # Optional cover replacement
-        cov = request.files.get('cover')
-        if cov and cov.filename:
-            cfn = secure_filename(cov.filename)
-            ext = os.path.splitext(cfn)[1]
-            dest = os.path.join(PROJECT_MS_DIR, pid + '-cover' + ext)
-            cov.save(dest)
-            old = proj.get('cover_file', '')
-            if old and old != pid + '-cover' + ext:
-                old_path = os.path.join(PROJECT_MS_DIR, old)
-                if os.path.exists(old_path):
-                    os.remove(old_path)
-            proj['cover_file'] = pid + '-cover' + ext
-
-        # Optional back-cover image for the print package's wrap
-        old_back = proj.get('print_back_file', '')
+        # Optional cover replacement, and the back-cover image for the print wrap
+        for field, suffix, key, what in (('cover', '-cover', 'cover_file', 'cover'),
+                                         ('print_back_image', '-back', 'print_back_file',
+                                          'back-cover image')):
+            f = request.files.get(field)
+            if not (f and f.filename):
+                continue
+            ext, data = _upload_ext(f), f.read()
+            if ext not in IMAGE_EXTS or not _is_image(data):
+                problems.append(f'The {what} was not replaced: “{f.filename}” '
+                                "isn't a .jpg or .png picture.")
+                continue
+            _replace_file(pid, data, pid + suffix + ext, proj.get(key, ''))
+            proj[key] = pid + suffix + ext
         back = request.files.get('print_back_image')
-        new_back = ''
-        if back and back.filename:
-            ext = os.path.splitext(secure_filename(back.filename))[1].lower()
-            if ext in ('.jpg', '.jpeg', '.png'):
-                new_back = pid + '-back' + ext
-                back.save(os.path.join(PROJECT_MS_DIR, new_back))
-                proj['print_back_file'] = new_back
-        elif 'print_back_clear' in form:
+        if 'print_back_clear' in form and not (back and back.filename) \
+                and proj.get('print_back_file'):
+            try:
+                os.remove(os.path.join(PROJECT_MS_DIR, proj['print_back_file']))
+            except OSError:
+                pass
             proj['print_back_file'] = ''
-        if old_back and old_back != proj.get('print_back_file', ''):
-            old_path = os.path.join(PROJECT_MS_DIR, old_back)
-            if os.path.exists(old_path):
-                os.remove(old_path)
+
+        def choice(key, allowed, default):
+            return _choice(form, key, allowed, proj.get(key, default), default)
 
         proj.update({
-            'print_retailer':   form.get('print_retailer', 'kdp'),
-            'print_binding':    form.get('print_binding', 'paperback'),
-            'print_paper':      form.get('print_paper', 'white'),
+            'print_retailer':   choice('print_retailer', tuple(WRAP_RETAILERS), 'kdp'),
+            'print_paper':      choice('print_paper', tuple(_PAPER), 'white'),
             'print_blurb':      form.get('print_blurb', '').strip(),
             'print_flap_blurb': form.get('print_flap_blurb', '').strip(),
             'print_flap_bio':   form.get('print_flap_bio', '').strip(),
-            'print_back_w':     _f(form, 'print_back_w', 1.5),
-            'print_back_y':     _f(form, 'print_back_y', 0.4),
+            'print_back_w':     _num(form, 'print_back_w', proj.get('print_back_w', 1.5), 0, 12),
+            'print_back_y':     _num(form, 'print_back_y', proj.get('print_back_y', 0.4), 0, 1),
+            **{k: choice(k, allowed, default) for k, (allowed, default) in EDIT_CHOICES.items()},
         })
         proj.update({
-            'name':             form.get('name', '').strip() or proj['name'],
-            'preset':           form.get('preset', proj['preset']),
-            'format':      form.get('format', proj.get('format', 'pdf')),
+            'name':             form.get('name', '').strip() or proj.get('name', '') or pid,
+            'preset':           choice('preset', tuple(p['id'] for p in presets), ''),
             'include_toc': 'include_toc' in form,
             'smartquotes': 'smartquotes' in form,
             'press': 'press' in form,
@@ -3138,12 +3231,10 @@ def project_edit(pid):
             'author':           form.get('author', '').strip(),
             'year':             form.get('year', '').strip(),
             'publisher':        form.get('publisher', '').strip(),
-            'front_matter':     form.get('front_matter', 'full'),
             'right_hand_starts': 'right_hand_starts' in form,
             'cover_overlay':    'cover_overlay' in form,
-            'cover_color':      form.get('cover_color', 'light'),
-            'cover_mode':       form.get('cover_mode', 'none'),
-            'cover_template':   form.get('cover_template', ''),
+            'cover_template':   choice('cover_template',
+                                       ('',) + tuple(c['id'] for c in list_cover_templates()), ''),
             'cover_collection': form.get('cover_collection', '').strip(),
             'cover_kicker':     form.get('cover_kicker', '').strip(),
             'cover_accent':     form.get('cover_accent', '').strip(),
@@ -3152,7 +3243,17 @@ def project_edit(pid):
             'updated':          datetime.now().isoformat(timespec='seconds'),
         })
         save_project_file(pid, proj)
+        if problems:
+            for msg in problems:
+                flash(msg)
+            flash('Everything else was saved.')
+            return redirect(url_for('project_edit', pid=pid))
         flash('Project updated.')
+        # saved on the way to the writing page or the Wrap designer: go on there
+        # (only to a page of this app)
+        nxt = form.get('next', '')
+        if nxt.startswith('/') and not nxt.startswith('//') and '\\' not in nxt:
+            return redirect(nxt)
         return redirect(url_for('projects'))
 
     return render_template('project_edit.html', pid=pid, proj=proj, presets=presets,
@@ -3193,7 +3294,7 @@ def _project_manuscript_text(proj, report_import=True):
                     return text
                 except Exception:
                     return ''
-            return open(path, encoding='utf-8', errors='replace').read()
+            return _read_text_file(path)
     return ''
 
 
@@ -3220,6 +3321,35 @@ def _norm_newlines(text):
     return (text or '').replace('\r\r\n', '\n').replace('\r\n', '\n').replace('\r', '\n')
 
 
+_BOMS = ((b'\xef\xbb\xbf', 'utf-8'), (b'\xff\xfe\x00\x00', 'utf-32-le'),
+         (b'\x00\x00\xfe\xff', 'utf-32-be'), (b'\xff\xfe', 'utf-16-le'),
+         (b'\xfe\xff', 'utf-16-be'))
+
+
+def _decode_text(raw):
+    """A text file's words, whatever it was saved as.
+
+    Read as UTF-8 with bad bytes replaced, a Windows-1252 file (Notepad's
+    "ANSI", older Word "Save as text") lost every accent and curly quote, a
+    UTF-16 one ("Unicode" in Notepad) came out as noise, and a UTF-8 file with
+    a byte-order mark started with an invisible character that stopped its
+    first `# Chapter` line being a chapter. A mark names the encoding; then
+    UTF-8 if it is valid, else Windows-1252.
+    """
+    for bom, enc in _BOMS:
+        if raw.startswith(bom):
+            return raw[len(bom):].decode(enc, errors='replace')
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError:
+        return raw.decode('cp1252', errors='replace')
+
+
+def _read_text_file(path):
+    with open(path, 'rb') as f:
+        return _norm_newlines(_decode_text(f.read()))
+
+
 # ------------------------------------------------------- manuscript safety
 # Once a book can be written *in* the app, the file on disk is the only copy of
 # someone's work, and this is the code standing between them and losing it.
@@ -3237,12 +3367,17 @@ def _atomic_write_text(path, text):
     both Windows and POSIX — after it, the file is either wholly the old text or
     wholly the new one.
     """
+    _atomic_write_bytes(path, text.encode('utf-8'))
+
+
+def _atomic_write_bytes(path, data):
+    """`_atomic_write_text` for bytes: an uploaded file, a book's settings."""
     folder = os.path.dirname(os.path.abspath(path)) or '.'
     os.makedirs(folder, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=folder, suffix='.tmp')
     try:
-        with os.fdopen(fd, 'w', encoding='utf-8', newline='') as f:
-            f.write(text)
+        with os.fdopen(fd, 'wb') as f:
+            f.write(data)
             f.flush()
             os.fsync(f.fileno())      # the bytes, not just the buffer
         os.replace(tmp, path)
@@ -3692,7 +3827,7 @@ def _project_source(proj):
                 logging.error('docx import failed: %s', traceback.format_exc())
                 return '', f'Could not read the Word file: {exc}'
         else:
-            raw = open(ms_path, encoding='utf-8', errors='replace').read()
+            raw = _read_text_file(ms_path)
 
     if not raw:
         return '', 'No manuscript found for this project.'
@@ -4191,7 +4326,7 @@ def project_continuity(pid):
                 flash(f'Could not read the Word file: {exc}')
                 return redirect(url_for('projects'))
         else:
-            raw = open(ms_path, encoding='utf-8', errors='replace').read()
+            raw = _read_text_file(ms_path)
 
     if not raw:
         flash('No manuscript found for this project.')
