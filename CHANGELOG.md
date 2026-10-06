@@ -124,6 +124,25 @@ line here.
 - **Snapshots taken at the same moment each keep their own text** in History.
 - **A broken font uploaded under a name a good font once had** is refused, as
   any broken font is.
+- **Uploading to the Fonts or Figures page never loses what is there.** A
+  broken file uploaded under the name of a good one deleted the good one, and
+  a different picture or font under a name already in use replaced it - in
+  every book that used it. A different file now goes in beside it ("map-2.png",
+  and the page says so); the same file again is simply the one already there.
+- **Removing a font or figure that something uses asks first, and says
+  what:** the styles, cover templates, wrap designs and books that name it.
+- **What went missing is in the checks.** A book whose figures or cover
+  fonts have left the library says which, on Typeset and in Send to print -
+  a missing figure printed only as a grey box. A wrap design's text whose font
+  is gone isn't printed at all, title included; the Wrap designer and the
+  print package now say so, and the designer's font picker shows the missing
+  font instead of the first one in the list. Pictures gone from a wrap design
+  are named too.
+- **A picture too big to print** (hundreds of megapixels) is refused with
+  that reason, not as "not a readable image".
+- **Fonts and figures with spaces or quotes in their names** (put in the
+  folder by hand) can be shown and removed; a quote in a font's name no
+  longer let Remove skip its "are you sure?".
 
 ## 1.3.0 — 3 October 2026
 

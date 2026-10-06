@@ -18,15 +18,16 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 6–12 below, in order — next is item 6, the font and figure
-   libraries** (bad uploads, deleting what's in use; a bad upload still overwrites a good
-   file of the same name before it is checked). Items 1-5 are done and merged, with fixes
+2. **Bug hunt plan, items 7–12 below, in order — next is item 7, Send to print /
+   publish, large print and the ebook** (the package page itself, `/large-print/<pid>`
+   with no test at all, the EPUB preview). Items 1-6 are done and merged, with fixes
    **unreleased**: they wait in CHANGELOG's `## Unreleased`. Harnesses to copy:
    `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
    `test_manuscript_editor.py`, `test_project_edit.py` and `test_first_run.py` (real-time
    headless browser: virtual time never gives a page its animation frames; harness routes
    registered at import, before any request), `test_shared_state.py` (threads, a real
-   threaded server, `Paused` to hold a build mid-way). The books in `projects/` are the user's test data - probe copies anyway.
+   threaded server, `Paused` to hold a build mid-way), `test_libraries.py`. The books in
+   `projects/` are the user's test data - probe copies anyway.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
@@ -309,6 +310,41 @@ session of awkward input; fix what is found, and note what isn't a bug.
    Times; a design element is skipped). It should warn before deleting, and the checks
    should say what went missing. Also the file-serving routes (`/download`, `/out`,
    `/figures/file`): refuse anything outside their folder.
+   - **Done (2026-10-05).** `test_libraries.py`: uploads, deletes, the checks and the
+     serving routes through the test client, and the Wrap designer in headless Chrome
+     (it fails 21 checks on the code before the fix). Found and fixed:
+     - **An upload was saved over the library file of its name, then checked**: a broken
+       font or image deleted the good one, and a different one replaced it in every
+       book, style and cover naming it. `_library_store` checks a temporary copy first,
+       stores a different file as `name-2.ext` (and says so), and treats the same bytes
+       as the file already there. The figure upload's XHR reply carries the stored name,
+       which the writing page's Figure button inserts.
+     - **Deleting something in use said nothing first.** `_font_uses` (styles, cover
+       templates, books' wrap designs) and `_figure_uses` (books' `~~~ figure` blocks,
+       Word books included, and styles' chapter art) feed an "is in use" panel on the
+       page; deleting needs `confirm=1` then.
+     - **Missing pieces were silent.** `build_pdf` reports `figures_missing` and
+       `cover_fonts_missing` (`engine.figures_missing`, `engine.cover_fonts_missing`),
+       shown by `_preflight` and the package (`_missing_checks`); `wrap_design.missing`
+       names text whose font is gone - **such text isn't printed at all**, so a deleted
+       font could drop a cover's title - and pictures whose file is gone, in the package
+       checks and (fonts) the designer's own checks. The designer's font select keeps a
+       missing font as an option marked "(not in the font library)" instead of showing
+       the first font. Printing is unchanged (still left off; asking before changing
+       printed output).
+     - **A decompression-bomb image** was refused as "not a readable image"; now "too
+       many pixels to print".
+     - **Names were matched through `secure_filename`**, so a file put in a library
+       folder by hand ("My Map.png") could be neither shown nor removed; now matched as
+       listed (`_in_library`). The remove prompt was an inline `confirm('…{{name}}…')`
+       that a quote in the name broke, submitting without asking; it reads a `data-ask`
+       attribute.
+     - Word-book picture extraction writes each picture whole (`os.replace`).
+     Not bugs: `/out`, `/download`, `/figures/file` and `/wrap-designer/font` all go
+     through `send_from_directory` (or a basename) and refused every traversal tried.
+     The Wrap designer lists only `.ttf` fonts, though the library takes TrueType
+     `.otf` too - a limitation, left. A cover template's background art lives in the
+     cover assets, not the figure library, and wasn't part of this hunt.
 7. **Send to print / publish, large print, the ebook** - the outputs that reach a printer or a
    store. The package is well tested server-side; untested are the page itself
    (`print_package.html`: the checks as shown, the download, a re-run), `/large-print/<pid>`

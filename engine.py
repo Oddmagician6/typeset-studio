@@ -170,6 +170,31 @@ def font_for(path):
     return name
 
 
+def cover_fonts_missing(tpl):
+    """The font files a cover template names that aren't in the library: the
+    cover is then set in the book's own faces instead, so the checks say so."""
+    out = []
+    for role in ('display', 'serif', 'italic'):
+        fname = (tpl.get('fonts') or {}).get(role)
+        if fname and not os.path.exists(
+                fname if os.path.isabs(fname) else os.path.join(FONT_DIR, fname)):
+            out.append(fname)
+    return sorted(set(out))
+
+
+def figures_missing(ms, preset):
+    """The figure files a book names (its `~~~ figure` blocks and its style's
+    chapter-opening art) that aren't in the figure library. Each prints as a
+    "missing image" box, which is easy to miss in a long proof."""
+    want = [chapter_art_src(preset)]
+    for ch in ms.get('chapters', []):
+        for block in ch.get('blocks', []):
+            if block[0] == 'doc_block' and len(block) >= 3 \
+                    and block[2].get('_type') == 'figure':
+                want.append((block[2].get('src') or '').strip())
+    return sorted({s for s in want if s and not _figure_asset_path(s)})
+
+
 def _register_cover_fonts(tpl, interior):
     """Register the cover template's own faces; fall back to the interior fonts."""
     files = tpl.get('fonts', {})
@@ -4553,6 +4578,9 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
         'font_fallback':  fonts['fallback'],
         'font_details':   fonts['details'],
         'fonts_embedded': not fonts['fallback'],
+        'figures_missing': figures_missing(manuscript, preset),
+        'cover_fonts_missing': cover_fonts_missing(cover['template'])
+                               if cover and cover.get('mode') == 'designed' else [],
         'press':          bool(press),
         'has_cover':      cover is not None,
     }
