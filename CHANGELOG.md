@@ -59,6 +59,31 @@ line here.
   from before the last edits); and the word count counts words in Cyrillic,
   Greek and other scripts while you type (it showed none until the page was
   reloaded).
+- **Saving a book's settings no longer changes what you didn't touch.** If a
+  book's style or cover template had been deleted, the Edit page quietly
+  switched it to the first style, or to no designed cover; it now keeps it
+  and says it's missing. The same for a printer, paper, format or other
+  choice the page doesn't list.
+- **Text files in other encodings read as written.** A manuscript saved as
+  Windows "ANSI" lost its accents and curly quotes, a "Unicode" (UTF-16) one
+  came out as noise, and a UTF-8 file with a byte-order mark lost its first
+  chapter heading. All three now read correctly, in every place a
+  manuscript is opened - including books already saved that way.
+- **Files named in other scripts upload.** A Word file called "Роман.docx"
+  lost its extension on the way in and was read as plain text; a cover,
+  figure or font with such a name was refused. All of them now upload.
+- **The Edit page checks what you upload, and says when it won't take it:**
+  a manuscript that isn't a .docx, .md or .txt file (or is empty, or a Word
+  file that won't open), and a cover or back-cover image that isn't a real
+  .jpg or .png picture. Everything else on the page still saves.
+- **Customise, Write and the Wrap designer links save your changes first.**
+  They used to leave the Edit page and lose them; leaving any other way with
+  unsaved changes now asks first (Cancel still discards).
+- **The back-cover image's width and position** can no longer be saved as
+  nonsense (letters, "nan", negative) - a value that isn't a number keeps the
+  old one, and out-of-range values are brought into range.
+- **A book's settings are saved all at once**, so an interrupted save can no
+  longer leave a half-written file that no page can open.
 
 ## 1.3.0 — 3 October 2026
 

@@ -18,15 +18,16 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 3–12 below, in order — next is item 3, the book Edit page**
-   (open and save unchanged = the same book, in every cover mode; a deleted style or cover
-   template; the selects saved unvalidated, `print_retailer` and friends). Items 1 (data
-   from older versions: e9cf1ff, 6f59be1) and 2 (the manuscript editor) are done and merged,
-   with fixes **unreleased**: they wait in CHANGELOG's `## Unreleased` for the next version.
-   Harnesses to copy: `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step
-   6), and `test_manuscript_editor.py` (a real-time headless browser: virtual time never
-   gives a page its animation frames). The books in `projects/` are the user's test data,
-   not real work - probe copies anyway.
+2. **Bug hunt plan, items 4–12 below, in order — next is item 4, Setting a book / first
+   run** (`generate.html`, `/generate` and its two untested previews, `/project/create`,
+   new draft; empty, huge and non-UTF-8 uploads - item 3 already gave `/generate` the
+   shared decoder and safe upload names, so check them there end to end). Items 1-3 are
+   done and merged, with fixes **unreleased**: they wait in CHANGELOG's `## Unreleased`.
+   Harnesses to copy: `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release
+   step 6), `test_manuscript_editor.py` and `test_project_edit.py` (real-time headless
+   browser: virtual time never gives a page its animation frames; harness routes must be
+   registered at import, before any request). The books in `projects/` are the user's
+   test data, not real work - probe copies anyway.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
@@ -182,6 +183,44 @@ session of awkward input; fix what is found, and note what isn't a bug.
    the same book, for books in every cover mode (none / designed / image / wrap) and with
    print settings, matter and uploads set. Then: replacing the manuscript (the snapshot
    first), cover and back-image upload and clear, mode switching, the Customise links.
+   - **Done (2026-10-05).** `test_project_edit.py`: every cover mode, print settings,
+     matter, uploads and awkward text open and save unchanged as the same book (also over
+     copies of the eight real books: only missing keys filled with their defaults), then
+     uploads, values and a browser half for leaving the page. Found and fixed:
+     - **Selects swapped values they don't list for their first option**: a deleted style
+       (to the first style), a deleted cover template (radio: cleared), and an unknown
+       printer, paper, binding, format, front matter, overlay colour or cover mode. The
+       page now lists the current value, marked (`keep` macro; the template gets its own
+       radio saying it's gone), and the server takes a listed value or the one the book
+       has (`_choice`, `EDIT_CHOICES`). Carried over from item 1.
+     - **Text uploads decoded as UTF-8 with replacement**: Windows-1252 lost accents and
+       quotes, UTF-16 was noise, a UTF-8 BOM hid the first `# Chapter`. `_decode_text` /
+       `_read_text_file` (BOM, strict UTF-8, else cp1252) now serve every manuscript
+       reader (`_project_manuscript_text`, `_project_source`, regenerate, `/generate` and
+       its preview), so books already stored that way read right too. An Edit-page text
+       upload is stored as UTF-8.
+     - **`secure_filename` drops non-ASCII letters, extension dot included**: "Роман.docx"
+       became "docx" - a Word file then stored with no extension and read as text; a
+       cover, figure, font or cover asset so named was refused. `_upload_ext` /
+       `_safe_upload_name` (stem falls back to `name-<hash>` so two such files don't
+       collide; extension case kept) at all eight upload sites.
+     - **Uploads unchecked**: any extension as a manuscript (an .exe), an empty file, a
+       broken .docx; any file as the cover (a .gif, a "png" that isn't one); a wrong-kind
+       back image silently ignored. Each is refused with a flash naming the file, the
+       rest of the form saved, and the page shown again.
+     - **`print_back_w` / `_y` unvalidated**: "nan"/"inf" wrote NaN/Infinity into the
+       JSON (not JSON), negatives and huge values kept. `_num`: not finite or not a
+       number keeps the old value; clamped to 0-12" and 0-1.
+     - **Customise / Write / Wrap designer links lost unsaved changes** (the hint said
+       "save first"). With changes they now submit the form with `next` and the save
+       redirects there (local paths only); other exits ask (`beforeunload`), Cancel
+       doesn't.
+     - **`save_project_file` wrote in place**; now `_atomic_write_text` (new
+       `_atomic_write_bytes` also writes uploads). Left for item 9: styles and cover
+       templates are still written with a plain `json.dump`.
+     Not bugs: matter fields are stripped on save (whitespace only); the Edit page posted
+     from a stale tab overwrites fields changed since in another (single-user app; the
+     manuscript, the part that matters, is guarded by item 2's revision check).
 4. **Setting a book: the first-run path** (`generate.html`, `/generate`, `/project/create`,
    `/project/new-draft`). Its two previews - `/generate/preview` and `/generate/epub-preview`
    - have no test at all. A new user's first ten minutes: an empty data folder, a .docx and a
