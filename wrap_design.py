@@ -69,6 +69,13 @@ def art_file(fname):
     return None
 
 
+def drawable_art(fname):
+    """`art_file`, or None when the file is there but can't be drawn (damaged,
+    or not a picture): such a file stopped the whole wrap from being made."""
+    path = art_file(fname)
+    return path if path and not engine.picture_unreadable(path) else None
+
+
 def font_name(fname):
     """Register a font-library file with ReportLab once; return its face name."""
     path = font_file(fname)
@@ -288,7 +295,7 @@ def build_pdf(design, dims, out_path):
             c.line(X, mid, X + w * inch, mid)
         elif kind == 'barcode' and w > 0 and h > 0:
             draw_barcode(c, el, X, Ytop, w * inch, h * inch)
-        elif kind == 'image' and art_file(el.get('src')) and w > 0 and h > 0:
+        elif kind == 'image' and drawable_art(el.get('src')) and w > 0 and h > 0:
             img = ImageReader(art_file(el['src']))
             iw, ih = img.getSize()
             turn = turn_of(el)
@@ -713,25 +720,26 @@ def missing(design):
         if el.get('type') == 'text' and not font_file(el.get('font')) \
                 and (el.get('text') or '').strip():
             fonts.add(os.path.basename(str(el.get('font') or '')) or '(no font)')
-        elif el.get('type') == 'image' and el.get('src') and not art_file(el.get('src')):
+        elif el.get('type') == 'image' and el.get('src') and not drawable_art(el.get('src')):
             pictures.add(os.path.basename(str(el['src'])))
     out = []
     if fonts:
         out.append(('Text left off the cover - its font is not in the font library',
                     sorted(fonts)))
     if pictures:
-        out.append(('Pictures left off the cover - the file is gone', sorted(pictures)))
+        out.append(('Pictures left off the cover - the file is gone or can’t be read',
+                    sorted(pictures)))
     return out
 
 
 def placed_images(design, g):
-    """[(path, w, h)] in inches for every picture in a design that exists - what
+    """[(path, w, h)] in inches for every picture in a design that can be drawn - what
     a resolution check measures each one against."""
     out = []
     for el in design.get('elements', []):
         if el.get('type') != 'image' or el.get('hidden'):
             continue
-        path = art_file(el.get('src'))
+        path = drawable_art(el.get('src'))
         _, _, w, h = el_rect(g, el)
         if path and w > 0 and h > 0:
             z = zoom_of(el)

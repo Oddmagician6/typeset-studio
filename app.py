@@ -99,6 +99,312 @@ for d in (PRESET_DIR, COVER_DIR, COVER_ASSET_DIR, FONT_DIR, FIGURE_DIR, OUT_DIR,
     os.makedirs(d, exist_ok=True)
 
 
+# ------------------------------------------------------------ damaged files
+class DamagedFile(Exception):
+    """A file in the data folder the app can't use, said in plain words.
+
+    Raised by `read_json` (and by anything else that finds a file it can't
+    read); the error page names the file and what is wrong with it, rather
+    than a bare "Internal Server Error".
+    """
+    def __init__(self, path, problem):
+        self.path, self.problem = path, problem
+        super().__init__(f'{data_path(path)} {problem}')
+
+
+def data_path(path):
+    """`path` as the writer would find it: inside the data folder when it is."""
+    for root in (DATA_DIR, os.path.dirname(PROJECT_DIR)):
+        try:
+            rel = os.path.relpath(path, root)
+        except ValueError:          # another drive
+            continue
+        if not rel.startswith('..'):
+            return rel.replace(os.sep, '/')
+    return path
+
+
+_JSON_KINDS = {list: 'a list', str: 'a piece of text', int: 'a number',
+               float: 'a number', bool: 'a yes/no value', type(None): 'nothing ("null")'}
+
+
+def read_json(path):
+    """The JSON object (a dict) in `path`, or `DamagedFile` saying what is wrong.
+
+    A missing file is the caller's to handle (FileNotFoundError). Forgiving where
+    the meaning is clear: a byte-order mark, or Windows-1252 text from a file
+    hand-edited in Notepad, read as the writer meant them.
+    """
+    try:
+        with open(path, 'rb') as f:
+            raw = f.read()
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise DamagedFile(path, f"can't be opened: {os_problem(exc)}.")
+    if not raw.strip(b' \t\r\n\0'):
+        raise DamagedFile(path, 'is empty - it was cut off while being saved '
+                                '(a crash, a power cut or a full disk).')
+    text = _decode_text(raw)
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        where = f'line {exc.lineno}, column {exc.colno}' if hasattr(exc, 'lineno') else ''
+        cut = not text.rstrip().endswith('}')     # every settings file ends with one
+        raise DamagedFile(path, (
+            f'stops part-way through ({where}) - it was cut off while being saved.'
+            if cut else f'is not valid JSON at {where} ({exc.msg}) - '
+                        'perhaps it was edited by hand.'))
+    if not isinstance(data, dict):
+        raise DamagedFile(path, f'holds {_JSON_KINDS.get(type(data), "something else")} '
+                                'where a set of settings should be.')
+    return data
+
+
+def os_problem(exc):
+    """What an OSError means, in a writer's words."""
+    import errno
+    n = getattr(exc, 'errno', None)
+    if n == errno.ENOSPC or getattr(exc, 'winerror', None) in (39, 112):
+        return 'the disk is full'
+    if n == errno.EROFS:
+        return 'the disk is read-only'
+    if isinstance(exc, PermissionError) or n == errno.EACCES:
+        if exc.filename and os.path.isdir(exc.filename):
+            return 'there is a folder where a file should be'
+        return (('Windows' if os.name == 'nt' else 'the system') + ' refused access - the '
+                'file may be read-only, or open in another program (OneDrive or a backup '
+                'tool syncing it)')
+    if isinstance(exc, FileNotFoundError):
+        return 'it is not there'
+    return exc.strerror or str(exc)
+
+
+# what each kind of settings file is, where it lives, and how to talk about it
+DAMAGE_KINDS = {'book': ('a book', 'PROJECT_DIR'),
+                'style': ('a style', 'PRESET_DIR'),
+                'cover': ('a cover template', 'COVER_DIR')}
+
+
+def _damage_dir(kind):
+    return globals()[DAMAGE_KINDS[kind][1]]
+
+
+def _damaged_as(kind, ident, read, *args):
+    """`read(*args)`, a DamagedFile from it told which book, style or cover it
+    is - so the error page can offer to repair or delete that one."""
+    try:
+        return read(*args)
+    except DamagedFile as exc:
+        exc.kind, exc.ident = kind, secure_filename(ident)
+        raise
+
+
+def damaged_files(*kinds):
+    """Every settings file of these kinds that can't be read: [{kind, id, file,
+    problem}]. The lists skip them; the list pages name them with this, so a
+    broken book doesn't simply vanish."""
+    out = []
+    for kind in kinds or DAMAGE_KINDS:
+        folder = _damage_dir(kind)
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            continue
+        for fn in names:
+            if not fn.endswith('.json'):
+                continue
+            try:
+                _READERS[kind](os.path.join(folder, fn))
+            except DamagedFile as exc:
+                out.append({'kind': kind, 'id': fn[:-5], 'file': data_path(exc.path),
+                            'problem': exc.problem})
+            except OSError:
+                pass
+    return out
+
+
+_TYPE_WORDS = {dict: 'a group of settings', list: 'a list', str: 'a piece of text',
+               float: 'a number', bool: 'a yes/no value', type(None): 'nothing ("null")'}
+
+
+def _type_of(v):
+    if isinstance(v, bool):
+        return bool
+    if isinstance(v, (int, float)):
+        return float
+    return type(v)
+
+
+def _misfits(data, ref, pre=''):
+    """The settings in `data` of a different kind from the same ones in `ref`
+    (a number where a group of settings belongs...): [(dotted key, value, ref value)]."""
+    out = []
+    for k, rv in ref.items():
+        if k not in data:
+            continue
+        v = data[k]
+        if _type_of(v) is not _type_of(rv):
+            out.append((pre + k, v, rv))
+        elif isinstance(rv, dict) and rv:
+            out += _misfits(v, rv, pre + k + '.')
+    return out
+
+
+def _fit(ref, data):
+    """`data` over `ref`, keeping `ref`'s value wherever `data` has one of the
+    wrong kind - how a damaged style or cover is repaired."""
+    out = json.loads(json.dumps(ref))
+    for k, v in data.items():
+        if k not in ref:
+            out[k] = v
+        elif _type_of(v) is not _type_of(ref[k]):
+            continue
+        elif isinstance(v, dict) and ref[k]:
+            out[k] = _fit(ref[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+# What kind of value each of a book's settings is, where the pages show it as
+# it is (a name that was a number took the whole Projects page down). Drawn
+# from every book written by 1.0.0-1.3.0; a setting missing here isn't checked.
+BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'preset',
+             'manuscript_file', 'manuscript_type', 'cover_file', 'cover_mode',
+             'cover_template', 'cover_color', 'cover_collection', 'cover_kicker',
+             'cover_accent', 'cover_epigraph', 'cover_studio', 'format', 'front_matter',
+             'created', 'updated', 'last_pdf', 'last_epub', 'last_print_package',
+             'last_package_scope')
+BOOK_FLAGS = ('include_toc', 'smartquotes', 'right_hand_starts', 'cover_overlay', 'press')
+
+
+def _shape_ref(kind):
+    if kind == 'book':
+        return {**{k: '' for k in BOOK_TEXT}, **{k: False for k in BOOK_FLAGS},
+                **{k: '' for k in matter.KEYS}, **PRINT_DEFAULTS}
+    if kind == 'style':
+        return DEFAULTS
+    # a design family's own block is a group, whatever is in it
+    return {**COVER_DEFAULTS, **{b: {} for b in FAMILY_BLOCKS.values()}}
+
+
+# The settings every style and cover template written by 1.0.0-1.3.0 has (and
+# the ones the bundled files and the fixtures all have): without them the pages
+# that show a style or cover fail, so a file lacking one was edited by hand.
+REQUIRED = {
+    'style': ('trim trim.w trim.h margins margins.top margins.bottom margins.inside '
+              'margins.outside font_family font_files font_files.regular font_files.bold '
+              'font_files.italic body body.size body.leading body.indent body.justify '
+              'body.hyphenate chapter chapter.start chapter.sink chapter.show_number '
+              'chapter.number_format chapter.number_size chapter.title_size '
+              'chapter.after_title chapter.open_style chapter.leadin_words '
+              'chapter.dropcap_lines part_divider part_divider.show_number '
+              'part_divider.number_format part_divider.number_size part_divider.title_size '
+              'part_divider.sink document_block document_block.frame document_block.indent '
+              'document_block.font_size document_block.first_indent '
+              'document_block.space_around document_block.header_size '
+              'document_block.dateline_style scene_break scene_break.type scene_break.glyph '
+              'scene_break.size scene_break.gap scene_break.image running_head '
+              'running_head.show running_head.caps running_head.size running_head.gap folio '
+              'folio.show folio.position folio.size folio.gap folio.hide_on_opener').split(),
+    'cover': ('fonts fonts.display fonts.serif fonts.italic palette palette.bg_top '
+              'palette.bg_bottom palette.gold palette.teal palette.ink palette.muted border '
+              'border.color border.inset border.gap border.line border.corner '
+              'border.corner_line collection collection.size collection.tracking '
+              'collection.color collection.top collection.bottom kicker kicker.size '
+              'kicker.tracking kicker.color kicker.y title title.size title.leading '
+              'title.tracking title.color title.y accent accent.size accent.tracking '
+              'accent.color accent.gap ornament ornament.color ornament.size '
+              'ornament.spacing ornament.rule ornament.rule_len ornament.gap epigraph '
+              'epigraph.size epigraph.leading epigraph.tracking epigraph.color '
+              'epigraph.width epigraph.top studio studio.size studio.tracking studio.color '
+              'studio.y').split(),
+    'book': [],
+}
+
+
+def _lacks(data, kind):
+    """The required settings (REQUIRED) that `data` doesn't have."""
+    out = []
+    for dotted in REQUIRED[kind]:
+        node = data
+        for part in dotted.split('.'):
+            if not isinstance(node, dict) or part not in node:
+                node = None
+                break
+            node = node[part]
+        if node is None and not any(dotted.startswith(m + '.') for m in out):
+            out.append(dotted)
+    return out
+
+
+def _read_shaped(kind, path):
+    data = read_json(path)
+    bad = _misfits(data, _shape_ref(kind))
+    gone = [] if bad else _lacks(data, kind)
+    if gone:
+        more = f' (and {len(gone) - 6} more)' if len(gone) > 6 else ''
+        raise DamagedFile(path, 'is missing settings every ' + DAMAGE_KINDS[kind][0][2:] +
+                          ' has: ' + ', '.join(f'“{k}”' for k in gone[:6]) + more +
+                          ' - perhaps it was edited by hand.')
+    if bad:
+        said = '; '.join(f'“{k}” is {_TYPE_WORDS.get(_type_of(v), "something else")} where '
+                         f'{_TYPE_WORDS.get(_type_of(rv), "something else")} should be'
+                         for k, v, rv in bad[:4])
+        more = f' (and {len(bad) - 4} more)' if len(bad) > 4 else ''
+        raise DamagedFile(path, f'has settings of the wrong kind: {said}{more} - '
+                                'perhaps it was edited by hand.')
+    return data
+
+
+def read_style(path):
+    """A style's settings (`read_json`), refused if any is of the wrong kind:
+    every page that shows a style reads them without checking."""
+    return _read_shaped('style', path)
+
+
+def read_book(path):
+    """A book's settings, checked as `read_style` checks a style's."""
+    return _read_shaped('book', path)
+
+
+def read_cover(path):
+    """A cover template's settings, checked as `read_style` checks a style's."""
+    return _read_shaped('cover', path)
+
+
+_READERS = {'book': lambda p: read_book(p), 'style': lambda p: read_style(p),
+            'cover': lambda p: read_cover(p)}
+
+
+def salvage_json(path):
+    """Whatever settings can still be read out of a damaged file: a dict, maybe
+    empty. Every settings file is written by `json.dumps(indent=2)`, one top-level
+    key per line, so a file cut short keeps every setting before the cut."""
+    try:
+        with open(path, 'rb') as f:
+            text = _decode_text(f.read()).replace('\0', '')
+    except OSError:
+        return {}
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except ValueError:
+        pass
+    lines = text.splitlines()
+    starts = [i for i, ln in enumerate(lines) if ln.startswith('  "')]
+    for i in [len(lines)] + starts[::-1]:    # the longest run of whole settings first
+        head = '\n'.join(lines[:i]).rstrip().rstrip(',')
+        try:
+            data = json.loads(head + '\n}')
+        except ValueError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return {}
+
+
 def _read_version():
     """This build's version, from the VERSION file the installer also reads.
 
@@ -390,7 +696,8 @@ def _min_inside(pages, table):
     return None
 
 
-def _missing_checks(figures=(), cover_fonts=(), design_missing=(), template_gone=''):
+def _missing_checks(figures=(), cover_fonts=(), design_missing=(), template_gone='',
+                    cover_art=()):
     """Check rows for what a book names but the libraries no longer have."""
     def listed(names):
         names = sorted(set(names))
@@ -398,12 +705,16 @@ def _missing_checks(figures=(), cover_fonts=(), design_missing=(), template_gone
     out = []
     if figures:
         out.append({'label': 'Figures', 'ok': False, 'detail': (
-            f'Not in the figure library, so printed as a "missing image" box: '
-            f'{listed(figures)} - upload them on the Figures page')})
+            f'Not in the figure library, or not a picture that can be read, so printed '
+            f'as a "missing image" box: {listed(figures)} - upload them on the Figures page')})
     if cover_fonts:
         out.append({'label': 'Cover fonts', 'ok': False, 'detail': (
             f'Not in the font library, so the cover is set in the book’s own faces '
             f'instead: {listed(cover_fonts)}')})
+    if cover_art:
+        out.append({'label': 'Cover art', 'ok': False, 'detail': (
+            f'Gone, or not a picture that can be read, so the cover is drawn without it: '
+            f'{listed(cover_art)} - choose it again in the cover editor')})
     if template_gone:
         out.append({'label': 'Cover', 'ok': False, 'detail': (
             f'The cover template “{template_gone}” has been deleted, so this book has no '
@@ -435,7 +746,8 @@ def _preflight(build_result, preset, page_count):
                               else 'Standard PDF fonts not embedded — platforms may reject')})
     checks += _missing_checks(build_result.get('figures_missing'),
                               build_result.get('cover_fonts_missing'),
-                              template_gone=build_result.get('cover_template_gone', ''))
+                              template_gone=build_result.get('cover_template_gone', ''),
+                              cover_art=build_result.get('cover_art_missing'))
 
     if build_result.get('has_cover'):
         checks.append({
@@ -718,11 +1030,22 @@ def _slug_or_blank(name):
     letter, "t"). A name in another script has nothing left, so the caller's
     default applies - which must fit the thing named: `slugify`'s own "style"
     named a book titled in Cyrillic "style" and its PDF "style-....pdf".
+
+    At most SLUG_MAX characters, cut at a word: a whole long title made file
+    paths Windows refuses (260 characters, History's included), so a book with
+    a long name could not be made at all.
     """
     import unicodedata
     folded = ''.join(c for c in unicodedata.normalize('NFKD', name or '')
                      if not unicodedata.combining(c))
-    return re.sub(r'[^a-z0-9]+', '-', folded.lower()).strip('-')
+    slug = re.sub(r'[^a-z0-9]+', '-', folded.lower()).strip('-')
+    if len(slug) > SLUG_MAX:
+        cut = slug[:SLUG_MAX + 1]
+        slug = (cut.rsplit('-', 1)[0] if '-' in cut[SLUG_MAX // 2:] else cut[:SLUG_MAX])
+    return slug.strip('-')
+
+
+SLUG_MAX = 60
 
 
 def slugify(name):
@@ -734,11 +1057,10 @@ def list_presets():
     for fn in sorted(os.listdir(PRESET_DIR)):
         if fn.endswith('.json'):
             try:
-                with open(os.path.join(PRESET_DIR, fn), encoding='utf-8') as f:
-                    data = json.load(f)
-                items.append({'id': fn[:-5], 'data': data})
-            except Exception:
-                pass
+                data = read_style(os.path.join(PRESET_DIR, fn))
+            except (OSError, DamagedFile):
+                continue        # named by `damaged_files`, not dropped silently
+            items.append({'id': fn[:-5], 'data': data})
     return items
 
 
@@ -746,8 +1068,7 @@ def load_preset(pid):
     path = os.path.join(PRESET_DIR, secure_filename(pid) + '.json')
     if not os.path.exists(path):
         abort(404)
-    with open(path, encoding='utf-8') as f:
-        return json.load(f)
+    return _damaged_as('style', pid, read_style, path)
 
 
 def list_cover_templates():
@@ -756,11 +1077,10 @@ def list_cover_templates():
     for fn in sorted(os.listdir(COVER_DIR)):
         if fn.endswith('.json'):
             try:
-                with open(os.path.join(COVER_DIR, fn), encoding='utf-8') as f:
-                    data = repair_cover_template(fn[:-5], json.load(f))
-                items.append({'id': fn[:-5], 'data': data})
-            except Exception:
-                pass
+                data = repair_cover_template(fn[:-5], read_cover(os.path.join(COVER_DIR, fn)))
+            except (OSError, DamagedFile):
+                continue
+            items.append({'id': fn[:-5], 'data': data})
     return items
 
 
@@ -789,8 +1109,7 @@ def load_cover_template(cid):
     path = os.path.join(COVER_DIR, secure_filename(cid) + '.json')
     if not os.path.exists(path):
         return None
-    with open(path, encoding='utf-8') as f:
-        return repair_cover_template(cid, json.load(f))
+    return repair_cover_template(cid, _damaged_as('cover', cid, read_cover, path))
 
 
 # Each design family's own settings, which the cover editor before 1.3.0
@@ -846,8 +1165,8 @@ def repair_cover_template(cid, tpl):
 
 def save_cover_template(cid, data):
     path = os.path.join(COVER_DIR, secure_filename(cid) + '.json')
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    # all at once, as books are: an interrupted plain write left an empty file
+    _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def unique_cover_id(base):
@@ -926,8 +1245,8 @@ def _is_embeddable_font(path):
 
 def save_preset(pid, data):
     path = os.path.join(PRESET_DIR, secure_filename(pid) + '.json')
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    # all at once, as books are: an interrupted plain write left an empty file
+    _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def unique_id(base):
@@ -945,20 +1264,18 @@ def list_projects():
     for fn in sorted(os.listdir(PROJECT_DIR)):
         if fn.endswith('.json'):
             try:
-                with open(os.path.join(PROJECT_DIR, fn), encoding='utf-8') as f:
-                    data = upgrade_project(json.load(f))
-                items.append({'id': fn[:-5], 'data': data})
-            except Exception:
-                pass
-    return sorted(items, key=lambda x: x['data'].get('updated', ''), reverse=True)
+                data = upgrade_project(read_book(os.path.join(PROJECT_DIR, fn)))
+            except (OSError, DamagedFile):
+                continue
+            items.append({'id': fn[:-5], 'data': data})
+    return sorted(items, key=lambda x: str(x['data'].get('updated') or ''), reverse=True)
 
 
 def load_project(pid):
     path = os.path.join(PROJECT_DIR, secure_filename(pid) + '.json')
     if not os.path.exists(path):
         abort(404)
-    with open(path, encoding='utf-8') as f:
-        return upgrade_project(json.load(f))
+    return upgrade_project(_damaged_as('book', pid, read_book, path))
 
 
 def upgrade_project(proj):
@@ -1001,8 +1318,7 @@ def update_project(pid, changes):
     with _PROJECT_LOCK:
         if not os.path.exists(path):
             return None
-        with open(path, encoding='utf-8') as f:
-            proj = upgrade_project(json.load(f))
+        proj = upgrade_project(_damaged_as('book', pid, read_book, path))
         proj.update(changes)
         save_project_file(pid, proj)
     return proj
@@ -1447,9 +1763,137 @@ def favicon():
                                mimetype='image/vnd.microsoft.icon')
 
 
+# ---------------------------------------------------- when something breaks
+def _wants_json():
+    """A page's own fetch() (answered in JSON), not the writer opening a page.
+    Browsers mark a navigation `Sec-Fetch-Mode: navigate`; fetch() says cors."""
+    mode = request.headers.get('Sec-Fetch-Mode')
+    if mode:
+        return mode != 'navigate'
+    return request.accept_mimetypes.best == 'application/json'
+
+
+def _problem_page(title, message, status=500, damaged=None):
+    if _wants_json():
+        return jsonify({'ok': False, 'error': f'{title}: {message}'}), status
+    try:
+        return render_template('problem.html', title=title, message=message, damaged=damaged,
+                               back=request.referrer or url_for('projects')), status
+    except Exception:           # the page frame itself failed: say it plainly
+        logging.error('problem page failed: %s', traceback.format_exc())
+        from markupsafe import escape
+        return (f'<!doctype html><meta charset="utf-8"><title>{escape(title)}</title>'
+                f'<h1>{escape(title)}</h1><p>{escape(message)}</p>'
+                f'<p><a href="/projects">Back to Projects</a></p>'), status
+
+
+@app.errorhandler(DamagedFile)
+def _damaged_file(exc):
+    kind = getattr(exc, 'kind', None)
+    damaged = None
+    if kind in DAMAGE_KINDS:
+        damaged = {'kind': kind, 'id': exc.ident, 'what': DAMAGE_KINDS[kind][0],
+                   'kept': len(salvage_json(exc.path))}
+        if kind == 'book':
+            damaged['manuscript'] = _guess_manuscript(exc.ident, salvage_json(exc.path))
+    return _problem_page('A file is damaged',
+                         f'{data_path(exc.path)} {exc.problem}', damaged=damaged)
+
+
+@app.errorhandler(OSError)
+def _disk_problem(exc):
+    """Reading or writing a file failed: say which file and why (a full disk, a
+    read-only folder, a file locked by another program) rather than a bare 500."""
+    logging.error('file error: %s', traceback.format_exc())
+    where = f' ({data_path(exc.filename)})' if getattr(exc, 'filename', None) else ''
+    return _problem_page('A file could not be read or written',
+                         f'{os_problem(exc)}{where}. That file was left as it was.')
+
+
+@app.errorhandler(Exception)
+def _unexpected(exc):
+    from werkzeug.exceptions import HTTPException
+    if isinstance(exc, HTTPException):
+        return exc
+    logging.error('unexpected error: %s', traceback.format_exc())
+    return _problem_page('Something went wrong',
+                         f'{type(exc).__name__}: {exc}. Nothing was saved by this step.')
+
+
+def _guess_manuscript(pid, salvaged):
+    """The manuscript a damaged book was using, if it can be told: the one its
+    readable part names, else one named after the book."""
+    named = salvaged.get('manuscript_file')
+    cands = [named] if isinstance(named, str) and named else []
+    cands += [secure_filename(pid) + ext for ext in ('.md', '.txt', '.docx')]
+    for fn in cands:
+        if os.path.isfile(os.path.join(PROJECT_MS_DIR, os.path.basename(fn))):
+            return os.path.basename(fn)
+    return ''
+
+
+@app.route('/damaged/<kind>/<ident>/repair', methods=['POST'])
+def damaged_repair(kind, ident):
+    """Rewrite a damaged book, style or cover from what can still be read of it,
+    the rest from defaults. The damaged file is kept beside it (`.damaged`), so
+    nothing is lost that a person could still pick out by hand."""
+    if kind not in DAMAGE_KINDS:
+        abort(404)
+    ident = secure_filename(ident)
+    path = os.path.join(_damage_dir(kind), ident + '.json')
+    if not ident or not os.path.exists(path):
+        abort(404)
+    try:
+        _READERS[kind](path)
+        flash('That file reads correctly now; nothing was changed.')
+        return redirect(_damaged_home(kind, ident))
+    except DamagedFile:
+        pass
+    try:
+        read_json(path)
+        whole = True            # it reads; only some settings are of the wrong kind
+    except DamagedFile:
+        whole = False
+    salvaged = salvage_json(path)
+    wrong = [k for k, _, _ in _misfits(salvaged, _shape_ref(kind))]
+    if kind == 'book':
+        data = {'name': ident, 'preset': '', 'manuscript_type': 'markdown',
+                **{k: v for k, v in salvaged.items() if k not in wrong}}
+        ms = _guess_manuscript(ident, salvaged)
+        if ms and not data.get('manuscript_file'):
+            data['manuscript_file'] = ms
+            if 'manuscript_type' not in salvaged:
+                data['manuscript_type'] = 'file' if ms.lower().endswith('.docx') else 'markdown'
+    else:
+        data = _fit(_shape_ref(kind), salvaged)
+    keep = path + '.damaged'
+    n = 2
+    while os.path.exists(keep):
+        keep, n = f'{path}.damaged-{n}', n + 1
+    shutil.copy2(path, keep)
+    _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
+    if whole:
+        said = ', '.join(f'“{k}”' for k in wrong[:6]) + (' and more' if len(wrong) > 6 else '')
+        flash(f'Repaired: {said} set back to '
+              f'{"its default" if len(wrong) == 1 else "their defaults"}. '
+              f'The old file is kept as {data_path(keep)}.')
+    else:
+        flash(f'Repaired: {len(salvaged)} settings were read back, the rest set to their '
+              f'defaults - check them. The damaged file is kept as {data_path(keep)}.')
+    return redirect(_damaged_home(kind, ident))
+
+
+def _damaged_home(kind, ident):
+    return {'book': lambda: url_for('project_edit', pid=ident),
+            'style': lambda: url_for('editor', pid=ident),
+            'cover': lambda: url_for('cover_editor', cid=ident)}[kind]()
+
+
+
 @app.route('/')
 def index(confirm=None):
-    return render_template('index.html', presets=list_presets(), confirm=confirm)
+    return render_template('index.html', presets=list_presets(), confirm=confirm,
+                           damaged=damaged_files('style'))
 
 
 def ornament_tiles():
@@ -1607,7 +2051,7 @@ def delete(pid):
         return redirect(url_for('index'))
     uses = _books_using('preset', pid)
     if uses and request.form.get('confirm') != '1':
-        name = _load_preset_or_default(pid).get('name') or pid
+        name = salvage_json(path).get('name') or pid
         return index(confirm={
             'label': f'The style “{name}”', 'uses': uses,
             'action': url_for('delete', pid=pid), 'back': url_for('index'),
@@ -1621,7 +2065,8 @@ def delete(pid):
 # ------------------------------------------------------- cover template routes
 @app.route('/covers')
 def covers(confirm=None):
-    return render_template('covers.html', covers=list_cover_templates(), confirm=confirm)
+    return render_template('covers.html', covers=list_cover_templates(), confirm=confirm,
+                           damaged=damaged_files('cover'))
 
 
 @app.route('/cover/new')
@@ -1680,7 +2125,7 @@ def cover_delete(cid):
         return redirect(url_for('covers'))
     uses = _books_using('cover_template', cid)
     if uses and request.form.get('confirm') != '1':
-        name = (load_cover_template(cid) or {}).get('name') or cid
+        name = salvage_json(path).get('name') or cid
         return covers(confirm={
             'label': f'The cover template “{name}”', 'uses': uses,
             'action': url_for('cover_delete', cid=cid), 'back': url_for('covers'),
@@ -1907,9 +2352,8 @@ def _project_thumb_bytes(pid):
     if not pid or not os.path.exists(src):
         return None
     try:
-        with open(src, encoding='utf-8') as f:
-            data = json.load(f)
-    except (OSError, ValueError):
+        data = read_json(src)
+    except (OSError, DamagedFile):
         return None
     pdf_path = project_last_pdf_path(data)
     if not pdf_path:
@@ -3327,7 +3771,7 @@ def projects():
     for it in items:
         it['has_thumb'] = project_last_pdf_path(it['data']) is not None
     return render_template('projects.html', projects=items,
-                           preset_map=preset_map)
+                           preset_map=preset_map, damaged=damaged_files('book'))
 
 
 @app.route('/project/create', methods=['POST'])
@@ -3415,8 +3859,11 @@ def _safe_upload_name(filename, fallback):
     if not re.fullmatch(r'[.][A-Za-z0-9]{1,8}', ext):
         ext = ''
     stem = secure_filename(os.path.splitext(filename or '')[0])
+    tag = hashlib.sha1((filename or '').encode('utf-8')).hexdigest()[:6]
     if not stem:
-        stem = fallback + '-' + hashlib.sha1((filename or '').encode('utf-8')).hexdigest()[:6]
+        stem = fallback + '-' + tag
+    elif len(stem) > 80:        # a path Windows would refuse (see SLUG_MAX)
+        stem = stem[:72] + '-' + tag
     return stem + ext
 
 
@@ -3638,9 +4085,8 @@ def _load_preset_or_default(pid):
         path = os.path.join(PRESET_DIR, secure_filename(pid) + '.json')
         if os.path.exists(path):
             try:
-                with open(path, encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception:
+                return read_style(path)
+            except (OSError, DamagedFile):
                 pass
     return DEFAULTS
 
@@ -3715,11 +4161,13 @@ def _atomic_write_bytes(path, data):
             f.flush()
             os.fsync(f.fileno())      # the bytes, not just the buffer
         os.replace(tmp, path)
-    except BaseException:
+    except BaseException as exc:
         try:
             os.remove(tmp)
         except OSError:
             pass
+        if isinstance(exc, OSError):
+            exc.filename = path     # the file being saved, not the temporary one
         raise
 
 
@@ -4041,9 +4489,17 @@ def _style_problem(proj):
     style = proj.get('preset') or ''
     if not style:
         return 'This book has no style yet - pick one in its settings (Edit).'
-    if not os.path.exists(os.path.join(PRESET_DIR, secure_filename(style) + '.json')):
+    path = os.path.join(PRESET_DIR, secure_filename(style) + '.json')
+    if not os.path.exists(path):
         return (f'This book’s style “{style}” is missing (deleted?) - pick another '
                 'in its settings (Edit).')
+    try:
+        read_style(path)
+    except DamagedFile as exc:
+        return (f'This book’s style can’t be read: {exc} Repair it on the Styles page, '
+                'or pick another style in its settings (Edit).')
+    except OSError as exc:
+        return f'This book’s style can’t be read: {os_problem(exc)}.'
     return ''
 
 
@@ -4071,6 +4527,16 @@ def _build_project(pid, proj):
     res = {'error': '', 'warnings': [], 'preset': preset, 'meta': meta,
            'cover_path': cover_path, 'ms_parsed': ms_parsed, 'fmt': fmt,
            'out_name': '', 'epub_name': '', 'build_result': None, 'page_count': 0}
+    # an uploaded cover that has gone, or isn't a picture, was quietly left off
+    cover_file = proj.get('cover_file') or ''
+    if proj.get('cover_mode') == 'image' and cover_file:
+        if not cover_path:
+            res['warnings'].append(f'The cover picture “{cover_file}” is missing, so this book '
+                                   'was built without a cover - upload it again on its Edit page.')
+        elif not _cover_jpeg_size(cover_path):
+            res['warnings'].append(f'The cover picture “{cover_file}” can’t be read as an image '
+                                   '(damaged, or not a picture), so this book was built without '
+                                   'a cover - upload it again on its Edit page.')
 
     if fmt in ('pdf', 'both'):
         res['out_name'] = _claim_out(f'{base}-{stamp}.pdf')
@@ -4268,7 +4734,8 @@ def _art_resolution_check(res, w_in, h_in):
     size = f'{w_in:g}×{h_in:g}" front panel with bleed'
     if not res:
         return {'label': 'Cover art', 'ok': False,
-                'detail': (f'The cover art could not be measured — check it is at least '
+                'detail': ('This picture can’t be read (damaged, or not an image), so it is '
+                           'left off the cover — upload it again. It needs to be at least '
                            f'{int(round(w_in * 300))}×{int(round(h_in * 300))} px for the '
                            f'{size}')}
     px, need = res['px'], res['need']
@@ -4408,7 +4875,8 @@ def build_print_package(proj, scope='print'):
                   engine._register_cover_fonts(tpl, engine.register_fonts(preset)))
             wres = engine.build_cover_wrap(tpl, cf, wmeta, dims, wrap)
             if not art:
-                checks += _missing_checks(cover_fonts=engine.cover_fonts_missing(tpl))
+                checks += _missing_checks(cover_fonts=engine.cover_fonts_missing(tpl),
+                                          cover_art=engine.cover_art_missing(tpl))
         files[pdir + os.path.basename(wrap)] = wrap
         for w in dims['warnings']:
             checks.append({'label': 'Cover wrap', 'ok': False, 'detail': w})
@@ -4737,9 +5205,8 @@ def project_delete(pid):
         proj = None
         if pid and os.path.exists(path):
             try:
-                with open(path, encoding='utf-8') as f:
-                    proj = json.load(f)
-            except (OSError, ValueError):
+                proj = read_json(path)
+            except (OSError, DamagedFile):
                 proj = None
         if isinstance(proj, dict):
             others = set()

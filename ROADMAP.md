@@ -18,11 +18,10 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 9–12 below, in order — next is item 9, a damaged data
-   folder** (corrupt JSON, missing files, unreadable images, read-only or full disk: say
-   what is wrong where, never a bare 500). **Open question for the user from item 8:**
+2. **Bug hunt plan, items 10–12 below, in order — next is item 10, the style editor's
+   pickers in the browser.** **Open question for the user from item 8:**
    should deleting a bundled style or cover template stick in the installed app? See
-   item 8's note. Items 1-8 are done and merged, with fixes
+   item 8's note. Items 1-9 are done and merged, with fixes
    **unreleased**: they wait in CHANGELOG's `## Unreleased`. Harnesses to copy:
    `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
    `test_manuscript_editor.py`, `test_project_edit.py` and `test_first_run.py` (real-time
@@ -30,7 +29,8 @@ Start here in a new session. Each item points at its full entry below.
    registered at import, before any request), `test_shared_state.py` (threads, a real
    threaded server, `Paused` to hold a build mid-way), `test_libraries.py`,
    `test_outputs.py` (an offline structural EPUB validator: `validate`),
-   `test_housekeeping.py` (a browser harness that answers `confirm()` itself). The books in
+   `test_housekeeping.py` (a browser harness that answers `confirm()` itself),
+   `test_damaged_data.py` (damaged files; `Sec-Fetch-Mode` from a real browser). The books in
    `projects/` are the user's test data - probe copies anyway.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
@@ -422,6 +422,53 @@ session of awkward input; fix what is found, and note what isn't a bug.
    manuscript or cover file, an unreadable image, very long and non-ASCII names, a read-only
    or full disk. The app should say what is wrong where it is wrong, never a bare 500, and
    one broken file must not take a whole list page down.
+   - **Done (2026-10-05).** `test_damaged_data.py`: every page against a folder holding books,
+     styles and covers cut short, empty, zero-filled, not JSON, a list, of the wrong kinds and
+     missing settings; repair; damaged pictures; a read-only file and a full disk
+     (`_atomic_write_bytes` patched); long names; and a browser half (a fetch gets JSON, a
+     page the problem page, whose Repair works). Found and fixed:
+     - **One damaged cover template took nearly every page down**: the context processor
+       lists templates on every render and `group_cover_templates` called `.get` on a
+       template that was a string. One book with a numeric `updated` broke `/projects`'s sort
+       (and a numeric `name` its template). Every settings read now goes through `read_json`
+       (BOM and Windows-1252 read as meant; must be an object) and, for books, styles and
+       covers, `read_book`/`read_style`/`read_cover`: a setting of another kind than in
+       `_shape_ref` (DEFAULTS, COVER_DEFAULTS plus family blocks, `BOOK_TEXT`/`BOOK_FLAGS`/
+       matter/PRINT_DEFAULTS), or a missing one from `REQUIRED` (exactly the settings every
+       style and cover any release wrote has), is a `DamagedFile`. Checked against all 171
+       real files (repo, fixtures 1.0.0-1.3.0, the installed app's data): none flagged.
+     - **A damaged file was a bare 500 everywhere, or vanished from its list.** Loaders tag a
+       `DamagedFile` with its kind and id (`_damaged_as`); `@errorhandler`s render
+       `problem.html` (or `{ok: false, error}` for a fetch - `Sec-Fetch-Mode` isn't
+       `navigate`): the file, what is wrong ("stops part-way through" when it doesn't end in
+       `}`), Repair and Delete. `OSError` names the file and the cause (`os_problem`: full,
+       read-only, locked by OneDrive, a folder in the way); anything else is "Something went
+       wrong" with the error, never the bare page. List pages name damaged files
+       (`damaged_files`, `_damaged.html`). Rebuild all and a book's build say its style can't
+       be read (`_style_problem`).
+     - **Repair** (`/damaged/<kind>/<id>/repair`): `salvage_json` takes every whole
+       top-level setting before the cut (files are `json.dumps(indent=2)`, one per line), the
+       rest from `_fit` over defaults (styles, covers) or dropped (a book's wrong-kind ones);
+       a book's manuscript is found from what's left or by its id (`_guess_manuscript`); the
+       damaged file is kept as `.damaged`. A real 1.3.0 book cut at 60% got 31 of its 49
+       settings back.
+     - **Styles and covers were saved with a plain `json.dump`** (a crash left an empty
+       file): now `_atomic_write_text`, whose errors now name the file, not its `.tmp`.
+     - **Pictures that aren't pictures were silent** (`engine.picture_unreadable`, cached by
+       mtime): a figure (printed as a "missing image" box, but the checks called it
+       present), cover-template art and emblems (`cover_art_missing`, drawn without),
+       an uploaded cover (built without; a gone one too) - each now in the checks or the
+       build's warnings. **A wrap design with one such picture couldn't be packaged at
+       all** (ReportLab raised); `wrap_design.drawable_art` leaves it off, `missing` says so.
+     - **A book with a long name couldn't be made** (the manuscript path passed Windows'
+       260 characters): `_slug_or_blank` cuts at `SLUG_MAX` (60), at a word;
+       `_safe_upload_name` keeps stems to 80 with a hash.
+     Not bugs, noted: a binary file as manuscript builds as cp1252 noise (no way to tell
+     it from text cheaply, and a false alarm would block a real book); a hand-written
+     one-line JSON cut short salvages nothing (the app never writes one); the data folder
+     itself being unwritable at startup still stops the app before any page (`os.makedirs`
+     at import) - only a frozen-app launcher could say so; `settings.json` damaged is read
+     as defaults, as before.
 10. **The style editor's pickers in the browser** - trim presets, ornament picker, chapter
     art, figure pickers, font selects with a missing font. The round trip and preview are now
     tested (`test_style_editor.py`); `test_chapter_art.py` and `test_ornaments.py` cover the

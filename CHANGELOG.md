@@ -174,6 +174,30 @@ line here.
   only when the template is edited.
 - **A new book, style or template never takes the name of a file that is
   there but damaged**, which it would have saved over.
+- **A damaged file no longer breaks the app.** One cover template that
+  couldn't be read made nearly every page fail ("Internal Server Error"), and
+  one odd book took the whole Projects page down. Now each page opens. A
+  damaged book, style or cover is named on its list page, and opening it shows
+  which file is wrong and how (cut short by a crash, empty, edited by hand…).
+- **Repair**, offered beside a damaged file, keeps every setting that can
+  still be read, sets the rest to their defaults, and keeps the damaged file
+  next to it. A book's manuscript is a separate file and stays safe; the
+  repaired book uses it again.
+- **Files saved from Notepad read as written**: a byte-order mark or Windows
+  accents in a settings file no longer make it unreadable.
+- **A full disk or a read-only file says so**, naming the file, instead of
+  failing with a bare error page. The writing page shows the reason and keeps
+  trying.
+- **Styles and cover templates save all at once**, as books already did, so a
+  crash mid-save can't leave an empty file.
+- **Pictures that won't open are reported**: a figure, cover art, an uploaded
+  cover or a wrap-designer picture that is damaged or isn't an image now shows
+  in the checks (an uploaded cover that has gone missing too). A wrap with such
+  a picture couldn't be sent to print at all; it now goes without the picture
+  and says so.
+- **Books with very long names can be made.** A long title gave file names
+  past Windows' limit, and the book couldn't be created; file names are now
+  cut short at a word, and the book keeps its whole name.
 
 ## 1.3.0 — 3 October 2026
 
