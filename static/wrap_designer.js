@@ -600,6 +600,7 @@
     else out.push(['ok', 'All text is inside the safe zones.']);
     if (missing.length) out.push(['bad', 'Characters the font doesn\'t have, which would print blank: ' + missing.join('; ')]);
     if (spineText && g.spine_text) out.push(['ok', 'The spine is wide enough for text.']);
+    fontChecks(out);
     pictureChecks(out);
     barcodeChecks(out);
     var ul = $('wd-checks');
@@ -607,6 +608,16 @@
     out.forEach(function (c) { var li = document.createElement('li'); li.className = c[0]; li.textContent = c[1]; ul.appendChild(li); });
   }
 
+  // Text whose font has left the font library: it would not print at all.
+  function fontChecks(out) {
+    var gone = design.elements.filter(function (el) {
+      return el.type === 'text' && !el.hidden && String(el.text || '').trim() &&
+             CFG.fonts.indexOf(el.font) === -1;
+    });
+    if (gone.length) out.push(['bad', 'Its font is not in the font library, so this text would be ' +
+                                      'left off the cover - pick another: ' + gone.map(function (el) {
+                                        return label(el) + ' (' + (el.font || 'no font') + ')'; }).join(', ')]);
+  }
   // Pictures and shapes you place that reach the trim but stop short of the
   // bleed (a white sliver if the cut wanders), and pictures too small for the
   // size they are placed at - measured as engine.image_cover_check measures them.
@@ -852,7 +863,11 @@
     };
     if (el.type === 'text') {
       add('Text', 'text', 'textarea');
-      add('Font', 'font', 'select', CFG.fonts.map(function (f) { return [f, f.replace(/\.ttf$/i, '')]; }));
+      // a font gone from the library stays listed (and flagged), or the select
+      // would show the first font while the box prints nothing
+      add('Font', 'font', 'select', CFG.fonts.map(function (f) { return [f, f.replace(/\.ttf$/i, '')]; })
+        .concat(el.font && CFG.fonts.indexOf(el.font) === -1
+                ? [[el.font, el.font.replace(/\.ttf$/i, '') + ' (not in the font library)']] : []));
       add('Size (pt)', 'size', 'number', null, true); add('Line spacing', 'leading', 'number', null, true);
       add('Letter spacing (pt)', 'tracking', 'number', null, true);
       add('Align', 'align', 'select', [['left', 'Left'], ['center', 'Centre'], ['right', 'Right'],

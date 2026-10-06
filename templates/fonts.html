@@ -31,6 +31,9 @@
     border:1px solid var(--rule-strong);border-radius:2px;padding:8px 10px;flex:1 1 260px;
   }
   .note{color:var(--muted);font-size:13px;margin:14px 0 0;line-height:1.5}
+  .inuse{border-color:var(--accent,#b0472a)}
+  .inuse ul{margin:0 0 14px;padding-left:20px;line-height:1.6}
+  .inuse .acts{display:flex;gap:12px;align-items:center}
 {% endblock %}
 
 {% block body %}
@@ -41,6 +44,25 @@
        (or TrueType-flavoured <code>.otf</code>) and it appears in the font pickers. Fonts are
        embedded in the exported PDF, so you need the right to embed anything you add.</p>
   </div>
+
+  {% if confirm %}
+  <div class="panel inuse" id="in-use">
+    <div class="hd">
+      <h2>{{ confirm.name }} is in use</h2>
+      <p>Styles that use it fall back to Times (or their regular face), covers to the book’s own faces, and wrap-design text set in it is left off the cover until you pick another font. The checks on each book will say so.</p>
+    </div>
+    <div class="bd">
+      <ul>{% for u in confirm.uses %}<li>{{ u }}</li>{% endfor %}</ul>
+      <div class="acts">
+        <form class="inline-form" method="post" action="{{ url_for('fonts_delete', name=confirm.name) }}">
+          <input type="hidden" name="confirm" value="1">
+          <button class="btn btn-ghost btn-sm" type="submit">Remove it anyway</button>
+        </form>
+        <a class="btn btn-primary btn-sm" href="{{ url_for('fonts_page') }}">Keep it</a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <div class="panel">
     <div class="hd">
@@ -76,7 +98,8 @@
             {% else %}
               <form class="inline-form" method="post"
                     action="{{ url_for('fonts_delete', name=f.name) }}"
-                    onsubmit="return confirm('Remove {{ f.name }}? Styles or covers using it will fall back to Times.');">
+                    data-ask="Remove {{ f.name }}? Styles or covers using it will fall back to Times."
+                    onsubmit="return confirm(this.dataset.ask);">
                 <button class="btn btn-ghost btn-sm" type="submit">Remove</button>
               </form>
             {% endif %}

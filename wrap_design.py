@@ -702,6 +702,28 @@ def front_trim(g):
     return g['front_x'], g['edge'] + g['board_ext'], g['trim_w'], g['trim_h']
 
 
+def missing(design):
+    """[(what, [names])] for what a design names that isn't there any more: a
+    text box whose font has left the library isn't printed at all, nor is a
+    picture whose file has gone - so the checks have to say so."""
+    fonts, pictures = set(), set()
+    for el in design.get('elements', []):
+        if not isinstance(el, dict) or el.get('hidden'):
+            continue
+        if el.get('type') == 'text' and not font_file(el.get('font')) \
+                and (el.get('text') or '').strip():
+            fonts.add(os.path.basename(str(el.get('font') or '')) or '(no font)')
+        elif el.get('type') == 'image' and el.get('src') and not art_file(el.get('src')):
+            pictures.add(os.path.basename(str(el['src'])))
+    out = []
+    if fonts:
+        out.append(('Text left off the cover - its font is not in the font library',
+                    sorted(fonts)))
+    if pictures:
+        out.append(('Pictures left off the cover - the file is gone', sorted(pictures)))
+    return out
+
+
 def placed_images(design, g):
     """[(path, w, h)] in inches for every picture in a design that exists - what
     a resolution check measures each one against."""

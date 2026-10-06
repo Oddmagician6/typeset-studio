@@ -390,6 +390,25 @@ def _min_inside(pages, table):
     return None
 
 
+def _missing_checks(figures=(), cover_fonts=(), design_missing=()):
+    """Check rows for what a book names but the libraries no longer have."""
+    def listed(names):
+        names = sorted(set(names))
+        return ', '.join(names[:5]) + (f' (+{len(names) - 5} more)' if len(names) > 5 else '')
+    out = []
+    if figures:
+        out.append({'label': 'Figures', 'ok': False, 'detail': (
+            f'Not in the figure library, so printed as a "missing image" box: '
+            f'{listed(figures)} - upload them on the Figures page')})
+    if cover_fonts:
+        out.append({'label': 'Cover fonts', 'ok': False, 'detail': (
+            f'Not in the font library, so the cover is set in the book’s own faces '
+            f'instead: {listed(cover_fonts)}')})
+    for what, names in design_missing or ():
+        out.append({'label': 'Cover wrap', 'ok': False, 'detail': f'{what}: {listed(names)}'})
+    return out
+
+
 def _preflight(build_result, preset, page_count):
     """Return a list of preflight check dicts: {label, ok, detail}."""
     checks = []
@@ -410,6 +429,8 @@ def _preflight(build_result, preset, page_count):
                    'detail': ('Embedded & subsetted — upload-ready'
                               if build_result.get('fonts_embedded')
                               else 'Standard PDF fonts not embedded — platforms may reject')})
+    checks += _missing_checks(build_result.get('figures_missing'),
+                              build_result.get('cover_fonts_missing'))
 
     if build_result.get('has_cover'):
         checks.append({
@@ -2459,10 +2480,124 @@ def style_cover_specs_template(pid):
                     headers={'Content-Disposition': f'attachment; filename="{fn}"'})
 
 
+def _library_store(up, fn, folder, check):
+    """Put an upload into a library folder; (stored name, note) or (None, reason).
+
+    Checked before it goes in: an upload used to be saved over the file of the
+    same name first and checked after, so a broken one deleted the good one.
+    And never over a different file: books, styles and covers name library
+    files, so a second "map.png" that isn't the first is stored as "map-2.png"
+    (and said so). The same file again is the one already there.
+    """
+    os.makedirs(folder, exist_ok=True)
+    stem, ext = os.path.splitext(fn)
+    fd, tmp = tempfile.mkstemp(dir=folder, suffix='.upload' + ext)
+    os.close(fd)
+    try:
+        up.save(tmp)
+        problem = check(tmp)
+        if problem:
+            return None, f'{up.filename} ({problem})'
+        with open(tmp, 'rb') as f:
+            data = f.read()
+        n = 1
+        while True:
+            cand = fn if n == 1 else f'{stem}-{n}{ext}'
+            path = os.path.join(folder, cand)
+            if os.path.exists(path):
+                try:
+                    with open(path, 'rb') as f:
+                        same = f.read() == data
+                except OSError:
+                    same = False
+                if same:
+                    return cand, 'already in the library'
+            else:
+                try:
+                    os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                except FileExistsError:
+                    continue
+                os.replace(tmp, path)
+                return cand, ('' if n == 1 else
+                              f'a different {fn} is already in the library, so this one is {cand}')
+            n += 1
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _flash_stored(saved, skipped, what):
+    if saved:
+        flash('Added ' + ', '.join(f'{n} ({note})' if note else n for n, note in saved) + '.')
+    if skipped:
+        flash('Skipped ' + '; '.join(skipped) + '.')
+    if not saved and not skipped:
+        flash(f'Choose one or more {what} to upload.')
+
+
+def _in_library(name, names):
+    """`name` if it is one of the library's own files, else None. Matched as
+    listed, not through secure_filename, so a file put in the folder by hand as
+    "My Map.png" can still be shown and removed."""
+    return name if name in names else None
+
+
+def _named(path_or_name, fn):
+    return os.path.basename(str(path_or_name or '')).lower() == fn.lower()
+
+
+def _font_uses(fn):
+    """Where a library font is named: styles, cover templates, books' wrap designs."""
+    uses = []
+    for it in list_presets():
+        files = it['data'].get('font_files')
+        if isinstance(files, dict) and any(_named(v, fn) for v in files.values()):
+            uses.append(f'the style “{it["data"].get("name") or it["id"]}”')
+    for it in list_cover_templates():
+        fonts = it['data'].get('fonts')
+        if isinstance(fonts, dict) and any(_named(v, fn) for v in fonts.values()):
+            uses.append(f'the cover template “{it["data"].get("name") or it["id"]}”')
+    for it in list_projects():
+        design = it['data'].get('wrap_design') or {}
+        els = design.get('elements') if isinstance(design, dict) else None
+        if isinstance(els, list) and any(isinstance(e, dict) and _named(e.get('font'), fn)
+                                         for e in els):
+            name = it['data'].get('name') or it['data'].get('title') or it['id']
+            uses.append(f'the wrap design of “{name}”')
+    return uses
+
+
+def _figure_uses(fn):
+    """Where a figure is named: books' `~~~ figure` blocks, styles' chapter art."""
+    uses = []
+    for it in list_presets():
+        if _named(engine.chapter_art_src(it['data']), fn):
+            uses.append(f'the style “{it["data"].get("name") or it["id"]}” (chapter art)')
+    for it in list_projects():
+        text = _project_manuscript_text(it['data'], report_import=False)
+        for line in text.splitlines():
+            m = manuscript.DOCBLOCK_RE.match(line)
+            if m:
+                kind, attrs = manuscript._parse_block_header(m.group(1))
+                if kind == 'figure' and _named(attrs.get('src'), fn):
+                    name = it['data'].get('name') or it['data'].get('title') or it['id']
+                    uses.append(f'the book “{name}”')
+                    break
+    return uses
+
+
 @app.route('/fonts')
-def fonts_page():
+def fonts_page(confirm=None):
     items = [{'name': f, 'builtin': f in BUILTIN_FONTS} for f in list_fonts()]
-    return render_template('fonts.html', fonts=items)
+    return render_template('fonts.html', fonts=items, confirm=confirm)
+
+
+def _font_problem(path):
+    if _is_embeddable_font(path):
+        return None
+    return 'not an embeddable font — OTF/CFF outlines aren’t supported'
 
 
 @app.route('/fonts/upload', methods=['POST'])
@@ -2475,38 +2610,36 @@ def fonts_upload():
         if not fn.lower().endswith(FONT_EXTS):
             skipped.append(f'{up.filename} (not a .ttf/.otf)')
             continue
-        if fn in BUILTIN_FONTS:
-            skipped.append(f'{fn} (built-in name is protected)')
-            continue
-        dest = os.path.join(FONT_DIR, fn)
-        up.save(dest)
-        if _is_embeddable_font(dest):
-            saved.append(fn)
+        name, note = _library_store(up, fn, FONT_DIR, _font_problem)
+        if name:
+            saved.append((name, note))
         else:
-            try:
-                os.remove(dest)
-            except OSError:
-                pass
-            skipped.append(f'{fn} (not an embeddable font — OTF/CFF outlines aren’t supported)')
-    if saved:
-        flash('Added ' + ', '.join(saved) + '.')
-    if skipped:
-        flash('Skipped ' + '; '.join(skipped) + '.')
-    if not saved and not skipped:
-        flash('Choose one or more .ttf or .otf files to upload.')
+            skipped.append(note)
+    _flash_stored(saved, skipped, '.ttf or .otf files')
     return redirect(url_for('fonts_page'))
 
 
-@app.route('/fonts/delete/<name>', methods=['POST'])
+@app.route('/fonts/delete/<path:name>', methods=['POST'])
 def fonts_delete(name):
-    fn = secure_filename(name)
+    fn = _in_library(name, list_fonts())
+    if not fn:
+        flash('That font isn’t in the library.')
+        return redirect(url_for('fonts_page'))
     if fn in BUILTIN_FONTS:
         flash('That font ships with the app and can’t be deleted.')
         return redirect(url_for('fonts_page'))
-    path = os.path.join(FONT_DIR, fn)
-    if os.path.exists(path) and fn.lower().endswith(FONT_EXTS):
-        os.remove(path)
-        flash(f'Removed {fn}. Styles or covers that referenced it fall back to Times.')
+    uses = _font_uses(fn)
+    if uses and request.form.get('confirm') != '1':
+        return fonts_page(confirm={'name': fn, 'uses': uses})
+    try:
+        os.remove(os.path.join(FONT_DIR, fn))
+    except OSError as exc:
+        flash(f'{fn} could not be removed: {exc}')
+        return redirect(url_for('fonts_page'))
+    flash(f'Removed {fn}.' + (' ' + 'What used it now falls back: styles to Times, covers '
+                              'to the book’s own faces, and wrap-design text set in it is '
+                              'left off the cover until you pick another font.'
+                              if uses else ''))
     return redirect(url_for('fonts_page'))
 
 
@@ -2538,28 +2671,30 @@ def list_figures():
     return names
 
 
+def _figure_problem(path):
+    """Why a file can't be a figure, or None. It must actually be an image."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            im.verify()
+    except Exception as exc:
+        if type(exc).__name__ == 'DecompressionBombError':
+            return 'too many pixels to print - save it smaller, at 300 dpi for its printed size'
+        return 'not a readable image'
+    return None
+
+
 def _save_figure(up):
-    """Validate and store one uploaded illustration. Returns (filename, error)."""
+    """Validate and store one uploaded illustration. Returns (filename, note)
+    or (None, error)."""
     fn = _safe_upload_name(up.filename, 'figure')
     if not fn.lower().endswith(FIGURE_EXTS):
         return None, f'{up.filename} (not a .jpg/.png/.gif)'
-    dest = os.path.join(FIGURE_DIR, fn)
-    up.save(dest)
-    try:                                   # must actually be an image
-        from PIL import Image
-        with Image.open(dest) as im:
-            im.verify()
-    except Exception:
-        try:
-            os.remove(dest)
-        except OSError:
-            pass
-        return None, f'{fn} (not a readable image)'
-    return fn, None
+    return _library_store(up, fn, FIGURE_DIR, _figure_problem)
 
 
 @app.route('/figures')
-def figures():
+def figures(confirm=None):
     items = []
     for f in list_figures():
         path = os.path.join(FIGURE_DIR, f)
@@ -2572,7 +2707,7 @@ def figures():
             pass
         items.append({'name': f, 'w': w, 'h': h,
                       'kb': os.path.getsize(path) / 1024.0})
-    return render_template('figures.html', figures=items)
+    return render_template('figures.html', figures=items, confirm=confirm)
 
 
 @app.route('/figures/upload', methods=['POST'])
@@ -2581,34 +2716,44 @@ def figures_upload():
     for up in request.files.getlist('figures'):
         if not up or not up.filename:
             continue
-        fn, err = _save_figure(up)
-        (saved if fn else skipped).append(fn or err)
-    # XHR (the manuscript editor's Figure button) wants the filename back
+        fn, note = _save_figure(up)
+        if fn:
+            saved.append((fn, note))
+        else:
+            skipped.append(note)
+    # XHR (the manuscript editor's Figure button) wants the filename back -
+    # the name it was stored under, which is what the book has to name
     if request.headers.get('X-Requested-With') == 'fetch':
-        return jsonify({'ok': bool(saved), 'saved': saved, 'skipped': skipped})
-    if saved:
-        flash('Added ' + ', '.join(saved) + '.')
-    if skipped:
-        flash('Skipped ' + '; '.join(skipped) + '.')
-    if not saved and not skipped:
-        flash('Choose one or more images to upload.')
+        return jsonify({'ok': bool(saved), 'saved': [n for n, _ in saved],
+                        'notes': [n for _, n in saved], 'skipped': skipped})
+    _flash_stored(saved, skipped, 'images')
     return redirect(url_for('figures'))
 
 
-@app.route('/figures/delete/<name>', methods=['POST'])
+@app.route('/figures/delete/<path:name>', methods=['POST'])
 def figures_delete(name):
-    fn = secure_filename(name)
-    path = os.path.join(FIGURE_DIR, fn)
-    if os.path.exists(path) and fn.lower().endswith(FIGURE_EXTS):
-        os.remove(path)
-        flash(f'Removed {fn}. Figures referencing it will show a "missing image" box.')
+    fn = _in_library(name, list_figures())
+    if not fn:
+        flash('That image isn’t in the library.')
+        return redirect(url_for('figures'))
+    uses = _figure_uses(fn)
+    if uses and request.form.get('confirm') != '1':
+        return figures(confirm={'name': fn, 'uses': uses})
+    try:
+        os.remove(os.path.join(FIGURE_DIR, fn))
+    except OSError as exc:
+        flash(f'{fn} could not be removed: {exc}')
+        return redirect(url_for('figures'))
+    flash(f'Removed {fn}.' + (' Where it was used, the book now prints a "missing image" '
+                              'box, and its checks say so.' if uses else ''))
     return redirect(url_for('figures'))
 
 
-@app.route('/figures/file/<name>')
+@app.route('/figures/file/<path:name>')
 def figure_file(name):
     """Serve an illustration, for the manager page and the editor's rich view."""
-    return send_from_directory(FIGURE_DIR, secure_filename(name))
+    fn = _in_library(name, list_figures()) or secure_filename(name)
+    return send_from_directory(FIGURE_DIR, fn)
 
 
 class _PreviewError(Exception):
@@ -4151,6 +4296,7 @@ def build_print_package(proj, scope='print'):
             g = engine.wrap_geometry(dims)
             wrap_design.build_pdf(design, dims, wrap)
             wres = wrap_design.summary(g, design)
+            checks += _missing_checks(design_missing=wrap_design.missing(design))
             # every picture measured at the size it is placed at, bleed included
             for path, w_in, h_in in wrap_design.placed_images(design, g):
                 row = _art_resolution_check(engine.image_cover_check(path, w_in, h_in),
@@ -4167,6 +4313,8 @@ def build_print_package(proj, scope='print'):
             cf = (engine.image_cover_fonts(preset) if art else
                   engine._register_cover_fonts(tpl, engine.register_fonts(preset)))
             wres = engine.build_cover_wrap(tpl, cf, wmeta, dims, wrap)
+            if not art:
+                checks += _missing_checks(cover_fonts=engine.cover_fonts_missing(tpl))
         files[pdir + os.path.basename(wrap)] = wrap
         for w in dims['warnings']:
             checks.append({'label': 'Cover wrap', 'ok': False, 'detail': w})

@@ -35,6 +35,9 @@
   }
   .note{color:var(--muted);font-size:13px;margin:14px 0 0;line-height:1.5}
   .note code{font-family:var(--mono);font-size:12.5px}
+  .inuse{border-color:var(--accent,#b0472a)}
+  .inuse ul{margin:0 0 14px;padding-left:20px;line-height:1.6}
+  .inuse .acts{display:flex;gap:12px;align-items:center}
 {% endblock %}
 
 {% block body %}
@@ -45,6 +48,25 @@
        as the <code>src</code>: <code>~~~ figure src="map.png"</code> — the block's text
        becomes the caption.</p>
   </div>
+
+  {% if confirm %}
+  <div class="panel inuse" id="in-use">
+    <div class="hd">
+      <h2>{{ confirm.name }} is in use</h2>
+      <p>Where it is used, the book prints a “missing image” box instead, and its checks say so.</p>
+    </div>
+    <div class="bd">
+      <ul>{% for u in confirm.uses %}<li>{{ u }}</li>{% endfor %}</ul>
+      <div class="acts">
+        <form class="inline-form" method="post" action="{{ url_for('figures_delete', name=confirm.name) }}">
+          <input type="hidden" name="confirm" value="1">
+          <button class="btn btn-ghost btn-sm" type="submit">Remove it anyway</button>
+        </form>
+        <a class="btn btn-primary btn-sm" href="{{ url_for('figures') }}">Keep it</a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <div class="panel">
     <div class="hd">
@@ -87,7 +109,8 @@
                   <span class="sep"></span>
                   <form class="inline-form" method="post"
                         action="{{ url_for('figures_delete', name=f.name) }}"
-                        onsubmit="return confirm('Remove {{ f.name }}? Figures using it will show a missing-image box.');">
+                        data-ask="Remove {{ f.name }}? Figures using it will show a missing-image box."
+                    onsubmit="return confirm(this.dataset.ask);">
                     <button class="btn btn-ghost btn-sm" type="submit">Remove</button>
                   </form>
                 </div>

@@ -822,8 +822,12 @@ def _para_images(p, stem, report):
         try:
             os.makedirs(FIGURE_DIR, exist_ok=True)
             if not os.path.exists(dest):
-                with open(dest, 'wb') as f:
+                # whole or not at all: a build reading this book at the same
+                # moment must not find half a picture under its name
+                tmp = f'{dest}.{os.getpid()}-{id(blob)}.tmp'
+                with open(tmp, 'wb') as f:
                     f.write(blob)
+                os.replace(tmp, dest)
         except OSError:
             report['images_failed'] += 1
             continue
