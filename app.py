@@ -549,18 +549,71 @@ def check_for_update(force=False, fetch=None):
     return {'version': latest, 'url': url, 'newer': is_newer(latest)}
 
 
+def _data_folder(name):
+    return {'presets': PRESET_DIR, 'covers': COVER_DIR, 'fonts': FONT_DIR}[name]
+
+
+def _deleted_defaults(name):
+    """The bundled styles or cover templates (by id) the user has deleted."""
+    got = load_settings().get('deleted_defaults')
+    ids = got.get(name) if isinstance(got, dict) else None
+    return {i for i in ids if isinstance(i, str)} if isinstance(ids, list) else set()
+
+
+def _set_deleted_defaults(name, ids):
+    settings = load_settings()
+    got = settings.get('deleted_defaults')
+    got = got if isinstance(got, dict) else {}
+    got[name] = sorted(ids)
+    settings['deleted_defaults'] = got
+    save_settings(settings)
+
+
+def _bundled_ids(name):
+    """The ids of the styles or cover templates that ship with the app, in a
+    separate bundle (the installed app); none in dev, where they are the data."""
+    src = resource_path(name)
+    if os.path.abspath(src) == os.path.abspath(_data_folder(name)) or not os.path.isdir(src):
+        return set()
+    return {f[:-5] for f in os.listdir(src) if f.endswith('.json')}
+
+
+def note_default_deleted(name, ident):
+    """Remember that a bundled style or cover template was deleted, so the next
+    start doesn't copy it back. The user decided (2026-10-06): a delete sticks,
+    and "Restore defaults" brings them back."""
+    if ident in _bundled_ids(name):
+        _set_deleted_defaults(name, _deleted_defaults(name) | {ident})
+
+
+def restorable_defaults(name):
+    """[(id, name)] of the bundled ones not in the data folder - deleted, or
+    lost - which "Restore defaults" would copy back."""
+    out = []
+    for ident in sorted(_bundled_ids(name)):
+        if not os.path.exists(os.path.join(_data_folder(name), ident + '.json')):
+            try:
+                label = read_json(resource_path(name, ident + '.json')).get('name') or ident
+            except Exception:
+                label = ident
+            out.append((ident, label))
+    return out
+
+
 def _seed_defaults():
     """First-run seeding: copy bundled default presets/covers/fonts into the
-    user data dir when a file is missing there. No-op in dev, where the bundled
-    and data locations are the same folder."""
+    user data dir when a file is missing there - except a bundled style or
+    cover the user deleted. No-op in dev, where the bundled and data locations
+    are the same folder."""
     for name in ('presets', 'covers', 'fonts'):
         src = resource_path(name)
-        dst = os.path.join(DATA_DIR, name)
+        dst = _data_folder(name)
         if os.path.abspath(src) == os.path.abspath(dst) or not os.path.isdir(src):
             continue
+        skip = {i + '.json' for i in _deleted_defaults(name)} if name != 'fonts' else set()
         for fn in os.listdir(src):
             s, d = os.path.join(src, fn), os.path.join(dst, fn)
-            if os.path.isfile(s) and not os.path.exists(d):
+            if os.path.isfile(s) and not os.path.exists(d) and fn not in skip:
                 try:
                     shutil.copy2(s, d)
                 except OSError:
@@ -1941,7 +1994,8 @@ def _damaged_home(kind, ident):
 @app.route('/')
 def index(confirm=None):
     return render_template('index.html', presets=list_presets(), confirm=confirm,
-                           damaged=damaged_files('style'))
+                           damaged=damaged_files('style'),
+                           restorable=restorable_defaults('presets'))
 
 
 def ornament_tiles():
@@ -2106,15 +2160,35 @@ def delete(pid):
             'after': 'Deleted, these books can’t be typeset until you pick another style '
                      'on their Edit page (which will say so).'})
     os.remove(path)
+    note_default_deleted('presets', pid)
     flash('Style deleted.' + (' The books that used it need another style.' if uses else ''))
     return redirect(url_for('index'))
+
+
+@app.route('/defaults/<name>/restore', methods=['POST'])
+def restore_defaults(name):
+    """Copy back the bundled styles or cover templates that were deleted. Ones
+    still there - edited or not - are left as they are."""
+    if name not in ('presets', 'covers'):
+        abort(404)
+    back = []
+    for ident, label in restorable_defaults(name):
+        _atomic_write_bytes(os.path.join(_data_folder(name), ident + '.json'),
+                            open(resource_path(name, ident + '.json'), 'rb').read())
+        back.append(label)
+    _set_deleted_defaults(name, set())
+    what = 'style' if name == 'presets' else 'cover template'
+    flash(f'Restored {len(back)} {what}{"s" if len(back) != 1 else ""}: '
+          + ', '.join(f'“{b}”' for b in back) + '.' if back else f'No {what}s were missing.')
+    return redirect(url_for('index' if name == 'presets' else 'covers'))
 
 
 # ------------------------------------------------------- cover template routes
 @app.route('/covers')
 def covers(confirm=None):
     return render_template('covers.html', covers=list_cover_templates(), confirm=confirm,
-                           damaged=damaged_files('cover'))
+                           damaged=damaged_files('cover'),
+                           restorable=restorable_defaults('covers'))
 
 
 @app.route('/cover/new')
@@ -2180,6 +2254,7 @@ def cover_delete(cid):
             'after': 'Deleted, these books have no cover until you pick another template '
                      'or upload art on their Edit page; their checks will say so.'})
     os.remove(path)
+    note_default_deleted('covers', cid)
     _drop_cover_thumbs(cid)
     flash('Cover template deleted.' + (' The books that used it need another cover.'
                                        if uses else ''))

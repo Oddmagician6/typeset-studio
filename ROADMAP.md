@@ -18,9 +18,8 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 11–12 below, in order — next is item 11, the small pages.** **Open question for the user from item 8:**
-   should deleting a bundled style or cover template stick in the installed app? See
-   item 8's note. Items 1-10 are done and merged, with fixes
+2. **Bug hunt plan, items 11–12 below, in order — next is item 11, the small pages.**
+   Items 1-10 are done and merged (item 8's open question answered and done), with fixes
    **unreleased**: they wait in CHANGELOG's `## Unreleased`. Harnesses to copy:
    `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
    `test_manuscript_editor.py`, `test_project_edit.py` and `test_first_run.py` (real-time
@@ -419,6 +418,15 @@ session of awkward input; fix what is found, and note what isn't a bug.
      template is undone at the next launch (the prompt says "cannot be undone"). Keeping
      a list of deleted bundled names would make it stick, but then there's no way back
      to the original - the user's call.
+   - **Answered and done (2026-10-06): "it should stick but have a 'restore defaults'
+     button."** Deleting a bundled style or cover template records its id in
+     settings.json (`deleted_defaults`, `note_default_deleted` - only ids in the bundle,
+     never one the user made); `_seed_defaults` skips those (fonts can't be deleted, so
+     they aren't listed). The Styles and Covers pages name the deleted defaults with a
+     **Restore defaults** button (`_restore_defaults.html`, `/defaults/<name>/restore`)
+     that copies back only what is missing - a default the user edited stays edited - and
+     forgets the list. A new default an update ships is still seeded. In dev the bundle
+     is the data folder, so there's nothing to offer. `test_defaults.py`.
 9. **A damaged data folder.** A corrupted JSON file (project, style, cover), a missing
    manuscript or cover file, an unreadable image, very long and non-ASCII names, a read-only
    or full disk. The app should say what is wrong where it is wrong, never a bare 500, and

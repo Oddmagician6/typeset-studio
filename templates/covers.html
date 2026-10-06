@@ -41,6 +41,7 @@
        the title, author, and a few optional lines. Duplicate one to make a variant, then
        tweak the colours, border, and type. Pick a cover on the <b>Set a book</b> page.</p>
   </div>
+  {% with what='cover template', folder='covers' %}{% include '_restore_defaults.html' %}{% endwith %}
 
   {% for g in cover_groups %}
     <details class="cover-cat" open>

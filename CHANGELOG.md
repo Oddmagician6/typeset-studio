@@ -198,6 +198,10 @@ line here.
 - **Books with very long names can be made.** A long title gave file names
   past Windows' limit, and the book couldn't be created; file names are now
   cut short at a word, and the book keeps its whole name.
+- **Deleting a style or cover template that came with the app sticks.** It
+  used to come back the next time the app started. The Styles and Covers pages
+  now list the ones you deleted, with a **Restore defaults** button that brings
+  them back (it doesn't touch the ones you've edited).
 - **Three of the bundled styles couldn't be saved.** Mass market, Modern clean
   and Science fiction & fantasy opened in the style editor, but Save did
   nothing except point at a field ("enter 0.34 or 0.36"). Neither did any style
