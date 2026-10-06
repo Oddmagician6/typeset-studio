@@ -214,7 +214,7 @@ def form_of(html, action):
     return MultiDict(p.fields)
 
 
-RELEASES = ['v1.0.0', 'v1.1.0', 'v1.2.0', 'v1.2.3', 'v1.2.6', 'v1.2.9', 'v1.3.0']
+RELEASES = ['v1.0.0', 'v1.1.0', 'v1.2.0', 'v1.2.3', 'v1.2.6', 'v1.2.9', 'v1.3.0', 'v1.3.1']
 
 
 def open_release(version):
