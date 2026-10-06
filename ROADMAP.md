@@ -18,10 +18,9 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 10–12 below, in order — next is item 10, the style editor's
-   pickers in the browser.** **Open question for the user from item 8:**
+2. **Bug hunt plan, items 11–12 below, in order — next is item 11, the small pages.** **Open question for the user from item 8:**
    should deleting a bundled style or cover template stick in the installed app? See
-   item 8's note. Items 1-9 are done and merged, with fixes
+   item 8's note. Items 1-10 are done and merged, with fixes
    **unreleased**: they wait in CHANGELOG's `## Unreleased`. Harnesses to copy:
    `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
    `test_manuscript_editor.py`, `test_project_edit.py` and `test_first_run.py` (real-time
@@ -30,7 +29,9 @@ Start here in a new session. Each item points at its full entry below.
    threaded server, `Paused` to hold a build mid-way), `test_libraries.py`,
    `test_outputs.py` (an offline structural EPUB validator: `validate`),
    `test_housekeeping.py` (a browser harness that answers `confirm()` itself),
-   `test_damaged_data.py` (damaged files; `Sec-Fetch-Mode` from a real browser). The books in
+   `test_damaged_data.py` (damaged files; `Sec-Fetch-Mode` from a real browser),
+   `test_style_pickers.py` (a step list in one iframe; a submitting step moves on before
+   it clicks, since the page it lands on runs the next step). The books in
    `projects/` are the user's test data - probe copies anyway.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
@@ -473,12 +474,48 @@ session of awkward input; fix what is found, and note what isn't a bug.
     art, figure pickers, font selects with a missing font. The round trip and preview are now
     tested (`test_style_editor.py`); `test_chapter_art.py` and `test_ornaments.py` cover the
     engine side.
+     - **Done (2026-10-06).** `test_style_pickers.py`: every bundled style and the new-style
+       page through the real Save button, every standard trim picked, every ornament tile
+       and a picture on a glyph style, a style naming a font, chapter art and scene picture
+       the libraries lack. Each of these failed against the old page. Found and fixed:
+     - **Save did nothing on three bundled styles** (mass-market, modern-clean,
+       science-fiction-fantasy): a number's `step` counts from its `min`, so `pd_sink`
+       0.35 / 0.45 under `min=0 step=0.02` was "invalid" and the browser refused the form;
+       picking 6.14 × 9.21, 4.25 × 6.87, 5.06 × 7.81, 6.69 × 9.61 or 7.44 × 9.69 did the
+       same to any style (the trim fields count from their opening value in 0.05s). The
+       form is `novalidate`; the server holds all 73 numbers to `STYLE_RANGES` (`_fs`;
+       `_f` now refuses NaN/Infinity for the cover form too). The ranges were checked
+       against every real style (repo, fixtures, the installed app's data): none outside.
+       The other number forms were swept: no field is invalid as opened; the cover editor
+       uses `step="any"`.
+     - **Whole-inch trims never showed in the picker**: options were `6.0x9.0`, the
+       script's lookup `6x9` (`%g` now).
+     - **An ornament tile clicked on a glyph style changed nothing** in the book (only the
+       Type select decides); picking a tile or a picture now sets the type, "none" of the
+       kind in use goes back to the glyph.
+     - **The scene-break picture was looked up in the fonts folder** (feature 9 predates
+       the figure library), so the app had no way to supply one. It is now a picker over
+       the figure library; `engine.scene_image_path` looks there first, then in the fonts
+       folder (old styles print as before). `scene_image_missing` puts a gone or
+       unreadable one in the checks (the breaks print the glyph); `_figure_uses` counts it,
+       so deleting it asks. The ebook still sets the glyph for a picture break - noted in
+       the field's hint, not changed.
+     - **Missing font / chapter art were shown as if present**: marked "(not in your …
+       library)", as the cover editor does; Preview now lists what it drew without
+       (`_style_warnings`: Times fallback, a missing weight, chapter art, scene picture).
+     - **A style that can't fit its page** (a 10" sink on a 9" page, a 500pt scene gap, a
+       1" trim) failed every build with ReportLab's `Flowable <Spacer at 0x…> too large on
+       page 2 in frame 'recto'…`: `engine.build_pdf` turns `LayoutError` into
+       `DoesNotFit`, which says what (a space, a scene break, a line of text…) and where.
+     Not bugs, noted: a style naming an ornament id no longer bundled shows no tile picked
+     and saves `''`, which prints the glyph exactly as before.
 11. **Small pages, partly covered:** the continuity checker's page (the checker is tested,
     `/project/<pid>/continuity` isn't), About and the update check's button (`/about/check`),
     the cover specs page and its template PDF.
 12. **The wrap designer's remaining edges** - already the most tested page: resizing a turned
     picture, a rule or the barcode; snapping while zoomed; undo across presets and
-    Customise; a design with hundreds of elements (the 400-element save limit).
+    Customise; a design with hundreds of elements (the 400-element save limit). Seen in
+    item 10: the Pages field is `min=24 step=10`, so its arrows snap to 24, 34 … 324.
 
 ## What this app is
 

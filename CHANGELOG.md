@@ -198,6 +198,29 @@ line here.
 - **Books with very long names can be made.** A long title gave file names
   past Windows' limit, and the book couldn't be created; file names are now
   cut short at a word, and the book keeps its whole name.
+- **Three of the bundled styles couldn't be saved.** Mass market, Modern clean
+  and Science fiction & fantasy opened in the style editor, but Save did
+  nothing except point at a field ("enter 0.34 or 0.36"). Neither did any style
+  after picking one of five standard trims from the list (6.14 × 9.21 and
+  others). Save now always saves, and each number is kept to a sensible range
+  instead: a body size typed as 0 no longer makes a book of invisible text.
+- **The standard-size list shows the trim a style has.** 5 × 8, 6 × 9, 7 × 10,
+  8 × 10 and 8.25 × 11 reset the list to "Choose a trim…".
+- **Clicking a scene-break ornament uses it.** On a style whose scene breaks
+  were a text glyph, picking an ornament tile changed nothing in the book until
+  the Type list was changed too. The tile now sets it, as does picking a picture.
+- **A scene break can be your own picture from the Figures page.** The field
+  wanted a file in the fonts folder, where the app had no way to put one.
+  Styles that already use a picture there keep it. A missing scene-break
+  picture is now in the checks (scene breaks print the glyph instead), and
+  deleting a picture a style uses says so first.
+- **The style editor says what's missing.** A font or chapter-art file that's
+  no longer in its library is marked "(not in your … library)" in its list, and
+  Preview names what it drew without, where it used to fall back to Times in
+  silence.
+- **A style that can't fit its page says so in words**: "A space on page 2
+  doesn't fit in the room a page has for text…", not a message about
+  `Flowable <Spacer at 0x…>`.
 
 ## 1.3.0 — 3 October 2026
 
