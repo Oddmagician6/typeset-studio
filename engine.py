@@ -44,6 +44,7 @@ from reportlab.platypus import (
     PageBreak, Flowable, NextPageTemplate, Table, TableStyle, KeepTogether,
 )
 from reportlab.platypus.paragraph import Paragraph as _P
+from reportlab.platypus.doctemplate import LayoutError
 from reportlab.lib import colors as _colors
 
 try:
@@ -261,6 +262,36 @@ def figures_missing(ms, preset):
                 want.append((block[2].get('src') or '').strip())
     return sorted({s for s in want if s and (not _figure_asset_path(s)
                                               or picture_unreadable(_figure_asset_path(s)))})
+
+
+def scene_image_src(preset):
+    """The picture a style marks scene breaks with, or '' (another type)."""
+    sb = preset.get('scene_break', {}) or {}
+    return (sb.get('image') or '').strip() if sb.get('type') == 'image' else ''
+
+
+def scene_image_path(preset):
+    """Where the scene-break picture is, or None. The figure library first; the
+    font folder after it, where styles had to keep one before there was a
+    figure library."""
+    name = scene_image_src(preset)
+    if not name:
+        return None
+    if os.path.isabs(name):
+        return name if os.path.exists(name) else None
+    for folder in (FIGURE_DIR, FONT_DIR):
+        p = os.path.join(folder, name)
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def scene_image_missing(preset):
+    """The scene-break picture's name if it is gone or can't be read: the
+    breaks then print the glyph instead, which a proof reader won't notice."""
+    name = scene_image_src(preset)
+    path = scene_image_path(preset)
+    return os.path.basename(name) if name and (not path or picture_unreadable(path)) else ''
 
 
 def _register_cover_fonts(tpl, interior):
@@ -4103,10 +4134,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             val  = block[1]
             if kind == 'scene':
                 sb = preset['scene_break']
-                img_path = None
-                if sb.get('type') == 'image' and sb.get('image', '').strip():
-                    raw_img = sb['image'].strip()
-                    img_path = raw_img if os.path.isabs(raw_img) else os.path.join(FONT_DIR, raw_img)
+                img_path = scene_image_path(preset)
                 orn = sb.get('ornament', '') if sb.get('type') == 'ornament' else ''
                 story.append(SceneBreak(glyph, head_font, sb['size'], sb['gap'],
                                         image_path=img_path, ornament=orn,
@@ -4471,6 +4499,28 @@ def _coverless(meta):
     return dict(meta, cover_mode='none', cover_image='')
 
 
+class DoesNotFit(ValueError):
+    """Something bigger than a page's text area: ReportLab's own message names
+    a Python object and a frame, which tells a writer nothing."""
+
+
+_FLOWABLE_WORDS = {'Spacer': 'A space', 'SceneBreak': 'A scene break',
+                   'Paragraph': 'A line of text', 'FigureImage': 'A picture',
+                   'Table': 'A table', 'KeepTogether': 'A picture with its caption'}
+
+
+def _does_not_fit(exc):
+    msg = str(exc)
+    page = re.search(r'too large on page (\d+)', msg)
+    kind = re.search(r'<(\w+) at 0x', msg)
+    what = _FLOWABLE_WORDS.get(kind.group(1) if kind else '', 'Something')
+    where = f' on page {page.group(1)}' if page else ''
+    return DoesNotFit(
+        f'{what}{where} doesn’t fit in the room a page has for text, so the book '
+        f'can’t be set. Usually the style leaves too little: the page size against '
+        f'its margins, the chapter sink, or a space or type size set very large.')
+
+
 def build_pdf(manuscript, preset, out_path, meta, press=False):
     """Build the interior. `press=True` asks for the press-ready variant.
 
@@ -4496,6 +4546,8 @@ def build_pdf(manuscript, preset, out_path, meta, press=False):
             res['press'] = False
             res['press_error'] = str(exc)
             return res
+    except LayoutError as exc:
+        raise _does_not_fit(exc) from exc
     finally:
         _FLOOR.size = 0
 
@@ -4666,6 +4718,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
         'font_details':   fonts['details'],
         'fonts_embedded': not fonts['fallback'],
         'figures_missing': figures_missing(manuscript, preset),
+        'scene_image_missing': scene_image_missing(preset),
         'cover_template_gone': (meta.get('cover_template') or '?')
                                if meta.get('cover_mode') == 'designed'
                                and not meta.get('cover_template_data') else '',

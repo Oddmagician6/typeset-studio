@@ -76,7 +76,9 @@
   </div>
 
   <div class="work">
-    <form class="editor" method="post"
+    {# novalidate: a number's `step` made the browser refuse a saved 0.35 or a
+       6.14" trim; the server holds every field to its range (STYLE_RANGES) #}
+    <form class="editor" method="post" novalidate
           action="{{ url_for('save') if is_new else url_for('save', pid=pid) }}"
           oninput="updatePreview()">
 
@@ -108,7 +110,7 @@
               <select id="trim-pick">
                 <option value="">Choose a trim…</option>
                 {% for w, h, label in trim_presets %}
-                <option value="{{ w }}x{{ h }}"
+                <option value="{{ '%g'|format(w) }}x{{ '%g'|format(h) }}"
                   {{ 'selected' if p.trim.w == w and p.trim.h == h }}>{{ w }} × {{ h }}" — {{ label }}</option>
                 {% endfor %}
               </select></div>
@@ -208,7 +210,7 @@
                   <option value="">None — plain chapter openings</option>
                   {% set figs = figures or [] %}
                   {% if ca_img and ca_img not in figs %}
-                    <option value="{{ ca_img }}" selected>{{ ca_img }}</option>
+                    <option value="{{ ca_img }}" selected>{{ ca_img }} (not in your figure library)</option>
                   {% endif %}
                   {% for f in figs %}
                     <option value="{{ f }}" {{ 'selected' if ca_img == f }}>{{ f }}</option>
@@ -252,7 +254,7 @@
           <div class="row">
             <div class="field"><label>Type</label>
               {% set sbt = p.scene_break.get('type', 'glyph') %}
-              <select name="sb_type">
+              <select name="sb_type" id="f-sbt">
                 <option value="glyph" {{ 'selected' if sbt=='glyph' }}>Text glyph</option>
                 <option value="ornament" {{ 'selected' if sbt=='ornament' }}>Bundled ornament</option>
                 <option value="image" {{ 'selected' if sbt=='image' }}>Your own image</option>
@@ -265,8 +267,18 @@
           <div class="row">
             <div class="field"><label>Glyph</label><span class="hint">used when type is Text glyph</span>
               <input type="text" id="f-glyph" name="s_glyph" value="{{ p.scene_break.glyph }}"></div>
-            <div class="field"><label>Ornament image</label><span class="hint">filename in /fonts or full path · PNG/JPG</span>
-              <input type="text" name="sb_image" value="{{ p.scene_break.get('image','') }}"></div>
+            {% set sbi = p.scene_break.get('image', '') %}
+            <div class="field"><label>Your own image</label>
+              <span class="hint">from your figure library · the ebook uses the glyph</span>
+              <select name="sb_image" id="f-sbi">
+                <option value="">None</option>
+                {% if sbi and sbi not in (figures or []) %}
+                  <option value="{{ sbi }}" selected>{{ sbi }} (not in your figure library)</option>
+                {% endif %}
+                {% for f in figures or [] %}
+                  <option value="{{ f }}" {{ 'selected' if sbi == f }}>{{ f }}</option>
+                {% endfor %}
+              </select></div>
           </div>
 
           {% set sel_orn = p.scene_break.get('ornament', '') %}
@@ -694,7 +706,7 @@
         <div class="field"><label>{{ label }}</label>{% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
           <select name="{{ name }}">
             {% set opts = fonts or [] %}
-            {% if value and value not in opts %}<option value="{{ value }}" selected>{{ value }}</option>{% endif %}
+            {% if value and value not in opts %}<option value="{{ value }}" selected>{{ value }} (not in your font library)</option>{% endif %}
             {% for f in opts %}<option value="{{ f }}" {{ 'selected' if value==f }}>{{ f }}</option>{% endfor %}
           </select></div>
       {%- endmacro %}
@@ -721,6 +733,7 @@
         <button type="button" id="preview-btn" class="btn">Preview pages</button>
         <span id="preview-status" style="font-size:13px;color:var(--muted)"></span>
       </div>
+      <ul id="preview-warn" style="display:none;margin:0;padding-left:18px;font-size:13px;color:var(--red)"></ul>
     </form>
 
     <aside class="preview">
@@ -807,6 +820,23 @@
       syncPick();
     })();
 
+    // Picking an ornament tile or an image is picking that kind of scene break:
+    // the Type select alone decides what prints, and a tile clicked on a glyph
+    // style used to change nothing in the book. Picking "none" of the kind in use
+    // goes back to the glyph.
+    (function () {
+      var type = document.getElementById('f-sbt'), img = document.getElementById('f-sbi');
+      function chose(kind, value) {
+        if (value) type.value = kind;
+        else if (type.value === kind) type.value = 'glyph';
+        updatePreview();
+      }
+      document.querySelectorAll('[name=sb_ornament]').forEach(function (r) {
+        r.addEventListener('change', function () { chose('ornament', r.value); });
+      });
+      img.addEventListener('change', function () { chose('image', img.value); });
+    })();
+
     document.getElementById('preview-btn').addEventListener('click', async () => {
       const btn    = document.getElementById('preview-btn');
       const status = document.getElementById('preview-status');
@@ -816,6 +846,9 @@
         const data = new FormData(document.querySelector('form.editor'));
         const res  = await fetch('/preview', {method: 'POST', body: data});
         const json = await res.json();
+        const warn = document.getElementById('preview-warn');
+        warn.innerHTML = '';
+        warn.style.display = 'none';
         if (json.ok) {
           const wrap = document.getElementById('preview-imgs');
           wrap.innerHTML = json.images.map(src =>
@@ -823,6 +856,10 @@
           ).join('');
           document.getElementById('preview-pages').style.display = 'block';
           status.textContent = json.images.length + ' page' + (json.images.length !== 1 ? 's' : '');
+          (json.warnings || []).forEach(w => {
+            const li = document.createElement('li'); li.textContent = w; warn.appendChild(li);
+          });
+          warn.style.display = warn.children.length ? 'block' : 'none';
         } else {
           status.textContent = json.error;
         }

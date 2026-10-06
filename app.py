@@ -697,7 +697,7 @@ def _min_inside(pages, table):
 
 
 def _missing_checks(figures=(), cover_fonts=(), design_missing=(), template_gone='',
-                    cover_art=()):
+                    cover_art=(), scene_image=''):
     """Check rows for what a book names but the libraries no longer have."""
     def listed(names):
         names = sorted(set(names))
@@ -707,6 +707,11 @@ def _missing_checks(figures=(), cover_fonts=(), design_missing=(), template_gone
         out.append({'label': 'Figures', 'ok': False, 'detail': (
             f'Not in the figure library, or not a picture that can be read, so printed '
             f'as a "missing image" box: {listed(figures)} - upload them on the Figures page')})
+    if scene_image:
+        out.append({'label': 'Scene breaks', 'ok': False, 'detail': (
+            f'The style’s scene-break picture {scene_image} isn’t in the figure library, or '
+            f'can’t be read, so scene breaks print its glyph instead - upload it on the '
+            f'Figures page, or pick another in the style')})
     if cover_fonts:
         out.append({'label': 'Cover fonts', 'ok': False, 'detail': (
             f'Not in the font library, so the cover is set in the book’s own faces '
@@ -747,7 +752,8 @@ def _preflight(build_result, preset, page_count):
     checks += _missing_checks(build_result.get('figures_missing'),
                               build_result.get('cover_fonts_missing'),
                               template_gone=build_result.get('cover_template_gone', ''),
-                              cover_art=build_result.get('cover_art_missing'))
+                              cover_art=build_result.get('cover_art_missing'),
+                              scene_image=build_result.get('scene_image_missing', ''))
 
     if build_result.get('has_cover'):
         checks.append({
@@ -1376,9 +1382,51 @@ def unique_project_id(base):
 
 def _f(form, key, default):
     try:
-        return float(form.get(key, default))
+        v = float(form.get(key, default))
     except (TypeError, ValueError):
         return default
+    return v if math.isfinite(v) else default      # NaN would be written as JSON
+
+
+# What each style number may be. The editor's page can't hold these back (its
+# `step`s made the browser refuse a saved 0.35 sink and half the standard trims,
+# so the form is `novalidate`); out of range is clamped here. Wide enough for
+# every style any release shipped or a user has saved; they stop a typed 0 body
+# size (a book of invisible text) or a sink taller than the page.
+_PT, _IN = (0.0, 144.0), (0.0, 4.0)          # a space in points / in inches
+STYLE_RANGES = {
+    'trim_w': (2.0, 20.0), 'trim_h': (2.0, 20.0),
+    'm_top': _IN, 'm_bottom': _IN, 'm_inside': _IN, 'm_outside': _IN,
+    'b_size': (4.0, 72.0), 'b_leading': (2.0, 144.0), 'b_indent': (0.0, 3.0),
+    'c_sink': (0.0, 10.0), 'c_number_size': (1.0, 144.0), 'c_title_size': (1.0, 144.0),
+    'c_after_title': _IN, 'c_leadin_words': (0.0, 40.0), 'c_dropcap_lines': (1.0, 10.0),
+    'ca_width': (0.05, 1.0), 'ca_gap': _IN, 'ca_max_height': (0.1, 20.0),
+    'pd_number_size': (1.0, 144.0), 'pd_title_size': (1.0, 144.0), 'pd_sink': (0.0, 1.0),
+    'db_indent': _IN, 'db_font_size': (0.0, 72.0), 'db_first_indent': _IN,
+    'db_space_around': _PT, 'db_header_size': (1.0, 72.0),
+    'fig_width': (0.05, 1.0), 'fig_max_height': (0.1, 1.0), 'fig_space_around': _PT,
+    'fig_caption_size': (0.0, 72.0), 'fig_caption_gap': _PT,
+    'li_indent': _IN, 'li_marker_gap': _IN, 'li_item_gap': _PT, 'li_space_around': _PT,
+    'li_font_size': (0.0, 72.0), 'li_line_leading': (0.5, 5.0),
+    'q_indent': _IN, 'q_right_indent': _IN, 'q_first_indent': _IN,
+    'q_font_size': (0.0, 72.0), 'q_line_leading': (0.5, 5.0), 'q_space_around': _PT,
+    'q_para_gap': _PT, 'q_source_gap': _PT,
+    'al_space_around': _PT, 'al_indent': _IN, 'al_para_gap': _PT,
+    'tb_font_size': (0.0, 72.0), 'tb_line_leading': (0.5, 5.0), 'tb_rule_width': (0.0, 10.0),
+    'tb_cell_pad_x': _PT, 'tb_cell_pad_y': _PT, 'tb_space_around': _PT,
+    'tb_width': (0.2, 1.0), 'tb_caption_size': (0.0, 72.0), 'tb_caption_gap': _PT,
+    'en_foot_gap': _PT, 'en_foot_rule_width': (0.0, 1.0), 'en_foot_max_height': (0.1, 0.8),
+    'en_font_size': (0.0, 72.0), 'en_line_leading': (0.5, 5.0), 'en_indent': _IN,
+    'en_entry_gap': _PT, 'en_group_gap': _PT, 'en_marker_scale': (0.2, 2.0),
+    's_size': (1.0, 144.0), 's_gap': _PT, 'sb_ornament_width': (0.0, 1.0),
+    'rh_size': (1.0, 72.0), 'rh_gap': _IN, 'fo_size': (1.0, 72.0), 'fo_gap': _IN,
+}
+
+
+def _fs(form, key, default):
+    """A style's number field, held to STYLE_RANGES."""
+    lo, hi = STYLE_RANGES[key]
+    return min(max(_f(form, key, default), lo), hi)
 
 
 def parse_preset_form(form):
@@ -1393,107 +1441,107 @@ def _preset_fields(form):
     return {
         'name': form.get('name', '').strip() or 'Untitled style',
         'description': form.get('description', '').strip(),
-        'trim': {'w': _f(form, 'trim_w', 6.0), 'h': _f(form, 'trim_h', 9.0)},
-        'margins': {'top': _f(form, 'm_top', 0.75), 'bottom': _f(form, 'm_bottom', 0.8),
-                    'inside': _f(form, 'm_inside', 0.85), 'outside': _f(form, 'm_outside', 0.6)},
+        'trim': {'w': _fs(form, 'trim_w', 6.0), 'h': _fs(form, 'trim_h', 9.0)},
+        'margins': {'top': _fs(form, 'm_top', 0.75), 'bottom': _fs(form, 'm_bottom', 0.8),
+                    'inside': _fs(form, 'm_inside', 0.85), 'outside': _fs(form, 'm_outside', 0.6)},
         'font_family': form.get('font_family', 'Book').strip() or 'Book',
         'font_files': {
             'regular': form.get('font_regular', 'Book-Regular.ttf').strip() or 'Book-Regular.ttf',
             'bold': form.get('font_bold', 'Book-Bold.ttf').strip() or 'Book-Bold.ttf',
             'italic': form.get('font_italic', 'Book-Italic.ttf').strip() or 'Book-Italic.ttf',
         },
-        'body': {'size': _f(form, 'b_size', 11.0), 'leading': _f(form, 'b_leading', 15.5),
-                 'indent': _f(form, 'b_indent', 0.3),
+        'body': {'size': _fs(form, 'b_size', 11.0), 'leading': _fs(form, 'b_leading', 15.5),
+                 'indent': _fs(form, 'b_indent', 0.3),
                  'justify': 'b_justify' in form, 'hyphenate': 'b_hyphenate' in form},
         'chapter': {
             'start': form.get('c_start', 'recto'),
-            'sink': _f(form, 'c_sink', 1.1),
+            'sink': _fs(form, 'c_sink', 1.1),
             'show_number': 'c_show_number' in form,
             'number_format': form.get('c_number_format', 'Chapter {n}') or 'Chapter {n}',
-            'number_size': _f(form, 'c_number_size', 12.0),
-            'title_size': _f(form, 'c_title_size', 18.0),
-            'after_title': _f(form, 'c_after_title', 0.45),
+            'number_size': _fs(form, 'c_number_size', 12.0),
+            'title_size': _fs(form, 'c_title_size', 18.0),
+            'after_title': _fs(form, 'c_after_title', 0.45),
             'open_style': form.get('c_open_style', 'smallcaps_leadin'),
-            'leadin_words': int(_f(form, 'c_leadin_words', 4)),
-            'dropcap_lines': int(_f(form, 'c_dropcap_lines', 3)),
+            'leadin_words': int(_fs(form, 'c_leadin_words', 4)),
+            'dropcap_lines': int(_fs(form, 'c_dropcap_lines', 3)),
         },
         'chapter_art': {
             'image':      form.get('ca_image', '').strip(),
             'position':   form.get('ca_position', 'above'),
-            'width':      _f(form, 'ca_width', 0.32),
+            'width':      _fs(form, 'ca_width', 0.32),
             'align':      form.get('ca_align', 'center'),
-            'gap':        _f(form, 'ca_gap', 0.16),
-            'max_height': _f(form, 'ca_max_height', 1.6),
+            'gap':        _fs(form, 'ca_gap', 0.16),
+            'max_height': _fs(form, 'ca_max_height', 1.6),
         },
         'part_divider': {
             'show_number':   'pd_show_number' in form,
             'number_format':  form.get('pd_number_format', 'Part {n}') or 'Part {n}',
-            'number_size':   _f(form, 'pd_number_size', 13.0),
-            'title_size':    _f(form, 'pd_title_size', 26.0),
-            'sink':          _f(form, 'pd_sink', 0.38),
+            'number_size':   _fs(form, 'pd_number_size', 13.0),
+            'title_size':    _fs(form, 'pd_title_size', 26.0),
+            'sink':          _fs(form, 'pd_sink', 0.38),
         },
         'document_block': {
             'frame':          form.get('db_frame', 'ruled'),
-            'indent':         _f(form, 'db_indent', 0.25),
-            'font_size':      _f(form, 'db_font_size', 0),
-            'first_indent':   _f(form, 'db_first_indent', 0.0),
-            'space_around':   _f(form, 'db_space_around', 12.0),
-            'header_size':    _f(form, 'db_header_size', 9.5),
+            'indent':         _fs(form, 'db_indent', 0.25),
+            'font_size':      _fs(form, 'db_font_size', 0),
+            'first_indent':   _fs(form, 'db_first_indent', 0.0),
+            'space_around':   _fs(form, 'db_space_around', 12.0),
+            'header_size':    _fs(form, 'db_header_size', 9.5),
             'dateline_style': form.get('db_dateline_style', 'italic'),
         },
         'figure': {
-            'width':          _f(form, 'fig_width', 0.8),
+            'width':          _fs(form, 'fig_width', 0.8),
             'align':          form.get('fig_align', 'center'),
-            'max_height':     _f(form, 'fig_max_height', 0.8),
-            'space_around':   _f(form, 'fig_space_around', 12.0),
-            'caption_size':   _f(form, 'fig_caption_size', 0),
+            'max_height':     _fs(form, 'fig_max_height', 0.8),
+            'space_around':   _fs(form, 'fig_space_around', 12.0),
+            'caption_size':   _fs(form, 'fig_caption_size', 0),
             'caption_style':  form.get('fig_caption_style', 'italic'),
             'caption_align':  form.get('fig_caption_align', 'center'),
-            'caption_gap':    _f(form, 'fig_caption_gap', 5.0),
+            'caption_gap':    _fs(form, 'fig_caption_gap', 5.0),
         },
         'list': {
             'bullet':        form.get('li_bullet', '•') or '•',
             'number_format': form.get('li_number_format', '{n}.') or '{n}.',
-            'indent':        _f(form, 'li_indent', 0.25),
-            'marker_gap':    _f(form, 'li_marker_gap', 0.22),
-            'item_gap':      _f(form, 'li_item_gap', 3.0),
-            'space_around':  _f(form, 'li_space_around', 10.0),
-            'font_size':     _f(form, 'li_font_size', 0),
-            'line_leading':  _f(form, 'li_line_leading', 1.35),
+            'indent':        _fs(form, 'li_indent', 0.25),
+            'marker_gap':    _fs(form, 'li_marker_gap', 0.22),
+            'item_gap':      _fs(form, 'li_item_gap', 3.0),
+            'space_around':  _fs(form, 'li_space_around', 10.0),
+            'font_size':     _fs(form, 'li_font_size', 0),
+            'line_leading':  _fs(form, 'li_line_leading', 1.35),
         },
         'quote': {
-            'indent':        _f(form, 'q_indent', 0.35),
-            'right_indent':  _f(form, 'q_right_indent', 0.35),
-            'first_indent':  _f(form, 'q_first_indent', 0.0),
-            'font_size':     _f(form, 'q_font_size', 0),
-            'line_leading':  _f(form, 'q_line_leading', 1.35),
+            'indent':        _fs(form, 'q_indent', 0.35),
+            'right_indent':  _fs(form, 'q_right_indent', 0.35),
+            'first_indent':  _fs(form, 'q_first_indent', 0.0),
+            'font_size':     _fs(form, 'q_font_size', 0),
+            'line_leading':  _fs(form, 'q_line_leading', 1.35),
             'style':         form.get('q_style', 'regular'),
-            'space_around':  _f(form, 'q_space_around', 11.0),
-            'para_gap':      _f(form, 'q_para_gap', 4.0),
+            'space_around':  _fs(form, 'q_space_around', 11.0),
+            'para_gap':      _fs(form, 'q_para_gap', 4.0),
             'source_style':  form.get('q_source_style', 'italic'),
             'source_align':  form.get('q_source_align', 'right'),
-            'source_gap':    _f(form, 'q_source_gap', 3.0),
+            'source_gap':    _fs(form, 'q_source_gap', 3.0),
         },
         'align': {
-            'space_around':  _f(form, 'al_space_around', 9.0),
-            'indent':        _f(form, 'al_indent', 0.0),
-            'para_gap':      _f(form, 'al_para_gap', 3.0),
+            'space_around':  _fs(form, 'al_space_around', 9.0),
+            'indent':        _fs(form, 'al_indent', 0.0),
+            'para_gap':      _fs(form, 'al_para_gap', 3.0),
         },
         'table': {
-            'font_size':     _f(form, 'tb_font_size', 0),
-            'line_leading':  _f(form, 'tb_line_leading', 1.3),
+            'font_size':     _fs(form, 'tb_font_size', 0),
+            'line_leading':  _fs(form, 'tb_line_leading', 1.3),
             'header_style':  form.get('tb_header_style', 'bold'),
             'rules':         form.get('tb_rules', 'header'),
-            'rule_width':    _f(form, 'tb_rule_width', 0.5),
-            'cell_pad_x':    _f(form, 'tb_cell_pad_x', 5.0),
-            'cell_pad_y':    _f(form, 'tb_cell_pad_y', 3.0),
-            'space_around':  _f(form, 'tb_space_around', 12.0),
-            'width':         _f(form, 'tb_width', 1.0),
+            'rule_width':    _fs(form, 'tb_rule_width', 0.5),
+            'cell_pad_x':    _fs(form, 'tb_cell_pad_x', 5.0),
+            'cell_pad_y':    _fs(form, 'tb_cell_pad_y', 3.0),
+            'space_around':  _fs(form, 'tb_space_around', 12.0),
+            'width':         _fs(form, 'tb_width', 1.0),
             'align':         form.get('tb_align', 'center'),
-            'caption_size':  _f(form, 'tb_caption_size', 0),
+            'caption_size':  _fs(form, 'tb_caption_size', 0),
             'caption_style': form.get('tb_caption_style', 'italic'),
             'caption_align': form.get('tb_caption_align', 'center'),
-            'caption_gap':   _f(form, 'tb_caption_gap', 5.0),
+            'caption_gap':   _fs(form, 'tb_caption_gap', 5.0),
         },
         'link': {
             'underline':      'lk_underline' in form,
@@ -1502,32 +1550,32 @@ def _preset_fields(form):
         },
         'endnotes': {
             'placement':        form.get('en_placement', 'end'),
-            'foot_gap':         _f(form, 'en_foot_gap', 10.0),
+            'foot_gap':         _fs(form, 'en_foot_gap', 10.0),
             'foot_rule':        'en_foot_rule' in form,
-            'foot_rule_width':  _f(form, 'en_foot_rule_width', 0.3),
-            'foot_max_height':  _f(form, 'en_foot_max_height', 0.4),
+            'foot_rule_width':  _fs(form, 'en_foot_rule_width', 0.3),
+            'foot_max_height':  _fs(form, 'en_foot_max_height', 0.4),
             'heading':          form.get('en_heading', 'Notes') or 'Notes',
             'group_by_chapter': 'en_group_by_chapter' in form,
-            'font_size':        _f(form, 'en_font_size', 0),
-            'line_leading':     _f(form, 'en_line_leading', 1.35),
-            'indent':           _f(form, 'en_indent', 0.3),
-            'entry_gap':        _f(form, 'en_entry_gap', 3.0),
-            'group_gap':        _f(form, 'en_group_gap', 12.0),
-            'marker_scale':     _f(form, 'en_marker_scale', 0.62),
+            'font_size':        _fs(form, 'en_font_size', 0),
+            'line_leading':     _fs(form, 'en_line_leading', 1.35),
+            'indent':           _fs(form, 'en_indent', 0.3),
+            'entry_gap':        _fs(form, 'en_entry_gap', 3.0),
+            'group_gap':        _fs(form, 'en_group_gap', 12.0),
+            'marker_scale':     _fs(form, 'en_marker_scale', 0.62),
         },
         'scene_break': {
             'type':  form.get('sb_type', 'glyph'),
             'glyph': form.get('s_glyph', '* * *') or '* * *',
-            'size':  _f(form, 's_size', 11.0),
-            'gap':   _f(form, 's_gap', 9.0),
+            'size':  _fs(form, 's_size', 11.0),
+            'gap':   _fs(form, 's_gap', 9.0),
             'image': form.get('sb_image', '').strip(),
             'ornament': (form.get('sb_ornament', '') or '').strip(),
-            'ornament_width': _f(form, 'sb_ornament_width', 0.0),
+            'ornament_width': _fs(form, 'sb_ornament_width', 0.0),
         },
         'running_head': {'show': 'rh_show' in form, 'caps': 'rh_caps' in form,
-                         'size': _f(form, 'rh_size', 8.5), 'gap': _f(form, 'rh_gap', 0.28)},
+                         'size': _fs(form, 'rh_size', 8.5), 'gap': _fs(form, 'rh_gap', 0.28)},
         'folio': {'show': 'fo_show' in form, 'position': form.get('fo_position', 'outer'),
-                  'size': _f(form, 'fo_size', 9.5), 'gap': _f(form, 'fo_gap', 0.42),
+                  'size': _fs(form, 'fo_size', 9.5), 'gap': _fs(form, 'fo_gap', 0.42),
                   'hide_on_opener': 'fo_hide_on_opener' in form},
     }
 
@@ -3113,6 +3161,8 @@ def _figure_uses(fn):
     for it in list_presets():
         if _named(engine.chapter_art_src(it['data']), fn):
             uses.append(f'the style “{it["data"].get("name") or it["id"]}” (chapter art)')
+        if _named(engine.scene_image_src(it['data']), fn):
+            uses.append(f'the style “{it["data"].get("name") or it["id"]}” (scene breaks)')
     for it in list_projects():
         text = _project_manuscript_text(it['data'], report_import=False)
         for line in text.splitlines():
@@ -3514,7 +3564,7 @@ def preview():
         fd, tmp_path = tempfile.mkstemp(suffix='.pdf')
         os.close(fd)
         try:
-            engine.build_pdf(ms, preset, tmp_path, meta)
+            built  = engine.build_pdf(ms, preset, tmp_path, meta)
             doc    = fitz.open(tmp_path)
             images = []
             for page in doc:
@@ -3523,7 +3573,7 @@ def preview():
                 b64 = base64.b64encode(pix.tobytes('png')).decode()
                 images.append(f'data:image/png;base64,{b64}')
             doc.close()
-            return jsonify({'ok': True, 'images': images})
+            return jsonify({'ok': True, 'images': images, 'warnings': _style_warnings(built)})
         finally:
             try:
                 os.remove(tmp_path)
@@ -3532,6 +3582,25 @@ def preview():
     except Exception as exc:
         logging.error('preview failed: %s', traceback.format_exc())
         return jsonify({'ok': False, 'error': str(exc)})
+
+
+def _style_warnings(built):
+    """What the style editor's preview drew without: a font file, the chapter
+    art, the scene-break picture. It used to fall back in silence, so a style
+    naming a font the library lost looked fine in Times."""
+    out = []
+    if built.get('font_fallback'):
+        out.append('Its regular font isn’t in your font library, so this is set in Times')
+    else:
+        out += [f'{role.capitalize()}: {d["file"]} - {d["error"]}'
+                for role, d in built.get('font_details', {}).items() if not d['ok']]
+    if built.get('figures_missing'):
+        out.append('Chapter art not in your figure library: '
+                   + ', '.join(built['figures_missing']))
+    if built.get('scene_image_missing'):
+        out.append(f'Scene-break picture not in your figure library: '
+                   f'{built["scene_image_missing"]} - the glyph is used')
+    return out
 
 
 # How much of the real book the "Set a book" preview renders. Only the first few
