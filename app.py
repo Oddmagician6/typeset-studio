@@ -885,11 +885,14 @@ def list_fonts():
 
 
 def _is_embeddable_font(path):
-    """True if ReportLab can register the file (i.e. it will embed in a PDF)."""
+    """True if ReportLab can load the file (i.e. it will embed in a PDF).
+
+    Loaded, not registered: a registered name keeps its first file, so a probe
+    by name passed a broken file uploaded under a name a good one had used.
+    """
     try:
         from reportlab.pdfbase.ttfonts import TTFont
-        from reportlab.pdfbase import pdfmetrics
-        pdfmetrics.registerFont(TTFont(f'_probe_{os.path.basename(path)}', path))
+        TTFont('_probe', path)
         return True
     except Exception:
         return False
@@ -948,11 +951,61 @@ def upgrade_project(proj):
     return proj
 
 
+_PROJECT_LOCK = threading.RLock()
+
+
 def save_project_file(pid, data):
     path = os.path.join(PROJECT_DIR, secure_filename(pid) + '.json')
     # all at once: a plain write that was interrupted left a half-written book
     # that no page could open
-    _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
+    with _PROJECT_LOCK:
+        _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
+
+
+def update_project(pid, changes):
+    """Write `changes` into the book as it is on disk now; the book, or None if gone.
+
+    For work that takes seconds between reading a book and recording what it
+    made (a build, a package). Saving the copy it read wrote back whatever that
+    copy held, so a settings save or a manuscript editor save made meanwhile in
+    another tab was quietly undone - the editor's first save of a .docx book
+    points the book at its new .md, and losing that hid the writer's text.
+    """
+    path = os.path.join(PROJECT_DIR, secure_filename(pid) + '.json')
+    with _PROJECT_LOCK:
+        if not os.path.exists(path):
+            return None
+        with open(path, encoding='utf-8') as f:
+            proj = upgrade_project(json.load(f))
+        proj.update(changes)
+        save_project_file(pid, proj)
+    return proj
+
+
+def _claim_out(name, folder=None):
+    """`name` in the folder (OUT_DIR), or name-2, name-3...: created empty there,
+    so a second build in the same second can't be handed the same file to write."""
+    folder = folder or OUT_DIR
+    os.makedirs(folder, exist_ok=True)
+    stem, ext = os.path.splitext(name)
+    n = 1
+    while True:
+        cand = name if n == 1 else f'{stem}-{n}{ext}'
+        try:
+            os.close(os.open(os.path.join(folder, cand),
+                             os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return cand
+        except FileExistsError:
+            n += 1
+
+
+def _drop_out(name, folder=None):
+    """Remove a claimed output that never got written."""
+    if name:
+        try:
+            os.remove(os.path.join(folder or OUT_DIR, name))
+        except OSError:
+            pass
 
 
 def unique_project_id(base):
@@ -1602,8 +1655,7 @@ def _cover_thumb_bytes(cid):
         png = pix.tobytes('png')
         doc.close()
         try:
-            with open(cache, 'wb') as f:
-                f.write(png)
+            _atomic_write_bytes(cache, png)   # a tile asked for twice at once
         except OSError:
             pass
         return png
@@ -1764,8 +1816,7 @@ def _project_thumb_bytes(pid):
         png = pix.tobytes('png')
         doc.close()
         try:
-            with open(cache, 'wb') as f:
-                f.write(png)
+            _atomic_write_bytes(cache, png)   # a tile asked for twice at once
         except OSError:
             pass
         return png
@@ -2231,12 +2282,13 @@ def wrap_designer_build():
     body = request.get_json(silent=True) or {}
     dims, warnings = _wrap_design_dims(body.get('settings') or {})
     slug = _slug_or_blank(body.get('name')) or 'wrap-design'
-    fn = f'{slug}-wrap-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pdf'
+    fn = _claim_out(f'{slug}-wrap-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pdf')
     path = os.path.join(OUT_DIR, fn)
     try:
         lines = wrap_design.build_pdf(body.get('design') or {}, dims, path)
     except Exception as exc:
         logging.error('Wrap design build failed: %s', traceback.format_exc())
+        _drop_out(fn)
         return jsonify(ok=False, error=f'The PDF could not be built: {exc}')
     png = ''
     try:
@@ -2670,7 +2722,7 @@ def generate():
     elif form.get('pasted', '').strip():
         raw = _norm_newlines(form['pasted'])
         stamp_p = datetime.now().strftime('%Y%m%d-%H%M%S')
-        ms_path = os.path.join(UPLOAD_DIR, f'pasted-{stamp_p}.txt')
+        ms_path = os.path.join(UPLOAD_DIR, _claim_out(f'pasted-{stamp_p}.txt', UPLOAD_DIR))
         with open(ms_path, 'w', encoding='utf-8', newline='') as pf:
             pf.write(raw)
         ms_type = 'pasted'
@@ -2720,7 +2772,7 @@ def generate():
     build_result = None
     page_count   = 0
     if fmt in ('pdf', 'both'):
-        out_name = f'{base}-{stamp}.pdf'
+        out_name = _claim_out(f'{base}-{stamp}.pdf')
         try:
             build_result = engine.build_pdf(ms, preset, os.path.join(OUT_DIR, out_name),
                                             meta, press=meta['press'])
@@ -2730,17 +2782,19 @@ def generate():
                       + build_result['press_error'])
         except Exception as exc:
             logging.error('PDF build failed: %s', traceback.format_exc())
+            _drop_out(out_name)
             flash(f'PDF build failed: {exc}')
             return render_template('generate.html', presets=presets, form=form)
 
     if fmt in ('epub', 'both'):
-        epub_name = f'{base}-{stamp}.epub'
+        epub_name = _claim_out(f'{base}-{stamp}.epub')
         try:
             with _epub_cover(preset, meta) as emeta:
                 epub.build_epub(ms, preset, os.path.join(OUT_DIR, epub_name), emeta)
         except Exception as exc:
             logging.error('EPUB build failed: %s', traceback.format_exc())
             flash(f'EPUB build failed: {exc}')
+            _drop_out(epub_name)
             epub_name = ''
 
     spec      = print_spec(page_count, preset) if page_count else None
@@ -3492,6 +3546,9 @@ def _thin_snapshots(pid):
                 pass
 
 
+_HISTORY_LOCK = threading.Lock()
+
+
 def snapshot_manuscript(pid, text, reason='edit', force=False):
     """Keep a copy of this text in the project's history. Returns its stamp or ''.
 
@@ -3504,35 +3561,38 @@ def snapshot_manuscript(pid, text, reason='edit', force=False):
     text = _norm_newlines(text)
     if not text.strip():
         return ''                       # never snapshot an empty editor
-    folder = _history_folder(pid)
-    os.makedirs(folder, exist_ok=True)
-    existing = list_snapshots(pid)
-    if existing:
-        newest = existing[0]
-        prev_path = os.path.join(folder, f'{newest["stamp"]}-{newest["reason"]}.md')
-        try:
-            if open(prev_path, encoding='utf-8', errors='replace').read() == text:
-                return ''
-        except OSError:
-            pass
-        if not force:
-            age = (datetime.now()
-                   - datetime.strptime(newest['stamp'], '%Y%m%d-%H%M%S')).total_seconds()
-            if age < SNAPSHOT_GAP:
-                return ''
-    # The stamp is the identity a restore is asked for by, so it has to be
-    # unique: two snapshots in the same second (an autosave and a forced copy
-    # before a restore) would otherwise both answer to it, and a restore could
-    # hand back the wrong one. Step forward a second until it is free.
-    taken = {s['stamp'] for s in existing}
-    when = datetime.now()
-    while when.strftime('%Y%m%d-%H%M%S') in taken:
-        when += timedelta(seconds=1)
-    stamp = when.strftime('%Y%m%d-%H%M%S')
-    reason = re.sub(r'\W+', '', reason) or 'edit'
-    _atomic_write_text(os.path.join(folder, f'{stamp}-{reason}.md'), text)
-    _thin_snapshots(pid)
-    return stamp
+    # one at a time: two saves at once (two tabs, which is when a conflict copy
+    # is kept) would otherwise both see a stamp as free and both take it
+    with _HISTORY_LOCK:
+        folder = _history_folder(pid)
+        os.makedirs(folder, exist_ok=True)
+        existing = list_snapshots(pid)
+        if existing:
+            newest = existing[0]
+            prev_path = os.path.join(folder, f'{newest["stamp"]}-{newest["reason"]}.md')
+            try:
+                if open(prev_path, encoding='utf-8', errors='replace').read() == text:
+                    return ''
+            except OSError:
+                pass
+            if not force:
+                age = (datetime.now()
+                       - datetime.strptime(newest['stamp'], '%Y%m%d-%H%M%S')).total_seconds()
+                if age < SNAPSHOT_GAP:
+                    return ''
+        # The stamp is the identity a restore is asked for by, so it has to be
+        # unique: two snapshots in the same second (an autosave and a forced copy
+        # before a restore) would otherwise both answer to it, and a restore could
+        # hand back the wrong one. Step forward a second until it is free.
+        taken = {s['stamp'] for s in existing}
+        when = datetime.now()
+        while when.strftime('%Y%m%d-%H%M%S') in taken:
+            when += timedelta(seconds=1)
+        stamp = when.strftime('%Y%m%d-%H%M%S')
+        reason = re.sub(r'\W+', '', reason) or 'edit'
+        _atomic_write_text(os.path.join(folder, f'{stamp}-{reason}.md'), text)
+        _thin_snapshots(pid)
+        return stamp
 
 
 def read_snapshot(pid, stamp):
@@ -3774,7 +3834,7 @@ def _build_project(pid, proj):
            'out_name': '', 'epub_name': '', 'build_result': None, 'page_count': 0}
 
     if fmt in ('pdf', 'both'):
-        res['out_name'] = f'{base}-{stamp}.pdf'
+        res['out_name'] = _claim_out(f'{base}-{stamp}.pdf')
         try:
             res['build_result'] = engine.build_pdf(
                 ms_parsed, preset, os.path.join(OUT_DIR, res['out_name']), meta,
@@ -3786,10 +3846,11 @@ def _build_project(pid, proj):
                     + res['build_result']['press_error'])
         except Exception as exc:
             logging.error('PDF build failed: %s', traceback.format_exc())
+            _drop_out(res['out_name'])
             return {'error': f'PDF build failed: {exc}'}
 
     if fmt in ('epub', 'both'):
-        res['epub_name'] = f'{base}-{stamp}.epub'
+        res['epub_name'] = _claim_out(f'{base}-{stamp}.epub')
         try:
             with _epub_cover(preset, meta) as emeta:
                 epub.build_epub(ms_parsed, preset,
@@ -3797,14 +3858,16 @@ def _build_project(pid, proj):
         except Exception as exc:
             logging.error('EPUB build failed: %s', traceback.format_exc())
             res['warnings'].append(f'EPUB build failed: {exc}')
+            _drop_out(res['epub_name'])
             res['epub_name'] = ''
 
-    proj['last_pdf']  = res['out_name']
-    proj['last_epub'] = res['epub_name']
+    done = {'last_pdf': res['out_name'], 'last_epub': res['epub_name'],
+            'updated': datetime.now().isoformat(timespec='seconds')}
     if res['page_count']:
-        proj['last_page_count'] = res['page_count']
-    proj['updated']   = datetime.now().isoformat(timespec='seconds')
-    save_project_file(pid, proj)
+        done['last_page_count'] = res['page_count']
+    proj.update(done)
+    # into the book as it is now: it may have been saved while this built
+    proj.update(update_project(pid, done) or {})
     return res
 
 
@@ -4208,7 +4271,7 @@ def build_print_package(proj, scope='print'):
 
         import zipfile
         folder = f'{base}-{scope}'
-        zip_name = f'{folder}-{stamp}.zip'
+        zip_name = _claim_out(f'{folder}-{stamp}.zip')
         with zipfile.ZipFile(os.path.join(OUT_DIR, zip_name), 'w',
                              zipfile.ZIP_DEFLATED) as z:
             for name, path in files.items():
@@ -4354,12 +4417,13 @@ def project_print_package(pid):
         logging.error('print package failed: %s', traceback.format_exc())
         flash(f'{"Publish" if scope == "publish" else "Print"} package failed: {exc}')
         return redirect(url_for('projects'))
-    proj['last_page_count'] = info['pages']
     # One slot for "the last handoff package", whichever kind it was — the
     # projects page offers it back as a download, and either kind supersedes.
-    proj['last_print_package'] = info['zip_name']
-    proj['last_package_scope'] = scope
-    save_project_file(pid, proj)
+    # Into the book as it is now: it may have been saved while this built.
+    done = {'last_page_count': info['pages'], 'last_print_package': info['zip_name'],
+            'last_package_scope': scope}
+    proj.update(done)
+    proj.update(update_project(pid, done) or {})
     return render_template('print_package.html', pid=pid, proj=proj, info=info)
 
 

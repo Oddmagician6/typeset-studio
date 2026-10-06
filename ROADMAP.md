@@ -18,14 +18,15 @@ Start here in a new session. Each item points at its full entry below.
    stripe with art set. The fix is to paint background art (and full-height bands like the
    stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
    output, so ask before fixing.
-2. **Bug hunt plan, items 5–12 below, in order — next is item 5, shared state between
-   requests** (fonts registered under global names on a threaded server; module globals
-   set per request). Items 1-4 are done and merged, with fixes **unreleased**: they wait in
-   CHANGELOG's `## Unreleased`. Harnesses to copy: `test_upgrade.py` with
-   `test_fixtures/make_fixtures.py` (release step 6), `test_manuscript_editor.py`,
-   `test_project_edit.py` and `test_first_run.py` (real-time headless browser: virtual time
-   never gives a page its animation frames; harness routes registered at import, before
-   any request). The books in `projects/` are the user's test data - probe copies anyway.
+2. **Bug hunt plan, items 6–12 below, in order — next is item 6, the font and figure
+   libraries** (bad uploads, deleting what's in use; a bad upload still overwrites a good
+   file of the same name before it is checked). Items 1-5 are done and merged, with fixes
+   **unreleased**: they wait in CHANGELOG's `## Unreleased`. Harnesses to copy:
+   `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
+   `test_manuscript_editor.py`, `test_project_edit.py` and `test_first_run.py` (real-time
+   headless browser: virtual time never gives a page its animation frames; harness routes
+   registered at import, before any request), `test_shared_state.py` (threads, a real
+   threaded server, `Paused` to hold a build mid-way). The books in `projects/` are the user's test data - probe copies anyway.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
@@ -263,6 +264,44 @@ session of awkward input; fix what is found, and note what isn't a bug.
    sharing a family name with different files, and for module globals set per request
    (`wrap_convert.IMPORT_DIR`). *Harness:* render pairs concurrently in threads and check the
    embedded font names in each PDF. Fix with names keyed by the font file, or a render lock.
+   - **Done (2026-10-05).** `test_shared_state.py`: covers, styles, ebooks, builds and
+     snapshots in threads and on a real threaded server, checked against what each makes
+     alone (it fails 14 checks on the code before the fix). Found and fixed:
+     - **Worse than planned: ReportLab keeps the first font registered under a name for
+       the life of the process** (re-registering a TTF name is a no-op). So `Cover-*` was
+       whatever the first cover drawn that session used - a template given other fonts in
+       the editor showed the old ones until a restart - a style's changed files under an
+       unchanged family name were ignored, and a font file replaced in the library kept
+       its old face (`WD-<stem>`, the Wrap designer's measuring too). And the threads
+       race: 12 of 16 covers drawn at once took another's face. Now `engine.font_for`
+       names a face by its file (path, size, mtime), registers it once under a lock, and
+       renames the face if another file already holds its internal name (ReportLab
+       otherwise hands back that file's font); `register_fonts`, `_register_cover_fonts`
+       and `wrap_design.font_name` all use it, and `<b>`/`<i>` resolve through a family
+       named for the files (`TSF-<hash>`), not the style's family name. The browser's
+       `WD-` CSS names are separate and unchanged.
+     - **The font upload check registered `_probe_<name>`**, so a broken file under a name
+       a good one had used passed. It loads the file without registering it.
+     - **`epub._ANCHORS` was module-wide**: two ebooks exported at once linked into each
+       other's chapters. Per thread now (`_BUILD`).
+     - **A build or package wrote back the book it had read**, undoing a save made
+       meanwhile (settings, or the editor's first save of a .docx book, which points it at
+       the new .md - the book then read its old text), and recreating a book deleted
+       mid-build. `update_project` merges just the results into the book on disk, under a
+       lock `save_project_file` shares.
+     - **Output names were stamped to the second**: two builds of a book in one second
+       wrote one file together. `_claim_out` creates the name (`-2`, `-3`...) before the
+       build writes it; a failed build removes it (`_drop_out`). Also the wrap designer's
+       proof, packages and pasted Set-a-book text.
+     - **Snapshots taken at once** picked the same stamp (and on Windows failed with
+       "Access is denied" from the two `os.replace`s). One at a time (`_HISTORY_LOCK`).
+     - The cover and project thumbnail caches are written atomically, so a tile asked for
+       twice at once can't be read half-written.
+     Not bugs: `wrap_convert.IMPORT_DIR` is set per request but always to the same
+     folder; the quick read-change-save routes (Edit, the writing page) still race each
+     other over a few milliseconds, not over a build. Left for item 6: an upload is saved
+     over a library font of the same name *before* it is checked, so a broken upload
+     deletes the good font.
 6. **The font and figure libraries** (`/fonts*`, `/figures*` - upload and delete untested).
    Bad uploads (not a font, a .otf with CFF outlines, a duplicate name, a huge image), and
    **deleting something in use**: a font a style, cover template or wrap design names, a

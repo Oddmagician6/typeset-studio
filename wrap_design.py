@@ -41,7 +41,6 @@ from reportlab.lib.colors import HexColor
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas as rl_canvas
 
 # Set by app.py: where the font library and the art a design may use live.
@@ -75,10 +74,7 @@ def font_name(fname):
     path = font_file(fname)
     if not path:
         raise ValueError(f'Font not found: {fname}')
-    name = 'WD-' + os.path.splitext(os.path.basename(path))[0]
-    if name not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont(name, path))
-    return name
+    return engine.font_for(path)
 
 
 def metrics(fname):

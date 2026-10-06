@@ -7,6 +7,7 @@ Reuses the same parsed manuscript structure as engine.py.
 import html
 import os
 import re
+import threading
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -94,18 +95,20 @@ def _endnotes_xhtml(chapters, preset):
 
 
 # In-book links (`[see](#the-salt-road)`) carry a bare fragment, which in a
-# multi-file EPUB has to become "that chapter's file". Filled per build.
-_ANCHORS = {}
+# multi-file EPUB has to become "that chapter's file". Filled per build, and
+# per thread: two books exported at once on the threaded server each need their own.
+_BUILD = threading.local()
 
 _HREF_RE = re.compile(r'(<a\s[^>]*href=")#([^"]+)(")')
 
 
 def _resolve_anchors(text):
     """Point `href="#anchor"` at the chapter file that anchor lives in."""
-    if not _ANCHORS:
+    anchors = getattr(_BUILD, 'anchors', None)
+    if not anchors:
         return text
     def sub(m):
-        target = _ANCHORS.get(m.group(2))
+        target = anchors.get(m.group(2))
         return m.group(1) + (target or ('#' + m.group(2))) + m.group(3)
     return _HREF_RE.sub(sub, text)
 
@@ -1147,10 +1150,10 @@ def build_epub(manuscript, preset, out_path, meta):
     art_href = fig_href.get(art_src, '')
 
     # anchor -> chapter file, so `[see](#slug)` resolves across the spine
-    _ANCHORS.clear()
+    _BUILD.anchors = anchors = {}
     for _i, _ch in enumerate(chapters, start=1):
         for _a in _ms_anchors(_ch, _i):
-            _ANCHORS.setdefault(_a, f'chapter{_i:03d}.xhtml')
+            anchors.setdefault(_a, f'chapter{_i:03d}.xhtml')
 
     level = meta.get('front_matter', 'full')
     if level is True:  level = 'full'

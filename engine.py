@@ -14,10 +14,12 @@ Imposition produced:
   * embedded TrueType fonts (KDP / IngramSpark friendly)
 """
 
+import hashlib
 import os
 import re
 import math
 import tempfile
+import threading
 
 try:
     import pyphen as _pyphen
@@ -137,6 +139,37 @@ def _diamond(canv, cx, cy, r):
     canv.drawPath(p, stroke=0, fill=1)
 
 
+_FONT_LOCK = threading.Lock()
+
+
+def font_for(path):
+    """Register a .ttf with ReportLab under a name of its own; return that name.
+
+    ReportLab keeps the first font registered under a name for the life of the
+    process and ignores any later one, and it hands a second file whose face has
+    the same internal name the first file's font. So a name has to stand for one
+    file as it is now: its path, size and modification time. A file replaced in
+    the library gets a new name, two covers or styles drawn at once on the
+    threaded server can't take each other's faces, and a face is registered once
+    however many requests want it (the lock: a font object swapped mid-render
+    loses the subset that render was building). Raises if the file won't load.
+    """
+    path = os.path.abspath(path)
+    st = os.stat(path)
+    key = hashlib.sha1(f'{os.path.normcase(path)}|{st.st_size}|{st.st_mtime_ns}'
+                       .encode('utf-8')).hexdigest()[:10]
+    name = f'TS-{os.path.splitext(os.path.basename(path))[0]}-{key}'
+    with _FONT_LOCK:
+        if name not in pdfmetrics.getRegisteredFontNames():
+            font = TTFont(name, path)
+            held = getattr(pdfmetrics, '_dynFaceNames', {}).get(font.face.name)
+            if held is not None and os.path.abspath(
+                    getattr(held.face, 'filename', '') or '') != path:
+                font.face.name += b'-' + key.encode('ascii')
+            pdfmetrics.registerFont(font)
+    return name
+
+
 def _register_cover_fonts(tpl, interior):
     """Register the cover template's own faces; fall back to the interior fonts."""
     files = tpl.get('fonts', {})
@@ -146,11 +179,9 @@ def _register_cover_fonts(tpl, interior):
         if not fname:
             continue
         path = fname if os.path.isabs(fname) else os.path.join(FONT_DIR, fname)
-        name = f'Cover-{role}'
         if os.path.exists(path):
             try:
-                pdfmetrics.registerFont(TTFont(name, path))
-                out[role] = name
+                out[role] = font_for(path)
             except Exception:
                 pass
     out.setdefault('serif', interior.get('regular', 'Times-Roman'))
@@ -1951,11 +1982,9 @@ def register_fonts(preset):
 
     for role, fname in files.items():
         path = fname if os.path.isabs(fname) else os.path.join(FONT_DIR, fname)
-        name = f'{fam}-{role}'
         if os.path.exists(path):
             try:
-                pdfmetrics.registerFont(TTFont(name, path))
-                roles[role]   = name
+                roles[role]   = font_for(path)
                 details[role] = {'file': fname, 'ok': True, 'error': None}
             except Exception as e:
                 details[role] = {'file': fname, 'ok': False, 'error': str(e)}
@@ -1968,11 +1997,14 @@ def register_fonts(preset):
                  'italic': 'Times-Italic'}
         fam = 'Times'
     else:
-        pdfmetrics.registerFontFamily(
-            fam, normal=roles['regular'],
-            bold=roles.get('bold', roles['regular']),
-            italic=roles.get('italic', roles['regular']),
-            boldItalic=roles.get('bold', roles['regular']))
+        # the family that <b> and <i> look up, named for these files, not the
+        # style's family name: two styles can share that with different files
+        faces = (roles['regular'], roles.get('bold', roles['regular']),
+                 roles.get('italic', roles['regular']))
+        with _FONT_LOCK:
+            pdfmetrics.registerFontFamily(
+                'TSF-' + hashlib.sha1('|'.join(faces).encode('utf-8')).hexdigest()[:10],
+                normal=faces[0], bold=faces[1], italic=faces[2], boldItalic=faces[1])
 
     return {
         'family':   fam,
