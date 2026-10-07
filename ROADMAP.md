@@ -7,20 +7,13 @@ sections before changing the engine.
 
 ---
 
-## Next up — priority order (as of 2026-10-04, after 1.3.0)
+## Next up — priority order (as of 2026-10-07, after 1.3.1)
 
 Start here in a new session. Each item points at its full entry below.
 
-1. **Template art stops at the trim, not the bleed (found by the designer's new bleed check).**
-   `_paint_background` paints a template's background picture into the front *panel*, so on a
-   wrap the eighth-inch bleed round it is the gradient underneath: a sliver of it can show on
-   the fore-edge, head or tail when the cut wanders. Confirmed for photographic, postcard and
-   stripe with art set. The fix is to paint background art (and full-height bands like the
-   stripe family's) to `front_art_size`, as uploaded art already is (#66). Changes printed
-   output, so ask before fixing.
-2. **Bug hunt plan: all 12 items done** (item 12, the wrap designer's edges, on 2026-10-06).
-   Items 1-12 are done and merged (item 8's open question answered and done), with fixes
-   **unreleased**: they wait in CHANGELOG's `## Unreleased`. Harnesses to copy:
+1. ~~**Template art stops at the trim, not the bleed.**~~ — **DONE (#76, 2026-10-07),
+   unreleased**: it waits in CHANGELOG's `## Unreleased`.
+2. **Bug hunt plan: all 12 items done and released in 1.3.1.** Harnesses to copy:
    `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
    `test_manuscript_editor.py`, `test_project_edit.py` and `test_first_run.py` (real-time
    headless browser: virtual time never gives a page its animation frames; harness routes
@@ -608,6 +601,7 @@ test_footnotes.py Footnote placement: builds books and measures where the notes 
 test_import.py    .docx import fidelity: builds real Word files and looks for the words.
 test_chapter_art.py Chapter-opening art: geometry, then a real PDF and EPUB.
 test_wrap.py      Print-wrap arithmetic: paperback, case-laminate and jacket geometry, measured.
+test_wrap_bleed.py Every design family's front, rendered: the colour either side of each cut matches.
 test_press.py     Press-ready interiors: colour, boxes and annotations, read back off the PDF.
 test_history.py   Manuscript safety: atomic writes, snapshots, thinning, restore and undo.
 test_update.py    The version check: consent, caching, and every way a feed can misbehave.
@@ -3038,6 +3032,30 @@ the app as its own **Wrap designer** tab (`/wrap-designer`), so it can be tried 
   for one- to three-line titles on all 24); the four-line classic titles that change were
   genuinely overprinting their epigraph. Tested with the 16-word title in every template:
   safe zones and collisions.
+
+**76. Template art runs to the bleed** *(small; found by the wrap designer's bleed check,
+shipped 2026-10-07)*
+
+On a wrap, a designed front was painted into the trimmed front *panel* only, so the bleed
+round it (and a case's turn-in) was the sheet's base gradient: a sliver of it could show at
+the fore-edge, head or tail when the cut wandered. Uploaded art (#66) already ran out to
+`front_art_size`; now the template's own full-bleed paint does too.
+- `build_cover_wrap` hands `_paint_background` and `_paint_cover_front` a `bleed` rectangle
+  (the `front_art_size` box: from the spine-side fold to the sheet's outer edge, full sheet
+  height; on a jacket it stops at the fold to the flap). Without one, as on the interior's
+  page 1 cover, every painter fills just its panel, as before.
+- **Background:** art and overlay fill the bleed rectangle. The **vignette** stays keyed to
+  the trim, so the finished cover looks as it did, and its outermost band's darkness fills
+  the margin between trim and bleed.
+- **Families:** every design painter takes `bleed=None`. Geometric's ground and title band,
+  stripe's ground and full-height band (out to the fore-edge when `side` is right), and
+  postcard's ground fill out to it; photographic's foot scrim runs out sideways and fills
+  under the foot at its densest. Type, rules, frames and emblems are still laid out in the
+  trimmed panel, so nothing moves inside the trim.
+- `test_wrap_bleed.py` renders one template per family, with and without art, on all three
+  bindings, and compares a strip just inside each cut with one just outside it. The old
+  engine fails 88 of those checks; vintage's vignette over the gradient alone was within
+  tolerance even before.
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 

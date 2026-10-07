@@ -8,6 +8,19 @@ line here.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **A designed cover's art runs to the edge of the print wrap.** On a print
+  wrap, a cover template's background picture, vignette and overlay, and the
+  flat colour and bands of the geometric, stripe and postcard designs, stopped
+  at the trim. The eighth-inch bleed round the front cover, and a hardcover's
+  turn-in, showed the plain gradient underneath, so a sliver of it could appear
+  at the edge of the finished book when the cut wandered. They now run out to
+  the edge of the sheet, as uploaded cover art already did. The front cover
+  looks the same once trimmed.
+
 ## 1.3.1 — 6 October 2026
 
 A release of fixes from a bug hunt through the whole app, page by page. Work saved
