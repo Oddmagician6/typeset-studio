@@ -565,38 +565,55 @@ def image_cover_fonts(preset):
     return {'display': f['bold'], 'serif': f['regular'], 'italic': f['italic']}
 
 
-def _paint_background(canv, tpl, x0, y0, w, h):
+def _paint_background(canv, tpl, x0, y0, w, h, bleed=None):
     """Optional full-bleed background inside (x0,y0,w,h): art image (cover-fit),
     edge vignette, then a flat colour overlay. Drawn over the base gradient and
-    under the border + text, so the frame and type stay crisp on top of art."""
+    under the border + text, so the frame and type stay crisp on top of art.
+
+    `bleed` is the printed rectangle round the trimmed panel (x, y, w, h) on a
+    wrap: the art and the overlay run out to it, or the gradient underneath
+    shows as a sliver when the cut wanders. The vignette stays keyed to the
+    trim, so the finished book looks as it did, and carries its edge on out."""
     bg = tpl.get('background', {})
     if not isinstance(bg, dict) or not bg:
         return
+    bx, by, bw, bh = bleed or (x0, y0, w, h)
     img = bg.get('image', '')
     if isinstance(img, str) and img.strip():
         path = _cover_asset_path(img.strip())
         if path and os.path.exists(path):
-            _draw_image_cover(canv, path, x0, y0, w, h)
+            _draw_image_cover(canv, path, bx, by, bw, bh)
     vig = _num(bg.get('vignette', 0))
     if vig > 0:
-        _paint_vignette(canv, x0, y0, w, h, min(vig, 1.0))
+        _paint_vignette(canv, x0, y0, w, h, min(vig, 1.0), bleed)
     ov = bg.get('overlay', {})
     op = _num(ov.get('opacity', 0)) if isinstance(ov, dict) else 0.0
     if op > 0:
         canv.saveState()
         canv.setFillColor(_pal_color(tpl, ov.get('color', '#000000')))
         canv.setFillAlpha(min(op, 1.0))
-        canv.rect(x0, y0, w, h, stroke=0, fill=1)
+        canv.rect(bx, by, bw, bh, stroke=0, fill=1)
         canv.setFillAlpha(1.0)
         canv.restoreState()
 
 
-def _paint_vignette(canv, x0, y0, w, h, strength):
+def _paint_vignette(canv, x0, y0, w, h, strength, bleed=None):
     """Soft edge-darkening: concentric translucent frame bands, darker at the edge.
-    Each band is four non-overlapping strips, so alpha never double-composites."""
+    Each band is four non-overlapping strips, so alpha never double-composites.
+    With a `bleed` rectangle round the panel, the outermost band's darkness also
+    fills the margin between the two, so the edge of the trim is the edge of the art."""
     rings = 10
     canv.saveState()
     canv.setFillColorRGB(0, 0, 0)
+    if bleed:
+        bx, by, bw, bh = bleed
+        canv.setFillAlpha(strength * 0.13)
+        for rx, ry, rw, rh in ((bx, by, x0 - bx, bh),                      # left
+                               (x0 + w, by, bx + bw - x0 - w, bh),         # right
+                               (x0, y0 + h, w, by + bh - y0 - h),          # top
+                               (x0, by, w, y0 - by)):                      # bottom
+            if rw > 0 and rh > 0:
+                canv.rect(rx, ry, rw, rh, stroke=0, fill=1)
     for i in range(rings):
         ta = i / float(rings)                            # 0 outer .. ->1 centre
         tb = (i + 1) / float(rings)
@@ -710,7 +727,7 @@ def _paint_border(canv, tpl, x0, y0, w, h):
     return bx0, by0, bx1, by1, gap
 
 
-def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h):
+def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
     """The full designed front cover, drawn inside (x0,y0,w,h)."""
     cx = x0 + w / 2.0
     canv.saveState()
@@ -860,14 +877,22 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h):
 # wrap's front panel dispatch through one entry point (`_paint_cover_front`). This is a
 # small, curated set of opinionated layouts — NOT a freeform canvas (ROADMAP strategy note).
 
-def _paint_bottom_scrim(canv, x0, y0, w, h, color, height_frac=0.55, max_alpha=0.82):
+def _paint_bottom_scrim(canv, x0, y0, w, h, color, height_frac=0.55, max_alpha=0.82,
+                        bleed=None):
     """Foot-anchored darkening gradient so type stays legible over full-bleed art:
     stacked non-overlapping horizontal strips, densest at the foot, fading to clear.
-    Non-overlapping so alpha never double-composites (same trick as _paint_vignette)."""
+    Non-overlapping so alpha never double-composites (same trick as _paint_vignette).
+    Measured from the trim; with a `bleed` it runs out sideways to it and fills the
+    bleed under the foot at its densest."""
     bands = 26
     sh = h * min(max(height_frac, 0.0), 1.0)
+    bx, by, bw, _ = bleed or (x0, y0, w, h)
+    x0, w = bx, bw
     canv.saveState()
     canv.setFillColor(color)
+    if y0 > by and max_alpha > 0.003:
+        canv.setFillAlpha(min(max_alpha, 1.0))
+        canv.rect(x0, by, w, y0 - by, stroke=0, fill=1)
     for i in range(bands):
         t = i / float(bands)                     # 0 at the foot .. ->1 at the band's top
         a = max_alpha * (1.0 - t) ** 1.7
@@ -879,7 +904,7 @@ def _paint_bottom_scrim(canv, x0, y0, w, h, color, height_frac=0.55, max_alpha=0
     canv.restoreState()
 
 
-def _design_photographic(canv, tpl, cf, meta, x0, y0, w, h):
+def _design_photographic(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
     """Full-bleed photographic cover: the background art (set via `background.image` and
     painted before dispatch) fills the panel; a soft foot scrim carries a large lower-
     anchored title, an author line over a short rule, a top series line, and a studio
@@ -895,7 +920,8 @@ def _design_photographic(canv, tpl, cf, meta, x0, y0, w, h):
     if sop > 0:
         _paint_bottom_scrim(canv, x0, y0, w, h,
                             _pal_color(tpl, ph.get('scrim', 'bg_bottom')),
-                            _num(ph.get('scrim_height', 0.55), 0.55), min(sop, 1.0))
+                            _num(ph.get('scrim_height', 0.55), 0.55), min(sop, 1.0),
+                            bleed)
 
     inner_w = w - 0.9 * inch
 
@@ -1033,7 +1059,7 @@ def _floor_above(y, font, size, gap=0.12 * inch):
     return y + _depth(font, size)[0] + gap
 
 
-def _design_typographic(canv, tpl, cf, meta, x0, y0, w, h):
+def _design_typographic(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
     """The title IS the cover: an oversized left-aligned display title filling the upper
     page, a heavy accent rule, a tagline, and author + series in tracked caps. No frame,
     no ornament, no art — pure type. Tuned via an optional `typo` dict."""
@@ -1130,7 +1156,7 @@ def _design_typographic(canv, tpl, cf, meta, x0, y0, w, h):
     _paint_emblems(canv, tpl, x0, y0, w, h)
 
 
-def _design_geometric(canv, tpl, cf, meta, x0, y0, w, h):
+def _design_geometric(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
     """Flat colour-blocked modern cover: a solid ground with a bold horizontal band
     carrying the title reversed out of it; series above, author below. No gradient, no
     frame — geometric flat colour. Tuned via an optional `blocks` dict."""
@@ -1138,10 +1164,12 @@ def _design_geometric(canv, tpl, cf, meta, x0, y0, w, h):
     bl = bl if isinstance(bl, dict) else {}
     cx = x0 + w / 2.0
 
-    # flat ground (overpaint the gradient so the cover reads as flat colour)
+    # flat ground (overpaint the gradient so the cover reads as flat colour),
+    # out to the bleed, as is the band across it
+    gx, gy, gw, gh = bleed or (x0, y0, w, h)
     canv.saveState()
     canv.setFillColor(_pal_color(tpl, bl.get('ground', 'bg_bottom')))
-    canv.rect(x0, y0, w, h, stroke=0, fill=1)
+    canv.rect(gx, gy, gw, gh, stroke=0, fill=1)
     canv.restoreState()
 
     # bold title band
@@ -1150,7 +1178,7 @@ def _design_geometric(canv, tpl, cf, meta, x0, y0, w, h):
     by0 = y0 + h * band_mid - band_h / 2.0
     canv.saveState()
     canv.setFillColor(_pal_color(tpl, bl.get('band', 'gold')))
-    canv.rect(x0, by0, w, band_h, stroke=0, fill=1)
+    canv.rect(gx, by0, gw, band_h, stroke=0, fill=1)
     canv.restoreState()
 
     inner_w = w - 1.1 * inch
@@ -1210,7 +1238,7 @@ def _design_geometric(canv, tpl, cf, meta, x0, y0, w, h):
     _paint_emblems(canv, tpl, x0, y0, w, h)
 
 
-def _design_vintage(canv, tpl, cf, meta, x0, y0, w, h):
+def _design_vintage(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
     """Vintage paperback: a top-anchored title bracketed by double rules, an italic
     tagline, and a filled author band across the foot with the author reversed. A
     heavier, older look. Tuned via an optional `vintage` dict."""
@@ -1303,7 +1331,7 @@ def _design_vintage(canv, tpl, cf, meta, x0, y0, w, h):
     _paint_emblems(canv, tpl, x0, y0, w, h)
 
 
-def _design_minimal(canv, tpl, cf, meta, x0, y0, w, h):
+def _design_minimal(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
     """Quiet, upscale minimalism: a modest tracked serif title high-centre over lots of
     whitespace, a short hairline rule, small-caps series + author. No frame, no ornament.
     Uses whatever ground the palette gradient supplies. Tuned via an optional `minimal` dict."""
@@ -1376,23 +1404,28 @@ def _design_minimal(canv, tpl, cf, meta, x0, y0, w, h):
     _paint_emblems(canv, tpl, x0, y0, w, h)
 
 
-def _design_stripe(canv, tpl, cf, meta, x0, y0, w, h):
+def _design_stripe(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
     """Editorial asymmetry: a full-height colour band down one side, with a large
     left-aligned title, series, and author set in the open field beside it. Flat colour
     (overpaints the gradient). Tuned via an optional `stripe` dict."""
     sp = tpl.get('stripe', {})
     sp = sp if isinstance(sp, dict) else {}
+    gx, gy, gw, gh = bleed or (x0, y0, w, h)
     canv.saveState()
     canv.setFillColor(_pal_color(tpl, sp.get('ground', 'bg_bottom')))
-    canv.rect(x0, y0, w, h, stroke=0, fill=1)
+    canv.rect(gx, gy, gw, gh, stroke=0, fill=1)
     canv.restoreState()
 
+    # the band runs the full height of the bleed, and out to it at its own side
     band_w = w * _num(sp.get('band_width', 0.34), 0.34)
     side = sp.get('side', 'left')
-    bx = x0 if side == 'left' else x0 + w - band_w
+    if side == 'left':
+        bx0, bx1 = gx, x0 + band_w
+    else:
+        bx0, bx1 = x0 + w - band_w, gx + gw
     canv.saveState()
     canv.setFillColor(_pal_color(tpl, sp.get('band', 'gold')))
-    canv.rect(bx, y0, band_w, h, stroke=0, fill=1)
+    canv.rect(bx0, gy, bx1 - bx0, gh, stroke=0, fill=1)
     canv.restoreState()
 
     tx0 = (x0 + band_w + 0.4 * inch) if side == 'left' else (x0 + 0.4 * inch)
@@ -1456,7 +1489,7 @@ def _design_stripe(canv, tpl, cf, meta, x0, y0, w, h):
     _paint_emblems(canv, tpl, x0, y0, w, h)
 
 
-def _design_postcard(canv, tpl, cf, meta, x0, y0, w, h):
+def _design_postcard(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
     """A framed-photo look: cover art (from `background.image`) sits in an inset mat +
     frame in the upper cover, with the title, series, and author on the flat ground below.
     An alternative to full-bleed for uploaded art. Tuned via an optional `postcard` dict."""
@@ -1464,9 +1497,10 @@ def _design_postcard(canv, tpl, cf, meta, x0, y0, w, h):
     pc = pc if isinstance(pc, dict) else {}
     cx = x0 + w / 2.0
 
+    gx, gy, gw, gh = bleed or (x0, y0, w, h)
     canv.saveState()                                     # flat ground over the full-bleed art
     canv.setFillColor(_pal_color(tpl, pc.get('ground', 'bg_bottom')))
-    canv.rect(x0, y0, w, h, stroke=0, fill=1)
+    canv.rect(gx, gy, gw, gh, stroke=0, fill=1)
     canv.restoreState()
 
     margin = _num(pc.get('margin', 0.7), 0.7) * inch
@@ -1569,10 +1603,14 @@ _COVER_DESIGNS = {
 }
 
 
-def _paint_cover_front(canv, tpl, cf, meta, x0, y0, w, h):
-    """Dispatch to the template's cover design family (default 'classic-frame')."""
+def _paint_cover_front(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
+    """Dispatch to the template's cover design family (default 'classic-frame').
+
+    (x0,y0,w,h) is the trimmed panel, which type is laid out in; `bleed` is the
+    printed rectangle round it on a wrap, which flat grounds and full-height
+    bands fill so the cut can wander without showing what is underneath."""
     fn = _COVER_DESIGNS.get(tpl.get('design') or 'classic-frame', _paint_cover_panel)
-    fn(canv, tpl, cf, meta, x0, y0, w, h)
+    fn(canv, tpl, cf, meta, x0, y0, w, h, bleed=bleed)
 
 
 def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
@@ -1892,17 +1930,18 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
     _paint_back_panel(c, tpl, cf, panel_meta, back_x, edge, pw, ph)
     drew_spine = _paint_spine(c, tpl, cf, meta, spine_x, edge, sp, ph, draw_text=draw_spine)
     art = _front_art(meta)
+    # The front's art runs past the trim to the outer edge of the sheet — bleed,
+    # and on a case the turn-in too — so nothing else can appear at the
+    # fore-edge; a jacket stops at the fold instead, because past it is the
+    # flap, which folds in and is not front. Uploaded art (#66) fills it, and so
+    # do a template's background art, flat ground and full-height bands.
+    art_w, art_h = front_art_size(g)
+    front_bleed = (front_x, 0.0, art_w * inch, art_h * inch)
     if art:
-        # Uploaded art is the front panel (#66). It runs past the trim to the
-        # outer edge of the sheet — bleed, and on a case the turn-in too — so
-        # nothing white can appear at the fore-edge; a jacket stops at the fold
-        # instead, because past it is the flap, which folds in and is not front.
-        art_w, art_h = front_art_size(g)
-        _paint_image_front(c, cf, meta, front_x, 0.0, art_w * inch, art_h * inch,
-                           (front_x, edge, pw, ph))
+        _paint_image_front(c, cf, meta, *front_bleed, (front_x, edge, pw, ph))
     else:
-        _paint_background(c, tpl, front_x, edge, pw, ph)
-        _paint_cover_front(c, tpl, cf, meta, front_x, edge, pw, ph)
+        _paint_background(c, tpl, front_x, edge, pw, ph, bleed=front_bleed)
+        _paint_cover_front(c, tpl, cf, meta, front_x, edge, pw, ph, bleed=front_bleed)
     if flap:
         _paint_flap(c, tpl, cf, meta, edge, edge, flap, ph, 'back')
         _paint_flap(c, tpl, cf, meta, front_x + pw, edge, flap, ph, 'front')
