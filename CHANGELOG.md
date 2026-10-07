@@ -8,7 +8,11 @@ line here.
 
 ---
 
-## Unreleased
+## 1.3.2 — 7 October 2026
+
+A small fix for print covers: a designed cover’s art, colour and bands now run
+right out to the edge of the print wrap, so nothing from underneath can show at
+the edge of the finished book when the cut wanders.
 
 ### Fixed
 
