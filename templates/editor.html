@@ -106,7 +106,7 @@
             <div class="field num"><label>Page height</label><span class="hint">inches</span>
               <input type="number" step="0.05" id="f-th" name="trim_h" value="{{ p.trim.h }}"></div>
             <div class="field"><label>Standard sizes</label>
-              <span class="hint">every one is accepted by KDP and IngramSpark</span>
+              <span class="hint">KDP and IngramSpark accept all but A5 (IngramSpark only)</span>
               <select id="trim-pick">
                 <option value="">Choose a trim…</option>
                 {% for w, h, label in trim_presets %}
@@ -719,6 +719,52 @@
         </div>
       </fieldset>
 
+      {% set hd = p.get('headings', {}) %}
+      {% set toc_depth = (p.get('toc', {}) or {}).get('depth', 1) %}
+      <fieldset>
+        <legend>Headings &amp; contents</legend>
+        <div class="fs-body">
+          <p class="hint">For reference books: <code>### Section</code> (a room key such as
+            <code>### A3. Guard Room</code>) and <code>#### Sub-section</code> under a
+            <code>## Subhead</code>. A size of 0 is the body size.</p>
+          <div class="row">
+            <div class="field"><label>Section (###)</label><span class="hint">weight</span>
+              <select name="hd_section_style">
+                {% for v, l in [('bold', 'Bold'), ('italic', 'Italic'), ('regular', 'Regular')] %}
+                <option value="{{ v }}" {{ 'selected' if hd.get('section_style', 'bold')==v }}>{{ l }}</option>{% endfor %}
+              </select></div>
+            <div class="field"><label>Alignment</label><span class="hint">section</span>
+              <select name="hd_section_align">
+                {% for v, l in [('left', 'Left'), ('center', 'Centered')] %}
+                <option value="{{ v }}" {{ 'selected' if hd.get('section_align', 'left')==v }}>{{ l }}</option>{% endfor %}
+              </select></div>
+            <div class="field num"><label>Size</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="hd_section_size" value="{{ hd.get('section_size', 0) }}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Sub-section (####)</label><span class="hint">weight</span>
+              <select name="hd_subsection_style">
+                {% for v, l in [('italic', 'Italic'), ('bold', 'Bold'), ('regular', 'Regular')] %}
+                <option value="{{ v }}" {{ 'selected' if hd.get('subsection_style', 'italic')==v }}>{{ l }}</option>{% endfor %}
+              </select></div>
+            <div class="field"><label>Alignment</label><span class="hint">sub-section</span>
+              <select name="hd_subsection_align">
+                {% for v, l in [('left', 'Left'), ('center', 'Centered')] %}
+                <option value="{{ v }}" {{ 'selected' if hd.get('subsection_align', 'left')==v }}>{{ l }}</option>{% endfor %}
+              </select></div>
+            <div class="field num"><label>Size</label><span class="hint">points</span>
+              <input type="number" step="0.5" name="hd_subsection_size" value="{{ hd.get('subsection_size', 0) }}"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Contents page lists</label><span class="hint">when a book has one</span>
+              <select name="toc_depth">
+                {% for v, l in [(1, 'Chapters'), (2, 'Chapters and subheads (##)'), (3, 'Down to sections (###)'), (4, 'Down to sub-sections (####)')] %}
+                <option value="{{ v }}" {{ 'selected' if toc_depth==v }}>{{ l }}</option>{% endfor %}
+              </select></div>
+          </div>
+        </div>
+      </fieldset>
+
       <fieldset>
         <legend>Running heads &amp; page numbers</legend>
         <div class="fs-body">
@@ -731,6 +777,15 @@
               <input type="number" step="0.5" name="rh_size" value="{{ p.running_head.size }}"></div>
             <div class="field num"><label>Head gap</label><span class="hint">inches</span>
               <input type="number" step="0.02" name="rh_gap" value="{{ p.running_head.gap }}"></div>
+          </div>
+          <div class="row">
+            {% set rhc = p.running_head.get('content', 'book') %}
+            <div class="field"><label>Running heads show</label><span class="hint">left page / right page</span>
+              <select name="rh_content">
+                <option value="book" {{ 'selected' if rhc=='book' }}>Author / book title</option>
+                <option value="chapter" {{ 'selected' if rhc=='chapter' }}>Book title / chapter</option>
+                <option value="section" {{ 'selected' if rhc=='section' }}>Chapter / section (##)</option>
+              </select></div>
           </div>
           <div class="row">
             <div class="check"><input type="checkbox" id="f-fo" name="fo_show" {{ 'checked' if p.folio.show }}>

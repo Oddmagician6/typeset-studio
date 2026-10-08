@@ -36,9 +36,41 @@ line here.
   under it, and a "Pacing" heading becomes a note.
 - **Homebrewery stat blocks paste as stat blocks.** Pasting one into the
   manuscript editor without a fence around it wraps it in one.
+- **Sections for reference books.** `### Section` and `#### Sub-section` add
+  two heading levels under `## Subhead`, for room keys like `### A3. Guard
+  Room` and rules broken into parts. The manuscript editor has **Section** and
+  **Sub-section** buttons, and the style editor sets each level's weight,
+  alignment and size. Before this, those lines printed as typed; no book
+  written so far uses them, so none changes.
+- **A tagline under a chapter title.** `#> Where the bells still ring below
+  the water.` on the line after `# Title` sets an italic line under the title,
+  in the PDF and the ebook.
+- **Contents with sections.** The style editor's new **Headings & contents**
+  settings choose how deep the contents page goes: chapters only (as before),
+  or down to subheads, sections or sub-sections, each with its page number. The
+  ebook's contents nest the same way.
+- **PDF bookmarks.** Every PDF now carries bookmarks for its parts, chapters,
+  subheads and sections, so a reader can jump around a long book from the
+  viewer's sidebar. DriveThruRPG asks for them.
+- **Running heads by chapter or section.** Running heads can show the book
+  title and the chapter, or the chapter and the current subhead, instead of
+  the author and the book title. Notes and back matter pages show their own
+  name.
+- **US Letter, A4 and A5 trims** in the style editor's list of standard sizes
+  (A5 is IngramSpark's; KDP doesn't print it). The size that list called
+  "Letter" was 8.25 × 11, and is now named "Large workbook".
+- **Word headings come in by level.** Heading 2, 3 and 4 import as `##`,
+  `###` and `####` rather than all as subheads. A document with no Heading 1
+  takes its chapters from the highest level it uses, and a lone heading above
+  them all comes in as the book's title on an unnumbered opening page, so an
+  adventure written in Heading 2 to 4 imports with its encounters as chapters.
+  Its "Read Aloud" and "Pacing" headings are boxed at any level.
 
 ### Fixed
 
+- **A chapter listed under a part fits its line in the contents.** Its dot
+  leaders ignored the part's indent, so a long title wrapped its page number
+  onto a line of its own.
 - **Block settings pasted from a word processor are read.** A setting in
   curly quotes, like `src=“map.png”` on a figure, was silently ignored, so the
   picture never appeared. Curly quotes now work, and the editor writes them

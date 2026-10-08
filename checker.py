@@ -35,7 +35,7 @@ def _chapter_paras(chapter: dict) -> list:
     """Return plain-text strings for every readable block in a chapter."""
     texts = []
     for block in chapter['blocks']:
-        if block[0] in ('para', 'subhead'):
+        if block[0] in ('para', 'subhead', 'section', 'subsection'):
             texts.append(_plain(block[1]))
         elif block[0] == 'doc_block':
             for sub in block[1]:

@@ -65,7 +65,8 @@
     "show": true,
     "caps": true,
     "size": 8.0,
-    "gap": 0.26
+    "gap": 0.26,
+    "content": "book"
   },
   "folio": {
     "show": true,

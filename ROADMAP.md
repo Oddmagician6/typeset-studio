@@ -32,19 +32,20 @@ Start here in a new session. Each item points at its full entry below.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
-4. **Tabletop RPG books (#74) — Phase 1 done, unreleased (2026-10-07).** The game blocks
-   (read-aloud, sidebar and note, stat block in every accepted format) with Word import
-   and Homebrewery paste are in CHANGELOG's `## Unreleased` beside #77. Phase 1's
-   leftovers are listed at the end of its entry. **Next: Phase 2** (reference structure:
-   `###`/`####` headings, contents depth, PDF bookmarks, section running heads, chapter
-   tagline, Letter/A4/A5 trims); its open question is the tagline syntax. Six phases in
-   all; the author's own books are local test material in `Edenfall for test/`
-   (gitignored).
-   **State at hand-off (2026-10-07): Phase 1 is NOT committed.** It sits in the working
-   tree on branch `ttrpg-phase1` (new files `statblock.py`, `test_game_blocks.py`,
-   `test_fixtures/ttrpg/baseline/phase1.json`). All 35 test files passed on it. Check
-   `git status` first and ask the user before committing or merging it to master; start
-   Phase 2 on top of it, not on master without it.
+4. **Tabletop RPG books (#74) — Phases 1 and 2 done, unreleased (2026-10-08).** Phase 1:
+   the game blocks (read-aloud, sidebar and note, stat block in every accepted format)
+   with Word import and Homebrewery paste. Phase 2: `###`/`####` headings, the `#>`
+   tagline, contents depth, PDF bookmarks, running heads by chapter or section,
+   Letter/A4/A5 trims, Word headings by level. Both are in CHANGELOG's `## Unreleased`
+   beside #77; each phase's leftovers end its entry. **Next: Phase 3** (game-book
+   presets and the colour screen PDF, dark pages included) — check its plan with the
+   user first. Six phases in all; the author's own books are local test material in
+   `Edenfall for test/` (gitignored).
+   **State at hand-off (2026-10-08):** on branch `ttrpg-phase1`, Phase 1 is committed
+   (d3ca54e, the user chose "commit on the branch"); Phase 2 is in the working tree,
+   NOT committed (new files `test_reference.py`, `test_fixtures/ttrpg/reference.md`,
+   `baseline/phase2.json`). All 36 test files pass. Ask the user before committing it
+   or merging the branch to master.
    **Children's books (#75)** sit beside it: early-reader presets are cheap and could come
    first; picture books wait on full-bleed interior pages (Tier 5E) and a per-page designer.
 5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
@@ -2646,7 +2647,7 @@ doc_model / WYSIWYG round-trip:
   preview shows no game block; Greek, Cyrillic and CJK text in a stat block print only
   with a font that has them (the bundled faces don't — older than #74).
 
-  **Phase 2 — Reference-book structure** *(small–medium)*. Also helps nonfiction.
+  **Phase 2 — Reference-book structure** *(small–medium)* — **DONE (2026-10-08)**, see "Phase 2 as built". Also helps nonfiction.
   *Watch-outs from Phase 1 (2026-10-07):*
   - **Word import's game-block pass reads `## ` headings.** `_IMP_READALOUD_RE` and
     `_IMP_PACING_RE` in `manuscript.py` match only `^##\s+`. When Heading 3–4 import as
@@ -2687,6 +2688,38 @@ doc_model / WYSIWYG round-trip:
     (the Volume 1 adventure).
   - **Tests:** heading levels through parse/render/EPUB/round trip; contents depth; the
     bookmark tree read back with `fitz` (`get_toc`); the back-compat case.
+
+  **Phase 2 as built (2026-10-08).** The tagline syntax chosen with the user: `#> …`
+  on the line after `# Title` (blank lines between allowed); anywhere else a `#>` line
+  is text, and `\#>` escapes it. `manuscript.SECTION_RE` / `SUBSECTION_RE` /
+  `TAGLINE_RE`, `HEADING_KINDS = ('subhead', 'section', 'subsection')` (the block
+  kinds; level = index + 2) and `heading_match()`; the doc model keeps one `subhead`
+  node with `level: 3|4` carried only when not 2, and `tagline` on the chapter node
+  only when set, so every existing model is unchanged (py, js and `wysiwyg.js`, which
+  holds both on data-attrs as it does the byline). Engine: headings are tagged
+  Paragraphs (`_heading_para`), read by `BookDoc.afterFlowable`, which records them
+  for the contents (`{'heading': level}` entries beside the chapters'), bookmarks
+  `##`/`###` and follows `##` for running heads; `TocMarker` (chapters) and
+  `OutlineMarker` (parts) bookmark too, and an outline level never jumps more than one
+  (`_outline`). Running heads: `running_head.content` = `book` (as before) |
+  `chapter` (title / chapter) | `section` (chapter / the first `##` begun on the page,
+  else the one in force); `RunningHeadMarker` names the Notes and back-matter pages.
+  `headings` (section/sub-section style, align, size) and `toc.depth` (1–4) are new
+  style sections; the nine bundled styles gained `running_head.content: "book"` so an
+  editor save changes nothing (`test_chapter_art`). EPUB: `h3`/`h4` with per-chapter
+  ids `h1, h2…` (`epub.chapter_headings`), nested nav (`_nav_li`), contents-page
+  links. Trims: US Letter, A4, A5 (A5 is IngramSpark only; the old "Letter" entry was
+  8.25 × 11 and is renamed). Word import: `_top_heading_level` — Heading 1 if used,
+  else the top level used; a lone first heading at that level over deeper ones is the
+  book's title, imported as `#*` (the Volume 1 adventure: its Heading 2 title, Heading
+  3 encounters as chapters, its 2 read-alouds and 3 pacing notes boxed at Heading 4).
+  Fixed on the way: a chapter's contents line under a part ignored the indent in its
+  dot leaders. Tests: `test_reference.py` (fixture `test_fixtures/ttrpg/reference.md`,
+  also in the rich editor corpus and `make_baseline.py`; `phase2.json` matches
+  `phase1.json` on every Phase 1 file).
+  **Left over from Phase 2** (on request): the style editor's live preview shows no
+  `###`; in-book links can't target a section (`#a3-guard-room`); bookmarks stop at
+  `###`; the rich editor edits a tagline in Markdown mode, as it does a byline.
 
   **Phase 3 — The game-book look and the screen PDF** *(medium)*.
   - **Game-book presets**, single column first (two-column ones follow Phase 4): an

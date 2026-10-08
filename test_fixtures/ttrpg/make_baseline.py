@@ -9,7 +9,8 @@ paragraph count), whether the Markdown round trip is byte-identical, the PDF's
 page count and build time (6 x 9, the default style), and whether the EPUB
 builds. Run make_long_book.py first for the generated files to be included.
 The report goes to baseline/baseline.json, or to the name given, so a later run
-can sit beside the 1.3.2 one (phase1.json is the run after Phase 1).
+can sit beside the 1.3.2 one (phase1.json is the run after Phase 1,
+phase2.json after Phase 2, which added reference.md).
 
 This is the "before" for Phase 1: today the three new fence types fall back to
 a plain document block, which joins a stat block's lines into one paragraph,
@@ -37,7 +38,7 @@ import epub
 import app as A
 
 FILES = ['adventure.md', 'statblocks.md', 'statblock_formats.md', 'edge_cases.md',
-         'generated/long_book.md', 'generated/long_statblock.md']
+         'reference.md', 'generated/long_book.md', 'generated/long_statblock.md']
 NEW_TYPES = ('statblock', 'readaloud', 'sidebar')
 
 

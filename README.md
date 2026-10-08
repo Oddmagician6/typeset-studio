@@ -186,7 +186,10 @@ The tool reads a light, plain-text convention:
 | `=== Part title`   | a part divider page           |
 | `# Chapter title`  | starts a new chapter          |
 | `#* Prologue`      | a chapter with no number      |
+| `#> Tagline`       | an italic line under the chapter title (the line right after `# Title`) |
 | `## Subhead`       | a section subhead             |
+| `### Section`      | a heading under a subhead (a room key: `### A3. Guard Room`) |
+| `#### Sub-section` | a heading under a section     |
 | `* * *` (own line) | a scene break                 |
 | `~~~` … `~~~`      | an epistolary / document block|
 | `~~~ figure src="map.png"` … `~~~` | an illustration; the block's text is its caption |
@@ -207,7 +210,8 @@ A `.docx` is converted to the same convention on import:
 | In Word | You get |
 |---------|---------|
 | Heading 1 / Title | a new chapter |
-| Heading 2, 3, … | a subhead |
+| Heading 2, 3, 4 | `##`, `###`, `####` (deeper levels set as `####`) |
+| no Heading 1 at all | the highest heading level used starts the chapters; if that level is used once, first, it is the book's title, imported as an unnumbered opening |
 | **bold** / *italic* runs | inline emphasis |
 | a centred `* * *` line | a scene break |
 | an image | a figure, with a following *Caption* paragraph as its caption |

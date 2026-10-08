@@ -1077,9 +1077,20 @@ DEFAULTS = {
     # 0 means "use the ornament's own recommended width" — see ornaments.py.
     'scene_break': {'type': 'glyph', 'glyph': '* * *', 'size': 11.0, 'gap': 9.0,
                     'image': '', 'ornament': '', 'ornament_width': 0.0},
-    'running_head': {'show': True, 'caps': True, 'size': 8.5, 'gap': 0.28},
+    # content: "book" (author on the verso, title on the recto, as always) |
+    # "chapter" (title / chapter) | "section" (chapter / the current `##`)
+    'running_head': {'show': True, 'caps': True, 'size': 8.5, 'gap': 0.28,
+                     'content': 'book'},
     'folio': {'show': True, 'position': 'outer', 'size': 9.5, 'gap': 0.42,
               'hide_on_opener': True},
+    # `###` section and `####` sub-section headings (#74 Phase 2). A size of 0
+    # is the body size; style is bold | italic | regular; align left | center
+    'headings': {'section_style': 'bold', 'section_align': 'left', 'section_size': 0,
+                 'subsection_style': 'italic', 'subsection_align': 'left',
+                 'subsection_size': 0},
+    # how deep the contents page goes: 1 = chapters, 2 adds `##` subheads,
+    # 3 `###` sections, 4 `####` sub-sections
+    'toc': {'depth': 1},
 }
 
 
@@ -1529,6 +1540,7 @@ STYLE_RANGES = {
     'en_entry_gap': _PT, 'en_group_gap': _PT, 'en_marker_scale': (0.2, 2.0),
     's_size': (1.0, 144.0), 's_gap': _PT, 'sb_ornament_width': (0.0, 1.0),
     'rh_size': (1.0, 72.0), 'rh_gap': _IN, 'fo_size': (1.0, 72.0), 'fo_gap': _IN,
+    'hd_section_size': (0.0, 72.0), 'hd_subsection_size': (0.0, 72.0),
 }
 
 
@@ -1793,11 +1805,28 @@ def _preset_fields(form):
             'ornament_width': _fs(form, 'sb_ornament_width', 0.0),
         },
         'running_head': {'show': 'rh_show' in form, 'caps': 'rh_caps' in form,
-                         'size': _fs(form, 'rh_size', 8.5), 'gap': _fs(form, 'rh_gap', 0.28)},
+                         'size': _fs(form, 'rh_size', 8.5), 'gap': _fs(form, 'rh_gap', 0.28),
+                         'content': _pick(form, 'rh_content', ('book', 'chapter', 'section'))},
+        'headings': {
+            'section_style':    _pick(form, 'hd_section_style', ('bold', 'italic', 'regular')),
+            'section_align':    _pick(form, 'hd_section_align', ('left', 'center')),
+            'section_size':     _fs(form, 'hd_section_size', 0),
+            'subsection_style': _pick(form, 'hd_subsection_style',
+                                      ('italic', 'bold', 'regular')),
+            'subsection_align': _pick(form, 'hd_subsection_align', ('left', 'center')),
+            'subsection_size':  _fs(form, 'hd_subsection_size', 0),
+        },
+        'toc': {'depth': int(_pick(form, 'toc_depth', ('1', '2', '3', '4')))},
         'folio': {'show': 'fo_show' in form, 'position': form.get('fo_position', 'outer'),
                   'size': _fs(form, 'fo_size', 9.5), 'gap': _fs(form, 'fo_gap', 0.42),
                   'hide_on_opener': 'fo_hide_on_opener' in form},
     }
+
+
+def _pick(form, key, choices):
+    """A choice field's value if it is one of `choices`, else the first."""
+    v = (form.get(key, '') or '').strip()
+    return v if v in choices else choices[0]
 
 
 def _hexf(form, key, default):
@@ -2213,7 +2242,8 @@ def clone(pid):
     return redirect(url_for('editor', pid=new_id))
 
 
-# Standard interior trims both KDP and IngramSpark accept, so a style can be set
+# Standard interior trims KDP and IngramSpark accept (A5 is IngramSpark's
+# alone, and its label says so), so a style can be set
 # to a real size instead of a typo that fails at upload.
 TRIM_PRESETS = [
     (4.25, 6.87, 'Mass market'),
@@ -2221,6 +2251,7 @@ TRIM_PRESETS = [
     (5.06, 7.81, 'A-format'),
     (5.25, 8.0,  'Small trade'),
     (5.5,  8.5,  'Trade — the common one'),
+    (5.83, 8.27, 'A5 — zines; IngramSpark (KDP doesn’t print it)'),
     (6.0,  9.0,  'Trade — the other common one'),
     (6.14, 9.21, 'Royal / B-format'),
     (6.69, 9.61, 'Crown quarto'),
@@ -2228,7 +2259,9 @@ TRIM_PRESETS = [
     (7.44, 9.69, 'Textbook'),
     (7.5,  9.25, 'Textbook (wide)'),
     (8.0,  10.0, 'Illustrated'),
-    (8.25, 11.0, 'Letter — manuals, workbooks'),
+    (8.25, 11.0, 'Large workbook'),
+    (8.27, 11.69, 'A4 — rulebooks outside the US'),
+    (8.5,  11.0, 'US Letter — rulebooks, manuals'),
 ]
 
 # Large print, following the RNIB / NAVH guidance: 16pt minimum, generous

@@ -192,6 +192,8 @@
       if (b.byline) el.dataset.byline = b.byline;
       // `#* Prologue` takes no number; the flag rides along the same way
       if (b.unnumbered) el.dataset.unnumbered = 'yes';
+      // `#> …` tagline: the same arrangement as the byline
+      if (b.tagline) el.dataset.tagline = b.tagline;
       if (!el.textContent) el.appendChild(document.createElement('br'));
     } else if (b.type === 'part') {
       el = document.createElement('h2');
@@ -201,6 +203,8 @@
     } else if (b.type === 'subhead') {
       el = document.createElement('p');
       el.className = 'wb wb-subhead'; el.dataset.block = 'subhead';
+      // `###` / `####`: the level rides on a data-attr, styled per level
+      if (b.level > 2) { el.dataset.level = String(b.level); el.className += ' wb-level-' + b.level; }
       appendInline(el, b.runs);
     } else if (b.type === 'para') {
       el = document.createElement('p');
@@ -543,7 +547,7 @@
     if (el.dataset && el.dataset.block) return el.dataset.block;
     var t = el.tagName;
     if (t === 'H1') return 'chapter';
-    if (t === 'H2') return 'subhead';
+    if (t === 'H2' || t === 'H3' || t === 'H4') return 'subhead';
     return 'para';                                       // P, DIV, or anything else
   }
 
@@ -578,10 +582,17 @@
       var ch = { type: 'chapter', title: titleOrNull(el),
                  byline: (el.dataset && el.dataset.byline) || null };
       if (el.dataset && el.dataset.unnumbered) ch.unnumbered = true;   // `#*`
+      if (el.dataset && el.dataset.tagline) ch.tagline = el.dataset.tagline;   // `#>`
       return ch;
     }
     if (type === 'part')    return { type: 'part', title: titleOrNull(el) };
-    if (type === 'subhead') return { type: 'subhead', runs: readInline(el) };
+    if (type === 'subhead') {
+      var sh = { type: 'subhead', runs: readInline(el) };
+      var lvl = parseInt((el.dataset && el.dataset.level) ||
+                         (el.tagName === 'H3' ? '3' : el.tagName === 'H4' ? '4' : ''), 10);
+      if (lvl === 3 || lvl === 4) sh.level = lvl;
+      return sh;
+    }
     if (type === 'scene')   return { type: 'scene' };
     if (type === 'poem')    return readPoem(el);
     if (type === 'figure')  return readFigure(el);

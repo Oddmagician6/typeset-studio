@@ -2297,12 +2297,18 @@ class OpenerMarker(Flowable):
 
 
 class TocMarker(Flowable):
-    """Chapter opener marker that also records its page for TOC generation."""
+    """Chapter opener marker that also records its page for TOC generation.
+
+    It is also where a chapter enters the PDF bookmarks and the running heads:
+    `label` is what both show, the title or, for an untitled chapter, its
+    number label.
+    """
     width = height = 0
 
-    def __init__(self, idx, title, part=None):
+    def __init__(self, idx, title, part=None, label=None):
         super().__init__()
         self.idx, self.title, self.part = idx, title, part
+        self.label = label or title or ''
 
     def wrap(self, w, h): return (0, 0)
 
@@ -2316,6 +2322,60 @@ class TocMarker(Flowable):
                 'part':  self.part,
                 'page':  self.canv.getPageNumber(),
             })
+        if isinstance(doc, BookDoc):
+            text = _outline_text(self.label)
+            doc._ol_chapter = 1 if self.part else 0
+            doc._outline(self.canv, text, doc._ol_chapter)
+            doc._rh_chapter, doc._rh_section = text, None
+
+
+class OutlineMarker(Flowable):
+    """A part divider's place in the PDF bookmarks (the top level)."""
+    width = height = 0
+
+    def __init__(self, title):
+        super().__init__()
+        self.title = title
+
+    def wrap(self, w, h): return (0, 0)
+
+    def draw(self):
+        doc = self.canv._doctemplate
+        if isinstance(doc, BookDoc):
+            doc._outline(self.canv, _outline_text(self.title), 0)
+
+
+class RunningHeadMarker(Flowable):
+    """Back matter's own name in a running head set by chapter or section, so
+    the Notes pages don't carry the last chapter's title."""
+    width = height = 0
+
+    def __init__(self, text):
+        super().__init__()
+        self.text = text
+
+    def wrap(self, w, h): return (0, 0)
+
+    def draw(self):
+        doc = self.canv._doctemplate
+        if isinstance(doc, BookDoc):
+            doc._rh_chapter, doc._rh_section = _outline_text(self.text), None
+
+
+def _outline_text(markup):
+    """Words for a bookmark or a running head: the markup and note numbers of a
+    heading taken out, entities turned back into characters."""
+    import html as _html
+    text = _NOTE_SUPER_RE.sub('', _NOTE_MARK_RE.sub('', markup or ''))
+    return ' '.join(_html.unescape(_plain(text)).split())
+
+
+def _heading_para(text, style, level):
+    """A heading inside a chapter, tagged for the contents, the bookmarks and
+    the running heads (`BookDoc.afterFlowable` reads the tag once it is set)."""
+    para = Paragraph(text, style)
+    para._ts_heading = (level, _outline_text(text))
+    return para
 
 
 class HRule(Flowable):
@@ -2479,6 +2539,14 @@ class BookDoc(BaseDocTemplate):
         self.head_font = head_font
         self._body_start  = None           # page number of the first chapter opener
         self._toc_entries = []             # filled by TocMarker during build
+        # PDF bookmarks (#74 Phase 2): a running key, the last level used (an
+        # outline may only go one level deeper at a time) and the level the
+        # current chapter sits at (1 under a part, else 0)
+        self._ol_n, self._ol_last, self._ol_chapter = 0, -1, 0
+        # running heads by chapter or section: what is in force, what was in
+        # force when the page began, and the first section started on it
+        self._rh_chapter = self._rh_section = None
+        self._rh_top = self._rh_first = None
         # footnotes: page -> points to keep free at the foot, and the notes to
         # draw there. Both are worked out by build_pdf's measuring passes.
         self._fn_reserve  = {}
@@ -2556,6 +2624,7 @@ class BookDoc(BaseDocTemplate):
         """
         self.canv._is_opener = False
         self.canv._is_blank = False
+        self._rh_top, self._rh_first = self._rh_section, None
         self._handle_pageBegin()
         f = self.frame
         if '_fullHeight' not in f.__dict__:
@@ -2566,6 +2635,46 @@ class BookDoc(BaseDocTemplate):
         f.__dict__['_height'] = f._fullHeight - keep
         f._geom()
         f._reset()
+
+    def _outline(self, canv, title, level):
+        """Add a PDF bookmark for the current page at `level` (0 = top)."""
+        if not title:
+            return
+        level = max(0, min(level, self._ol_last + 1))
+        self._ol_n += 1
+        key = f'ts-ol-{self._ol_n}'
+        canv.bookmarkPage(key)
+        canv.addOutlineEntry(title, key, level=level, closed=False)
+        self._ol_last = level
+
+    def afterFlowable(self, flowable):
+        """A heading inside a chapter has been set: record its page for the
+        contents, bookmark `##` and `###`, and follow `##` for running heads."""
+        tag = getattr(flowable, '_ts_heading', None)
+        if not tag:
+            return
+        level, text = tag
+        self._toc_entries.append({'heading': level, 'title': text,
+                                  'page': self.canv.getPageNumber()})
+        if level <= 3:
+            self._outline(self.canv, text, self._ol_chapter + level - 1)
+        if level == 2:
+            self._rh_section = text
+            if self._rh_first is None:
+                self._rh_first = text
+
+    def _running_head(self, recto):
+        """The running head's words for this page, as the style asks."""
+        mode = self.preset['running_head'].get('content', 'book')
+        title = self.meta.get('title', '')
+        if mode == 'chapter':
+            return (self._rh_chapter or title) if recto else title
+        if mode == 'section':
+            chap = self._rh_chapter or title
+            if not recto:
+                return chap
+            return self._rh_first or self._rh_top or chap
+        return title if recto else self.meta.get('author', '')
 
     def _draw_footnotes(self, canv, page):
         """Set this page's notes into the space handle_pageBegin kept free."""
@@ -2661,7 +2770,7 @@ class BookDoc(BaseDocTemplate):
             y = self._ph - self._top + rh['gap'] * inch
             canv.setFont(self.head_font, rh['size'])
             canv.setFillGray(0.2)
-            txt = self.meta.get('title', '') if recto else self.meta.get('author', '')
+            txt = self._running_head(recto)
             if rh.get('caps'):
                 txt = txt.upper()
             canv.drawCentredString(cx, y, txt)
@@ -2709,6 +2818,27 @@ def _styles(preset, fonts):
     subhead = ParagraphStyle('sub', parent=body, fontName=fonts.get('bold', fonts['regular']),
                              firstLineIndent=0, alignment=TA_CENTER,
                              spaceBefore=b['leading'], spaceAfter=b['leading'] * 0.5)
+    # `#>` tagline under a chapter title: the byline's look
+    chap_tagline = ParagraphStyle('ctag', parent=chap_byline)
+    # `###` and `####` (#74 Phase 2): left-aligned by default, kept with the
+    # text after them so a heading never ends a page
+    hd = preset.get('headings', {}) or {}
+    _hd_fonts = {'bold': fonts.get('bold', fonts['regular']),
+                 'italic': fonts.get('italic', fonts['regular']),
+                 'regular': fonts['regular']}
+    _hd_align = {'left': TA_LEFT, 'center': TA_CENTER}
+
+    def _heading_style(name, key, dflt_style, gap_before, gap_after):
+        size = hd.get(key + '_size') or b['size']
+        return ParagraphStyle(
+            name, parent=body, fontName=_hd_fonts.get(hd.get(key + '_style'),
+                                                       _hd_fonts[dflt_style]),
+            fontSize=size, leading=max(b['leading'], size * 1.25),
+            firstLineIndent=0, alignment=_hd_align.get(hd.get(key + '_align'), TA_LEFT),
+            spaceBefore=b['leading'] * gap_before, spaceAfter=b['leading'] * gap_after,
+            keepWithNext=1)
+    section = _heading_style('sec', 'section', 'bold', 0.9, 0.3)
+    subsection = _heading_style('subsec', 'subsection', 'italic', 0.6, 0.2)
     pd = preset.get('part_divider', {})
     part_num_style = ParagraphStyle('partnum', fontName=fonts['regular'],
                                     fontSize=pd.get('number_size', 13.0),
@@ -2719,7 +2849,8 @@ def _styles(preset, fonts):
                                       leading=pd.get('title_size', 26.0) * 1.15,
                                       alignment=TA_CENTER)
     return dict(body=body, first=first, chap_title=chap_title, chap_num=chap_num,
-                chap_byline=chap_byline,
+                chap_byline=chap_byline, chap_tagline=chap_tagline,
+                section=section, subsection=subsection,
                 subhead=subhead, part_num=part_num_style, part_title=part_title_style)
 
 
@@ -4569,6 +4700,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 story.append(Spacer(1, 0.15 * inch))
             if ch_part.get('title'):
                 story.append(Paragraph(ch_part['title'], st['part_title']))
+            story.append(OutlineMarker(
+                ch_part.get('title') or pd.get('number_format', 'Part {n}').format(n=ch_part_num)))
             current_part_num = ch_part_num
             need_break = True
 
@@ -4579,7 +4712,10 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             story.append(PageBreak())
         need_break = True
 
-        story.append(TocMarker(idx, ch.get('title'), ch.get('part')))
+        _label = ch.get('title') or (
+            c.get('number_format', 'Chapter {n}').format(n=_numbers[idx - 1])
+            if _numbers[idx - 1] is not None else '')
+        story.append(TocMarker(idx, ch.get('title'), ch.get('part'), label=_label))
         story.append(Spacer(1, c['sink'] * inch))
         # chapter-opening art: over the number, or under the title/byline
         art = _chapter_art(preset, avail_w, text_h)
@@ -4601,6 +4737,9 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         if ch.get('byline'):
             story.append(Spacer(1, 0.12 * inch))
             story.append(Paragraph(_ms_inline(ch['byline'], sq), st['chap_byline']))
+        if ch.get('tagline'):
+            story.append(Spacer(1, 0.08 * inch))
+            story.append(Paragraph(_ms_inline(ch['tagline'], sq), st['chap_tagline']))
         if art and art_pos == 'below':
             story.extend(art)
         story.append(Spacer(1, c['after_title'] * inch))
@@ -4618,7 +4757,10 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                                         ornament_width=sb.get('ornament_width', 0.0)))
                 flush_next = True
             elif kind == 'subhead':
-                story.append(Paragraph(val, st['subhead']))
+                story.append(_heading_para(val, st['subhead'], 2))
+                flush_next = True
+            elif kind in ('section', 'subsection'):
+                story.append(_heading_para(val, st[kind], 3 if kind == 'section' else 4))
                 flush_next = True
             elif kind == 'doc_block':
                 if not opened:
@@ -4654,11 +4796,13 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             and preset.get('endnotes', {}).get('placement', 'end') != 'foot'):
         story.append(RectoBreak() if rhs else PageBreak())
         _bm_first = False
+        story.append(RunningHeadMarker(preset.get('endnotes', {}).get('heading', 'Notes')))
         story.extend(_endnotes_page(manuscript['chapters'], fonts, st, preset))
 
     for _sec in _matter.present(meta, 'back'):
         story.append((RectoBreak() if rhs else PageBreak()) if _bm_first else PageBreak())
         _bm_first = False
+        story.append(RunningHeadMarker(_matter.heading(_sec, _author)))
         story.extend(_matter_page(_matter.heading(_sec, _author),
                                   meta[_sec['key']].strip(),
                                   fonts, st, sq, _sec['style'],
@@ -4684,11 +4828,34 @@ def _build_toc(entries, body_start, avail_w, preset, fonts, st, folio_offset=0):
 
     dot_char = '.'
     last_part = None
+    # how deep the contents go: 1 = chapters (as before), 2 adds `##`
+    # subheads, 3 `###` sections, 4 `####` (#74 Phase 2)
+    try:
+        depth = int((preset.get('toc') or {}).get('depth', 1) or 1)
+    except (TypeError, ValueError):
+        depth = 1
+    part = None                       # the part of the chapter last listed
 
     for e in entries:
+        level = e.get('heading')
+        if level and level > depth:
+            continue
         folio = (e['page'] - (body_start or 1) + 1) + folio_offset
         if folio < 1:
             folio = 1
+
+        if level:
+            # a heading inside a chapter, indented a step per level under it
+            label   = _esc_markup(e['title'])
+            folio_s = str(folio)
+            indent  = (0.18 * inch if part else 0) + (level - 1) * 0.18 * inch
+            lw      = stringWidth(e['title'] + '  ', font, size)
+            fw      = stringWidth('  ' + folio_s, font, size)
+            n_dots  = max(3, int((avail_w - indent - lw - fw)
+                                 / stringWidth(dot_char, font, size)))
+            s = ParagraphStyle('toc_sec', parent=toc_ch, leftIndent=indent)
+            out.append(Paragraph(f'{label}  {dot_char * n_dots}  {folio_s}', s))
+            continue
 
         # Part heading (no page number)
         part = e.get('part')
@@ -4702,9 +4869,10 @@ def _build_toc(entries, body_start, avail_w, preset, fonts, st, folio_offset=0):
         folio_s  = str(folio)
         lw       = stringWidth(label + '  ',  font, size)
         fw       = stringWidth('  ' + folio_s, font, size)
-        n_dots   = max(3, int((avail_w - lw - fw) / stringWidth(dot_char, font, size)))
-        line     = f'{label}  {dot_char * n_dots}  {folio_s}'
         indent   = 0.18 * inch if part else 0
+        n_dots   = max(3, int((avail_w - indent - lw - fw)
+                              / stringWidth(dot_char, font, size)))
+        line     = f'{label}  {dot_char * n_dots}  {folio_s}'
         s = ParagraphStyle('toc_line', parent=toc_ch, leftIndent=indent)
         out.append(Paragraph(line, s))
 

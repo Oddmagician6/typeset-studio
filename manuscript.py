@@ -7,7 +7,11 @@ Conventions
 -----------
   # Chapter Title        -> starts a new chapter (the title line is optional text)
   # Title | Author        -> chapter with an anthology byline under the title
+  #> Tagline             -> an italic line under the chapter title (the line
+                            right after "# Title"; anywhere else it is text)
   ##  Subhead            -> a centered subhead inside a chapter
+  ### Section            -> a section heading (a room key: "### A3. Guard Room")
+  #### Sub-section       -> a heading under a section
   * * *  /  ***  /  ---  -> a scene break (on its own line)
   blank line             -> paragraph separator
   *italic*  **bold**     -> inline emphasis
@@ -73,6 +77,19 @@ UNNUMBERED_RE  = re.compile(r'^#\*\s+(.*)$')
 # stable). No byline => the chapter behaves exactly as before.
 BYLINE_SEP     = ' | '
 SUBHEAD_RE     = re.compile(r'^##\s+(.*)$')
+# `###` and `####` (#74 Phase 2): the section and sub-section of a reference
+# book. Before them these lines printed literally; a bare `###` is still a scene
+# break, which is matched first. Inside a fence they are never read (Homebrewery's
+# `### Actions` is a stat block's own section line).
+SECTION_RE     = re.compile(r'^###\s+(.*)$')
+SUBSECTION_RE  = re.compile(r'^####\s+(.*)$')
+# The block kinds of the three heading levels inside a chapter, `##` first. A
+# heading's level is its position here plus two.
+HEADING_KINDS  = ('subhead', 'section', 'subsection')
+# `#> The bells still ring below the water.` — the italic tagline under a chapter
+# title. Only the line right after `# Title` (blank lines between allowed) is a
+# tagline; anywhere else the line is ordinary text.
+TAGLINE_RE     = re.compile(r'^#>\s+(.*)$')
 DOCBLOCK_RE    = re.compile(r'^\s*~~~(.*)')
 PART_RE        = re.compile(r'^\s*===\s*(.*)')
 # Straight or curly quotes: a value pasted from a word processor arrives as
@@ -130,9 +147,20 @@ def _is_block_line(line):
     return bool(
         SCENE_BREAK_RE.match(line) or CHAPTER_RE.match(line)
         or UNNUMBERED_RE.match(line)
-        or SUBHEAD_RE.match(line) or DOCBLOCK_RE.match(line)
+        or SUBHEAD_RE.match(line) or SECTION_RE.match(line)
+        or SUBSECTION_RE.match(line) or TAGLINE_RE.match(line)
+        or DOCBLOCK_RE.match(line)
         or PART_RE.match(line)
     )
+
+
+def heading_match(line):
+    """(kind, text) for a `##`, `###` or `####` heading line, else None."""
+    for kind, rx in zip(HEADING_KINDS, (SUBHEAD_RE, SECTION_RE, SUBSECTION_RE)):
+        m = rx.match(line)
+        if m:
+            return kind, m.group(1).strip()
+    return None
 
 
 def _smarten(text):
@@ -245,7 +273,7 @@ def _walk_block_texts(blocks):
     """
     for i, block in enumerate(blocks):
         kind = block[0]
-        if kind in ('para', 'subhead'):
+        if kind == 'para' or kind in HEADING_KINDS:
             def _set(new, i=i, block=block):
                 blocks[i] = (block[0], new)
             yield _set, block[1]
@@ -458,11 +486,13 @@ def parse_markdown(raw, smartquotes=True):
     """Return {'chapters': [{'title': str|None, 'byline': str|None, 'part': dict|None, 'blocks': [...] }]}.
 
     Each block is:
-      ('para', text) | ('subhead', text) | ('scene', None)
+      ('para', text) | ('subhead', text) | ('section', text)
+      | ('subsection', text) | ('scene', None)
       | ('doc_block', [('para', text), ...])
       | ('doc_block', [('para', text), ...], {'_type': str, attr: str, ...})
 
     'part' on each chapter is {'title': str|None, 'number': int} or None.
+    'tagline' (raw, like the byline) is present only on a chapter that has one.
     """
     lines = raw.replace('\r\n', '\n').replace('\r', '\n').split('\n')
     chapters  = []
@@ -566,7 +596,19 @@ def parse_markdown(raw, smartquotes=True):
             cur['unnumbered'] = True
         chapters.append(cur)
 
+    tag_ok = False                         # the line after `# Title` may be `#> …`
+
     for line in lines:
+        # `#> …` right after a chapter heading is its tagline. Any other line
+        # that isn't blank ends the chance, so a later `#>` line is just text.
+        if tag_ok and not in_block and line.strip():
+            tag_ok = False
+            m_tag = TAGLINE_RE.match(line)
+            if m_tag:
+                if m_tag.group(1).strip():
+                    cur['tagline'] = m_tag.group(1).strip()
+                continue
+
         # A leading backslash guarding a block marker => literal paragraph text.
         if not in_block and line[:1] == _BSL and _is_block_line(line[1:]):
             if cur is None:
@@ -627,10 +669,11 @@ def parse_markdown(raw, smartquotes=True):
 
         m_un  = UNNUMBERED_RE.match(line)
         m_ch  = m_un or CHAPTER_RE.match(line)
-        m_sub = SUBHEAD_RE.match(line)
+        m_sub = heading_match(line)
         if m_ch:
             _t, _by = _split_byline(m_ch.group(1))
             new_chapter(_t, _by, unnumbered=bool(m_un))
+            tag_ok = True
             continue
         if cur is None:
             new_chapter(None)
@@ -640,7 +683,7 @@ def parse_markdown(raw, smartquotes=True):
             continue
         if m_sub:
             flush_para()
-            cur['blocks'].append(('subhead', _inline(m_sub.group(1).strip(), smartquotes)))
+            cur['blocks'].append((m_sub[0], _inline(m_sub[1], smartquotes)))
             continue
         if line.strip() == '':
             flush_para()
@@ -759,6 +802,9 @@ def block_collision(line):
         CHAPTER_RE.match(line)
         or UNNUMBERED_RE.match(line)
         or SUBHEAD_RE.match(line)
+        or SECTION_RE.match(line)
+        or SUBSECTION_RE.match(line)
+        or TAGLINE_RE.match(line)
         or PART_RE.match(line)
         or DOCBLOCK_RE.match(line)
         or SCENE_BREAK_RE.match(line)
@@ -1043,6 +1089,58 @@ def _table_md(tbl, report):
     return ['', fence] + rows + ['~~~', '']
 
 
+_WORD_HEADING_RE = re.compile(r'heading\s*(\d+)')
+
+
+def _word_heading(style):
+    """A Word paragraph style's heading level: 'title' is 1, 'heading 3' is 3,
+    anything else 0."""
+    if style == 'title':
+        return 1
+    m = _WORD_HEADING_RE.match(style)
+    return int(m.group(1)) if m else 0
+
+
+def _top_heading_level(body):
+    """(level, title) — the Word heading level that starts a chapter, and the
+    paragraph that is the book's own title, or None.
+
+    Heading 1 (or Title) when the document uses it. Otherwise its highest level
+    in use, so a document set in Heading 2 to 4 (an adventure written as
+    sections) still gets chapters rather than one untitled chapter of subheads.
+    When that level is used once, by the document's first heading, and deeper
+    levels follow, that heading is the book's title over the whole document:
+    chapters start a level below it, and it imports as an unnumbered chapter
+    so its words are kept.
+    """
+    heads = []
+    for p in body:
+        st = getattr(p, 'style', None)
+        lvl = _word_heading(((st.name if st is not None else '') or '').lower())
+        if lvl and (getattr(p, 'text', '') or '').strip():
+            heads.append((lvl, p))
+    if not heads:
+        return 1, None
+    used = sorted({lvl for lvl, _ in heads})
+    top = used[0]
+    if top == 1:
+        return 1, None
+    tops = [p for lvl, p in heads if lvl == top]
+    if len(tops) == 1 and heads[0][1] is tops[0] and len(used) > 1:
+        return used[1], tops[0]
+    return top, None
+
+
+def _heading_level(style, top):
+    """The Markdown heading level (1 = `#`, up to 4 = `####`) of a Word
+    paragraph style, counting from the document's top level, or 0 for body
+    text. Levels below `####` are set as `####`: the convention stops there."""
+    lvl = _word_heading(style)
+    if not lvl:
+        return 0
+    return max(1, min(4, lvl - top + 1))
+
+
 def _new_report():
     return {'chapters': 0, 'subheads': 0, 'figures': 0, 'tables': 0,
             'quotes': 0, 'lists': 0, 'aligned': 0, 'poems': 0,
@@ -1153,6 +1251,8 @@ def import_docx(path, report=None):
     except AttributeError:                        # older python-docx: no tables
         body = list(doc.paragraphs)
 
+    top_level, title_para = _top_heading_level(body)
+
     for item in body:
         if isinstance(item, Table):
             # every buffer, not just quotes: whatever is still buffered came
@@ -1196,7 +1296,13 @@ def import_docx(path, report=None):
         if text:
             fig_caption_at = None
 
-        if style.startswith('heading 1') or style == 'title':
+        level = _heading_level(style, top_level)
+        if item is title_para:
+            flush_all()
+            rep['chapters'] += 1
+            out.extend(['', '#* ' + _one_line(_para_md(p, rep, None, plain=True)), ''])
+            continue
+        if level == 1:
             flush_all()
             flush_notes()                     # the outgoing chapter's notes
             rep['chapters'] += 1
@@ -1204,10 +1310,10 @@ def import_docx(path, report=None):
             # arrive as words: `# **Title**` printed the asterisks
             out.extend(['', '# ' + _one_line(_para_md(p, rep, None, plain=True)), ''])
             continue
-        if style.startswith('heading'):
+        if level:
             flush_all()
             rep['subheads'] += 1
-            out.extend(['', '## ' + text, ''])
+            out.extend(['', '#' * level + ' ' + text, ''])
             continue
         if not text:
             continue
@@ -1279,8 +1385,8 @@ def import_docx(path, report=None):
 
 _IMP_HEADING_RE = re.compile(r'^#{1,6}\s')
 _IMP_READALOUD_RE = re.compile(
-    r'^##\s+(?:\*\*)?\s*read[\s-]aloud\b.*$', re.I)
-_IMP_PACING_RE = re.compile(r'^##\s+(?:\*\*)?\s*(pacing(?:\s+notes?)?)\s*(?:\*\*)?\s*$', re.I)
+    r'^#{2,4}\s+(?:\*\*)?\s*read[\s-]aloud\b.*$', re.I)
+_IMP_PACING_RE = re.compile(r'^#{2,4}\s+(?:\*\*)?\s*(pacing(?:\s+notes?)?)\s*(?:\*\*)?\s*$', re.I)
 _IMP_LORE_RE = re.compile(r'^\*{2,3}lore\.?\*{2,3}$', re.I)
 
 
@@ -1386,7 +1492,7 @@ def _imp_boxes(lines, rep):
         if ra:
             # the heading is the box's label ("Read Aloud", "Read Aloud: The
             # Inn"), so it stays as written, as the title
-            title = lines[i].strip()[2:].strip().strip('*').strip()
+            title = lines[i].strip().lstrip('#').strip().strip('*').strip()
             header = '~~~ readaloud' + (f' title="{title}"' if '"' not in title else '')
             rep['readalouds'] = rep.get('readalouds', 0) + 1
         else:

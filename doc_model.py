@@ -22,9 +22,11 @@ A document is a list of blocks. Each block is a plain JSON-able dict:
 
     {"type": "chapter",  "title": str | None,          # "# ..."   title stored raw
                          "byline": str | None,          # "# Title | Author" anthology byline
-                         "unnumbered": True}            # only on "#* ..." — no chapter number
+                         "unnumbered": True,            # only on "#* ..." — no chapter number
+                         "tagline": str}                # only when set: "#> ..." under the title
     {"type": "part",     "title": str | None}          # "=== ..." title stored raw
-    {"type": "subhead",  "runs": [run, ...]}           # "## ..."
+    {"type": "subhead",  "runs": [run, ...],           # "## ..."
+                         "level": 3 | 4}                # only on "### ..." / "#### ..."
     {"type": "para",     "runs": [run, ...]}           # a paragraph
     {"type": "scene"}                                   # scene break
     {"type": "docblock", "block_type": str,            # "" for a plain ~~~ fence
@@ -375,6 +377,7 @@ def from_markdown(raw, smartquotes=True):
     block_para_buf = []
     block_type = ''
     block_attrs = {}
+    tag_ok = False                     # the line after `# Title` may be `#> …`
 
     def flush_para():
         nonlocal para_buf
@@ -428,6 +431,15 @@ def from_markdown(raw, smartquotes=True):
         in_block = False
 
     for line in lines:
+        # `#> …` right after a chapter heading is its tagline (mirrors manuscript)
+        if tag_ok and not in_block and line.strip():
+            tag_ok = False
+            m_tag = manuscript.TAGLINE_RE.match(line)
+            if m_tag:
+                if m_tag.group(1).strip():
+                    blocks[-1]["tagline"] = m_tag.group(1).strip()
+                continue
+
         # A leading backslash guarding a block marker => literal paragraph text.
         if not in_block and line[:1] == _BSL and _block_collision(line[1:]):
             para_buf.append(line[1:])
@@ -460,7 +472,7 @@ def from_markdown(raw, smartquotes=True):
 
         m_un = manuscript.UNNUMBERED_RE.match(line)
         m_ch = m_un or manuscript.CHAPTER_RE.match(line)
-        m_sub = manuscript.SUBHEAD_RE.match(line)
+        m_sub = manuscript.heading_match(line)
         if m_ch:
             flush_para()
             title, byline = manuscript._split_byline(m_ch.group(1))
@@ -468,6 +480,7 @@ def from_markdown(raw, smartquotes=True):
             if m_un:                       # only carried when set, so a plain
                 block["unnumbered"] = True  # chapter model stays as it was
             blocks.append(block)
+            tag_ok = True
             continue
         if manuscript.SCENE_BREAK_RE.match(line):
             flush_para()
@@ -475,8 +488,11 @@ def from_markdown(raw, smartquotes=True):
             continue
         if m_sub:
             flush_para()
-            blocks.append({"type": "subhead",
-                           "runs": _parse_inline(m_sub.group(1).strip(), smartquotes)})
+            block = {"type": "subhead", "runs": _parse_inline(m_sub[1], smartquotes)}
+            level = manuscript.HEADING_KINDS.index(m_sub[0]) + 2
+            if level > 2:                  # only carried when not `##`
+                block["level"] = level
+            blocks.append(block)
             continue
         if line.strip() == '':
             flush_para()
@@ -513,10 +529,12 @@ def to_markdown(blocks):
                 out.append(mark + title + manuscript.BYLINE_SEP + byline)
             else:
                 out.append(mark + title)
+            if b.get("tagline"):
+                out.append("#> " + b["tagline"])
         elif t == "part":
             out.append("=== " + (b["title"] or ""))
         elif t == "subhead":
-            out.append("## " + _runs_to_md(b["runs"]))
+            out.append("#" * b.get("level", 2) + " " + _runs_to_md(b["runs"]))
         elif t == "para":
             line = _runs_to_md(b["runs"])
             if _block_collision(line):                   # guard a would-be marker

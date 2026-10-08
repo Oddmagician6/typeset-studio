@@ -31,6 +31,6 @@
   "part_divider": { "show_number": true, "number_format": "Part {n}", "number_size": 11.0, "title_size": 22.0, "sink": 0.4 },
   "document_block": { "frame": "ruled", "indent": 0.25, "font_size": 0, "first_indent": 0.0, "space_around": 11.0, "header_size": 9.0, "dateline_style": "italic" },
   "scene_break": { "type": "glyph", "glyph": "—", "size": 11.0, "gap": 8.0, "image": "" },
-  "running_head": { "show": true, "caps": true, "size": 8.0, "gap": 0.25 },
+  "running_head": { "show": true, "caps": true, "size": 8.0, "gap": 0.25, "content": "book" },
   "folio": { "show": true, "position": "outer", "size": 9.0, "gap": 0.38, "hide_on_opener": true }
 }

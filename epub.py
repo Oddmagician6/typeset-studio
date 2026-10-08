@@ -205,6 +205,14 @@ def _style_css(preset=None):
     rules = ['a { color: %s; }' % (colour or 'inherit'),
              'a { text-decoration: %s; }'
              % ('underline' if lm.get('epub_underline', True) else 'none')]
+    hd = (preset or {}).get('headings', {}) or {}
+    _weight = {'bold': 'font-weight: bold; font-style: normal;',
+               'italic': 'font-weight: normal; font-style: italic;',
+               'regular': 'font-weight: normal; font-style: normal;'}
+    for tag, key, dflt in (('h3', 'section', 'bold'), ('h4', 'subsection', 'italic')):
+        align = 'center' if hd.get(key + '_align') == 'center' else 'left'
+        rules.append('%s { font-size: 1em; text-align: %s; %s margin: 1.2em 0 0.4em; }'
+                     % (tag, align, _weight.get(hd.get(key + '_style'), _weight[dflt])))
     return '\n'.join(rules) + '\n' + """\
 body {
   font-family: Georgia, "Times New Roman", serif;
@@ -236,6 +244,14 @@ p.chapter-byline {
   color: #444;
   margin: -1em 0 1.6em;
 }
+p.chapter-tagline {
+  font-style: italic;
+  text-align: center;
+  text-indent: 0;
+  color: #444;
+  margin: -1em 0 1.6em;
+}
+p.chapter-byline + p.chapter-tagline { margin-top: -1.2em; }
 p.chapter-art { text-align: center; text-indent: 0; margin: 0 0 1em; }
 p.chapter-art-below { margin: 1em 0 1.6em; }
 p.chapter-art img { max-width: 100%; height: auto; }
@@ -354,6 +370,7 @@ sup.noteref a { text-decoration: none; }
 .toc-list li a { text-decoration: none; color: inherit; }
 .toc-part { font-weight: bold; margin-top: 0.8em; border-bottom: none !important; }
 .toc-indent { padding-left: 1.5em; }
+.toc-list li.toc-sec { border-bottom: none; padding: 0.1em 0; font-size: 0.95em; }
 .matter-alsoby { text-align: center; }
 .matter-alsoby .matter-head { font-size: 1.2em; font-weight: bold; margin: 2em 0 1em; }
 .matter-alsoby p { text-indent: 0; margin: 0.3em 0; }
@@ -391,6 +408,30 @@ def _default_copyright(meta):
     return '\n'.join(lines)
 
 
+_HEAD_LEVEL = {'subhead': 2, 'section': 3, 'subsection': 4}
+
+
+def _toc_depth(preset):
+    """How deep the contents go (the style's `toc.depth`): 1 = chapters."""
+    try:
+        return int((preset.get('toc') or {}).get('depth', 1) or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def chapter_headings(chapter):
+    """[(id, level, plain text)] for the headings inside a chapter, in order.
+    `_chapter_xhtml` gives each heading the same id, so the contents can link
+    to it."""
+    out = []
+    for block in chapter.get('blocks', []):
+        level = _HEAD_LEVEL.get(block[0])
+        if level:
+            text = ' '.join(html.unescape(re.sub(r'<[^>]+>', '', block[1])).split())
+            out.append((f'h{len(out) + 1}', level, text))
+    return out
+
+
 def _toc_page_xhtml(chapters, preset):
     """In-text TOC page for EPUB — chapter links, no page numbers."""
     c        = preset.get('chapter', {})
@@ -400,6 +441,7 @@ def _toc_page_xhtml(chapters, preset):
     pd_fmt   = pd.get('number_format', 'Part {n}')
 
     body = '<div class="matter-body">\n  <h1 class="matter-head">Contents</h1>\n  <ul class="toc-list">\n'
+    depth = _toc_depth(preset)
     _nums = _ms_numbers(chapters)
     current_part_num = None
     for idx, ch in enumerate(chapters, start=1):
@@ -416,6 +458,13 @@ def _toc_page_xhtml(chapters, preset):
         indent = ' class="toc-indent"' if ch_part_num is not None else ''
         body += (f'    <li{indent}><a href="chapter{idx:03d}.xhtml">'
                  f'{_text_to_html(label)}</a></li>\n')
+        for hid, level, text in chapter_headings(ch):
+            if level > depth:
+                continue
+            pad = 1.5 * (level - 1) + (1.5 if ch_part_num is not None else 0)
+            body += (f'    <li class="toc-sec" style="padding-left: {pad:g}em">'
+                     f'<a href="chapter{idx:03d}.xhtml#{hid}">'
+                     f'{_text_to_html(text)}</a></li>\n')
     body += '  </ul>\n</div>\n'
     return _xhtml('Contents', body)
 
@@ -676,11 +725,16 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
         lines.append('  <p class="chapter-byline">'
                      f'{_text_to_html(chapter["byline"])}</p>')
 
+    if chapter.get('tagline'):
+        lines.append('  <p class="chapter-tagline">'
+                     f'{_text_to_html(chapter["tagline"])}</p>')
+
     if art_href and art_pos == 'below':
         lines.append(_chapter_art_html(preset, art_href, 'below'))
 
     opened         = False
     no_indent_next = False
+    n_head         = 0              # heading ids: see chapter_headings
 
     for block in chapter.get('blocks', []):
         kind = block[0]
@@ -689,8 +743,10 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
             lines.append(_scene_orn_html(preset, scene_orn) if scene_orn else
                          f'  <p class="scene-break">{_text_to_html(scene_glyph)}</p>')
             no_indent_next = True
-        elif kind == 'subhead':
-            lines.append(f'  <h2>{_markup_to_html(val)}</h2>')
+        elif kind in _HEAD_LEVEL:
+            n_head += 1
+            tag = f'h{_HEAD_LEVEL[kind]}'
+            lines.append(f'  <{tag} id="h{n_head}">{_markup_to_html(val)}</{tag}>')
             no_indent_next = True
         elif kind == 'doc_block':
             meta   = block[2] if len(block) > 2 else {}
@@ -1130,6 +1186,31 @@ def _content_opf(uid, meta, manifest_items, spine_items, modified):
     )
 
 
+def _nav_li(href, label, kids=()):
+    """One entry of the navigation document, with a chapter's headings nested
+    under it by level (EPUB 3 wants each `<ol>` inside the `<li>` it belongs
+    to). A level that skips one, a `###` straight under a chapter, nests one
+    step, under the nearest heading above it."""
+    out = f'      <li><a href="{href}">{_text_to_html(label)}</a>'
+    if kids:
+        stack = []                    # levels of the open lists
+        for k_href, k_label, level in kids:
+            while stack and stack[-1] > level:
+                if len(stack) == 1 or stack[-2] < level:
+                    stack[-1] = level   # shallower than its list: a sibling in it
+                else:
+                    out += '</li></ol>'
+                    stack.pop()
+            if stack and stack[-1] == level:
+                out += '</li>'
+            else:
+                out += '<ol>'
+                stack.append(level)
+            out += f'<li><a href="{k_href}">{_text_to_html(k_label)}</a>'
+        out += '</li></ol>' * len(stack)
+    return out + '</li>'
+
+
 def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=False):
     c        = preset.get('chapter', {})
     show_num = c.get('show_number', True)
@@ -1138,6 +1219,7 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
     pd_fmt   = pd.get('number_format', 'Part {n}')
 
     meta = meta or {}
+    depth = _toc_depth(preset)
     toc = []
     if has_cover:
         toc.append(('cover.xhtml', 'Cover'))
@@ -1160,7 +1242,9 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
             current_part_num = ch_part_num
         label = ch.get('title') or (num_fmt.format(n=_nums[idx - 1])
                                    if show_num and _nums[idx - 1] else f'Section {idx}')
-        toc.append((f'chapter{idx:03d}.xhtml', label))
+        kids = [(f'chapter{idx:03d}.xhtml#{hid}', text, level)
+                for hid, level, text in chapter_headings(ch) if level <= depth]
+        toc.append((f'chapter{idx:03d}.xhtml', label, kids))
 
     if has_notes:
         toc.append(('endnotes.xhtml', preset.get('endnotes', {}).get('heading', 'Notes')))
@@ -1170,10 +1254,7 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
         toc.append((_sec['href'],
                     _matter.heading(_sec, author) or _sec['key'].title()))
 
-    items = '\n'.join(
-        f'      <li><a href="{href}">{_text_to_html(label)}</a></li>'
-        for href, label in toc
-    )
+    items = '\n'.join(_nav_li(*entry) for entry in toc)
     body = (
         '<nav epub:type="toc" id="toc">\n'
         '  <h1>Contents</h1>\n'

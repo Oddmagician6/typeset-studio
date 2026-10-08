@@ -149,6 +149,12 @@ EXPECT = {
                          '--- Actions\n***Strike.*** *Melee Weapon Attack:* +4 to hit, reach 5 ft., '
                          'one target. *Hit:* 5 (1d6 + 2) damage.\n~~~\n'),
     'readaloud-button': '# One\n\nText.\n\n~~~ readaloud\nBoxed.\n~~~\n',
+    # #74 Phase 2: a paragraph made a section, a section made a sub-section, and
+    # a tagline and heading levels that survive an edit nearby
+    'section-button': '# One\n\n### Text.\n\nMore.\n',
+    'subsection-from-section': '# One\n\n#### A1. Hall\n',
+    'levels-survive-an-edit': ('# One\n#> Tag *line*.\n\n## Sub\n\n### Sec\n\n'
+                               '#### Detail\n\nText added\n'),
     'statblock-line-edit': '# One\n\n~~~ statblock\n___\n**AC** 9\n**HP** 4 (1d8)\n--- Actions\n~~~\n',
     'paste-homebrewery': ('# One\n\nBefore.\n\nIntro line.\n\n~~~ statblock\n{{monster,frame\n'
                           '## Bog-Thrall\n**AC** :: 9\n}}\n~~~\n\nAfter line.\n'),
@@ -196,7 +202,8 @@ def main():
     corpus = {'features': FEATURES}
     # the game blocks' fixtures (#74): every stat block format and edge case
     ttrpg = [os.path.join(HERE, 'test_fixtures', 'ttrpg', n) for n in
-             ('adventure.md', 'statblocks.md', 'statblock_formats.md', 'edge_cases.md')]
+             ('adventure.md', 'statblocks.md', 'statblock_formats.md', 'edge_cases.md',
+              'reference.md')]
     for p in [os.path.join(HERE, 'sample', 'sample.md')] + ttrpg + sorted(
             glob.glob(os.path.join(HERE, 'projects', 'manuscripts', '*.md'))):
         with open(p, encoding='utf-8') as f:

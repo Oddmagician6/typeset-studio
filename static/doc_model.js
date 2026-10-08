@@ -10,9 +10,9 @@
  *     DocModel.toMarkdown(blocks) -> string
  *
  * Block / run schema matches doc_model.py exactly:
- *     {type:"chapter",  title:str|null, byline:str|null}
+ *     {type:"chapter",  title:str|null, byline:str|null, tagline:str (only when set)}
  *     {type:"part",     title:str|null}
- *     {type:"subhead",  runs:[run,...]}
+ *     {type:"subhead",  runs:[run,...], level:3|4 (only on ### / ####)}
  *     {type:"para",     runs:[run,...]}
  *     {type:"scene"}
  *     {type:"docblock", block_type:str, attrs:{k:v}, children:[para,...]}
@@ -41,6 +41,13 @@
   // `#* Prologue` — a chapter that takes no number. Mirrors manuscript.UNNUMBERED_RE.
   var UNNUMBERED_RE  = /^#\*\s+(.*)$/;
   var SUBHEAD_RE     = /^##\s+(.*)$/;
+  // `###` / `####` — section and sub-section (mirror manuscript.SECTION_RE /
+  // SUBSECTION_RE); a bare `###` is a scene break, matched first.
+  var SECTION_RE     = /^###\s+(.*)$/;
+  var SUBSECTION_RE  = /^####\s+(.*)$/;
+  // `#> …` — the tagline under a chapter title, only on the line after `# Title`.
+  // Mirrors manuscript.TAGLINE_RE.
+  var TAGLINE_RE     = /^#>\s+(.*)$/;
   var DOCBLOCK_RE    = /^\s*~~~(.*)/;
   var PART_RE        = /^\s*===\s*(.*)/;
   // straight or curly quotes (pasted from a word processor); mirrors manuscript._ATTR_RE
@@ -261,7 +268,19 @@
 
   function isBlockLine(line) {
     return SCENE_BREAK_RE.test(line) || CHAPTER_RE.test(line) || UNNUMBERED_RE.test(line)
-        || SUBHEAD_RE.test(line) || DOCBLOCK_RE.test(line) || PART_RE.test(line);
+        || SUBHEAD_RE.test(line) || SECTION_RE.test(line) || SUBSECTION_RE.test(line)
+        || TAGLINE_RE.test(line) || DOCBLOCK_RE.test(line) || PART_RE.test(line);
+  }
+
+  // [level, text] for a `##`, `###` or `####` line, else null (mirror
+  // manuscript.heading_match)
+  function headingMatch(line) {
+    var rxs = [SUBHEAD_RE, SECTION_RE, SUBSECTION_RE];
+    for (var i = 0; i < rxs.length; i++) {
+      var m = rxs[i].exec(line);
+      if (m) return [i + 2, m[1].trim()];
+    }
+    return null;
   }
 
   function parseBlockHeader(header) {
@@ -324,9 +343,18 @@
       blockChildren = []; blockType = ''; blockAttrs = {}; inBlock = false;
     }
 
+    var tagOk = false;                 // the line after `# Title` may be `#> …`
     for (var li = 0; li < lines.length; li++) {
       var line = lines[li];
 
+      if (tagOk && !inBlock && line.trim()) {
+        tagOk = false;
+        var mTag = TAGLINE_RE.exec(line);
+        if (mTag) {
+          if (mTag[1].trim()) blocks[blocks.length - 1].tagline = mTag[1].trim();
+          continue;
+        }
+      }
       if (!inBlock && line.charAt(0) === BSL && isBlockLine(line.slice(1))) {
         paraBuf.push(line.slice(1));
         continue;
@@ -355,17 +383,24 @@
         continue;
       }
       var mUn = UNNUMBERED_RE.exec(line);
-      var mCh = mUn || CHAPTER_RE.exec(line), mSub = SUBHEAD_RE.exec(line);
+      var mCh = mUn || CHAPTER_RE.exec(line), mSub = headingMatch(line);
       if (mCh) {
         flushPara();
         var sb = splitByline(mCh[1]);
         var chBlock = { type: 'chapter', title: sb.title, byline: sb.byline };
         if (mUn) chBlock.unnumbered = true;   // only carried when set
         blocks.push(chBlock);
+        tagOk = true;
         continue;
       }
       if (SCENE_BREAK_RE.test(line)) { flushPara(); blocks.push({ type: 'scene' }); continue; }
-      if (mSub) { flushPara(); blocks.push({ type: 'subhead', runs: parseInline(mSub[1].trim()) }); continue; }
+      if (mSub) {
+        flushPara();
+        var sh = { type: 'subhead', runs: parseInline(mSub[1]) };
+        if (mSub[0] > 2) sh.level = mSub[0];   // only carried when not `##`
+        blocks.push(sh);
+        continue;
+      }
       if (line.trim() === '') flushPara();
       else {
         // a note definition must not merge with the line above it
@@ -399,10 +434,11 @@
         var mark = b.unnumbered ? '#* ' : '# ';
         if (title && b.byline) out.push(mark + title + BYLINE_SEP + b.byline);
         else out.push(mark + title);
+        if (b.tagline) out.push('#> ' + b.tagline);
       } else if (b.type === 'part') {
         out.push('=== ' + (b.title || ''));
       } else if (b.type === 'subhead') {
-        out.push('## ' + runsToMd(b.runs));
+        out.push(new Array((b.level || 2) + 1).join('#') + ' ' + runsToMd(b.runs));
       } else if (b.type === 'para') {
         var line = runsToMd(b.runs);
         if (isBlockLine(line)) line = BSL + line;

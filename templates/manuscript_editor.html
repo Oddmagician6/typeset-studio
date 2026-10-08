@@ -98,6 +98,7 @@
     font-size:10.5px;letter-spacing:.1em;color:var(--muted);margin-top:6px}
   .outline a.ol-ch{padding-left:12px}
   .outline a.ol-sub{padding-left:26px;color:var(--muted)}
+  .outline a.ol-sec{padding-left:40px;font-size:.92em}
   .outline a.ol-scene{padding-left:26px;color:var(--muted);font-size:12px}
   .outline .ol-empty{font-size:12.5px;color:var(--muted);padding:2px}
   .history{max-height:30vh;overflow:auto;display:flex;flex-direction:column;gap:2px}
@@ -137,6 +138,14 @@
   .ms-rich .wb-part{font-family:var(--mono);font-size:13px;letter-spacing:.16em;
     text-transform:uppercase;color:var(--muted);margin:34px 0 16px}
   .ms-rich .wb-subhead{text-align:center;font-weight:700;margin:22px 0;font-size:15px}
+  .ms-rich .wb-subhead.wb-level-3{text-align:left;margin:18px 0 8px}
+  .ms-rich .wb-subhead.wb-level-4{text-align:left;font-style:italic;margin:14px 0 6px}
+  /* `#>` tagline: under the title (and under a byline), edited in Markdown mode */
+  .ms-rich .wb-chapter[data-tagline]::after{content:attr(data-tagline);display:block;
+    font-family:var(--serif);font-size:15px;font-weight:400;font-style:italic;
+    color:var(--muted);border:0;padding:0;margin-top:4px;letter-spacing:0;text-transform:none}
+  .ms-rich .wb-chapter[data-byline][data-tagline]::after{
+    content:attr(data-byline) "\A" attr(data-tagline);white-space:pre-line}
   .ms-rich .wb-para{margin:0 0 12px}
   .ms-rich .wb-scene{text-align:center;color:var(--muted);letter-spacing:.4em;
     margin:20px 0;user-select:none}
@@ -243,6 +252,8 @@
         <span class="div"></span>
         <button type="button" data-act="chapter">Chapter</button>
         <button type="button" data-act="subhead">Subhead</button>
+        <button type="button" data-act="section" title="A section heading (###), such as a room key">Section</button>
+        <button type="button" data-act="subsection" title="A heading under a section (####)">Sub-section</button>
         <button type="button" data-act="part">Part</button>
         <button type="button" data-act="scene">Scene break</button>
         <span class="div"></span>
@@ -288,7 +299,9 @@
         <table>
           <tr><td><code># Chapter Title</code></td><td>start a new chapter</td></tr>
           <tr><td><code># Title | Author</code></td><td>chapter with a byline under the title (anthologies)</td></tr>
+          <tr><td><code>#&gt; Tagline</code></td><td>an italic line under the chapter title (the line right after <code># Title</code>)</td></tr>
           <tr><td><code>## Subhead</code></td><td>a centred section subhead</td></tr>
+          <tr><td><code>### Section</code> · <code>#### Sub-section</code></td><td>headings under a subhead, for reference books (a room key: <code>### A3. Guard Room</code>)</td></tr>
           <tr><td><code>=== Part Title</code></td><td>a part divider page</td></tr>
           <tr><td><code>* * *</code></td><td>a scene break (own line)</td></tr>
           <tr><td><code>*italic*</code> · <code>**bold**</code></td><td>inline emphasis</td></tr>
@@ -411,13 +424,19 @@
       function buildOutline(){
         var lines = ta.value.split('\n');
         var box = document.getElementById('outline');
-        var offset = 0, chap = 0, scene = 1, html = '';
+        var offset = 0, chap = 0, scene = 1, html = '', fence = false;
         for (var i = 0; i < lines.length; i++){
           var ln = lines[i];
-          var mPart = /^===\s*(.*)$/.exec(ln);
-          var mCh   = /^#\s+(.*)$/.exec(ln);
-          var mSub  = /^##\s+(.*)$/.exec(ln);
-          if (mPart){
+          // a fence's lines are its own (a stat block's `### Actions`)
+          if (/^\s*~~~/.test(ln)) fence = !fence;
+          var mPart = fence ? null : /^===\s*(.*)$/.exec(ln);
+          var mCh   = fence ? null : /^#\s+(.*)$/.exec(ln);
+          var mSub  = fence ? null : /^##\s+(.*)$/.exec(ln);
+          var mSec  = fence ? null : /^###\s+(.*)$/.exec(ln);
+          if (mSec){
+            html += '<a class="ol-sub ol-sec" data-off="' + offset + '">' +
+                    esc(mSec[1].trim() || 'Section') + '</a>';
+          } else if (mPart){
             html += '<a class="ol-part" data-off="' + offset + '">' +
                     esc(mPart[1].trim() || 'Part') + '</a>';
           } else if (mSub){
@@ -670,6 +689,8 @@
       var ACTS = {
         chapter: function(){ linePrefix('# '); },
         subhead: function(){ linePrefix('## '); },
+        section: function(){ linePrefix('### '); },
+        subsection: function(){ linePrefix('#### '); },
         part:    function(){ linePrefix('=== '); },
         scene:   function(){ insertBlock('\n* * *\n\n'); },
         bold:    function(){ surround('**','**'); },
@@ -914,7 +935,8 @@
         else if (/^\s*~~~/.test(ln)) h = '<span class="hl-fence">' + e + '</span>';
         else if (inFence) h = '<span class="hl-doc">' + e + '</span>';
         else if (/^===/.test(ln)) h = '<span class="hl-part">' + e + '</span>';
-        else if (/^##\s/.test(ln)) h = '<span class="hl-sub">' + e + '</span>';
+        else if (/^#{2,4}\s/.test(ln)) h = '<span class="hl-sub">' + e + '</span>';
+        else if (/^#>\s/.test(ln)) h = '<span class="hl-ch">' + e + '</span>';
         else if (/^#\s/.test(ln)) h = '<span class="hl-ch">' + e + '</span>';
         else if (SCENE_RE.test(ln)) h = '<span class="hl-scene">' + e + '</span>';
         else h = hlInline(e);
@@ -1051,6 +1073,11 @@
         if (type === 'chapter'){ neu = document.createElement('h1'); neu.className = 'wb wb-chapter'; neu.dataset.block = 'chapter'; }
         else if (type === 'part'){ neu = document.createElement('h2'); neu.className = 'wb wb-part'; neu.dataset.block = 'part'; }
         else if (type === 'subhead'){ neu = document.createElement('p'); neu.className = 'wb wb-subhead'; neu.dataset.block = 'subhead'; }
+        else if (type === 'section' || type === 'subsection'){
+          var lv = type === 'section' ? 3 : 4;
+          neu = document.createElement('p'); neu.className = 'wb wb-subhead wb-level-' + lv;
+          neu.dataset.block = 'subhead'; neu.dataset.level = String(lv);
+        }
         else { neu = document.createElement('p'); neu.className = 'wb wb-para'; neu.dataset.block = 'para'; }
         var inline = /\bwb-(para|subhead)\b/;
         if (inline.test(el.className) && inline.test(neu.className)){
@@ -1066,6 +1093,8 @@
       var RICH_ACTS = {
         chapter: function(){ convertBlock('chapter'); },
         subhead: function(){ convertBlock('subhead'); },
+        section: function(){ convertBlock('section'); },
+        subsection: function(){ convertBlock('subsection'); },
         part:    function(){ convertBlock('part'); },
         scene:   function(){
           var sc = WYS.renderBlock({type:'scene'}), p = WYS.renderBlock({type:'para', runs:[]});

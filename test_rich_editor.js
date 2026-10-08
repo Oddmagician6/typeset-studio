@@ -158,6 +158,18 @@ f.onload = function () {
     loadMd('# One\n\nText.\n'); caret(q('.wb-para'), true); act('readaloud'); type('Boxed.');
     return getMd();
   });
+  run('section-button', function () {
+    loadMd('# One\n\nText.\n\nMore.\n'); caret(q('.wb-para'), true); act('section');
+    return getMd();
+  });
+  run('subsection-from-section', function () {
+    loadMd('# One\n\n### A1. Hall\n'); caret(q('.wb-subhead'), true); act('subsection');
+    return getMd();
+  });
+  run('levels-survive-an-edit', function () {
+    loadMd('# One\n#> Tag *line*.\n\n## Sub\n\n### Sec\n\n#### Detail\n\nText\n');
+    caret(q('.wb-para'), true); type(' added'); return getMd();
+  });
   run('statblock-line-edit', function () {
     // a section line and a Homebrewery rule must come back exactly as typed
     loadMd('# One\n\n~~~ statblock\n___\n**AC** 9\n--- Actions\n~~~\n');
