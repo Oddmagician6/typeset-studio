@@ -10,7 +10,39 @@ line here.
 
 ## Unreleased
 
+### New
+
+- **Game blocks for tabletop RPG books.** Three new blocks, each with a
+  toolbar button in the manuscript editor and its own settings in the style
+  editor:
+  - **Read aloud** (`~~~ readaloud`): boxed text for the game master to read
+    to the players, with an optional title.
+  - **Sidebar** (`~~~ sidebar title="…"`): a callout box with a title bar.
+    `style="note"` makes it a light labelled note, for things like pacing.
+  - **Stat block** (`~~~ statblock`): a creature's statistics, set as a stat
+    block with its name, type line, rules, ability scores, sections and named
+    entries. Paste a stat block as it comes: bold labels from Word or Google
+    Docs, plain text copied out of a PDF, the Homebrewery's formats (old and
+    new), `Label: value` lines, the 2024 layout with its save column, or an
+    old-school one-line stat line. They all print in your style's one look.
+    Missing ability modifiers are worked out for you, `cr="…"` puts the
+    challenge on the name line, and `count="2"` adds "× 2". Long stat blocks
+    split across pages without losing a line, and the manuscript keeps every
+    line exactly as you typed it.
+- **Word import finds game blocks.** A stat block written in Word the usual
+  way (a bold name, an italic type line, bold labels, a one-row table of
+  ability scores, bold "Actions" headings) comes in as a stat block, ending
+  before the creature's "Lore". A "Read Aloud" heading boxes the paragraphs
+  under it, and a "Pacing" heading becomes a note.
+- **Homebrewery stat blocks paste as stat blocks.** Pasting one into the
+  manuscript editor without a fence around it wraps it in one.
+
 ### Fixed
+
+- **Block settings pasted from a word processor are read.** A setting in
+  curly quotes, like `src=“map.png”` on a figure, was silently ignored, so the
+  picture never appeared. Curly quotes now work, and the editor writes them
+  back as straight ones.
 
 - **Word files import with their bold and italic intact.** A bold or italic
   phrase whose run ended in a space, which is how Word usually stores a name

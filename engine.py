@@ -3599,6 +3599,438 @@ def _render_table_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=Non
     return out
 
 
+# ---------------------------------------------------------------- game blocks
+# `~~~ readaloud`, `~~~ sidebar` and `~~~ statblock` (ROADMAP #74). Each is a
+# one-column `Table`, one row per paragraph or line, so a long one splits across
+# pages like any table; none is ever wrapped in KeepTogether (the doc_block box
+# rule). `splitInRow` lets a single row taller than the frame split too, rather
+# than abort the build.
+#
+# Every colour has a print-safe twin (`print_fill` beside `fill`): the screen
+# value is for the colour screen PDF still to come (#74 Phase 3), so every build
+# today uses the print value, and a black-and-white interior is safe.
+
+# The three sections' defaults, deliberately plain (a light box, black rules)
+# so a style written before them gets a sensible look without editing; app.py's
+# DEFAULTS uses these. A style's own section is laid over them key by key.
+GAME_BLOCK_DEFAULTS = {
+    'readaloud': {
+        'font_size': 0, 'line_leading': 1.35, 'style': 'italic',
+        'title_style': 'smallcaps',
+        'fill': '#efe6d2', 'print_fill': '#eeeeee',
+        'rule': 'left', 'rule_width': 3.0,
+        'rule_color': '#7a5c2e', 'print_rule_color': '#555555',
+        'pad_x': 8.0, 'pad_y': 6.0, 'para_gap': 4.0, 'space_around': 12.0,
+    },
+    'sidebar': {
+        'font_size': 0, 'line_leading': 1.3, 'style': 'regular',
+        'fill': '#e4ece4', 'print_fill': '#f0f0f0',
+        'border_width': 0.75, 'border_color': '#3e5a46', 'print_border_color': '#000000',
+        'title_size': 0, 'title_style': 'bold', 'title_caps': True,
+        'title_fill': '#3e5a46', 'print_title_fill': '',
+        'title_color': '#ffffff', 'print_title_color': '#000000',
+        'pad_x': 8.0, 'pad_y': 6.0, 'para_gap': 4.0, 'space_around': 12.0,
+    },
+    'statblock': {
+        'font_size': 0, 'line_leading': 1.25,
+        'fill': '#f6efdc', 'print_fill': '',
+        'name_size': 0, 'name_style': 'bold', 'name_caps': True,
+        'name_color': '#7a1f12', 'print_name_color': '#000000',
+        'meta_style': 'italic',
+        'rule': 'tapered', 'rule_width': 1.5,
+        'rule_color': '#9c2b17', 'print_rule_color': '#000000',
+        'field_label_style': 'bold',
+        'scores': 'row', 'score_label_style': 'bold',
+        'section_style': 'smallcaps', 'section_size': 0, 'section_rule': True,
+        'entry_name_style': 'bolditalic', 'entry_indent': 0.0, 'entry_gap': 3.0,
+        'pad_x': 6.0, 'pad_y': 5.0, 'space_around': 12.0,
+        'border': 'top-bottom', 'border_width': 2.0,
+    },
+}
+
+
+def _gb_section(preset, key):
+    return {**GAME_BLOCK_DEFAULTS[key], **(preset.get(key) or {})}
+
+
+def _gb_color(sec, key):
+    """The colour a build uses for `key`: the print value, else the plain one.
+    '' (none) -> None."""
+    v = sec.get('print_' + key, sec.get(key, ''))
+    return _hex(v) if v else None
+
+
+def _gb_font(fonts, style):
+    if style in ('bold', 'bolditalic', 'smallcaps'):
+        return fonts.get('bold', fonts['regular'])
+    if style == 'italic':
+        return fonts.get('italic', fonts['regular'])
+    return fonts['regular']
+
+
+def _caps_markup(text):
+    """Upper-case the text between tags, leaving the markup itself alone (an
+    entity like `&amp;` is upper-cased too, so it is put back)."""
+    out = re.sub(r'(^|>)([^<]+)', lambda m: m.group(1) + m.group(2).upper(), text)
+    return re.sub(r'&([A-Z]+|#X?[0-9A-F]+);', lambda m: '&' + m.group(1).lower() + ';', out)
+
+
+def _gb_caps(text, style):
+    """Small caps as the engine sets them elsewhere: capitals, a size smaller."""
+    return _caps_markup(text) if style == 'smallcaps' else text
+
+
+def _is_light(color):
+    return (0.299 * color.red + 0.587 * color.green + 0.114 * color.blue) > 0.8
+
+
+class TaperedRule(Flowable):
+    """The stat block rule: thick in the middle, tapering to a point at each end.
+    A vector, so it is crisp at any size and needs no image."""
+    def __init__(self, color, thickness=1.5, shape='tapered'):
+        super().__init__()
+        self.color, self.thickness, self.shape = color, thickness, shape
+
+    def wrap(self, w, h):
+        self.width = w
+        self.height = self.thickness + 3
+        return (w, self.height)
+
+    def draw(self):
+        c = self.canv
+        y = self.height / 2.0
+        c.saveState()
+        if self.shape == 'tapered':
+            c.setFillColor(self.color)
+            p = c.beginPath()
+            p.moveTo(0, y)
+            p.lineTo(self.width / 2.0, y + self.thickness / 2.0)
+            p.lineTo(self.width, y)
+            p.lineTo(self.width / 2.0, y - self.thickness / 2.0)
+            p.close()
+            c.drawPath(p, stroke=0, fill=1)
+        else:
+            c.setStrokeColor(self.color)
+            c.setLineWidth(max(0.25, self.thickness / 2.0))
+            c.line(0, y, self.width, y)
+        c.restoreState()
+
+
+def _gb_box(rows, avail_w, pad_x, pad_y, fill, border, border_w, border_c, extra=()):
+    """Rows -> one splittable single-column Table. A row is a flowable, or
+    (flowable, space before it): a cell ignores its paragraph's own spacing,
+    so the gaps between rows are the cells' padding."""
+    rows = [r if isinstance(r, tuple) else (r, 0) for r in rows]
+    t = Table([[r] for r, _ in rows], colWidths=[avail_w], splitInRow=1)
+    style = [
+        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING',   (0, 0), (-1, -1), pad_x),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), pad_x),
+        ('TOPPADDING',    (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+    ]
+    for i, (_, before) in enumerate(rows):
+        if i and before:
+            style.append(('TOPPADDING', (0, i), (-1, i), before))
+    style += [('TOPPADDING',    (0, 0), (-1, 0), pad_y),
+              ('BOTTOMPADDING', (0, -1), (-1, -1), pad_y)]
+    if fill is not None:
+        style.append(('BACKGROUND', (0, 0), (-1, -1), fill))
+    if border_c is not None and border_w > 0:
+        if border == 'box':
+            style.append(('BOX', (0, 0), (-1, -1), border_w, border_c))
+        elif border == 'top-bottom':
+            style.append(('LINEABOVE', (0, 0), (-1, 0), border_w, border_c))
+            style.append(('LINEBELOW', (0, -1), (-1, -1), border_w, border_c))
+        elif border == 'left':
+            style.append(('LINEBEFORE', (0, 0), (0, -1), border_w, border_c))
+        elif border == 'right':
+            style.append(('LINEAFTER', (0, 0), (0, -1), border_w, border_c))
+    style.extend(extra)
+    t.setStyle(TableStyle(style))
+    return t
+
+
+def _gb_paras(block_paras, style, gap, hyph):
+    """A row per block paragraph, `gap` before each."""
+    return [(Paragraph(_hyphenate_markup(text, hyph) if hyph else text, style), gap)
+            for _, text in block_paras]
+
+
+def _render_readaloud_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=None):
+    """`~~~ readaloud title="…"` — boxed text to read aloud to the players."""
+    ra    = _gb_section(preset, 'readaloud')
+    size  = ra.get('font_size', 0) or st['body'].fontSize
+    lead  = size * ra.get('line_leading', 1.35)
+    space = ra.get('space_around', 12.0)
+    gap   = ra.get('para_gap', 4.0)
+    body_style = ParagraphStyle(
+        'readaloud', parent=st['body'], fontName=_gb_font(fonts, ra.get('style', 'italic')),
+        fontSize=size, leading=lead, firstLineIndent=0, leftIndent=0, rightIndent=0,
+        spaceBefore=0, spaceAfter=0)
+    rows = []
+    title = (attrs.get('title', '') or '').strip()
+    if title:
+        tstyle = ra.get('title_style', 'smallcaps')
+        tsize = size - (1 if tstyle == 'smallcaps' else 0)
+        ts = ParagraphStyle('readaloudtitle', parent=body_style,
+                            fontName=_gb_font(fonts, tstyle), fontSize=tsize,
+                            leading=tsize * 1.3)
+        rows.append(Paragraph(_gb_caps(_ms_inline(title, False), tstyle), ts))
+    rows += _gb_paras(block_paras, body_style, gap, hyph)
+    if not rows:
+        rows.append(Spacer(1, lead))      # an empty box still shows where it goes
+    tbl = _gb_box(rows, avail_w, ra.get('pad_x', 8.0), ra.get('pad_y', 6.0),
+                  _gb_color(ra, 'fill'), ra.get('rule', 'left'),
+                  ra.get('rule_width', 3.0), _gb_color(ra, 'rule_color'))
+    return [Spacer(1, space), tbl, Spacer(1, space)]
+
+
+def _render_sidebar_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=None):
+    """`~~~ sidebar title="…"` — a callout box with a title bar.
+
+    `style="note"` is the light form: the title as a label and the text after
+    it, beside a thin rule, with no box (an adventure's "Pacing" notes)."""
+    sb    = _gb_section(preset, 'sidebar')
+    size  = sb.get('font_size', 0) or st['body'].fontSize
+    lead  = size * sb.get('line_leading', 1.3)
+    space = sb.get('space_around', 12.0)
+    gap   = sb.get('para_gap', 4.0)
+    pad_x = sb.get('pad_x', 8.0)
+    pad_y = sb.get('pad_y', 6.0)
+    note  = (attrs.get('style', '') or '').strip().lower() == 'note'
+    body_style = ParagraphStyle(
+        'sidebar', parent=st['body'], fontName=_gb_font(fonts, sb.get('style', 'regular')),
+        fontSize=size, leading=lead, firstLineIndent=0, leftIndent=0, rightIndent=0,
+        spaceBefore=0, spaceAfter=0)
+    border_c = _gb_color(sb, 'border_color')
+    title_fill = None if note else _gb_color(sb, 'title_fill')
+    title_color = _gb_color(sb, 'title_color')
+    if title_fill is None and title_color is not None and _is_light(title_color):
+        title_color = None                # white on no bar would vanish
+
+    rows = []
+    title = (attrs.get('title', '') or '').strip()
+    if title:
+        text = _ms_inline(title, False)
+        if sb.get('title_caps', True):
+            text = _caps_markup(text)
+        tsize = sb.get('title_size', 0) or size
+        rows.append(Paragraph(text, ParagraphStyle(
+            'sidebartitle', parent=body_style,
+            fontName=_gb_font(fonts, sb.get('title_style', 'bold')),
+            fontSize=tsize, leading=tsize * 1.25,
+            textColor=title_color or _colors.black)))
+    titled = bool(rows)
+    rows += _gb_paras(block_paras, body_style, gap, hyph)
+
+    if note:
+        if not rows:
+            return []
+        if titled and len(rows) > 1:
+            rows[1] = (rows[1][0], 2)
+        tbl = _gb_box(rows, avail_w, pad_x, 2.0, None, 'left',
+                      max(0.5, sb.get('border_width', 0.75)), border_c)
+        return [Spacer(1, space), tbl, Spacer(1, space)]
+
+    if not rows:
+        rows.append(Spacer(1, lead))
+    extra = []
+    if titled:
+        extra = [('TOPPADDING', (0, 0), (-1, 0), pad_y * 0.6),
+                 ('BOTTOMPADDING', (0, 0), (-1, 0), pad_y * 0.6)]
+        if len(rows) > 1:
+            rows[1] = (rows[1][0], pad_y)
+        if title_fill is not None:
+            extra.append(('BACKGROUND', (0, 0), (-1, 0), title_fill))
+    tbl = _gb_box(rows, avail_w, pad_x, pad_y, _gb_color(sb, 'fill'), 'box',
+                  sb.get('border_width', 0.75), border_c, extra)
+    return [Spacer(1, space), tbl, Spacer(1, space)]
+
+
+def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=None):
+    """`~~~ statblock` — a game stat block, read by statblock.py into one model
+    (whatever format it was written in) and printed in the style's one look:
+    the name (with its count and challenge), the meta line, a rule, the fields
+    with the score row where it was written, then each section."""
+    model = attrs.get('_statblock') or {}
+    sm    = _gb_section(preset, 'statblock')
+    size  = sm.get('font_size', 0) or st['body'].fontSize
+    lead  = size * sm.get('line_leading', 1.25)
+    space = sm.get('space_around', 12.0)
+    pad_x = sm.get('pad_x', 6.0)
+    pad_y = sm.get('pad_y', 5.0)
+    gap   = sm.get('entry_gap', 3.0)
+    inner_w = avail_w - 2 * pad_x
+    rule_c = _gb_color(sm, 'rule_color') or _colors.black
+    rule_shape = sm.get('rule', 'tapered')
+    rule_w = sm.get('rule_width', 1.5)
+    bold = fonts.get('bold', fonts['regular'])
+
+    base = ParagraphStyle(
+        'statblock', parent=st['body'], fontName=fonts['regular'], fontSize=size,
+        leading=lead, firstLineIndent=0, leftIndent=0, rightIndent=0,
+        alignment=TA_LEFT, spaceBefore=0, spaceAfter=0)
+
+    def rule():
+        return (TaperedRule(rule_c, rule_w, rule_shape) if rule_shape != 'none'
+                else Spacer(1, 3))
+
+    rows = []
+    name = model.get('name', '')
+    count = (attrs.get('count', '') or '').strip()
+    cr = (attrs.get('cr', '') or '').strip()
+    nsize = sm.get('name_size', 0) or size + 3
+    ncolor = _gb_color(sm, 'name_color') or _colors.black
+    if name or count or cr:
+        text = _caps_markup(name) if sm.get('name_caps', True) else name
+        if count:
+            text += (f' <font name="{fonts["regular"]}">&#215;&#160;'
+                     f'{_ms_inline(count, False)}</font>')
+        head = Paragraph(text, ParagraphStyle(
+            'sbname', parent=base, fontName=_gb_font(fonts, sm.get('name_style', 'bold')),
+            fontSize=nsize, leading=nsize * 1.2, textColor=ncolor))
+        if cr:
+            cr_text = 'CR ' + _ms_inline(cr, False)
+            cr_w = min(inner_w * 0.45, stringWidth(_plain(cr_text), bold, size) + 4)
+            crp = Paragraph(cr_text, ParagraphStyle(
+                'sbcr', parent=base, alignment=TA_RIGHT, fontName=bold,
+                leading=nsize * 1.2))
+            head = Table([[head, crp]], colWidths=[inner_w - cr_w, cr_w])
+            head.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+                                      ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                                      ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                                      ('TOPPADDING', (0, 0), (-1, -1), 0),
+                                      ('BOTTOMPADDING', (0, 0), (-1, -1), 0)]))
+        rows.append(head)
+    meta = model.get('meta', '')
+    if meta:
+        rows.append(Paragraph(meta, ParagraphStyle(
+            'sbmeta', parent=base, fontName=_gb_font(fonts, sm.get('meta_style', 'italic')))))
+
+    fields = model.get('fields', [])
+    scores = model.get('scores', [])
+    at = min(model.get('scores_at', 0), len(fields)) if scores else len(fields)
+    flabel = sm.get('field_label_style', 'bold')
+    lab_open, lab_close = {'bold': ('<b>', '</b>'), 'bolditalic': ('<b><i>', '</i></b>'),
+                           'italic': ('<i>', '</i>')}.get(flabel, ('', ''))
+    field_style = ParagraphStyle('sbfield', parent=base, leftIndent=size,
+                                 firstLineIndent=-size)
+
+    def field_rows(fs):
+        out = []
+        for f in fs:
+            body = f['value']
+            if hyph and body:
+                body = _hyphenate_markup(body, hyph)
+            out.append(Paragraph(f"{lab_open}{f['label']}{lab_close}"
+                                 + (f' {body}' if body else ''), field_style))
+        return out
+
+    if rows and (fields or scores):
+        rows.append(rule())
+    rows += field_rows(fields[:at])
+    if scores:
+        if at:
+            rows.append(rule())
+        rows.append(_statblock_scores(scores, sm, fonts, base, inner_w, size))
+        if fields[at:]:
+            rows.append(rule())
+        rows += field_rows(fields[at:])
+
+    sstyle = sm.get('section_style', 'smallcaps')
+    ssize = sm.get('section_size', 0) or size + 1
+    sec_style = ParagraphStyle('sbsection', parent=base, fontName=_gb_font(fonts, sstyle),
+                               fontSize=ssize, leading=ssize * 1.3, textColor=ncolor)
+    eo, ec = {'bolditalic': ('<b><i>', '</i></b>'), 'bold': ('<b>', '</b>'),
+              'italic': ('<i>', '</i>')}.get(sm.get('entry_name_style', 'bolditalic'),
+                                             ('', ''))
+    ent_style = ParagraphStyle('sbentry', parent=base,
+                               leftIndent=sm.get('entry_indent', 0.0) * inch)
+    for k, sec in enumerate(model.get('sections', [])):
+        if k == 0 and rows and (fields or scores):
+            rows.append(rule())           # the end of the head
+        if sec['name']:
+            rows.append((Paragraph(_gb_caps(sec['name'], sstyle), sec_style),
+                         gap * 2 if k or not (fields or scores) else 0))
+            if sm.get('section_rule', True):
+                rows.append(HRule(color=(rule_c.red, rule_c.green, rule_c.blue),
+                                  thickness=0.5))
+        elif k and rows:
+            rows.append(rule())           # a bare `---`
+        for e in sec['entries']:
+            body = e['text']
+            if hyph and body:
+                body = _hyphenate_markup(body, hyph)
+            lead_in = f"{eo}{e['name']}{ec}" if e['name'] else ''
+            rows.append((Paragraph(lead_in + (' ' if lead_in and body else '') + body,
+                                   ent_style), gap))
+    if not rows:
+        return []
+    tbl = _gb_box(rows, avail_w, pad_x, pad_y, _gb_color(sm, 'fill'),
+                  sm.get('border', 'top-bottom'), sm.get('border_width', 2.0), rule_c)
+    return [Spacer(1, space), tbl, Spacer(1, space)]
+
+
+def _statblock_scores(scores, sm, fonts, base, inner_w, size):
+    """The score row as a small table. 'row': one row of NAME over score (mod);
+    'grid': two rows of three (for narrow columns); 'table-2024': the 2024
+    books' columns, score, modifier and save, three abilities to a row. Saves
+    are facts, so a block that gives them always prints them that way."""
+    how = sm.get('scores', 'row')
+    if any(c.get('save') for c in scores):
+        how = 'table-2024'
+    cs = ParagraphStyle('sbscore', parent=base, alignment=TA_CENTER)
+    ls = ParagraphStyle('sbscorelabel', parent=cs,
+                        fontName=_gb_font(fonts, sm.get('score_label_style', 'bold')))
+    data = []
+    widths = None
+    if how == 'table-2024':
+        hsize = max(5.0, size - 2.5)
+        hs = ParagraphStyle('sbscorehead', parent=cs, fontSize=hsize, leading=hsize * 1.2)
+        # each ability is four columns sized to what they hold, so no heading or
+        # name wraps; three abilities to a row, fewer when the measure is narrow
+        pad = 4.0
+        need = [max(stringWidth(_plain(c['name']), ls.fontName, size) for c in scores) + pad,
+                max(stringWidth(_plain(c['score']), cs.fontName, size) for c in scores) + pad,
+                max(stringWidth('MOD', cs.fontName, hsize),
+                    max(stringWidth(_plain(c.get('mod', '')), cs.fontName, size)
+                        for c in scores)) + pad,
+                max(stringWidth('SAVE', cs.fontName, hsize),
+                    max(stringWidth(_plain(c.get('save', '')), cs.fontName, size)
+                        for c in scores)) + pad]
+        per = 3
+        while per > 1 and sum(need) * per > inner_w:
+            per -= 1
+        slack = max(0.0, inner_w - sum(need) * per) / (4 * per)
+        widths = [w + slack for w in need] * per
+        for start in range(0, len(scores), per):
+            group = scores[start:start + per]
+            data.append(sum(([Paragraph('', hs), Paragraph('', hs),
+                              Paragraph('MOD', hs), Paragraph('SAVE', hs)]
+                             for _ in group), []))
+            data.append(sum(([Paragraph(c['name'], ls), Paragraph(c['score'], cs),
+                              Paragraph(c.get('mod', ''), cs),
+                              Paragraph(c.get('save', ''), cs)] for c in group), []))
+    else:
+        per = 3 if how == 'grid' else len(scores)
+        for start in range(0, len(scores), per):
+            group = scores[start:start + per]
+            data.append([Paragraph(c['name'], ls) for c in group])
+            data.append([Paragraph(f"{c['score']} ({c['mod']})" if c.get('mod')
+                                   else c['score'], cs) for c in group])
+    cols = max(len(r) for r in data)
+    for r in data:
+        r += [Paragraph('', cs)] * (cols - len(r))
+    t = Table(data, colWidths=(widths or [inner_w / cols] * cols)[:cols])
+    t.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                           ('LEFTPADDING', (0, 0), (-1, -1), 1),
+                           ('RIGHTPADDING', (0, 0), (-1, -1), 1),
+                           ('TOPPADDING', (0, 0), (-1, -1), 0.5),
+                           ('BOTTOMPADDING', (0, 0), (-1, -1), 0.5)]))
+    return t
+
+
 def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_meta=None):
     """Return flowables for one ~~~ … ~~~ document block."""
     meta  = block_meta or {}
@@ -3617,6 +4049,12 @@ def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_
             return _render_table_block(block_paras, attrs, preset, fonts, st, avail_w, hyph)
         if btype in ('center', 'centre', 'right', 'left'):
             return _render_align_block(block_paras, btype, preset, fonts, st, avail_w, hyph)
+        if btype == 'readaloud':
+            return _render_readaloud_block(block_paras, attrs, preset, fonts, st, avail_w, hyph)
+        if btype == 'sidebar':
+            return _render_sidebar_block(block_paras, attrs, preset, fonts, st, avail_w, hyph)
+        if btype == 'statblock':
+            return _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph)
         db             = preset.get('document_block', {})
         header_size    = db.get('header_size', 9.5)
         dateline_style = db.get('dateline_style', 'italic')

@@ -23,6 +23,7 @@ import threading
 import traceback
 import webbrowser
 import contextlib
+import copy
 from datetime import datetime, timedelta
 
 # Verbose in development; quiet in a frozen/installed build (the packaged app
@@ -1051,6 +1052,10 @@ DEFAULTS = {
               'space_around': 11.0, 'para_gap': 4.0,
               'source_style': 'italic', 'source_align': 'right', 'source_gap': 3.0},
     'align': {'space_around': 9.0, 'indent': 0.0, 'para_gap': 3.0},
+    # the game blocks (#74): read-aloud boxes, sidebars and stat blocks. Every
+    # colour has a print_ twin, the value every build uses until the colour
+    # screen PDF arrives; see engine.GAME_BLOCK_DEFAULTS
+    **copy.deepcopy(engine.GAME_BLOCK_DEFAULTS),
     # rules: "all" (a full grid) | "horizontal" | "header" (the book default —
     # a rule above, under the header and at the foot) | "none"
     'table': {'font_size': 0, 'line_leading': 1.3, 'header_style': 'bold',
@@ -1527,6 +1532,116 @@ STYLE_RANGES = {
 }
 
 
+# The game blocks' fields (#74), one list driving the style editor's form, the
+# parser and the ranges: (key, kind, label, hint, range or choices, step).
+# `color` fields are the print colours, the ones every build uses today; the
+# screen colours ride along unseen (`hidden`) until the colour screen PDF
+# exists, so saving a style never loses them.
+_STYLES = (('regular', 'Regular'), ('italic', 'Italic'))
+_FACES = (('bold', 'Bold'), ('regular', 'Regular'), ('italic', 'Italic'),
+          ('bolditalic', 'Bold italic'), ('smallcaps', 'Small caps'))
+_SIZE0 = (0.0, 72.0)
+GAME_BLOCK_FIELDS = (
+    ('readaloud', 'ra', 'Read-aloud boxes', '~~~ readaloud title="…"', (
+        ('font_size', 'num', 'Size', 'points · 0 = body size', _SIZE0, 0.25),
+        ('line_leading', 'num', 'Leading', '× size', (0.5, 5.0), 0.05),
+        ('style', 'choice', 'Text', '', _STYLES, None),
+        ('title_style', 'choice', 'Title', 'from title="…"', _FACES, None),
+        ('rule', 'choice', 'Rule', '', (('left', 'At the left'), ('box', 'A box'),
+                                       ('top-bottom', 'Above and below'), ('none', 'None')), None),
+        ('rule_width', 'num', 'Rule width', 'points', (0.0, 12.0), 0.25),
+        ('print_rule_color', 'color', 'Rule colour', '#rrggbb', None, None),
+        ('print_fill', 'color', 'Fill', '#rrggbb · blank = none', None, None),
+        ('pad_x', 'num', 'Padding across', 'points', _PT, 0.5),
+        ('pad_y', 'num', 'Padding down', 'points', _PT, 0.5),
+        ('para_gap', 'num', 'Between paragraphs', 'points', _PT, 0.5),
+        ('space_around', 'num', 'Space around', 'points', _PT, 0.5),
+        ('fill', 'hidden'), ('rule_color', 'hidden'),
+    )),
+    ('sidebar', 'sd', 'Sidebars', '~~~ sidebar title="…"', (
+        ('font_size', 'num', 'Size', 'points · 0 = body size', _SIZE0, 0.25),
+        ('line_leading', 'num', 'Leading', '× size', (0.5, 5.0), 0.05),
+        ('style', 'choice', 'Text', '', _STYLES, None),
+        ('title_style', 'choice', 'Title', '', _FACES, None),
+        ('title_size', 'num', 'Title size', 'points · 0 = text size', _SIZE0, 0.25),
+        ('title_caps', 'check', 'Title in capitals', '', None, None),
+        ('print_title_color', 'color', 'Title colour', '#rrggbb', None, None),
+        ('print_title_fill', 'color', 'Title bar', '#rrggbb · blank = none', None, None),
+        ('border_width', 'num', 'Border width', 'points', (0.0, 12.0), 0.25),
+        ('print_border_color', 'color', 'Border colour', '#rrggbb', None, None),
+        ('print_fill', 'color', 'Fill', '#rrggbb · blank = none', None, None),
+        ('pad_x', 'num', 'Padding across', 'points', _PT, 0.5),
+        ('pad_y', 'num', 'Padding down', 'points', _PT, 0.5),
+        ('para_gap', 'num', 'Between paragraphs', 'points', _PT, 0.5),
+        ('space_around', 'num', 'Space around', 'points', _PT, 0.5),
+        ('fill', 'hidden'), ('border_color', 'hidden'), ('title_fill', 'hidden'),
+        ('title_color', 'hidden'),
+    )),
+    ('statblock', 'sk', 'Stat blocks', '~~~ statblock name="…" meta="…"', (
+        ('font_size', 'num', 'Size', 'points · 0 = body size', _SIZE0, 0.25),
+        ('line_leading', 'num', 'Leading', '× size', (0.5, 5.0), 0.05),
+        ('name_size', 'num', 'Name size', 'points · 0 = size + 3', _SIZE0, 0.25),
+        ('name_style', 'choice', 'Name', '', _FACES, None),
+        ('name_caps', 'check', 'Name in capitals', '', None, None),
+        ('print_name_color', 'color', 'Name colour', '#rrggbb · also the section heads', None, None),
+        ('meta_style', 'choice', 'Type line', 'the line under the name', _FACES, None),
+        ('rule', 'choice', 'Rules', 'under the name and the fields',
+         (('tapered', 'Tapered'), ('plain', 'Plain'), ('none', 'None')), None),
+        ('rule_width', 'num', 'Rule width', 'points', (0.0, 12.0), 0.25),
+        ('print_rule_color', 'color', 'Rule colour', '#rrggbb · also the border', None, None),
+        ('field_label_style', 'choice', 'Field labels', 'Armor Class, Hit Points…', _FACES, None),
+        ('scores', 'choice', 'Ability scores', '', (
+            ('row', 'One row'), ('grid', 'Two rows of three'),
+            ('table-2024', 'With modifier and save columns')), None),
+        ('score_label_style', 'choice', 'Score names', '', _FACES, None),
+        ('section_style', 'choice', 'Section heads', 'Actions, Reactions…', _FACES, None),
+        ('section_size', 'num', 'Section size', 'points · 0 = size + 1', _SIZE0, 0.25),
+        ('section_rule', 'check', 'A rule under each section head', '', None, None),
+        ('entry_name_style', 'choice', 'Entry names', 'Multiattack.', _FACES, None),
+        ('entry_indent', 'num', 'Entry indent', 'inches', _IN, 0.05),
+        ('entry_gap', 'num', 'Between entries', 'points', _PT, 0.5),
+        ('border', 'choice', 'Border', '', (('top-bottom', 'Above and below'),
+                                           ('box', 'A box'), ('none', 'None')), None),
+        ('border_width', 'num', 'Border width', 'points', (0.0, 12.0), 0.25),
+        ('print_fill', 'color', 'Fill', '#rrggbb · blank = none', None, None),
+        ('pad_x', 'num', 'Padding across', 'points', _PT, 0.5),
+        ('pad_y', 'num', 'Padding down', 'points', _PT, 0.5),
+        ('space_around', 'num', 'Space around', 'points', _PT, 0.5),
+        ('fill', 'hidden'), ('name_color', 'hidden'), ('rule_color', 'hidden'),
+    )),
+)
+for _sec, _pre, _l, _s, _fields in GAME_BLOCK_FIELDS:
+    for _fd in _fields:
+        if _fd[1] == 'num':
+            STYLE_RANGES[f'{_pre}_{_fd[0]}'] = _fd[4]
+_COLOR_RE = re.compile(r'^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$')
+
+
+def _game_block_fields(form):
+    """The game blocks' sections from the style form. A field the form doesn't
+    carry keeps its default, so a form from before #74 still saves."""
+    out = {}
+    for sec, pre, _label, _syntax, fields in GAME_BLOCK_FIELDS:
+        dflt = engine.GAME_BLOCK_DEFAULTS[sec]
+        vals = {}
+        for fd in fields:
+            key, kind, name = fd[0], fd[1], f'{pre}_{fd[0]}'
+            if kind == 'num':
+                vals[key] = _fs(form, name, dflt[key])
+            elif kind == 'choice':
+                v = form.get(name, dflt[key])
+                vals[key] = v if v in dict(fd[4]) else dflt[key]
+            elif kind == 'check':
+                # an unticked box sends nothing, so the form marks that it
+                # carries the section; with no marker, keep the default
+                vals[key] = (name in form) if f'{pre}__form' in form else dflt[key]
+            else:                                   # 'color' and 'hidden'
+                v = (form.get(name, dflt[key]) or '').strip()
+                vals[key] = v if (v == '' or _COLOR_RE.match(v)) else dflt[key]
+        out[sec] = vals
+    return out
+
+
 def _fs(form, key, default):
     """A style's number field, held to STYLE_RANGES."""
     lo, hi = STYLE_RANGES[key]
@@ -1535,6 +1650,7 @@ def _fs(form, key, default):
 
 def parse_preset_form(form):
     out = _preset_fields(form)
+    out.update(_game_block_fields(form))
     floor = _f(form, 'min_text_size', 0.0)
     if floor > 0:                 # written only when set: other styles are as they were
         out['min_text_size'] = min(floor, 72.0)
@@ -1854,6 +1970,8 @@ def _inject_cover_templates():
             'app_version': APP_VERSION,
             # a cached answer only — no page render ever waits on the network
             'update_info': update_for_page(),
+            'game_block_fields': GAME_BLOCK_FIELDS,
+            'game_block_default': lambda sec, key: engine.GAME_BLOCK_DEFAULTS[sec][key],
             'scene_break_label': scene_break_label}
 
 
@@ -2164,9 +2282,11 @@ def make_large_print(preset):
     _scale_sizes(lp.get('scene_break', {}), factor, ('size',))
     _scale_sizes(lp.get('running_head', {}), factor, ('size',))
     _scale_sizes(lp.get('folio', {}), factor, ('size',))
-    for key in ('document_block', 'poem', 'list', 'quote', 'figure', 'endnotes'):
+    for key in ('document_block', 'poem', 'list', 'quote', 'figure', 'endnotes',
+                'readaloud', 'sidebar', 'statblock'):
         _scale_sizes(lp.get(key, {}), factor,
-                     ('font_size', 'header_size', 'title_size', 'caption_size'))
+                     ('font_size', 'header_size', 'title_size', 'caption_size',
+                      'name_size', 'section_size'))
 
     name = preset.get('name', 'Style')
     # a trailing "(6×9)" in the name would now be a lie about the page

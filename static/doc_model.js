@@ -27,7 +27,7 @@
   // per line / per table row, not wrapped into a paragraph. A table's `|` cell
   // separators are ordinary text at this level; only the two builders split on
   // them. Mirrors manuscript.LINE_BLOCKS.
-  var LINE_BLOCKS = ['list', 'center', 'centre', 'right', 'left', 'table'];
+  var LINE_BLOCKS = ['list', 'center', 'centre', 'right', 'left', 'table', 'statblock'];
   // A link target is restricted to unambiguous forms, so ordinary prose like
   // "[sic](ibid)" never becomes a link. Mirrors manuscript.LINK_RE.
   var LINK_RE = /\[([^\[\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+|#[A-Za-z0-9][\w\-]*)\)/g;
@@ -43,7 +43,8 @@
   var SUBHEAD_RE     = /^##\s+(.*)$/;
   var DOCBLOCK_RE    = /^\s*~~~(.*)/;
   var PART_RE        = /^\s*===\s*(.*)/;
-  var ATTR_RE        = /(\w+)="([^"]*)"/g;
+  // straight or curly quotes (pasted from a word processor); mirrors manuscript._ATTR_RE
+  var ATTR_RE        = /(\w+)=["“”]([^"“”]*)["“”]/g;
   var BYLINE_SEP     = ' | ';   // "# Title | Author" anthology byline (mirror manuscript.py)
 
   function splitByline(titleLine) {
@@ -298,6 +299,12 @@
             if (s.trim()) lines.push({ runs: parseInline(s.trim()) });
           });
           if (lines.length) blockChildren.push({ type: 'stanza', lines: lines });
+        } else if (blockType === 'statblock') {
+          // A stat block's source is kept exactly as written, one plain run per
+          // line (its `___` rules and `--- Actions` must survive an edit).
+          blockParaBuf.forEach(function (s) {
+            if (s.trim()) blockChildren.push({ type: 'para', runs: [run(s.trim())] });
+          });
         } else if (LINE_BLOCKS.indexOf(blockType) !== -1) {
           // One line = one child (a list item, or a line of an aligned block)
           blockParaBuf.forEach(function (s) {
@@ -375,6 +382,15 @@
 
   // ---- document model -> markdown ------------------------------------------
 
+  // A stat block line back to its source: plain runs are the source text itself,
+  // written with no escaping; emphasis put on by the editor is written as markers.
+  // Mirrors doc_model._statblock_line.
+  function statblockLine(runs) {
+    return runs.map(function (r) {
+      return (r.bold || r.italic) ? emphMd([r], false) : r.text;
+    }).join('');
+  }
+
   function toMarkdown(blocks) {
     var out = [];
     blocks.forEach(function (b) {
@@ -406,6 +422,8 @@
             if (si > 0) out.push('');                    // blank line between stanzas
             kids[si].lines.forEach(function (ln) { out.push(runsToMd(ln.runs)); });
           }
+        } else if (b.block_type === 'statblock') {
+          for (var sl = 0; sl < kids.length; sl++) out.push(statblockLine(kids[sl].runs));
         } else if (LINE_BLOCKS.indexOf(b.block_type) !== -1) {
           for (var li = 0; li < kids.length; li++) out.push(runsToMd(kids[li].runs));
         } else {
@@ -423,9 +441,46 @@
     return out.join('\n');
   }
 
+  // ---- Homebrewery stat blocks pasted with no fence ------------------------
+  // Mirrors statblock.wrap_unfenced: a `{{monster …}}` block (to its `}}`), or a
+  // `___` line followed by `> ## Name` (to the last `>` line), is wrapped in a
+  // `~~~ statblock` fence. Only the paste does this, never the parser: a `>`
+  // line or a `___` rule in a novel must not become a stat block.
+  var V3_OPEN_RE = /^\s*\{\{\s*monster\b/;
+  var LEGACY_HEAD_RE = /^\s*>\s*##\s+\S/;
+  var FENCE_RE = /^\s*~~~/;
+  function wrapUnfenced(markdown) {
+    var lines = markdown.split('\n'), out = [], i = 0, inFence = false, j;
+    while (i < lines.length) {
+      var line = lines[i];
+      if (FENCE_RE.test(line)) { inFence = !inFence; out.push(line); i++; continue; }
+      if (!inFence && V3_OPEN_RE.test(line)) {
+        j = i + 1;
+        while (j < lines.length && lines[j].trim() !== '}}' && !FENCE_RE.test(lines[j])) j++;
+        if (j < lines.length && lines[j].trim() === '}}') {
+          out = out.concat(['~~~ statblock'], lines.slice(i, j + 1), ['~~~']);
+          i = j + 1;
+          continue;
+        }
+      }
+      if (!inFence && /^_{3,}$/.test(line.trim()) && i + 1 < lines.length
+          && LEGACY_HEAD_RE.test(lines[i + 1])) {
+        j = i + 1;
+        while (j < lines.length && /^\s*>/.test(lines[j])) j++;
+        out = out.concat(['~~~ statblock'], lines.slice(i, j), ['~~~']);
+        i = j;
+        continue;
+      }
+      out.push(line);
+      i++;
+    }
+    return out.join('\n');
+  }
+
   global.DocModel = {
     fromMarkdown: fromMarkdown,
     toMarkdown: toMarkdown,
+    wrapUnfenced: wrapUnfenced,
     // exposed for tests
     _parseInline: parseInline,
     _run: run,

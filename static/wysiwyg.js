@@ -71,8 +71,11 @@
     if (!el.childNodes.length) el.appendChild(document.createElement('br'));
   }
 
+  // the game blocks (#74) read better by their names than by their fence words
+  var DOC_LABELS = { readaloud: 'read aloud', sidebar: 'sidebar', statblock: 'stat block' };
+
   function docHeadLabel(blockType, attrs) {
-    var parts = [blockType || 'block'];
+    var parts = [DOC_LABELS[blockType] || blockType || 'block'];
     for (var k in attrs) if (attrs.hasOwnProperty(k)) parts.push(k + ': ' + attrs[k]);
     return parts.join('  ·  ');
   }
@@ -380,6 +383,19 @@
   // starts a paragraph, a single line break is a space.
   function pasteBlocks(html, text) {
     var blocks = [];
+    // a Homebrewery stat block copied from its editor comes as plain text; it
+    // is wrapped in a stat block fence and the text read as the manuscript is
+    var plainText = (text || '').replace(/\r\n?/g, '\n');
+    var wrapped = plainText && DocModel.wrapUnfenced(plainText);
+    if (wrapped && wrapped !== plainText) {
+      DocModel.fromMarkdown(wrapped).forEach(function (b) {
+        if (b.type === 'docblock') blocks.push({ doc: b });
+        else if (b.type === 'scene') blocks.push({ scene: true });
+        else if (b.runs) blocks.push({ runs: b.runs });
+        else if (b.title) blocks.push({ runs: [{ text: b.title, bold: false, italic: false, link: '' }] });
+      });
+      return blocks;
+    }
     if (html) {
       var doc = new DOMParser().parseFromString(html, 'text/html');
       Array.prototype.forEach.call(
@@ -480,6 +496,7 @@
     }
     if (!top) blocks = blocks.filter(function (b) { return b.runs; });  // no scene inside a block
     if (!blocks.length) return false;
+    if (!blocks[0].runs) blocks.unshift({ runs: [] });   // a block can't join the caret's line
 
     var tail = doc.createRange();
     tail.setStart(range.startContainer, range.startOffset);
@@ -497,11 +514,12 @@
     blocks.forEach(function (b) {
       var el;
       if (b.scene) el = renderBlock({ type: 'scene' });
+      else if (b.doc) el = renderBlock(b.doc);
       else if (top) { el = renderBlock({ type: 'para', runs: b.runs }); }
       else { el = line.cloneNode(false); appendInline(el, b.runs); }
       last.after(el); last = el;
     });
-    if (last.dataset && last.dataset.block === 'scene') {
+    if (last.dataset && (last.dataset.block === 'scene' || last.dataset.block === 'docblock')) {
       var p = renderBlock({ type: 'para', runs: [] }); last.after(p); last = p;
     }
     if (last !== line && last.childNodes.length === 1 && last.firstChild.nodeName === 'BR')

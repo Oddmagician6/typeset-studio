@@ -1,6 +1,6 @@
 """Record what the app does today with the TTRPG fixtures (ROADMAP #74).
 
-    python test_fixtures/ttrpg/make_baseline.py
+    python test_fixtures/ttrpg/make_baseline.py [name.json]
 
 Run from the repo root (or anywhere: it finds the repo from its own path).
 Builds each fixture with the current code and writes baseline/baseline.json:
@@ -8,6 +8,8 @@ for each file, the blocks the parser makes of every fence (type, attributes,
 paragraph count), whether the Markdown round trip is byte-identical, the PDF's
 page count and build time (6 x 9, the default style), and whether the EPUB
 builds. Run make_long_book.py first for the generated files to be included.
+The report goes to baseline/baseline.json, or to the name given, so a later run
+can sit beside the 1.3.2 one (phase1.json is the run after Phase 1).
 
 This is the "before" for Phase 1: today the three new fence types fall back to
 a plain document block, which joins a stat block's lines into one paragraph,
@@ -46,8 +48,10 @@ def fences(ms):
         for b in ch['blocks']:
             if b[0] == 'doc_block':
                 meta = b[2] if len(b) > 2 else {}
+                # `_`-keys are the parser's own (a stat block's reading), not
+                # attributes the writer typed
                 out.append({'type': meta.get('_type', ''),
-                            'attrs': {k: v for k, v in meta.items() if k != '_type'},
+                            'attrs': {k: v for k, v in meta.items() if not k.startswith('_')},
                             'paras': len(b[1])})
     return out
 
@@ -98,7 +102,8 @@ def main():
             rec['epub'] = '%s: %s' % (type(exc).__name__, exc)
         report['files'][name] = rec
         print(name, {k: v for k, v in rec.items() if k != 'fence_detail'})
-    with open(os.path.join(out_dir, 'baseline.json'), 'w', encoding='utf-8') as f:
+    name = sys.argv[1] if len(sys.argv) > 1 else 'baseline.json'
+    with open(os.path.join(out_dir, name), 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=1, ensure_ascii=False)
 
 

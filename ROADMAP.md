@@ -32,12 +32,19 @@ Start here in a new session. Each item points at its full entry below.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
-4. **Tabletop RPG books (#74) — planned 2026-10-07, not started.** Six phases in its entry:
-   game blocks (with Word import), reference structure (headings, contents, bookmarks),
-   the game-book look and colour screen PDF (dark pages included), two columns (gated on a
-   spike in the real engine), index, and a special-pages designer shared with #75. The
-   author's own books are local test material in `Edenfall for test/` (gitignored). Start
-   with Phase 1.
+4. **Tabletop RPG books (#74) — Phase 1 done, unreleased (2026-10-07).** The game blocks
+   (read-aloud, sidebar and note, stat block in every accepted format) with Word import
+   and Homebrewery paste are in CHANGELOG's `## Unreleased` beside #77. Phase 1's
+   leftovers are listed at the end of its entry. **Next: Phase 2** (reference structure:
+   `###`/`####` headings, contents depth, PDF bookmarks, section running heads, chapter
+   tagline, Letter/A4/A5 trims); its open question is the tagline syntax. Six phases in
+   all; the author's own books are local test material in `Edenfall for test/`
+   (gitignored).
+   **State at hand-off (2026-10-07): Phase 1 is NOT committed.** It sits in the working
+   tree on branch `ttrpg-phase1` (new files `statblock.py`, `test_game_blocks.py`,
+   `test_fixtures/ttrpg/baseline/phase1.json`). All 35 test files passed on it. Check
+   `git status` first and ask the user before committing or merging it to master; start
+   Phase 2 on top of it, not on master without it.
    **Children's books (#75)** sit beside it: early-reader presets are cheap and could come
    first; picture books wait on full-bleed interior pages (Tier 5E) and a per-page designer.
 5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
@@ -967,6 +974,28 @@ created, updated    ISO 8601 datetime strings
 
 - **`dateline_style: "smallcaps"`** is faked as uppercase + bold (no true small-caps font
   registered). Text is uppercased in `_ep_dtext()` before being passed to the bold font.
+
+- **A stat block is read once, into `attrs['_statblock']`** (#74). `statblock.read` turns
+  the fence's raw lines into a model (name, meta, fields, scores, sections of entries) and
+  `manuscript._inline_statblock` inlines each piece; both builders print that model. The
+  block's `('para', …)` children are only a plain copy (field values and entries) for the
+  continuity checker and word counts, so `_walk_block_texts` walks the **model, not the
+  children**, for a stat block: walking both put a note's EPUB anchor on the unprinted
+  copy. The attrs dict is shared between the PDF and EPUB copies of a chapter, so a
+  rewrite rebuilds the model (`_model_set`), never edits it in place.
+
+- **A stat block's lines are source, not prose** (#74). Its formats use `___` rules,
+  `::`, `|` and `--- Actions`, which the emphasis layer rewrites (`___` reads as an
+  italic underscore; smartening turns `---` into an em dash). So `doc_model` (Python and
+  JS) keeps each line as **one plain run**, never smartened, and writes plain runs back
+  with no escaping (`_statblock_line` / `statblockLine`). Lines are classified on their
+  raw text before any inline pass, as table cells are split before `_inline`.
+
+- **Game block colours: builds use the `print_` value** (`engine._gb_color`). The plain
+  value is the screen colour, kept for #74 Phase 3's colour screen PDF; the style editor
+  shows the print colours and carries the screen ones in hidden fields
+  (`app.GAME_BLOCK_FIELDS`, one list for the form, the parser and `STYLE_RANGES`). A style
+  with no game block sections gets `engine.GAME_BLOCK_DEFAULTS` key by key.
 
 ---
 
@@ -2415,8 +2444,8 @@ doc_model / WYSIWYG round-trip:
   the paid-app scan reached the same conclusion from the other direction, and endnotes/footnotes/
   figures are specced there alongside the other missing block types.)*
 
-- **74. Tabletop RPG rulebooks and adventures (D&D-style)** — **PLANNED** *(large; noted
-  2026-10-02, planned 2026-10-07 with the user; no work started)*. A big self-publishing
+- **74. Tabletop RPG rulebooks and adventures (D&D-style)** — **IN PROGRESS** *(large;
+  noted 2026-10-02, planned 2026-10-07 with the user; Phase 1 done 2026-10-07)*. A big self-publishing
   market (DMs Guild, DriveThruRPG, Kickstarter zines) whose books have a strong, recognisable
   look and few affordable tools that do it. It fits the app's bet: a family of "game book"
   **presets** owns the look, and the manuscript carries only structure.
@@ -2499,7 +2528,9 @@ doc_model / WYSIWYG round-trip:
   `static/wysiwyg.js`, `templates/manuscript_editor.html`, `test_doc_model.py`) applies to
   every new block below.
 
-  **Phase 1 — Game blocks, single column** *(medium)*. Useful at once in any book.
+  **Phase 1 — Game blocks, single column** *(medium)* — **DONE 2026-10-07, unreleased.**
+  Useful at once in any book. Built as specced below; what was decided on the way and
+  what is left is under "Phase 1 as built", after the list.
   - `~~~ readaloud` — the boxed "read this to the players" text: prose, shaded fill, rule
     or bar at the side. Preset section `readaloud` (fill, rule colour/side, italic or not,
     padding).
@@ -2576,7 +2607,64 @@ doc_model / WYSIWYG round-trip:
     splits and loses no line; the modifier rule; a `test_doc_model.py` stability case for
     each.
 
+  **Phase 1 as built (2026-10-07).** `statblock.py` is the reader (`classify` a line,
+  `read` a block, `wrap_unfenced` for the paste); `test_game_blocks.py` runs it against
+  all 58 line cases and the 7 formats, then builds every fixture to PDF and EPUB (every
+  field and entry printed, EPUBs valid), splits a 120-entry block over pages, checks the
+  style form and large print, and imports a generated Word game book plus the author's
+  Bestiary when present (71 score tables in, 71 stat blocks out, every word kept).
+  `test_rich_editor.py` round-trips the four fixtures in a real browser and covers the
+  toolbar buttons, a stat block line edit, the Homebrewery paste, and JS/Python parity of
+  `wrapUnfenced`. Decided while building:
+  - **The rich editor shows a stat block's lines as source** (monospace, one plain run
+    per line), not formatted: the formats' own punctuation must survive an edit. The page
+    preview shows the real look.
+  - **Head and sections:** a Proficiency Bonus line straight after Challenge stays in the
+    head (the corpus's Mere-Wyrm); a score of "—" is accepted (the Bestiary's template
+    creature, "STR —"), with no modifier worked out.
+  - **Rows, not paragraph spacing:** each block is a one-column `Table` with
+    `splitInRow=1`; gaps between rows are cell padding, since a cell ignores its
+    paragraph's `spaceAfter`.
+  - **Saves force the 2024 table:** a stat block that gives saves prints the MOD/SAVE
+    columns whatever the style's `scores` setting, as saves are facts.
+  - **Word import works on the imported Markdown** (`game_blocks_from_import`), not on
+    Word's structures: a table of the six ability scores (one row, or names over values) is the
+    anchor; the block runs back to the bold name and forward to the next bold name, a
+    heading, a fence or a ***Lore*** paragraph. A "Read Aloud" heading becomes the box's
+    title, as written (the author's boxes carry that label); a "Pacing" or "Pacing Note"
+    heading becomes `~~~ sidebar … style="note"` (not in the plan, but the same rule and
+    the author's book has three). The `*Read aloud:*` inline paragraphs in the adventure
+    are left as prose.
+  - **Fixture baseline:** `make_baseline.py phase1.json` is the run after Phase 1, beside
+    the 1.3.2 `baseline.json`. The adventure, corpus and long book now round-trip byte for
+    byte (all three were lossy); the long book is 348 pages in 1.5 s (311 in 0.9 s before:
+    the blocks are boxed and spaced now).
+  **Left over from Phase 1** (small; on request): `sample/` does not have the adventure
+  yet, because the app offers one sample and choosing between two needs a picker on the
+  New book page; the rich editor can't edit a block's attributes (a sidebar's title or a
+  stat block's `cr`: switch to Markdown, as for a quote's source); the style editor's live
+  preview shows no game block; Greek, Cyrillic and CJK text in a stat block print only
+  with a font that has them (the bundled faces don't — older than #74).
+
   **Phase 2 — Reference-book structure** *(small–medium)*. Also helps nonfiction.
+  *Watch-outs from Phase 1 (2026-10-07):*
+  - **Word import's game-block pass reads `## ` headings.** `_IMP_READALOUD_RE` and
+    `_IMP_PACING_RE` in `manuscript.py` match only `^##\s+`. When Heading 3–4 import as
+    `###`/`####`, widen both to `^#{2,4}\s+`, or the author's adventure (whose "Read
+    Aloud" and "Pacing Note" headings may be any level) loses its boxes. A box runs to the
+    next heading of *any* level (`_IMP_HEADING_RE`), which stays right.
+  - **`###` inside a stat block fence is the stat block's own section line** (Homebrewery's
+    `### Actions`). It is safe because headings are only parsed outside fences; keep the
+    new heading rule outside `in_block`, in `manuscript.py`, `doc_model.py` and
+    `static/doc_model.js` alike.
+  - **Pasted Homebrewery text outside a fence** (`## Bog-Thrall`, `### Actions` in prose)
+    will read as headings once `###` exists; only the paste wraps it, so that is expected.
+  - **Test material:** run `test_fixtures/ttrpg/make_baseline.py phase2.json` after the
+    phase and diff it against `phase1.json`; the Volume 1 adventure (no Heading 1, 41
+    same-level subheads) is the case for promoting the top heading level to chapters.
+  - **Edit scripts:** in this environment a Bash heredoc collapses doubled backslashes
+    (a `'\\b'` became a literal backspace in a regex). Use the Edit tool, or write the
+    script with the Write tool, and scan edited files for control characters.
   - **`###` and `####` headings** (section, sub-section; a room key like `### A3. Guard
     Room` is a `###`). *Back-compat:* today those lines print literally, so a book with one
     changes — check `test_fixtures/` and the user's `projects/` for any before shipping,

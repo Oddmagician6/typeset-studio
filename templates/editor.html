@@ -484,6 +484,56 @@
       </fieldset>
 
       <fieldset>
+        <legend>Game blocks</legend>
+        <div class="fs-body">
+          <p class="hint" style="margin:0 0 8px;line-height:1.6">
+            For tabletop game books: boxed text to read aloud, sidebars and stat blocks.
+            The colours here are the printed ones; keep fills light for a black-and-white interior.
+          </p>
+          {% for sec, pre, label, syntax, fields in game_block_fields %}
+          {% set g = p.get(sec, {}) %}
+          <h4 class="gb-head" style="margin:14px 0 6px">{{ label }} <code style="font-weight:normal">{{ syntax }}</code></h4>
+          <input type="hidden" name="{{ pre }}__form" value="1">
+          {% set shown = fields | rejectattr(1, 'equalto', 'hidden') | list %}
+          {% for row in shown | batch(4) %}
+          <div class="row">
+            {% for fd in row %}
+            {% set name = pre ~ '_' ~ fd[0] %}
+            {% if fd[1] == 'num' %}
+            <div class="field num"><label>{{ fd[2] }}</label>{% if fd[3] %}<span class="hint">{{ fd[3] }}</span>{% endif %}
+              <input type="number" step="{{ fd[5] }}" name="{{ name }}" value="{{ g.get(fd[0], game_block_default(sec, fd[0])) }}"></div>
+            {% elif fd[1] == 'choice' %}
+            {% set cur = g.get(fd[0], game_block_default(sec, fd[0])) %}
+            <div class="field"><label>{{ fd[2] }}</label>{% if fd[3] %}<span class="hint">{{ fd[3] }}</span>{% endif %}
+              <select name="{{ name }}">
+                {% for val, text in fd[4] %}<option value="{{ val }}" {{ 'selected' if cur == val }}>{{ text }}</option>{% endfor %}
+              </select></div>
+            {% elif fd[1] == 'check' %}
+            <div class="check"><input type="checkbox" id="f-{{ name }}" name="{{ name }}"
+                   {{ 'checked' if g.get(fd[0], game_block_default(sec, fd[0])) }}>
+              <label for="f-{{ name }}">{{ fd[2] }}</label></div>
+            {% else %}
+            <div class="field"><label>{{ fd[2] }}</label>{% if fd[3] %}<span class="hint">{{ fd[3] }}</span>{% endif %}
+              <input type="text" name="{{ name }}" value="{{ g.get(fd[0], game_block_default(sec, fd[0])) }}"></div>
+            {% endif %}
+            {% endfor %}
+          </div>
+          {% endfor %}
+          {% for fd in fields if fd[1] == 'hidden' %}
+          <input type="hidden" name="{{ pre }}_{{ fd[0] }}" value="{{ g.get(fd[0], game_block_default(sec, fd[0])) }}">
+          {% endfor %}
+          {% endfor %}
+          <p class="hint" style="margin-top:6px;line-height:1.6">
+            <code>~~~ sidebar title="Pacing" style="note"</code> — a label and a line, no box.<br>
+            <code>~~~ statblock</code> reads the common formats as they are pasted: bold labels
+            (<code>**Armor Class** 12</code>), <code>Label: value</code>, the Homebrewery's, the
+            2024 layout and an old-school stat line. <code>cr="2 (450 XP)"</code> sets the
+            challenge on the name line and <code>count="2"</code> adds “× 2”.
+          </p>
+        </div>
+      </fieldset>
+
+      <fieldset>
         <legend>Tables</legend>
         <div class="fs-body">
           {% set tb = p.get('table', {}) %}

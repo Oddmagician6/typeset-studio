@@ -142,6 +142,16 @@ EXPECT = {
     'bold-across-note': '# One\n\n**make**[^a]** this** bold\n\n[^a]: N.\n',
     'figure-caption-enter': '# One\n\n~~~ figure src="m.png"\nCap one.\n\nCap two.\n~~~\n',
     'scene-button': '# One\n\nText.\n\n* * *\n\nAfter\n',
+    'statblock-button': ('# One\n\nText.\n\n~~~ statblock\nCreature Name\n*Medium humanoid, neutral*\n'
+                         'Armor Class: 12\nHit Points: 11 (2d8 + 2)\nSpeed: 30 ft.\n'
+                         'STR 10 | DEX 14 | CON 12 | INT 10 | WIS 10 | CHA 10\n'
+                         'Senses: passive Perception 10\nLanguages: Common\nChallenge: 1/4 (50 XP)\n'
+                         '--- Actions\n***Strike.*** *Melee Weapon Attack:* +4 to hit, reach 5 ft., '
+                         'one target. *Hit:* 5 (1d6 + 2) damage.\n~~~\n'),
+    'readaloud-button': '# One\n\nText.\n\n~~~ readaloud\nBoxed.\n~~~\n',
+    'statblock-line-edit': '# One\n\n~~~ statblock\n___\n**AC** 9\n**HP** 4 (1d8)\n--- Actions\n~~~\n',
+    'paste-homebrewery': ('# One\n\nBefore.\n\nIntro line.\n\n~~~ statblock\n{{monster,frame\n'
+                          '## Bog-Thrall\n**AC** :: 9\n}}\n~~~\n\nAfter line.\n'),
     'list-button-in-letter': '# One\n\n~~~ letter from="A"\nDear B,\n~~~\n\n~~~ list\nitem\n~~~\n',
     'paste-gdocs': '# One\n\nBefore.\n\n*It* was late.\n\n**Next** para.\n',
     'paste-word': '# One\n\nBefore.\n\nThe *first* paragraph.\n\n**Second** one.\n',
@@ -184,7 +194,10 @@ def main():
                    'format': 'pdf'}, f)
 
     corpus = {'features': FEATURES}
-    for p in [os.path.join(HERE, 'sample', 'sample.md')] + sorted(
+    # the game blocks' fixtures (#74): every stat block format and edge case
+    ttrpg = [os.path.join(HERE, 'test_fixtures', 'ttrpg', n) for n in
+             ('adventure.md', 'statblocks.md', 'statblock_formats.md', 'edge_cases.md')]
+    for p in [os.path.join(HERE, 'sample', 'sample.md')] + ttrpg + sorted(
             glob.glob(os.path.join(HERE, 'projects', 'manuscripts', '*.md'))):
         with open(p, encoding='utf-8') as f:
             corpus[os.path.relpath(p, HERE).replace(os.sep, '/')] = f.read()
@@ -227,6 +240,11 @@ def main():
             manuscript.parse_markdown(md, smartquotes=s)
             == manuscript.parse_markdown(after, smartquotes=s) for s in (True, False))
         check(name, same)
+    import statblock
+    formats = corpus['test_fixtures/ttrpg/statblock_formats.md']
+    check('the paste wraps unfenced Homebrewery blocks as statblock.py does',
+          result.get('wrapped') == statblock.wrap_unfenced(formats)
+          and result.get('wrapped') != formats)
     check('the marked non-breaking space survives',
           'Mr. Smith' in result['roundtrip'].get('features', ''))
 

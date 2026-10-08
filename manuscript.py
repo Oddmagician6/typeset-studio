@@ -18,21 +18,33 @@ Conventions
                             telegram to="…"
                             newspaper headline="…" date="…" source="…"
                             redacted classification="…"
+  ~~~ readaloud title="…"  -> boxed text to read aloud at the table (prose)
+  ~~~ sidebar title="…"    -> a titled callout box (prose); style="note" for a
+                            labelled line with no box
+  ~~~ statblock name="…" meta="…" cr="…" count="…"
+                         -> a game stat block, one line per line, in any of the
+                            formats statblock.py reads (5e, Homebrewery, the
+                            2024 layout, an old-school stat line, plain fields)
 
 Anything before the first "# " is treated as the opening of an untitled first
 chapter, so a plain manuscript with no headings still works.
 """
 
+import copy
 import os
 import re
 import html
+
+import statblock
 
 
 # Fenced blocks whose content is line-oriented: every source line is its own item
 # (a list), its own line (an alignment block) or its own row (a table), instead of
 # being wrapped into a paragraph. Poems are line-oriented too but keep stanzas, so
 # they're handled separately. doc_model.py and static/doc_model.js mirror this set.
-LINE_BLOCKS = ('list', 'center', 'centre', 'right', 'left', 'table')
+# A stat block is line-oriented too: its source is kept exactly as written, and
+# statblock.py reads the lines into fields, scores and sections.
+LINE_BLOCKS = ('list', 'center', 'centre', 'right', 'left', 'table', 'statblock')
 
 # A table row's cells are split on `|` at parse time — *before* inline markup is
 # applied — and each cell is inlined on its own, then rejoined with this marker.
@@ -63,7 +75,10 @@ BYLINE_SEP     = ' | '
 SUBHEAD_RE     = re.compile(r'^##\s+(.*)$')
 DOCBLOCK_RE    = re.compile(r'^\s*~~~(.*)')
 PART_RE        = re.compile(r'^\s*===\s*(.*)')
-_ATTR_RE       = re.compile(r'(\w+)="([^"]*)"')
+# Straight or curly quotes: a value pasted from a word processor arrives as
+# `src=“map.png”`, and reading only straight ones dropped it without a word.
+# The round trip writes straight quotes back.
+_ATTR_RE       = re.compile(r'(\w+)=["“”]([^"“”]*)["“”]')
 
 
 # Backslash escapes for literal emphasis / marker characters. A writer (or the
@@ -235,6 +250,22 @@ def _walk_block_texts(blocks):
                 blocks[i] = (block[0], new)
             yield _set, block[1]
         elif kind == 'doc_block':
+            meta = block[2] if len(block) > 2 else {}
+            if meta.get('_type') == 'statblock' and meta.get('_statblock'):
+                # the builders print the model, not the paragraphs (those are
+                # a plain-text copy for the checker), so only the model is
+                # rewritten: a note's anchor must land where it is printed
+                for path in _statblock_paths(meta['_statblock']):
+                    # the attrs dict is shared by every copy of the chapter
+                    # (map_block_texts copies only the list), so a change
+                    # rebuilds the model rather than editing it in place
+                    def _set(new, i=i, path=path):
+                        cur = blocks[i]
+                        attrs = dict(cur[2])
+                        attrs['_statblock'] = _model_set(attrs['_statblock'], path, new)
+                        blocks[i] = cur[:2] + (attrs,) + tuple(cur[3:])
+                    yield _set, _model_get(blocks[i][2]['_statblock'], path)
+                continue
             for j in range(len(block[1])):
                 # Read the block back out of `blocks` rather than closing over the
                 # one captured at the start: a doc_block with two lines to rewrite
@@ -246,6 +277,87 @@ def _walk_block_texts(blocks):
                     inner[j] = (inner[j][0], new)
                     blocks[i] = (cur[0], inner) + tuple(cur[2:])
                 yield _set, blocks[i][1][j][1]
+
+
+def _statblock_paths(model):
+    """Where the markup strings sit in a read stat block (notes may be in any)."""
+    for i, _ in enumerate(model.get('fields', [])):
+        yield ('fields', i, 'value')
+    for i, sec in enumerate(model.get('sections', [])):
+        for j, _ in enumerate(sec['entries']):
+            yield ('sections', i, 'entries', j, 'name')
+            yield ('sections', i, 'entries', j, 'text')
+
+
+def _model_get(model, path):
+    node = model
+    for key in path:
+        node = node[key]
+    return node
+
+
+def _model_set(model, path, value):
+    new = copy.deepcopy(model)
+    node = new
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = value
+    return new
+
+
+def _plain_attr(text, smartquotes=True):
+    """A name or a title given as an attribute: escaped, never read as markup
+    (`meta="Small *humanoid*"` prints its asterisks)."""
+    text = (text or '').strip()
+    if smartquotes:
+        text = _smarten(text)
+    return html.escape(text, quote=False)
+
+
+def _inline_statblock(model, smartquotes=True):
+    """Inline every string of a read stat block, the way a table inlines each
+    cell after splitting it. Labels, names and values may carry emphasis and
+    links; scores are numbers and are only escaped."""
+    def il(t):
+        return _inline(t, smartquotes) if t else ''
+
+    def entry_text(t):
+        # `\---` came through as a literal line: keep its hyphens hyphens
+        if t.startswith('---'):
+            lead = len(t) - len(t.lstrip('-'))
+            return '-' * lead + il(t[lead:])
+        return il(t)
+
+    out = {
+        'name': _plain_attr(model['name'], smartquotes),
+        'meta': _plain_attr(model['meta'], smartquotes),
+        'fields': [{'label': il(f['label']), 'value': il(f['value'])}
+                   for f in model['fields']],
+        'scores': [{k: html.escape(v, quote=False) for k, v in c.items()}
+                   for c in model['scores']],
+        'auto': model['auto'],
+        'scores_at': model.get('scores_at', 0),
+        'sections': [{'name': il(s['name']),
+                      'entries': [{'name': il(e['name']), 'text': entry_text(e['text'])}
+                                  for e in s['entries']]}
+                     for s in model['sections']],
+    }
+    return out
+
+
+def _statblock_children(model):
+    """The block's paragraphs, for every reader that only knows paragraphs (the
+    continuity checker, word counts): each field's value and each entry."""
+    out = []
+    for f in model['fields']:
+        if f['value']:
+            out.append(('para', f['value']))
+    for s in model['sections']:
+        for e in s['entries']:
+            text = ' '.join(t for t in (e['name'], e['text']) if t)
+            if text:
+                out.append(('para', text))
+    return out
 
 
 def map_block_texts(chapters, fn):
@@ -371,6 +483,7 @@ def parse_markdown(raw, smartquotes=True):
     block_para_buf = []
     block_type     = ''
     block_attrs    = {}
+    sb_lines       = []                    # a stat block's raw lines, read at its end
 
     def flush_note():
         nonlocal note_label, note_buf
@@ -421,6 +534,29 @@ def parse_markdown(raw, smartquotes=True):
                     block_buf.append(('para', _inline(joined, smartquotes)))
             block_para_buf = []
 
+    def close_block():
+        nonlocal block_type, block_attrs, in_block
+        flush_block_para()
+        # A *typed* block is kept even when it has no content: a figure
+        # usually has no caption, and dropping it would lose the
+        # illustration. A plain empty ~~~ fence is still discarded.
+        if block_type == 'statblock':
+            model = _inline_statblock(statblock.read(
+                sb_lines, block_attrs.get('name', ''), block_attrs.get('meta', '')),
+                smartquotes)
+            block_buf[:] = _statblock_children(model)
+            block_attrs = dict(block_attrs, _statblock=model)
+        if block_buf or block_type:
+            blk = ('doc_block', list(block_buf))
+            if block_type:
+                blk = blk + ({'_type': block_type, **block_attrs},)
+            cur['blocks'].append(blk)
+        block_buf[:] = []
+        sb_lines[:] = []
+        block_type = ''
+        block_attrs = {}
+        in_block = False
+
     def new_chapter(title, byline=None, unnumbered=False):
         nonlocal cur
         flush_para() if cur else None
@@ -470,19 +606,7 @@ def parse_markdown(raw, smartquotes=True):
         m_doc = DOCBLOCK_RE.match(line)
         if m_doc:
             if in_block:
-                flush_block_para()
-                # A *typed* block is kept even when it has no content: a figure
-                # usually has no caption, and dropping it would lose the
-                # illustration. A plain empty ~~~ fence is still discarded.
-                if block_buf or block_type:
-                    blk = ('doc_block', list(block_buf))
-                    if block_type:
-                        blk = blk + ({'_type': block_type, **block_attrs},)
-                    cur['blocks'].append(blk)
-                block_buf[:] = []
-                block_type = ''
-                block_attrs = {}
-                in_block = False
+                close_block()
             else:
                 flush_para()
                 if cur is None:
@@ -493,7 +617,9 @@ def parse_markdown(raw, smartquotes=True):
 
         # Inside a doc block: only paragraph text
         if in_block:
-            if line.strip() == '':
+            if block_type == 'statblock':
+                sb_lines.append(line)
+            elif line.strip() == '':
                 flush_block_para()
             else:
                 block_para_buf.append(line)
@@ -523,12 +649,7 @@ def parse_markdown(raw, smartquotes=True):
 
     # close any unclosed block
     if in_block:
-        flush_block_para()
-        if block_buf or block_type:
-            blk = ('doc_block', list(block_buf))
-            if block_type:
-                blk = blk + ({'_type': block_type, **block_attrs},)
-            cur['blocks'].append(blk)
+        close_block()
     flush_para()
 
     chapters = [c for c in chapters if c['blocks'] or c['title']]
@@ -1146,7 +1267,143 @@ def import_docx(path, report=None):
 
     flush_all()
     flush_notes()
-    return '\n'.join(out)
+    return '\n'.join(game_blocks_from_import(out, rep))
+
+
+# ------------------------------------------------- game blocks in a Word file
+# A game book written in Word has no stat block element, so its stat blocks
+# arrive as ordinary paragraphs around a one-row score table, and its boxed
+# text as a "Read Aloud" heading over the paragraphs to box. They are found in
+# the imported Markdown, which is regular enough to read, rather than in Word's
+# own structures: the shape is the same whichever way the author built it.
+
+_IMP_HEADING_RE = re.compile(r'^#{1,6}\s')
+_IMP_READALOUD_RE = re.compile(
+    r'^##\s+(?:\*\*)?\s*read[\s-]aloud\b.*$', re.I)
+_IMP_PACING_RE = re.compile(r'^##\s+(?:\*\*)?\s*(pacing(?:\s+notes?)?)\s*(?:\*\*)?\s*$', re.I)
+_IMP_LORE_RE = re.compile(r'^\*{2,3}lore\.?\*{2,3}$', re.I)
+
+
+def _imp_score_row(lines, i):
+    """`~~~ table` at lines[i] holding only ability scores -> (row, end) or None.
+    One row of `STR 11 (+0) | …`, or a row of names over a row of values."""
+    if not lines[i].startswith('~~~ table'):
+        return None
+    j = i + 1
+    rows = []
+    while j < len(lines) and lines[j].strip() != '~~~':
+        if lines[j].strip():
+            rows.append(lines[j].strip())
+        j += 1
+    if j >= len(lines) or not rows or len(rows) > 2:
+        return None
+    if len(rows) == 2:
+        names = [c.strip() for c in rows[0].split('|')]
+        vals = [c.strip() for c in rows[1].split('|')]
+        if len(names) != len(vals):
+            return None
+        rows = [' | '.join(f'{n} {v}' for n, v in zip(names, vals))]
+    cells = statblock._score_cells(rows[0])
+    if not cells or sorted(c['name'].upper() for c in cells) != sorted(statblock.FIVE_E):
+        return None
+    return rows[0], j + 1
+
+
+def _imp_name(line):
+    m = statblock._BOLD_ONLY_RE.match(line)
+    if not m:
+        return False
+    inner = m.group(1).strip().rstrip(':')
+    return (inner not in statblock.KNOWN_SECTIONS and inner not in statblock.KNOWN_LABELS
+            and not inner.endswith('.'))
+
+
+def _imp_statblocks(lines, rep):
+    out, i = [], 0
+    while i < len(lines):
+        found = _imp_score_row(lines, i)
+        if not found:
+            out.append(lines[i])
+            i += 1
+            continue
+        row, after = found
+        # back to the name: over the fields, the meta line and blank lines
+        k = len(out)
+        start = None
+        while k > 0:
+            ln = out[k - 1].strip()
+            if not ln:
+                k -= 1
+                continue
+            if _imp_name(ln):
+                start = k - 1
+                break
+            if (statblock.classify(ln, 'head')['kind'] == 'fields'
+                    or statblock._ITALIC_ONLY_RE.match(ln)):
+                k -= 1
+                continue
+            break
+        if start is None:
+            start = k
+        head = [ln.strip() for ln in out[start:] if ln.strip()]
+        del out[start:]
+        # on to the end: the next name, a heading, a fence, a scene break or
+        # the Lore paragraph that follows a creature
+        j = after
+        while j < len(lines):
+            ln = lines[j].strip()
+            if (_IMP_HEADING_RE.match(ln) or ln.startswith('~~~') or _IMP_LORE_RE.match(ln)
+                    or SCENE_BREAK_RE.match(ln) or PART_RE.match(ln) or _imp_name(ln)):
+                break
+            j += 1
+        tail = [ln.strip() for ln in lines[after:j] if ln.strip()]
+        out += ['', '~~~ statblock'] + head + [row] + tail + ['~~~', '']
+        rep['statblocks'] = rep.get('statblocks', 0) + 1
+        rep['tables'] = max(0, rep.get('tables', 0) - 1)
+        i = j
+    return out
+
+
+def _imp_boxes(lines, rep):
+    """A "Read Aloud" heading over its paragraphs -> `~~~ readaloud`; a
+    "Pacing" one -> a note sidebar. Each runs to the next heading or block."""
+    out, i = [], 0
+    while i < len(lines):
+        ra = _IMP_READALOUD_RE.match(lines[i].strip())
+        pa = None if ra else _IMP_PACING_RE.match(lines[i].strip())
+        if not (ra or pa):
+            out.append(lines[i])
+            i += 1
+            continue
+        j = i + 1
+        while j < len(lines):
+            ln = lines[j].strip()
+            if (_IMP_HEADING_RE.match(ln) or ln.startswith('~~~')
+                    or SCENE_BREAK_RE.match(ln) or PART_RE.match(ln)):
+                break
+            j += 1
+        paras = [ln.strip() for ln in lines[i + 1:j] if ln.strip()]
+        if ra:
+            # the heading is the box's label ("Read Aloud", "Read Aloud: The
+            # Inn"), so it stays as written, as the title
+            title = lines[i].strip()[2:].strip().strip('*').strip()
+            header = '~~~ readaloud' + (f' title="{title}"' if '"' not in title else '')
+            rep['readalouds'] = rep.get('readalouds', 0) + 1
+        else:
+            header = f'~~~ sidebar title="{pa.group(1).title()}" style="note"'
+            rep['notes_boxed'] = rep.get('notes_boxed', 0) + 1
+        rep['subheads'] = max(0, rep.get('subheads', 0) - 1)
+        body = []
+        for k, p in enumerate(paras):
+            body += ([''] if k else []) + [p]
+        out += ['', header] + body + ['~~~', '']
+        i = j
+    return out
+
+
+def game_blocks_from_import(lines, rep):
+    """Find the game blocks in a Word import's Markdown lines (see above)."""
+    return _imp_boxes(_imp_statblocks(lines, rep), rep)
 
 
 def import_summary(rep):
@@ -1179,6 +1436,13 @@ def import_summary(rep):
     if rep.get('breaks'):
         got.append(f"{rep['breaks']} passage" + ('s' if rep['breaks'] != 1 else '')
                    + ' with kept line breaks')
+    if rep.get('statblocks'):
+        got.append(f"{rep['statblocks']} stat block" + ('s' if rep['statblocks'] != 1 else ''))
+    if rep.get('readalouds'):
+        got.append(f"{rep['readalouds']} read-aloud box"
+                   + ('es' if rep['readalouds'] != 1 else ''))
+    if rep.get('notes_boxed'):
+        got.append(f"{rep['notes_boxed']} pacing note" + ('s' if rep['notes_boxed'] != 1 else ''))
 
     lost = []
     if rep.get('links'):

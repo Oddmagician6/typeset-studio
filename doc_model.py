@@ -340,6 +340,17 @@ def _runs_to_md(runs):
     return md
 
 
+def _statblock_line(runs):
+    """A stat block line back to its source: plain runs are the source text
+    itself, so they are written as they are, with no escaping. Emphasis put on
+    by the editor is written as markers."""
+    if all(not r["bold"] and not r["italic"] and not r.get("link")
+           and not r.get("note") for r in runs):
+        return "".join(r["text"] for r in runs)
+    return "".join(_emph_md([r]) if (r["bold"] or r["italic"]) else r["text"]
+                   for r in runs)
+
+
 def _block_collision(line):
     """True if a paragraph line would be mistaken for a structural block.
 
@@ -383,6 +394,15 @@ def from_markdown(raw, smartquotes=True):
                          for s in block_para_buf if s.strip()]
                 if lines:
                     block_children.append({"type": "stanza", "lines": lines})
+            elif block_type == 'statblock':
+                # A stat block's source is kept exactly as written, one plain
+                # run per line: its formats use `___` rules, `::` and `|` that
+                # the emphasis layer would rewrite, and `--- Actions` must still
+                # be a section after an edit. statblock.py reads the lines.
+                for s in block_para_buf:
+                    if s.strip():
+                        block_children.append({"type": "para",
+                                               "runs": [_run(s.strip())]})
             elif block_type in manuscript.LINE_BLOCKS:
                 # One line = one child (a list item, or a line of an aligned block)
                 for s in block_para_buf:
@@ -518,6 +538,9 @@ def to_markdown(blocks):
                         out.append("")                   # blank line between stanzas
                     for ln in stanza["lines"]:
                         out.append(_runs_to_md(ln["runs"]))
+            elif b["block_type"] == "statblock":
+                for kid in kids:                         # source lines, as written
+                    out.append(_statblock_line(kid["runs"]))
             elif b["block_type"] in manuscript.LINE_BLOCKS:
                 for kid in kids:                         # one item/line per line
                     out.append(_runs_to_md(kid["runs"]))

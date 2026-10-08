@@ -46,6 +46,8 @@ f.onload = function () {
 
   var out = {roundtrip: {}, scenarios: {}};
   Object.keys(CORPUS).forEach(function (k) { loadMd(CORPUS[k]); out.roundtrip[k] = getMd(); });
+  // the paste's Homebrewery wrapper, to compare with statblock.wrap_unfenced
+  out.wrapped = w.DocModel.wrapUnfenced(CORPUS['test_fixtures/ttrpg/statblock_formats.md']);
 
   var S = out.scenarios;
   function run(name, fn) {
@@ -148,6 +150,25 @@ f.onload = function () {
   });
   run('scene-button', function () {
     loadMd('# One\n\nText.\n'); caret(q('.wb-para'), true); act('scene'); type('After'); return getMd();
+  });
+  run('statblock-button', function () {
+    loadMd('# One\n\nText.\n'); caret(q('.wb-para'), true); act('statblock'); return getMd();
+  });
+  run('readaloud-button', function () {
+    loadMd('# One\n\nText.\n'); caret(q('.wb-para'), true); act('readaloud'); type('Boxed.');
+    return getMd();
+  });
+  run('statblock-line-edit', function () {
+    // a section line and a Homebrewery rule must come back exactly as typed
+    loadMd('# One\n\n~~~ statblock\n___\n**AC** 9\n--- Actions\n~~~\n');
+    var lines = rich.querySelectorAll('.wb-doc-para'); caret(lines[1], true);
+    enter(); type('**HP** 4 (1d8)'); return getMd();
+  });
+  run('paste-homebrewery', function () {
+    // a V3 monster block copied with no fence gets one; the text around it stays
+    loadMd('# One\n\nBefore.\n'); caret(q('.wb-para'), true); enter();
+    paste('<p>{{monster,frame</p>', 'Intro line.\n\n{{monster,frame\n## Bog-Thrall\n**AC** :: 9\n}}\n\nAfter line.');
+    return getMd();
   });
   run('list-button-in-letter', function () {
     loadMd('# One\n\n~~~ letter from="A"\nDear B,\n~~~\n'); caret(q('.wb-doc-para'), true);

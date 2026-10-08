@@ -299,6 +299,30 @@ table.block-table.rules-horizontal tr { border-bottom: 1px solid #444; }
 table.block-table.rules-horizontal { border-top: 1px solid #444; }
 table.block-table.rules-header { border-top: 1.5px solid #222; border-bottom: 1.5px solid #222; }
 table.block-table.rules-header thead tr { border-bottom: 1px solid #444; }
+/* game blocks (#74): read-aloud box, sidebar (and its note form), stat block */
+.readaloud { margin: 1.2em 0; padding: 0.5em 0.8em; background: #eeeeee; border-left: 3px solid #555555; font-style: italic; }
+.readaloud p { text-indent: 0; margin: 0.35em 0; }
+.readaloud p.block-title { font-style: normal; font-weight: bold; font-variant: small-caps; }
+.sidebar { margin: 1.2em 0; border: 1px solid #000; background: #f0f0f0; }
+.sidebar p { text-indent: 0; margin: 0.35em 0.8em; }
+.sidebar p.block-title { margin: 0; padding: 0.3em 0.8em; font-weight: bold; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 1px solid #000; }
+.sidebar-note { margin: 1.2em 0; border-left: 1px solid #000; padding-left: 0.8em; }
+.sidebar-note p { text-indent: 0; margin: 0.3em 0; }
+.sidebar-note p.block-title { font-weight: bold; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.1em; }
+section.statblock { margin: 1.4em 0; padding: 0.4em 0.6em; border-top: 2px solid #000; border-bottom: 2px solid #000; font-size: 0.95em; }
+section.statblock p { text-indent: 0; margin: 0.25em 0; }
+section.statblock .sb-name { font-weight: bold; font-size: 1.25em; text-transform: uppercase; margin: 0; }
+section.statblock .sb-cr { float: right; font-weight: bold; font-size: 0.85em; }
+section.statblock .sb-meta { font-style: italic; margin: 0 0 0.3em; }
+section.statblock hr { border: 0; border-top: 1px solid #000; margin: 0.4em 0; }
+section.statblock dl { margin: 0.2em 0; }
+section.statblock dt { display: inline; font-weight: bold; }
+section.statblock dd { display: inline; margin: 0; }
+section.statblock dd:after { content: ""; display: block; }
+section.statblock table.sb-scores { width: 100%; border-collapse: collapse; text-align: center; margin: 0.3em 0; }
+section.statblock table.sb-scores th, section.statblock table.sb-scores td { padding: 0.1em 0.2em; text-align: center; text-indent: 0; }
+section.statblock h3 { font-size: 1.05em; font-variant: small-caps; font-weight: bold; text-align: left; border-bottom: 1px solid #000; margin: 0.7em 0 0.3em; }
+section.statblock .sb-entry-name { font-weight: bold; font-style: italic; }
 .align p { text-indent: 0; margin: 0.2em 0; }
 .align-center { text-align: center; }
 .align-right { text-align: right; }
@@ -702,6 +726,10 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
                 lines.extend(_table_html(val, attrs, preset.get('table', {})))
                 no_indent_next = True
                 continue
+            if btype in ('readaloud', 'sidebar', 'statblock'):
+                lines.extend(_game_block_html(btype, val, attrs))
+                no_indent_next = True
+                continue
             if btype in ('center', 'centre', 'right', 'left'):
                 how = 'center' if btype in ('center', 'centre') else btype
                 lines.append(f'  <div class="align align-{how}">')
@@ -774,6 +802,82 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
     ch_title = chapter.get('title') or (num_fmt.format(n=number)
                                         if show_num and number else f'Section {idx}')
     return _xhtml(ch_title, '\n'.join(lines))
+
+
+def _game_block_html(btype, paras, attrs):
+    """XHTML for the game blocks (#74). A stat block is a <section> with a
+    definition list for its fields and a <table> for its scores, read from the
+    model statblock.py made of it; attribute values are plain text, escaped."""
+    out = []
+    if btype in ('readaloud', 'sidebar'):
+        note = btype == 'sidebar' and (attrs.get('style', '') or '').strip().lower() == 'note'
+        cls = 'sidebar-note' if note else btype
+        title = (attrs.get('title', '') or '').strip()
+        out.append(f'  <aside class="{cls}">' if btype == 'sidebar'
+                   else f'  <div class="{cls}">')
+        if title:
+            out.append(f'    <p class="block-title">{_text_to_html(title)}</p>')
+        for _, text in paras:
+            out.append(f'    <p>{_markup_to_html(text)}</p>')
+        out.append('  </aside>' if btype == 'sidebar' else '  </div>')
+        return out
+
+    m = attrs.get('_statblock') or {}
+    out.append('  <section class="statblock">')
+    name, cr = m.get('name', ''), (attrs.get('cr', '') or '').strip()
+    count = (attrs.get('count', '') or '').strip()
+    if name or cr or count:
+        head = _markup_to_html(name)
+        if count:
+            head += f' × {_text_to_html(count)}'
+        if cr:
+            head = f'<span class="sb-cr">CR {_text_to_html(cr)}</span>' + head
+        out.append(f'    <p class="sb-name">{head}</p>')
+    if m.get('meta'):
+        out.append(f'    <p class="sb-meta">{_markup_to_html(m["meta"])}</p>')
+    fields, scores = m.get('fields', []), m.get('scores', [])
+    at = min(m.get('scores_at', 0), len(fields)) if scores else len(fields)
+
+    def dl(fs):
+        if not fs:
+            return []
+        rows = ['    <dl>']
+        for f in fs:
+            rows.append(f'      <dt>{_markup_to_html(f["label"])}</dt>'
+                        f' <dd>{_markup_to_html(f["value"])}</dd>')
+        rows.append('    </dl>')
+        return rows
+
+    if fields or scores:
+        out.append('    <hr/>')
+    out += dl(fields[:at])
+    if scores:
+        saves = any(c.get('save') for c in scores)
+        out.append('    <table class="sb-scores">')
+        if saves:
+            out.append('      <tr><th></th><th></th><th>Mod</th><th>Save</th></tr>')
+            for c in scores:
+                out.append(f'      <tr><th>{c["name"]}</th><td>{c["score"]}</td>'
+                           f'<td>{c.get("mod", "")}</td><td>{c.get("save", "")}</td></tr>')
+        else:
+            out.append('      <tr>' + ''.join(f'<th>{c["name"]}</th>' for c in scores)
+                       + '</tr>')
+            out.append('      <tr>' + ''.join(
+                f'<td>{c["score"]} ({c["mod"]})</td>' if c.get('mod')
+                else f'<td>{c["score"]}</td>' for c in scores) + '</tr>')
+        out.append('    </table>')
+        out += dl(fields[at:])
+    for k, sec in enumerate(m.get('sections', [])):
+        if sec['name']:
+            out.append(f'    <h3>{_markup_to_html(sec["name"])}</h3>')
+        elif k or fields or scores:
+            out.append('    <hr/>')
+        for e in sec['entries']:
+            lead = (f'<span class="sb-entry-name">{_markup_to_html(e["name"])}</span> '
+                    if e['name'] else '')
+            out.append(f'    <p>{lead}{_markup_to_html(e["text"])}</p>')
+    out.append('  </section>')
+    return out
 
 
 # ---------------------------------------------------------------- OPF / NAV

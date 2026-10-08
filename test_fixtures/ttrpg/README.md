@@ -17,6 +17,7 @@ in hand. The plan itself is the #74 entry in `ROADMAP.md`.
 | `make_long_book.py` | Generates `generated/long_book.md` (22 chapters, 264 keyed rooms, 132 stat blocks; **311 pages** at 6 × 9 today) and `generated/long_statblock.md` (one 120-entry stat block that runs to 7 pages). Deterministic (seed 74). Re-run it rather than committing the output. |
 | `make_baseline.py` | Builds every fixture with the current code and writes `baseline/baseline.json`. Run it again after each phase and diff. |
 | `baseline/baseline.json` | The "before", taken at 1.3.2. |
+| `baseline/phase1.json` | The same run after Phase 1 (`make_baseline.py phase1.json`); diff the two. |
 
 Generated Markdown, PDFs and EPUBs are ignored by this folder's `.gitignore`.
 
@@ -64,6 +65,15 @@ Measured by `make_baseline.py` and by hand:
 - **Prose here avoids underscores and backslashes.** The app reads `_x_` as italic even
   inside backticks (there are no code spans), so fixture text that names files like
   `long_book.md` gets reformatted by the round trip.
+
+## After Phase 1 (2026-10-07)
+
+Phase 1 is built (`statblock.py`, `test_game_blocks.py`; the record is in ROADMAP #74,
+"Phase 1 as built"). Every fixture parses into the new blocks, the adventure, the corpus
+and the long book round-trip byte for byte, and `statblocks_with_one_para` is 0 except
+for edge-case blocks with a single field or entry. What the round trip still changes in
+`edge_cases.md` is the normalisation the cases allow (13, 19), case 18's nesting, case
+10's trailing space after `---`, and case 21's missing closing fence.
 
 ## Phase 1 touch points
 

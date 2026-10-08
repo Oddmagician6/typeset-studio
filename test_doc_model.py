@@ -590,6 +590,58 @@ Short row
 """
 
 
+GAME_BLOCKS_MD = """# The Crypt
+
+~~~ readaloud title="The Door"
+The door is *cold*. It doesn't move.
+
+A second paragraph, read aloud too.
+~~~
+
+~~~ sidebar title="Running the Crypt"
+Let the players' fear do the work.
+~~~
+
+~~~ sidebar title="Pacing" style="note"
+Ten minutes, no more.
+~~~
+
+~~~ statblock name="Bog Hag" meta="Medium fey, neutral evil" cr="3 (700 XP)" count="2"
+Armor Class: 17 (natural armor)
+**Hit Points** 82 (11d8 + 33)
+___
+STR 18 | DEX 12 | CON 16 | INT 13 | WIS 14 | CHA 16
+--- Traits
+***Amphibious.*** The hag can't drown.
+\\--- a literal line
+--- Actions
+***Claws.*** *Melee Weapon Attack:* +6 to hit, it's "sharp".
+~~~
+"""
+
+
+def test_game_blocks():
+    """The game blocks (#74): two prose blocks and a line-oriented stat block
+    whose lines are kept exactly as written."""
+    print("\n[game blocks]")
+    for smart in (True, False):
+        doc1 = doc_model.from_markdown(GAME_BLOCKS_MD, smartquotes=smart)
+        md2 = doc_model.to_markdown(doc1)
+        doc2 = doc_model.from_markdown(md2, smartquotes=smart)
+        eng_a = manuscript.parse_markdown(GAME_BLOCKS_MD, smartquotes=smart)
+        eng_b = manuscript.parse_markdown(md2, smartquotes=smart)
+        _check(f"game block engine fidelity (smart={smart})", eng_a == eng_b, _diff(eng_a, eng_b))
+        _check(f"game block model stability (smart={smart})", doc1 == doc2, _diff(doc1, doc2))
+    doc = doc_model.from_markdown(GAME_BLOCKS_MD)
+    sb = [b for b in doc if b["type"] == "docblock" and b["block_type"] == "statblock"][0]
+    _check("a stat block is one plain run per line, as written, never smartened",
+           [r["text"] for k in sb["children"] for r in k["runs"]][-1]
+           == '***Claws.*** *Melee Weapon Attack:* +6 to hit, it\'s "sharp".')
+    md = doc_model.to_markdown(doc)
+    _check("its source comes back byte for byte",
+           GAME_BLOCKS_MD[GAME_BLOCKS_MD.index('~~~ statblock'):] in md)
+
+
 def test_tables():
     """A table is line-oriented (one row per line); cells split on `|`."""
     print("\n[tables]")
@@ -971,6 +1023,7 @@ if __name__ == "__main__":
     test_figures()
     test_blocks()
     test_tables()
+    test_game_blocks()
     test_links()
     test_notes()
     test_note_refs()

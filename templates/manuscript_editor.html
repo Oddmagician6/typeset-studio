@@ -166,6 +166,14 @@
   .ms-rich .wb-doc[data-btype="quote"]{border-left:3px solid var(--rule);background:transparent;
     padding:2px 0 2px 16px;margin:16px 0 16px 12px}
   .ms-rich .wb-doc[data-btype="quote"] .wb-doc-para{font-style:normal;color:var(--muted)}
+  /* game blocks: a stat block's lines are its source, shown as written */
+  .ms-rich .wb-doc[data-btype="readaloud"] .wb-doc-para{font-style:italic}
+  .ms-rich .wb-doc[data-btype="sidebar"]{border:1px solid var(--rule-strong)}
+  .ms-rich .wb-doc[data-btype="sidebar"] .wb-doc-para{font-style:normal}
+  .ms-rich .wb-doc[data-btype="statblock"]{border-left:0;border-top:2px solid var(--rule-strong);
+    border-bottom:2px solid var(--rule-strong)}
+  .ms-rich .wb-doc[data-btype="statblock"] .wb-doc-para{font-style:normal;font-family:var(--mono);
+    font-size:12.5px;margin:0 0 2px}
   .ms-rich .wb-doc[data-btype="center"],
   .ms-rich .wb-doc[data-btype="centre"],
   .ms-rich .wb-doc[data-btype="right"],
@@ -247,6 +255,9 @@
         <button type="button" data-act="list">List</button>
         <button type="button" data-act="quote">Quote</button>
         <button type="button" data-act="table">Table</button>
+        <button type="button" data-act="readaloud" title="Boxed text to read aloud at the table">Read aloud</button>
+        <button type="button" data-act="sidebar" title="A titled callout box">Sidebar</button>
+        <button type="button" data-act="statblock" title="A game stat block, in any common format">Stat block</button>
         <button type="button" data-act="find">Find</button>
       </div>
       <input type="file" id="fig-file" accept=".jpg,.jpeg,.png,.gif" hidden>
@@ -287,6 +298,9 @@
           <tr><td><code>~~~ list</code> … <code>~~~</code></td><td>a bulleted list — one item per line. <code>~~~ list type="number"</code> numbers them</td></tr>
           <tr><td><code>~~~ quote source="…"</code> … <code>~~~</code></td><td>an inset quotation; the source line is optional</td></tr>
           <tr><td><code>~~~ table</code> … <code>~~~</code></td><td>a table — one row per line, cells split on <code>|</code>. The first row is the header (<code>header="no"</code> to turn that off); add <code>align="left,right"</code>, <code>widths="3,1"</code> or <code>caption="…"</code></td></tr>
+          <tr><td><code>~~~ readaloud title="…"</code> … <code>~~~</code></td><td>boxed text to read aloud to the players; the title is optional</td></tr>
+          <tr><td><code>~~~ sidebar title="…"</code> … <code>~~~</code></td><td>a callout box with a title bar. <code>style="note"</code> sets a label and a line, no box</td></tr>
+          <tr><td><code>~~~ statblock name="…" meta="…"</code> … <code>~~~</code></td><td>a stat block, one line per line: <code>Label: value</code> fields, a score row <code>STR 18 | DEX 12 | …</code> (modifiers worked out), <code>--- Actions</code> sections and <code>***Name.***</code> entries. Paste one from Word, a PDF or the Homebrewery as it is; <code>cr="…"</code> and <code>count="2"</code> go on the name line</td></tr>
           <tr><td><code>~~~ center</code> · <code>~~~ right</code> · <code>~~~ left</code></td><td>an aligned block — one line per line</td></tr>
           <tr><td><code>[text](https://…)</code></td><td>a link — also <code>mailto:</code> and <code>#chapter-2</code> inside the book</td></tr>
           <tr><td><code>a claim.[^src]</code> + <code>[^src]: the note</code></td><td>an endnote; numbers restart each chapter and a Notes page is added automatically. A note can cite another, and in rich mode typing the closing <code>]</code> makes the reference</td></tr>
@@ -644,6 +658,15 @@
         input.click();
       }
 
+      // a new stat block is a worked example of the line grammar: the name and
+      // meta on the first lines, `Label: value` fields, the score row (modifiers
+      // are worked out), `--- Section` lines and `***Name.***` entries
+      var STATBLOCK_SEED = ['Creature Name', '*Medium humanoid, neutral*',
+        'Armor Class: 12', 'Hit Points: 11 (2d8 + 2)', 'Speed: 30 ft.',
+        'STR 10 | DEX 14 | CON 12 | INT 10 | WIS 10 | CHA 10',
+        'Senses: passive Perception 10', 'Languages: Common', 'Challenge: 1/4 (50 XP)',
+        '--- Actions',
+        '***Strike.*** *Melee Weapon Attack:* +4 to hit, reach 5 ft., one target. *Hit:* 5 (1d6 + 2) damage.'];
       var ACTS = {
         chapter: function(){ linePrefix('# '); },
         subhead: function(){ linePrefix('## '); },
@@ -661,6 +684,9 @@
         list:    function(){ insertBlock('\n~~~ list\n\n~~~\n\n'); },
         quote:   function(){ insertBlock('\n~~~ quote\n\n~~~\n\n'); },
         table:   function(){ insertBlock('\n~~~ table\nColumn | Column\n | \n~~~\n\n'); },
+        readaloud: function(){ insertBlock('\n~~~ readaloud\n\n~~~\n\n'); },
+        sidebar: function(){ insertBlock('\n~~~ sidebar title=""\n\n~~~\n\n'); },
+        statblock: function(){ insertBlock('\n~~~ statblock\n' + STATBLOCK_SEED.join('\n') + '\n~~~\n\n'); },
         find:    function(){ openFind(); },
       };
       document.querySelectorAll('.toolbar button').forEach(function(b){
@@ -673,6 +699,20 @@
       });
 
       ta.addEventListener('input', changed);
+      // a Homebrewery stat block pasted with no fence gets one (see
+      // DocModel.wrapUnfenced); anything else pastes as the browser does it
+      ta.addEventListener('paste', function(e){
+        var cd = e.clipboardData;
+        var text = cd && (cd.getData('text/plain') || '').replace(/\r\n?/g, '\n');
+        if (!text) return;
+        var wrapped = DocModel.wrapUnfenced(text);
+        if (wrapped === text) return;
+        e.preventDefault();
+        var s = ta.selectionStart, v = ta.value;
+        ta.value = v.slice(0, s) + wrapped + v.slice(ta.selectionEnd);
+        ta.selectionStart = ta.selectionEnd = s + wrapped.length;
+        changed();
+      });
       ta.addEventListener('keydown', function(e){
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's'){ e.preventDefault(); save(); }
       });
@@ -1067,16 +1107,19 @@
         // seeded with a header row and one body row, so the pipes that separate
         // the cells are visible rather than something you have to know about
         table:   function(){ insertDocBlock('table', ['Column | Column', ' | ']); },
+        readaloud: function(){ insertDocBlock('readaloud'); },
+        sidebar: function(){ insertDocBlock('sidebar', null, {title: 'Title'}); },
+        statblock: function(){ insertDocBlock('statblock', STATBLOCK_SEED); },
         find:    function(){ exitRich(); openFind(); },
       };
 
       // shared by the List / Quote / Table buttons: drop a typed block in and
       // put the caret in its first line
-      function insertDocBlock(btype, lines){
+      function insertDocBlock(btype, lines, attrs){
         var kids = (lines || ['']).map(function(t){
           return {type:'para', runs: t ? [DocModel._run(t)] : []};
         });
-        var blk = WYS.renderBlock({type:'docblock', block_type:btype, attrs:{},
+        var blk = WYS.renderBlock({type:'docblock', block_type:btype, attrs:attrs || {},
                                    children:kids});
         var p = WYS.renderBlock({type:'para', runs:[]});
         var el = currentRichBlock();
