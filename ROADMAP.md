@@ -37,13 +37,16 @@ Start here in a new session. Each item points at its full entry below.
    with Word import and Homebrewery paste. Phase 2: `###`/`####` headings, the `#>`
    tagline, contents depth, PDF bookmarks, running heads by chapter or section,
    Letter/A4/A5 trims, Word headings by level. Both are in CHANGELOG's `## Unreleased`
-   beside #77; each phase's leftovers end its entry. **Next: Phase 3a** (the colour
-   model, the screen PDF, Cinzel, the dark style); its plan was agreed on 2026-10-08,
-   decisions at the head of the Phase 3 entry. Six phases in all; the author's own books are local test material in
+   beside #77; each phase's leftovers end its entry. **Phase 3a is built** (the colour
+   model, the screen PDF, Cinzel, the dark style; see "Phase 3a as built"). **Next: Phase
+   3b** (page backgrounds and the generated parchment, furniture ornaments, the light
+   Letter rulebook and the A5 zine); its decisions are at the head of the Phase 3 entry. Six phases in all; the author's own books are local test material in
    `Edenfall for test/` (gitignored).
    **State at hand-off (2026-10-08):** on branch `ttrpg-phase1`, Phase 1 is committed
-   (d3ca54e, the user chose "commit on the branch") and so is Phase 2 (6f9e426). All
-   36 test files pass. The branch is not merged to master: ask the user before merging.
+   (d3ca54e, the user chose "commit on the branch") and so is Phase 2 (6f9e426). Phase
+   3a is in the working tree, NOT committed (new: `test_screen.py`,
+   `presets/game-dark-screen.json`, the Cinzel fonts and licences). All 37 test files
+   pass. Ask the user before committing it or merging the branch to master.
    **Children's books (#75)** sit beside it: early-reader presets are cheap and could come
    first; picture books wait on full-bleed interior pages (Tier 5E) and a per-page designer.
 5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
@@ -2739,6 +2742,39 @@ doc_model / WYSIWYG round-trip:
     `#0c1116`; text `#ddd5c2`; headings gold `#c2a35e`; accents teal `#62c3c8`; muted
     `#b8b3a3` / `#8a8576`; Garamond text, Cinzel and Cinzel Decorative display. The
     bundled style takes a generic name (the repo is public).
+
+  **Phase 3a as built (2026-10-08).** One hook does the colour model: ReportLab sends every
+  colour a canvas *or a text object* sets through the canvas's `_enforceColorSpace` (the
+  press canvas's CMYK check uses it), so `engine._screen_canvasmaker` installs a mapping
+  there (`_screen_ink`): a **neutral** (black, a grey, white — the print ink of a
+  black-on-white page) moves to the same place between the palette's text colour and
+  page colour; a chromatic colour, or a `FixedColor` (what `_gb_color` and the role
+  colours return: colours the style chose), is kept. The two grey setters bypass the hook,
+  so the canvas routes them through it. No hard-coded grey was edited. The page colour is
+  painted by `BookDoc._paint_page` (the body templates' `onPage`), which then sets black as
+  the ink; the cover is painted with `_ts_ink_off` (its own colours). Style keys: `screen`
+  (`page`, `text`, `heading`, `accent`; '' = the print look; `SCREEN_DEFAULTS`),
+  `font_files.display` (only present when chosen; `fonts['display']`, used for chapter
+  title/number, part pages, `##`, `###` and the running heads). Heading colour: chapter and
+  part titles, `##`; accent: chapter label, part number, tagline, `###`. A screen build is
+  `build_pdf(..., screen=True)`, which reads the style through `_screen_preset` (adds
+  `_screen`; `_gb_section` then drops the `print_` twins). Game block text follows its fill
+  (`_ink_on`: under 4.5:1 against the palette text, it takes the page colour, black or
+  white, whichever reads best). App: book flag `screen_pdf` (Edit page and compose page),
+  `_screen_build` writes `…-screen.pdf` after the print PDF (a failure is a warning, never
+  the print file), `last_screen_pdf` on the project, a "Screen PDF" button on /projects and
+  a download on the result page. The style editor gained **Screen PDF colours**, a
+  **Display** font and the blocks' **Screen** colour fields (formerly hidden). Bundled:
+  Cinzel and Cinzel Decorative Regular/Bold (static TTFs from the upstream repos, OFL texts
+  in `fonts/licenses/`, in `BUILTIN_FONTS`), and `presets/game-dark-screen.json` (Letter,
+  EB Garamond + Cinzel Bold, running heads by chapter, contents to `##`). Tests:
+  `test_screen.py` — the contrast measure (each span against the pixels behind it, floor
+  3:1; it checks itself on a heading set in the page colour) over every fixture on the dark
+  palette, the print build light, roles and the display face, block colours, the cover
+  unchanged, the bundled style both ways, the form, and the app's two-file build.
+  **Left over from 3a:** a coloured link setting for the screen PDF (link colour is
+  ebook-only); the drop cap and small-caps lead-in take the text colour, not the heading's;
+  the style editor's live preview is the print look.
   - **Game-book presets**, single column first (two-column ones follow Phase 4): an
     **Edenfall-style dark screen book** (the author's own look, above), a light Letter
     rulebook, an A5/digest zine (OSR style). Genre look, not a copy of anyone's books.

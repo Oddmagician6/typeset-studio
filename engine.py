@@ -2174,6 +2174,9 @@ def register_fonts(preset):
         'regular':  roles['regular'],
         'bold':     roles.get('bold',   roles['regular']),
         'italic':   roles.get('italic', roles['regular']),
+        # titles and headings (#74 Phase 3), only when the style names one and
+        # the body faces loaded: a fallback book stays all Times
+        'display':  None if fallback else roles.get('display'),
         'fallback': fallback,
         'details':  details,
     }
@@ -2576,15 +2579,26 @@ class BookDoc(BaseDocTemplate):
             templates.append(PageTemplate(id='cover', frames=[full],
                                           onPage=self._draw_cover, onPageEnd=self._furniture))
         templates += [
-            PageTemplate(id='recto', frames=[recto], onPageEnd=self._furniture),
-            PageTemplate(id='verso', frames=[verso], onPageEnd=self._furniture),
-            PageTemplate(id='blank', frames=[recto], onPageEnd=self._furniture),
+            PageTemplate(id='recto', frames=[recto], onPage=self._paint_page,
+                         onPageEnd=self._furniture),
+            PageTemplate(id='verso', frames=[verso], onPage=self._paint_page,
+                         onPageEnd=self._furniture),
+            PageTemplate(id='blank', frames=[recto], onPage=self._paint_page,
+                         onPageEnd=self._furniture),
         ]
         self.addPageTemplates(templates)
 
     def _draw_cover(self, canv, doc):
         if canv.getPageNumber() != 1:
             return
+        # a cover keeps its own colours on a screen build
+        canv._ts_ink_off = True
+        try:
+            self._draw_cover_page(canv)
+        finally:
+            canv._ts_ink_off = False
+
+    def _draw_cover_page(self, canv):
         cv = self._cover
         if cv.get('mode') == 'designed':
             self._draw_designed_cover(canv)
@@ -2713,6 +2727,7 @@ class BookDoc(BaseDocTemplate):
             y -= fl.style.spaceAfter
 
     _press_canvas = None          # set by build_pdf for a press-ready build
+    _screen = None                # the screen palette, on a screen build
 
     def build(self, flowables, **kw):
         """Route a press build through the CMYK canvas, measuring passes included.
@@ -2723,7 +2738,22 @@ class BookDoc(BaseDocTemplate):
         """
         if self._press_canvas is not None:
             kw.setdefault('canvasmaker', self._press_canvas)
+        elif self._screen is not None:
+            kw.setdefault('canvasmaker', _screen_canvasmaker(self._screen))
         return BaseDocTemplate.build(self, flowables, **kw)
+
+    def _paint_page(self, canv, doc):
+        """A screen build's page colour, under everything on the page; then
+        black (the palette's text colour) as the ink, for anything drawn
+        without setting one."""
+        if self._screen is None:
+            return
+        canv._ts_ink_off = True
+        canv.setFillColor(self._screen['page'])
+        canv.rect(0, 0, self._pw, self._ph, stroke=0, fill=1)
+        canv._ts_ink_off = False
+        canv.setFillColor(_colors.black)
+        canv.setStrokeColor(_colors.black)
 
     def handle_flowable(self, flowables):
         f = flowables[0]
@@ -2805,17 +2835,20 @@ def _styles(preset, fonts):
                           allowWidows=0, allowOrphans=0)
     first = ParagraphStyle('first', parent=body, firstLineIndent=0)
     c = preset['chapter']
-    chap_title = ParagraphStyle('chap', fontName=fonts.get('bold', fonts['regular']),
+    # a display face, when the style has one, sets titles and headings
+    disp = fonts.get('display')
+    chap_title = ParagraphStyle('chap', fontName=disp or fonts.get('bold', fonts['regular']),
                                 fontSize=c['title_size'], leading=c['title_size'] * 1.15,
                                 alignment=TA_CENTER)
-    chap_num = ParagraphStyle('cnum', fontName=fonts['regular'],
+    chap_num = ParagraphStyle('cnum', fontName=disp or fonts['regular'],
                               fontSize=c['number_size'], leading=c['number_size'] * 1.2,
                               alignment=TA_CENTER, textColor=(0.3, 0.3, 0.3))
     # Anthology byline: author line under the piece title.
     chap_byline = ParagraphStyle('cbyl', fontName=fonts.get('italic', fonts['regular']),
                                  fontSize=b['size'] + 1, leading=(b['size'] + 1) * 1.3,
                                  alignment=TA_CENTER, textColor=(0.28, 0.28, 0.28))
-    subhead = ParagraphStyle('sub', parent=body, fontName=fonts.get('bold', fonts['regular']),
+    subhead = ParagraphStyle('sub', parent=body,
+                             fontName=disp or fonts.get('bold', fonts['regular']),
                              firstLineIndent=0, alignment=TA_CENTER,
                              spaceBefore=b['leading'], spaceAfter=b['leading'] * 0.5)
     # `#>` tagline under a chapter title: the byline's look
@@ -2838,16 +2871,27 @@ def _styles(preset, fonts):
             spaceBefore=b['leading'] * gap_before, spaceAfter=b['leading'] * gap_after,
             keepWithNext=1)
     section = _heading_style('sec', 'section', 'bold', 0.9, 0.3)
+    if disp:
+        section.fontName = disp
     subsection = _heading_style('subsec', 'subsection', 'italic', 0.6, 0.2)
     pd = preset.get('part_divider', {})
-    part_num_style = ParagraphStyle('partnum', fontName=fonts['regular'],
+    part_num_style = ParagraphStyle('partnum', fontName=disp or fonts['regular'],
                                     fontSize=pd.get('number_size', 13.0),
                                     leading=pd.get('number_size', 13.0) * 1.2,
                                     alignment=TA_CENTER, textColor=(0.35, 0.35, 0.35))
-    part_title_style = ParagraphStyle('parttitle', fontName=fonts.get('bold', fonts['regular']),
+    part_title_style = ParagraphStyle('parttitle',
+                                      fontName=disp or fonts.get('bold', fonts['regular']),
                                       fontSize=pd.get('title_size', 26.0),
                                       leading=pd.get('title_size', 26.0) * 1.15,
                                       alignment=TA_CENTER)
+    # the screen palette's heading and accent colours (a screen build only)
+    theme = preset.get('_screen') or {}
+    if theme.get('heading'):
+        for sty in (chap_title, part_title_style, subhead):
+            sty.textColor = theme['heading']
+    if theme.get('accent'):
+        for sty in (chap_num, part_num_style, chap_tagline, section):
+            sty.textColor = theme['accent']
     return dict(body=body, first=first, chap_title=chap_title, chap_num=chap_num,
                 chap_byline=chap_byline, chap_tagline=chap_tagline,
                 section=section, subsection=subsection,
@@ -3781,14 +3825,17 @@ GAME_BLOCK_DEFAULTS = {
 
 
 def _gb_section(preset, key):
-    return {**GAME_BLOCK_DEFAULTS[key], **(preset.get(key) or {})}
+    sec = {**GAME_BLOCK_DEFAULTS[key], **(preset.get(key) or {})}
+    if preset.get('_screen'):              # a screen build: the screen colours
+        sec = {k: v for k, v in sec.items() if not k.startswith('print_')}
+    return sec
 
 
 def _gb_color(sec, key):
     """The colour a build uses for `key`: the print value, else the plain one.
     '' (none) -> None."""
     v = sec.get('print_' + key, sec.get(key, ''))
-    return _hex(v) if v else None
+    return _fixed(_hex(v)) if v else None
 
 
 def _gb_font(fonts, style):
@@ -3809,6 +3856,33 @@ def _caps_markup(text):
 def _gb_caps(text, style):
     """Small caps as the engine sets them elsewhere: capitals, a size smaller."""
     return _caps_markup(text) if style == 'smallcaps' else text
+
+
+def _luminance(c):
+    """WCAG relative luminance of a colour."""
+    def lin(v):
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * lin(c.red) + 0.7152 * lin(c.green) + 0.0722 * lin(c.blue)
+
+
+def contrast(a, b):
+    """WCAG contrast ratio of two colours, 1 to 21."""
+    la, lb = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def _ink_on(preset, fill):
+    """The text colour for a game block with its own `fill`, on a screen build.
+
+    Block text is the palette's text colour, which on a dark page is light: on
+    a light fill it would vanish. So when that pair falls under 4.5:1, the text
+    takes whichever of the page colour, black and white reads best on the fill.
+    None leaves the text as it is (a print build, no fill, or a good pair)."""
+    theme = preset.get('_screen')
+    if not theme or fill is None or contrast(theme['text'], fill) >= 4.5:
+        return None
+    return max((theme['page'], _fixed(_colors.black), _fixed(_colors.white)),
+               key=lambda c: contrast(c, fill))
 
 
 def _is_light(color):
@@ -3899,6 +3973,7 @@ def _render_readaloud_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
         'readaloud', parent=st['body'], fontName=_gb_font(fonts, ra.get('style', 'italic')),
         fontSize=size, leading=lead, firstLineIndent=0, leftIndent=0, rightIndent=0,
         spaceBefore=0, spaceAfter=0)
+    body_style.textColor = _ink_on(preset, _gb_color(ra, 'fill')) or body_style.textColor
     rows = []
     title = (attrs.get('title', '') or '').strip()
     if title:
@@ -3934,6 +4009,9 @@ def _render_sidebar_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=N
         'sidebar', parent=st['body'], fontName=_gb_font(fonts, sb.get('style', 'regular')),
         fontSize=size, leading=lead, firstLineIndent=0, leftIndent=0, rightIndent=0,
         spaceBefore=0, spaceAfter=0)
+    if not note:                          # a note has no box: its text is on the page
+        body_style.textColor = (_ink_on(preset, _gb_color(sb, 'fill'))
+                                or body_style.textColor)
     border_c = _gb_color(sb, 'border_color')
     title_fill = None if note else _gb_color(sb, 'title_fill')
     title_color = _gb_color(sb, 'title_color')
@@ -3951,7 +4029,7 @@ def _render_sidebar_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=N
             'sidebartitle', parent=body_style,
             fontName=_gb_font(fonts, sb.get('title_style', 'bold')),
             fontSize=tsize, leading=tsize * 1.25,
-            textColor=title_color or _colors.black)))
+            textColor=title_color or body_style.textColor)))
     titled = bool(rows)
     rows += _gb_paras(block_paras, body_style, gap, hyph)
 
@@ -4002,6 +4080,7 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
         'statblock', parent=st['body'], fontName=fonts['regular'], fontSize=size,
         leading=lead, firstLineIndent=0, leftIndent=0, rightIndent=0,
         alignment=TA_LEFT, spaceBefore=0, spaceAfter=0)
+    base.textColor = _ink_on(preset, _gb_color(sm, 'fill')) or base.textColor
 
     def rule():
         return (TaperedRule(rule_c, rule_w, rule_shape) if rule_shape != 'none'
@@ -4012,7 +4091,7 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     count = (attrs.get('count', '') or '').strip()
     cr = (attrs.get('cr', '') or '').strip()
     nsize = sm.get('name_size', 0) or size + 3
-    ncolor = _gb_color(sm, 'name_color') or _colors.black
+    ncolor = _gb_color(sm, 'name_color') or base.textColor
     if name or count or cr:
         text = _caps_markup(name) if sm.get('name_caps', True) else name
         if count:
@@ -5050,6 +5129,105 @@ def press_check(path):
     return out
 
 
+# The colour screen PDF (#74 Phase 3). A style's `screen` section holds its
+# screen palette: the page and text colours, and the heading and accent colours
+# for titles and headings. '' leaves each at the print look (a white page,
+# black text). The print and press builds never read it: dark is screen-only.
+SCREEN_DEFAULTS = {'page': '', 'text': '', 'heading': '', 'accent': ''}
+
+
+class FixedColor(_colors.Color):
+    """A colour the style chose (a game block's fill, a heading colour): the
+    screen canvas sets it as it is. Every other neutral is the engine's own
+    black-and-grey print ink, which the screen canvas moves onto the palette."""
+
+
+def _fixed(color):
+    return FixedColor(color.red, color.green, color.blue, color.alpha) if color else None
+
+
+def screen_theme(preset):
+    """The screen palette as colours: page, text, and heading / accent (None
+    when unset). Unset page and text are white and black."""
+    sc = {**SCREEN_DEFAULTS, **(preset.get('screen') or {})}
+    def pick(key):
+        v = (sc.get(key) or '').strip()
+        return _fixed(_hex(v)) if re.fullmatch(r'#?(?:[0-9a-fA-F]{3}){1,2}', v) else None
+    return {'page': pick('page') or _fixed(_colors.white),
+            'text': pick('text') or _fixed(_colors.black),
+            'heading': pick('heading'), 'accent': pick('accent')}
+
+
+def _screen_preset(preset):
+    """The style as the screen build reads it: the palette resolved under
+    `_screen`, which also makes `_gb_section` give the game blocks their screen
+    colours in place of their print twins (`fill` rather than `print_fill`)."""
+    out = dict(preset)
+    out['_screen'] = screen_theme(preset)
+    return out
+
+
+def _screen_ink(theme):
+    """colour -> colour for the screen canvas.
+
+    A neutral (black, a grey, white) is the print ink of a black-on-white page,
+    so it is moved to the same place between the palette's text colour (for
+    black) and page colour (for white): a 30% grey caption reads as a muted
+    tone on a dark page, a pale table tint as a panel a shade off the page. A
+    chromatic colour, and any colour the style chose, is kept.
+    """
+    page, text = theme['page'], theme['text']
+
+    def ink(c):
+        if isinstance(c, FixedColor):
+            return c
+        if isinstance(c, str):
+            c = _colors.toColor(c)
+        if isinstance(c, (tuple, list)):
+            if len(c) != 3:
+                return c
+            c = _colors.Color(*c)
+        if not isinstance(c, _colors.Color) or isinstance(c, _colors.CMYKColor):
+            return c
+        r, g, b = c.red, c.green, c.blue
+        if max(r, g, b) - min(r, g, b) > 0.02:
+            return c
+        t = (r + g + b) / 3.0               # 0 = black ink, 1 = white
+        return _colors.Color(text.red + (page.red - text.red) * t,
+                             text.green + (page.green - text.green) * t,
+                             text.blue + (page.blue - text.blue) * t, c.alpha)
+    return ink
+
+
+def _screen_canvasmaker(theme):
+    """A canvas that sets the book on the screen palette (see `_screen_ink`).
+
+    ReportLab sends every colour a canvas or a text object sets through
+    `_enforceColorSpace` (the press canvas uses it to force CMYK), so one hook
+    reaches paragraph text, table rules and fills, ornaments and furniture
+    alike; only the two grey setters skip it, so they are routed through it.
+    `_ts_ink_off` turns the mapping off while a cover is painted: a cover keeps
+    its own colours.
+    """
+    from reportlab.pdfgen import canvas as _canvas
+    ink = _screen_ink(theme)
+
+    class ScreenCanvas(_canvas.Canvas):
+        def __init__(self, *a, **kw):
+            _canvas.Canvas.__init__(self, *a, **kw)
+            self._ts_ink_off = False
+            me = self
+            self._enforceColorSpace = lambda c: c if me._ts_ink_off else ink(c)
+
+        def setFillGray(self, gray, alpha=None):
+            self.setFillColor((gray, gray, gray), alpha=alpha)
+
+        def setStrokeGray(self, gray, alpha=None):
+            self.setStrokeColor((gray, gray, gray), alpha=alpha)
+
+    return ScreenCanvas
+
+
 def _press_canvasmaker(pw, ph):
     """A canvas that emits what a printer wants, and refuses what it doesn't.
 
@@ -5166,8 +5344,10 @@ def _does_not_fit(exc):
         f'its margins, the chapter sink, or a space or type size set very large.')
 
 
-def build_pdf(manuscript, preset, out_path, meta, press=False):
-    """Build the interior. `press=True` asks for the press-ready variant.
+def build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
+    """Build the interior. `press=True` asks for the press-ready variant,
+    `screen=True` for the colour screen PDF (the style's screen palette and
+    screen colours, no cover-less trimming; see `_screen_canvasmaker`).
 
     A press build that hits a colour it cannot express falls back to a normal
     one and says so in `press_error`, because a book that builds in RGB beats
@@ -5180,6 +5360,9 @@ def build_pdf(manuscript, preset, out_path, meta, press=False):
     except (TypeError, ValueError):
         _FLOOR.size = 0
     try:
+        if screen:
+            return _build_pdf(manuscript, _screen_preset(preset), out_path, meta,
+                              screen=True)
         if not press:
             return _build_pdf(manuscript, preset, out_path, meta)
         try:
@@ -5197,10 +5380,10 @@ def build_pdf(manuscript, preset, out_path, meta, press=False):
         _FLOOR.size = 0
 
 
-def _build_pdf(manuscript, preset, out_path, meta, press=False):
+def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
     fonts = register_fonts(preset)
     st = _styles(preset, fonts)
-    head_font = fonts['regular']
+    head_font = fonts.get('display') or fonts['regular']
 
     # A copy, not an edit in place: app.py parses once and builds both outputs
     # from the same structure, and the EPUB resolves its own links.
@@ -5256,6 +5439,8 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
         doc._fn_reserve, doc._fn_assign, doc._fn_flow = fn_reserve, fn_assign, fn_flow
         if press:
             doc._press_canvas = _press_canvasmaker(doc._pw, doc._ph)
+        elif screen:
+            doc._screen = preset['_screen']
         return doc
 
     def _resolve_foot(make_toc=None):
@@ -5372,5 +5557,6 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False):
         'cover_art_missing': cover_art_missing(cover['template'])
                              if cover and cover.get('mode') == 'designed' else [],
         'press':          bool(press),
+        'screen':         bool(screen),
         'has_cover':      cover is not None,
     }

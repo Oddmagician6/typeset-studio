@@ -276,8 +276,9 @@ BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'preset
              'cover_template', 'cover_color', 'cover_collection', 'cover_kicker',
              'cover_accent', 'cover_epigraph', 'cover_studio', 'format', 'front_matter',
              'created', 'updated', 'last_pdf', 'last_epub', 'last_print_package',
-             'last_package_scope')
-BOOK_FLAGS = ('include_toc', 'smartquotes', 'right_hand_starts', 'cover_overlay', 'press')
+             'last_package_scope', 'last_screen_pdf')
+BOOK_FLAGS = ('include_toc', 'smartquotes', 'right_hand_starts', 'cover_overlay', 'press',
+              'screen_pdf')
 
 
 def _shape_ref(kind):
@@ -1091,6 +1092,9 @@ DEFAULTS = {
     # how deep the contents page goes: 1 = chapters, 2 adds `##` subheads,
     # 3 `###` sections, 4 `####` sub-sections
     'toc': {'depth': 1},
+    # the colour screen PDF's palette (#74 Phase 3): page, text, and the heading
+    # and accent colours; '' keeps the print look. Print builds never read it
+    'screen': dict(engine.SCREEN_DEFAULTS),
 }
 
 
@@ -1311,9 +1315,14 @@ def unique_cover_id(base):
 BUILTIN_FAMILIES = ('Book',          # Libre Baskerville
                     'EBGaramond', 'Vollkorn', 'Alegreya',
                     'CrimsonPro', 'Lora', 'Spectral')
-BUILTIN_FONTS = {f'{fam}-{role}.ttf'
-                 for fam in BUILTIN_FAMILIES
-                 for role in ('Regular', 'Bold', 'Italic')}
+# Display faces for titles and headings (a style's `display` font, #74 Phase
+# 3): capitals-only designs with no italic, so they ship as Regular and Bold.
+BUILTIN_DISPLAY = ('Cinzel', 'CinzelDecorative')
+BUILTIN_FONTS = ({f'{fam}-{role}.ttf'
+                  for fam in BUILTIN_FAMILIES
+                  for role in ('Regular', 'Bold', 'Italic')}
+                 | {f'{fam}-{role}.ttf' for fam in BUILTIN_DISPLAY
+                    for role in ('Regular', 'Bold')})
 FONT_EXTS = ('.ttf', '.otf')
 
 
@@ -1568,7 +1577,8 @@ GAME_BLOCK_FIELDS = (
         ('pad_y', 'num', 'Padding down', 'points', _PT, 0.5),
         ('para_gap', 'num', 'Between paragraphs', 'points', _PT, 0.5),
         ('space_around', 'num', 'Space around', 'points', _PT, 0.5),
-        ('fill', 'hidden'), ('rule_color', 'hidden'),
+        ('fill', 'color', 'Screen fill', '#rrggbb · the screen PDF', None, None),
+        ('rule_color', 'color', 'Screen rule', '#rrggbb · the screen PDF', None, None),
     )),
     ('sidebar', 'sd', 'Sidebars', '~~~ sidebar title="…"', (
         ('font_size', 'num', 'Size', 'points · 0 = body size', _SIZE0, 0.25),
@@ -1586,8 +1596,10 @@ GAME_BLOCK_FIELDS = (
         ('pad_y', 'num', 'Padding down', 'points', _PT, 0.5),
         ('para_gap', 'num', 'Between paragraphs', 'points', _PT, 0.5),
         ('space_around', 'num', 'Space around', 'points', _PT, 0.5),
-        ('fill', 'hidden'), ('border_color', 'hidden'), ('title_fill', 'hidden'),
-        ('title_color', 'hidden'),
+        ('fill', 'color', 'Screen fill', '#rrggbb · the screen PDF', None, None),
+        ('border_color', 'color', 'Screen border', '#rrggbb · the screen PDF', None, None),
+        ('title_fill', 'color', 'Screen title bar', '#rrggbb · the screen PDF', None, None),
+        ('title_color', 'color', 'Screen title', '#rrggbb · the screen PDF', None, None),
     )),
     ('statblock', 'sk', 'Stat blocks', '~~~ statblock name="…" meta="…"', (
         ('font_size', 'num', 'Size', 'points · 0 = body size', _SIZE0, 0.25),
@@ -1619,7 +1631,9 @@ GAME_BLOCK_FIELDS = (
         ('pad_x', 'num', 'Padding across', 'points', _PT, 0.5),
         ('pad_y', 'num', 'Padding down', 'points', _PT, 0.5),
         ('space_around', 'num', 'Space around', 'points', _PT, 0.5),
-        ('fill', 'hidden'), ('name_color', 'hidden'), ('rule_color', 'hidden'),
+        ('fill', 'color', 'Screen fill', '#rrggbb · the screen PDF', None, None),
+        ('name_color', 'color', 'Screen name', '#rrggbb · the screen PDF', None, None),
+        ('rule_color', 'color', 'Screen rule', '#rrggbb · the screen PDF', None, None),
     )),
 )
 for _sec, _pre, _l, _s, _fields in GAME_BLOCK_FIELDS:
@@ -1681,7 +1695,13 @@ def _preset_fields(form):
             'regular': form.get('font_regular', 'Book-Regular.ttf').strip() or 'Book-Regular.ttf',
             'bold': form.get('font_bold', 'Book-Bold.ttf').strip() or 'Book-Bold.ttf',
             'italic': form.get('font_italic', 'Book-Italic.ttf').strip() or 'Book-Italic.ttf',
+            # a display face for titles and headings: only kept when chosen
+            **({'display': form['font_display'].strip()}
+               if (form.get('font_display') or '').strip() else {}),
         },
+        'screen': {k: (form.get('sc_' + k, '') or '').strip()
+                   if _COLOR_RE.match((form.get('sc_' + k, '') or '').strip()) else ''
+                   for k in engine.SCREEN_DEFAULTS},
         'body': {'size': _fs(form, 'b_size', 11.0), 'leading': _fs(form, 'b_leading', 15.5),
                  'indent': _fs(form, 'b_indent', 0.3),
                  'justify': 'b_justify' in form, 'hyphenate': 'b_hyphenate' in form},
@@ -3786,6 +3806,7 @@ def generate():
         'include_toc':    'include_toc' in form,
         'smartquotes':    'smartquotes' in form,
         'press':          'press' in form,
+        'screen_pdf':     'screen_pdf' in form,
         **{k: form.get(k, '').strip() for k in matter.KEYS},
     }
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -3795,6 +3816,7 @@ def generate():
 
     out_name  = ''
     epub_name = ''
+    screen_name = ''
 
     build_result = None
     page_count   = 0
@@ -3812,6 +3834,9 @@ def generate():
             _drop_out(out_name)
             flash(f'PDF build failed: {exc}')
             return render_template('generate.html', presets=presets, form=form)
+        screen_name, warn = _screen_build(ms, preset, meta, base, stamp)
+        if warn:
+            flash(warn)
 
     if fmt in ('epub', 'both'):
         epub_name = _claim_out(f'{base}-{stamp}.epub')
@@ -3829,6 +3854,7 @@ def generate():
     press     = _press_report(out_name, build_result)
     chapters  = len(ms['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
+                           screen_name=screen_name,
                            meta=meta, preset=preset, preset_id=pid,
                            chapters=chapters, ms_path=ms_path, ms_type=ms_type,
                            cover_path=cover_path, from_project=None, fmt=fmt,
@@ -4184,12 +4210,14 @@ def project_create():
         'include_toc': form.get('include_toc') == '1',
         'smartquotes': form.get('smartquotes') == '1',
         'press': form.get('press') == '1',
+        'screen_pdf': form.get('screen_pdf') == '1',
         **{k: form.get(k, '').strip() for k in matter.KEYS},
         'manuscript_file': ms_file,
         'manuscript_type': ms_type,
         'cover_file': cover_file,
         'last_pdf': form.get('last_pdf', ''),
         'last_epub': form.get('last_epub', ''),
+        'last_screen_pdf': form.get('last_screen_pdf', ''),
         'last_page_count': form.get('page_count', ''),
         'created': now,
         'updated': now,
@@ -4369,6 +4397,10 @@ def project_edit(pid):
             'include_toc': 'include_toc' in form,
             'smartquotes': 'smartquotes' in form,
             'press': 'press' in form,
+            # written only once it is used, so a save of a book from before the
+            # option changes nothing in it
+            **({'screen_pdf': 'screen_pdf' in form}
+               if 'screen_pdf' in form or 'screen_pdf' in proj else {}),
             **{k: form.get(k, '').strip() for k in matter.KEYS},
             'title':            form.get('title', '').strip(),
             'subtitle':         form.get('subtitle', '').strip(),
@@ -4889,7 +4921,8 @@ def _build_project(pid, proj):
     fmt   = proj.get('format', 'pdf')
     res = {'error': '', 'warnings': [], 'preset': preset, 'meta': meta,
            'cover_path': cover_path, 'ms_parsed': ms_parsed, 'fmt': fmt,
-           'out_name': '', 'epub_name': '', 'build_result': None, 'page_count': 0}
+           'out_name': '', 'epub_name': '', 'screen_name': '', 'build_result': None,
+           'page_count': 0}
     # an uploaded cover that has gone, or isn't a picture, was quietly left off
     cover_file = proj.get('cover_file') or ''
     if proj.get('cover_mode') == 'image' and cover_file:
@@ -4916,6 +4949,9 @@ def _build_project(pid, proj):
             logging.error('PDF build failed: %s', traceback.format_exc())
             _drop_out(res['out_name'])
             return {'error': f'PDF build failed: {exc}'}
+        res['screen_name'], warn = _screen_build(ms_parsed, preset, meta, base, stamp)
+        if warn:
+            res['warnings'].append(warn)
 
     if fmt in ('epub', 'both'):
         res['epub_name'] = _claim_out(f'{base}-{stamp}.epub')
@@ -4930,6 +4966,7 @@ def _build_project(pid, proj):
             res['epub_name'] = ''
 
     done = {'last_pdf': res['out_name'], 'last_epub': res['epub_name'],
+            'last_screen_pdf': res['screen_name'],
             'updated': datetime.now().isoformat(timespec='seconds')}
     if res['page_count']:
         done['last_page_count'] = res['page_count']
@@ -4937,6 +4974,22 @@ def _build_project(pid, proj):
     # into the book as it is now: it may have been saved while this built
     proj.update(update_project(pid, done) or {})
     return res
+
+
+def _screen_build(ms, preset, meta, base, stamp):
+    """The colour screen PDF beside a print one, when the book asks for it
+    (#74 Phase 3): (file name, '') or ('', a warning). A failure here never
+    costs the print PDF, which is already built."""
+    if not meta.get('screen_pdf'):
+        return '', ''
+    name = _claim_out(f'{base}-{stamp}-screen.pdf')
+    try:
+        engine.build_pdf(ms, preset, os.path.join(OUT_DIR, name), meta, screen=True)
+        return name, ''
+    except Exception as exc:
+        logging.error('Screen PDF build failed: %s', traceback.format_exc())
+        _drop_out(name)
+        return '', f'The screen PDF could not be built: {exc}'
 
 
 @app.route('/project/<pid>/generate', methods=['POST'])
@@ -4956,6 +5009,7 @@ def project_generate(pid):
     press     = _press_report(out_name, build_result)
     chapters  = len(res['ms_parsed']['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
+                           screen_name=res['screen_name'],
                            meta=res['meta'], preset=preset, preset_id=proj['preset'],
                            chapters=chapters, ms_path='',
                            ms_type=proj.get('manuscript_type', 'file'),
@@ -5063,6 +5117,7 @@ def _project_meta(proj):
         'cover_studio':     proj.get('cover_studio', ''),
         'include_toc':   proj.get('include_toc', False),
         'smartquotes':   proj.get('smartquotes', True),
+        'screen_pdf':    proj.get('screen_pdf', False),
         'press':         proj.get('press', False),
         **{k: proj.get(k, '') for k in matter.KEYS},
     }

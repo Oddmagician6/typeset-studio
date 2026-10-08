@@ -66,6 +66,22 @@ line here.
   adventure written in Heading 2 to 4 imports with its encounters as chapters.
   Its "Read Aloud" and "Pacing" headings are boxed at any level.
 
+- **A colour screen PDF for selling downloads.** Tick **Also make a colour
+  screen PDF** on a book's Edit page and every build also writes `…-screen.pdf`:
+  the same pages, set in the style's new **Screen PDF colours** (a page colour,
+  a text colour, and colours for titles and headings), with the game blocks in
+  their screen colours. Every grey in the book follows the palette, so a dark
+  page needs nothing else, and text in a box follows the box's fill. The printed
+  book is unchanged: a dark screen style still prints black on white.
+- **A display face for titles and headings.** A style's new **Display** font
+  sets chapter titles, part pages, subheads, sections and running heads. Cinzel
+  and Cinzel Decorative ship with the app for it.
+- **A new style, Game Book — Dark Screen**: US Letter, Garamond text, Cinzel
+  headings, a near-black screen page with gold headings and teal accents, and
+  game blocks set off to match.
+- **The game blocks' screen colours can be edited** in the style editor (the
+  **Screen** fields beside the printed ones).
+
 ### Fixed
 
 - **A chapter listed under a part fits its line in the contents.** Its dot

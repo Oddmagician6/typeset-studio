@@ -60,7 +60,8 @@ It runs on your own machine and sends nothing anywhere.
 - [Fonts](#fonts) · [Preview](#seeing-the-book-before-you-build-it) ·
   [Checking the ebook](#checking-the-ebook)
 - [Handing off to print](#handing-off-to-print) —
-  [press-ready interiors](#press-ready-interiors), [the wrap](#the-print-wrap--paperback-or-hardcover)
+  [press-ready interiors](#press-ready-interiors), [the colour screen PDF](#the-colour-screen-pdf),
+  [the wrap](#the-print-wrap--paperback-or-hardcover)
 - [Contributing](#contributing) · [Licence](#licence) · [Folder map](#folder-map)
 
 ---
@@ -477,6 +478,9 @@ The three starting styles:
 - **Classic Literary (6×9)** — warm, traditional novel interior; a good default.
 - **Gothic / Horror (5.5×8.5)** — tighter trim, denser page, sunken drop-cap openings.
 - **Modern Clean (6×9)** — airy and contemporary, centered folios, no running heads.
+- **Game Book — Dark Screen (8.5×11)** — a tabletop adventure or sourcebook: Garamond
+  text, Cinzel headings, running heads by chapter; its colour screen PDF is set on a
+  near-black page with gold headings and teal accents, and its print build is black on white.
 
 ---
 
@@ -494,7 +498,12 @@ The tool ships with **seven book serifs**, each with a regular, bold and italic:
 | Lora | `Lora` | Romance / Women's Fiction |
 | Spectral | `Spectral` | Thriller / Crime, Science Fiction (Clean) |
 
-All seven are under the SIL Open Font Licence — free to use and to embed in a book
+It also ships two **display faces** for titles and headings, **Cinzel** and **Cinzel
+Decorative** (capitals designs, in regular and bold), used by the Game Book — Dark Screen
+style. A style's **Display** font, when it names one, sets the chapter titles and
+numbers, part pages, `##` subheads, `###` sections and the running heads.
+
+All of them are under the SIL Open Font Licence — free to use and to embed in a book
 you sell. The licence texts are in `fonts/licenses/`.
 
 In a style's **Fonts** section you can point to your own typefaces two ways:
@@ -570,6 +579,24 @@ press rather than a screen:
 
 If a book genuinely contains colour, the press build can't express it: the file is built
 the ordinary way instead and the page tells you why. Nothing is silently converted.
+
+### The colour screen PDF
+
+A book sold as a download (DriveThruRPG, itch.io, a Patreon) is read on a screen, where
+colour costs nothing. Tick **Also make a colour screen PDF** on a book's Edit page (or the
+compose page) and every build writes a second PDF, `…-screen.pdf`, beside the print one,
+with the same layout and page count:
+
+- **The style's screen colours.** A style's **Screen PDF colours** set the page colour,
+  the text colour, and colours for titles and headings (**Headings**: chapter and part
+  titles, `##` subheads; **Accent**: chapter labels, taglines, `###` sections). Every grey
+  the book uses — captions, running heads, rules, table tints — moves onto that palette,
+  so a dark page needs no other settings. Blank fields keep the printed look.
+- **Game blocks in their screen colours** (the **Screen** fields under Game blocks). Text
+  in a box follows the box: a light fill keeps dark text even on a dark page.
+- **Bookmarks and links** as in every PDF, and the cover page in its own colours.
+
+The printed book never uses any of it: a dark screen style prints black on white.
 
 After a press build the result page adds a **Press check** card, measured off the finished
 file: colour, illustrations, transparency, annotations, trim box.

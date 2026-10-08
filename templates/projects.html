@@ -139,6 +139,9 @@
             {% if p.last_pdf %}
               <a class="btn btn-sm" href="{{ url_for('download', fn=p.last_pdf) }}">Last PDF</a>
             {% endif %}
+            {% if p.last_screen_pdf %}
+              <a class="btn btn-sm" href="{{ url_for('download', fn=p.last_screen_pdf) }}">Screen PDF</a>
+            {% endif %}
             {% if p.last_print_package %}
               <a class="btn btn-sm" href="{{ url_for('download', fn=p.last_print_package) }}">Last package</a>
             {% endif %}

@@ -488,7 +488,8 @@
         <div class="fs-body">
           <p class="hint" style="margin:0 0 8px;line-height:1.6">
             For tabletop game books: boxed text to read aloud, sidebars and stat blocks.
-            The colours here are the printed ones; keep fills light for a black-and-white interior.
+            The plain colour fields are the printed ones; keep fills light for a black-and-white
+            interior. The <b>Screen</b> ones are for the colour screen PDF.
           </p>
           {% for sec, pre, label, syntax, fields in game_block_fields %}
           {% set g = p.get(sec, {}) %}
@@ -719,6 +720,26 @@
         </div>
       </fieldset>
 
+      {% set sc = p.get('screen', {}) or {} %}
+      <fieldset>
+        <legend>Screen PDF colours</legend>
+        <div class="fs-body">
+          <p class="hint" style="margin:0 0 8px;line-height:1.6">For a book's <b>colour screen
+            PDF</b> (ticked on its Edit page): the page and text colours, and colours for
+            titles and headings. Blank keeps the printed look, a white page and black text.
+            The printed book never uses these, so a dark page here still prints light.</p>
+          <div class="row">
+            {% for key, label, hint in [('page', 'Page', 'the page colour'),
+                                        ('text', 'Text', 'body text'),
+                                        ('heading', 'Headings', 'titles, parts and ## subheads'),
+                                        ('accent', 'Accent', 'chapter labels, taglines, ### sections')] %}
+            <div class="field"><label>{{ label }}</label><span class="hint">#rrggbb · {{ hint }}</span>
+              <input type="text" name="sc_{{ key }}" value="{{ sc.get(key, '') }}" placeholder="blank = print look"></div>
+            {% endfor %}
+          </div>
+        </div>
+      </fieldset>
+
       {% set hd = p.get('headings', {}) %}
       {% set toc_depth = (p.get('toc', {}) or {}).get('depth', 1) %}
       <fieldset>
@@ -826,6 +847,13 @@
             {{ fontsel('Regular', 'font_regular', p.font_files.regular, 'from your font library') }}
             {{ fontsel('Bold', 'font_bold', p.font_files.bold) }}
             {{ fontsel('Italic', 'font_italic', p.font_files.italic) }}
+            {% set disp = p.font_files.get('display', '') %}
+            <div class="field"><label>Display</label><span class="hint">titles and headings · optional</span>
+              <select name="font_display">
+                <option value="" {{ 'selected' if not disp }}>None — use the bold</option>
+                {% if disp and disp not in (fonts or []) %}<option value="{{ disp }}" selected>{{ disp }} (not in your font library)</option>{% endif %}
+                {% for f in fonts or [] %}<option value="{{ f }}" {{ 'selected' if disp==f }}>{{ f }}</option>{% endfor %}
+              </select></div>
           </div>
           <p class="hint" style="margin-top:12px">Need another face?
             <a href="{{ url_for('fonts_page') }}" target="_blank">Manage fonts</a> to upload it.</p>

@@ -68,11 +68,16 @@
         <span class="k">Chapters</span><span>{{ chapters }}</span>
         {% if out_name %}<span class="k">PDF</span><span>{{ out_name }}</span>{% endif %}
         {% if epub_name %}<span class="k">EPUB</span><span>{{ epub_name }}</span>{% endif %}
+        {% if screen_name %}<span class="k">Screen PDF</span><span>{{ screen_name }}</span>{% endif %}
       </div>
       <div class="actions">
         {% if out_name %}
           <a class="btn btn-primary" href="{{ url_for('download', fn=out_name) }}">Download PDF</a>
           <a class="btn" href="{{ url_for('out_file', fn=out_name) }}" target="_blank" rel="noopener">Open PDF</a>
+        {% endif %}
+        {% if screen_name %}
+          <a class="btn" href="{{ url_for('download', fn=screen_name) }}"
+             title="The colour edition for reading on screen (DriveThruRPG and the like)">Download screen PDF</a>
         {% endif %}
         {% if epub_name %}
           <a class="btn {{ 'btn-primary' if not out_name }}" href="{{ url_for('download', fn=epub_name) }}">Download EPUB</a>
@@ -230,6 +235,8 @@
           <input type="hidden" name="include_toc"      value="{{ '1' if meta.get('include_toc') else '' }}">
           <input type="hidden" name="smartquotes"      value="{{ '1' if meta.smartquotes else '' }}">
           <input type="hidden" name="press"            value="{{ '1' if meta.press else '' }}">
+          <input type="hidden" name="screen_pdf"       value="{{ '1' if meta.get('screen_pdf') else '' }}">
+          <input type="hidden" name="last_screen_pdf"  value="{{ screen_name or '' }}">
           {% for k in matter_keys %}
           <input type="hidden" name="{{ k }}" value="{{ meta.get(k,'') }}">
           {% endfor %}
