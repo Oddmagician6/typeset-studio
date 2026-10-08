@@ -42,10 +42,8 @@ Start here in a new session. Each item points at its full entry below.
    user first. Six phases in all; the author's own books are local test material in
    `Edenfall for test/` (gitignored).
    **State at hand-off (2026-10-08):** on branch `ttrpg-phase1`, Phase 1 is committed
-   (d3ca54e, the user chose "commit on the branch"); Phase 2 is in the working tree,
-   NOT committed (new files `test_reference.py`, `test_fixtures/ttrpg/reference.md`,
-   `baseline/phase2.json`). All 36 test files pass. Ask the user before committing it
-   or merging the branch to master.
+   (d3ca54e, the user chose "commit on the branch") and so is Phase 2 (6f9e426). All
+   36 test files pass. The branch is not merged to master: ask the user before merging.
    **Children's books (#75)** sit beside it: early-reader presets are cheap and could come
    first; picture books wait on full-bleed interior pages (Tier 5E) and a per-page designer.
 5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
