@@ -7,12 +7,14 @@ sections before changing the engine.
 
 ---
 
-## Next up — priority order (as of 2026-10-07, after 1.3.1)
+## Next up — priority order (as of 2026-10-07, after 1.3.2)
 
 Start here in a new session. Each item points at its full entry below.
 
-1. ~~**Template art stops at the trim, not the bleed.**~~ — **DONE (#76, 2026-10-07),
-   unreleased**: it waits in CHANGELOG's `## Unreleased`.
+1. **Word import fixes (#77) — done, merged, unreleased.** Emphasis that closes (the
+   author's Bestiary printed 902 stray asterisks) and documents with no Normal style. They
+   wait in CHANGELOG's `## Unreleased`; cut **1.3.3** when the user asks. (The bleed fix,
+   #76, shipped in 1.3.2.)
 2. **Bug hunt plan: all 12 items done and released in 1.3.1.** Harnesses to copy:
    `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
    `test_manuscript_editor.py`, `test_project_edit.py` and `test_first_run.py` (real-time
@@ -30,8 +32,12 @@ Start here in a new session. Each item points at its full entry below.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
-4. **Tabletop RPG books (#74), when the designer is done:** typed blocks first (stat block,
-   read-aloud box, sidebar), two-column pagination after.
+4. **Tabletop RPG books (#74) — planned 2026-10-07, not started.** Six phases in its entry:
+   game blocks (with Word import), reference structure (headings, contents, bookmarks),
+   the game-book look and colour screen PDF (dark pages included), two columns (gated on a
+   spike in the real engine), index, and a special-pages designer shared with #75. The
+   author's own books are local test material in `Edenfall for test/` (gitignored). Start
+   with Phase 1.
    **Children's books (#75)** sit beside it: early-reader presets are cheap and could come
    first; picture books wait on full-bleed interior pages (Tier 5E) and a per-page designer.
 5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
@@ -2409,28 +2415,289 @@ doc_model / WYSIWYG round-trip:
   the paid-app scan reached the same conclusion from the other direction, and endnotes/footnotes/
   figures are specced there alongside the other missing block types.)*
 
-- **74. Tabletop RPG rulebooks and adventures (D&D-style)** — **FUTURE** *(large; noted
-  2026-10-02 at the user's request, not scheduled)*. A big self-publishing market (DMs Guild,
-  DriveThruRPG, Kickstarter zines) whose books have a strong, recognisable look and few
-  affordable tools that do it. It fits the app's bet: a family of "game book" **presets** owns
-  the look, and the manuscript carries only structure. What it would need, roughly by cost:
-  - **Typed blocks**, the same mechanism as the epistolary blocks (#4): a **stat block**
-    (`~~~ statblock name="…" size="…"` with ability scores laid out as a table, then traits and
-    actions), **read-aloud boxed text** (the shaded "read this to the players" box), and
-    **sidebars** / callouts. These reuse the block model, `doc_model` round trip and WYSIWYG.
-  - **Two-column body text**, the defining layout. ReportLab can do it with two frames per
-    page template; the hard parts are a column-spanning element (a full-width map or table
-    between two-column runs) and keeping footnotes, figures and the rich-mode preview right.
-  - Headings at more levels (chapter, section, sub-section, room keys like "A3. Guard Room"),
-    running heads by section, art spots and full-page maps (figures already exist; full-bleed
-    pages are the imposition work noted under Tier 5E), and a **table of contents with
-    sections**, likely an **index** (ruled out for novels in Tier 5H, but rulebooks expect one).
-  - A parchment-style background and ornament set as preset options, kept print-safe (light
-    enough for a black-and-white interior, and off for press-ready builds).
-  *Avoid the trade dress:* the look is genre convention, but the official books' fonts, page
-  art and logos are WotC's own, and a preset should look like the genre rather than copy
-  those books. Sequence after the wrap designer (#72); start with the typed blocks, which are
-  cheap and useful in single column, before taking on two-column pagination.
+- **74. Tabletop RPG rulebooks and adventures (D&D-style)** — **PLANNED** *(large; noted
+  2026-10-02, planned 2026-10-07 with the user; no work started)*. A big self-publishing
+  market (DMs Guild, DriveThruRPG, Kickstarter zines) whose books have a strong, recognisable
+  look and few affordable tools that do it. It fits the app's bet: a family of "game book"
+  **presets** owns the look, and the manuscript carries only structure.
+
+  **Decisions taken with the user (2026-10-07):**
+  - **Layout: both.** Flowed text set by presets (two columns, typed game blocks) for the
+    bulk of a book, *then* a hand-placed page designer for special pages (maps, handouts,
+    character sheets, title spreads). Not a per-page designer for the whole book.
+  - **Stat blocks: a 5e shape plus a generic one.** One block with one line grammar; the
+    5e layout (six ability scores, traits, actions) is a preset look, and any other system
+    uses the same block without the score row. The SRD 5.1 is CC-BY-4.0, so the *shape* is
+    safe; the official books' fonts, page art and logos are not (see trade dress below).
+  - **Outputs: all three** — print (KDP / IngramSpark / Lulu), a **colour screen PDF** for
+    DriveThruRPG (how most game books actually sell), and the EPUB.
+  - **Index: yes, as a later phase**, after the blocks and two columns.
+  - **Look before columns (decided 2026-10-07, after seeing the author's own books).** Their
+    finished adventure is *single column* on a dark screen page, so the game-book look and
+    screen PDF move up to Phase 3 and two columns become Phase 4.
+
+  **What the code has today (surveyed 2026-10-07):** one text frame per page (`BookDoc`
+  `recto`/`verso`), mutated per page for the footnote reservation in `handle_pageBegin`;
+  headings stop at `##` (a `### Room A3` line is *printed literally* as a paragraph today);
+  the contents lists chapters only; **no PDF bookmarks at all**; in-book `#anchor` links
+  exist (#49); `LINE_BLOCKS` (list, table, aligned) are the line-oriented fences a stat
+  block can follow; no Letter (8.5 × 11), A4 or A5 trim in `TRIM_PRESETS`; full-bleed
+  interior pages are not built (Tier 5E).
+
+  **Spike already run (2026-10-07):** ReportLab 5.0's `BalancedColumns` flowable, in a
+  single-frame page, carried a 44-paragraph two-column run across two pages with a boxed
+  block inside it, then a **full-width table between two-column runs**, then a second run
+  balanced at its end. So two columns need no second page engine: a chapter becomes a
+  sequence of full-width flowables and `BalancedColumns` runs inside the frame the engine
+  already has, and the footnote reservation (which only shrinks that frame) still applies.
+  What the spike did *not* cover is listed under Phase 4's gate.
+
+  **Test material is ready (2026-10-07):** `test_fixtures/ttrpg/` holds an original sample
+  adventure, a 9-block stat block corpus (5e and four other systems), 21 edge cases, the
+  stat block line grammar as a 35-case JSON spec, draft preset sections, a 311-page
+  long-book generator, and a baseline of what 1.3.2 does with all of it. Its README lists
+  the findings (smart punctuation turns `---` into an em dash before a block sees it;
+  curly-quoted attributes are silently dropped for *every* block type today, a bug to fix
+  in Phase 1) and Phase 1's touch points with line numbers.
+
+  **The author's own books (2026-10-07), kept local:** `Edenfall for test/` in the repo
+  root is **gitignored** (the repo is public; these are the author's unpublished books, so
+  they are never committed). Tests that use them must skip cleanly when the folder is
+  absent. It holds a Bestiary (Word, ~30,000 words, 71 stat blocks), a Compendium of magic
+  items (Word, ~14,000 words), the Volume 1 adventure (Word, ~4,700 words) with the PDF the
+  author made of it (22 Letter pages, WeasyPrint), and two maps (a 1660 × 948 village map,
+  a 2744 × 4000 battle map). What they showed:
+  - **The target look:** single column, a near-black screen page with light text, gold
+    Cinzel caps for titles and teal small caps for subheads, EB Garamond-style body text,
+    a diamond-and-rule ornament under titles, a running footer ("Edenfall Collection ·
+    Ashforge Studio") with the folio, and a contents page without dot leaders. Chapter
+    openers are a label, a title and an italic tagline under it (a numbered label like
+    "Encounter {n}" in roman numerals). Cinzel and Cinzel Decorative are
+    OFL, so the look can be built from licensed faces.
+  - **Blocks as the author uses them:** read-aloud boxes carry a *title* after the "Read
+    Aloud" label; stat blocks show the **CR on the name line**, right-aligned, and a count
+    ("× 2" after the name); some stat blocks are **partial** (a line saying to use a
+    standard creature's statistics with changes, then only the changed fields); "Pacing"
+    notes are a small labelled callout; a creature's stat block is followed by a
+    ***Lore*** section of prose outside the block.
+  - **How the Word files are written:** stat block labels have **no colon** (bold
+    "Armor Class" then "12"), the scores are a one-row Word table (`STR` over `11 (+0)`,
+    hyphen-minus for negatives), sections are bold paragraphs ("Actions"), traits are
+    bold-italic names. Today's importer already turns the score table into
+    `STR 11 (+0) | DEX 12 (+1) | …`, the Phase 1 score-row grammar. The adventure has no
+    Heading 1 (its title is a Heading 2), so it imports as one untitled chapter with 41
+    same-level subheads; headings 2–4 all flatten to `##`.
+  - **Two importer bugs, fixed as #77** before any #74 work: stray asterisks from emphasis
+    runs ending in a space (902 in the imported Bestiary), and a crash on a document with
+    no Normal style (the Compendium could not be imported at all). The Compendium also has
+    92 asterisks typed into its text as Markdown-style emphasis; they import literally,
+    correctly, and are a fix for the document, not the app.
+
+  **Phases.** Each one ships on its own and is released on its own; each is useful without
+  the next. The seven-file round for a block type (Tier 5A's list: `manuscript.py`,
+  `engine.py`, `epub.py`, `doc_model.py` + `static/doc_model.js` byte-identical,
+  `static/wysiwyg.js`, `templates/manuscript_editor.html`, `test_doc_model.py`) applies to
+  every new block below.
+
+  **Phase 1 — Game blocks, single column** *(medium)*. Useful at once in any book.
+  - `~~~ readaloud` — the boxed "read this to the players" text: prose, shaded fill, rule
+    or bar at the side. Preset section `readaloud` (fill, rule colour/side, italic or not,
+    padding).
+  - `~~~ sidebar title="…"` — a callout box with a title bar. Prose paragraphs only in v1:
+    the block model has no nested fences, so a list or table inside one is a later
+    question. Preset section `sidebar`.
+  - `~~~ statblock name="…" meta="…"` — **line-oriented** (one line per line, like a
+    `LINE_BLOCKS` fence, so the rich editor keeps every line). The grammar, the same for
+    every system:
+    ```
+    ~~~ statblock name="Bog Hag" meta="Medium fey, neutral evil"
+    Armor Class: 17 (natural armor)
+    Hit Points: 82 (11d8 + 33)
+    Speed: 30 ft.
+    STR 18 | DEX 12 | CON 16 | INT 13 | WIS 14 | CHA 16
+    Skills: Deception +5, Stealth +3
+    Challenge: 3 (700 XP)
+    --- Traits
+    ***Amphibious.*** The hag can breathe air and water.
+    --- Actions
+    ***Claws.*** *Melee Weapon Attack:* +6 to hit, reach 5 ft., one target.
+    ~~~
+    ```
+    `Label: value` → a field row (label bold); a line of two or more `NAME n` cells split on
+    `|` → the score row, set as a table, with the modifier worked out when only the score is
+    given (`18` → `18 (+4)`; a written modifier is kept); `--- Name` → a section heading
+    with its rule; anything else → an entry paragraph. A generic system just leaves out the
+    score row. Splits across pages and columns as a single-column `Table` (the `doc_block`
+    box rule: never `KeepTogether`). Preset section `statblock` (title face/colour, rule
+    colour and shape, fill, field and section styles); EPUB as a `<section>` with a
+    definition list and a score `<table>`.
+  - **Many stat block formats accepted, most common first** (the user's call,
+    2026-10-07: paste a stat block from wherever it was written). Inside a `~~~ statblock`
+    fence the reader accepts, in this order of priority and of building:
+    1. **the classic 5e layout**, bold labels with no colon (`**Armor Class** 12`), as typed
+       in Word or Google Docs or copied from D&D Beyond — and the same pasted from a PDF
+       with no formatting at all (known labels; a line of score names then a line of
+       values; title-case entry names ending in a full stop);
+    2. **Homebrewery / GM Binder Markdown**: V3's `{{monster,frame` with `**Label** ::
+       value`, and the legacy `___` + `> - **Label** value` form; their two-row score
+       table and `### Actions` headings;
+    3. **the colon form** (`Armor Class: 12`, above);
+    4. **the 2024 5e layout**: `AC 15  Initiative +2 (12)` on one line, a score table with
+       modifier *and* save (`Str 14 +2 +2`), `CR 1/2 (XP 100; PB +2)`;
+    5. **the old-school one-line stat line** (`AC 6 [13], HD 2* (9hp), Att …, MV …`),
+       split at each comma that comes before a known abbreviation.
+    Every format reads into **one model** and prints in the style's one look. The source is
+    **stored as written** (a line-oriented fence keeps every line), so nothing is
+    rewritten behind the writer's back and the round trip is trivial. Homebrewery blocks
+    pasted *without* a fence are found by the paste and import converter and wrapped in
+    one; the parser never reads `>` or `___` outside a fence, because a novel may contain
+    either. The full reading rules and the expected model are
+    `test_fixtures/ttrpg/statblock_formats.json`; `statblock_formats.md` is one creature
+    in every format, and formats 1–3 must read identically. Build in the order above: 1
+    and 3 share most of a reader, 2 is a wrapper over 1, then 4, then 5.
+  - Print safety from day one: every fill has a value tested on a black-and-white
+    interior, and press-ready builds (`press_check`) treat block colours like any other.
+  - **From the author's books:** `~~~ readaloud title="…"` (an optional label line);
+    `~~~ statblock` takes `cr="1 (200 XP)"` (set on the name line, right-aligned) and
+    `count="2"` ("× 2" after the name); a partial stat block (fields and sections, no
+    score row, a `meta` naming the standard creature it changes) must look deliberate, not
+    broken; a **note** variant of the sidebar for "Pacing" callouts
+    (`~~~ sidebar title="Pacing" style="note"`: a label and a line, no box).
+  - **Word import of game blocks**, since the author's material lives in Word: a 5e stat
+    block in the Bestiary's shape (bold name; italic meta; bold-label fields with no colon;
+    the one-row score table; bold section paragraphs; bold-italic entries) becomes a
+    `~~~ statblock`, ending at the next bold name, a heading or a ***Lore*** paragraph,
+    which stays prose. A heading reading "Read Aloud" (optionally "Read Aloud — title")
+    with the paragraphs under it becomes `~~~ readaloud`. Tested against the Bestiary when
+    the local folder is present: 71 score tables in, the same number of stat blocks out,
+    every word kept, nothing else turned into a block.
+  - `sample/` gains a short adventure manuscript that uses every block.
+  - **Tests:** parse + render + EPUB + round trip per block; a stat block taller than a page
+    splits and loses no line; the modifier rule; a `test_doc_model.py` stability case for
+    each.
+
+  **Phase 2 — Reference-book structure** *(small–medium)*. Also helps nonfiction.
+  - **`###` and `####` headings** (section, sub-section; a room key like `### A3. Guard
+    Room` is a `###`). *Back-compat:* today those lines print literally, so a book with one
+    changes — check `test_fixtures/` and the user's `projects/` for any before shipping,
+    and keep `\###` as the escape (line-start `\#` already exists). Preset styles per level;
+    `doc_model` gains the levels (a new heading node, checked with `read(render(m))`).
+  - **Contents with sections:** a `toc.depth` preset value (1 = chapters, as now; 2–3 adds
+    `##`/`###`), recorded by a heading marker like `TocMarker`; dotted leaders stay.
+  - **PDF bookmarks** (`bookmarkPage` + `addOutlineEntry`) for parts, chapters and
+    sections — DriveThruRPG asks for them, and every book benefits. Every build gets them.
+  - **Running heads by section** as a preset choice (chapter on the verso, current `##`
+    section on the recto).
+  - **Trims:** Letter (8.5 × 11), A4 and A5 added to `TRIM_PRESETS`, and checked against
+    the retailers' wrap presets (#24) and Send to print (#65).
+  - **Chapter label and tagline** (the author's openers): the label already exists as
+    `chapter.number_format` ("Encounter {n}", with roman numerals as a choice); the italic
+    tagline under the title is new — a line under `# Title` (syntax to choose; the
+    anthology byline `# Title | Author` sets an italic line in the same place, #31).
+  - **Word headings by level:** Heading 2–4 import as `##`/`###`/`####` rather than all as
+    subheads, and a document with no Heading 1 promotes its top level used to chapters
+    (the Volume 1 adventure).
+  - **Tests:** heading levels through parse/render/EPUB/round trip; contents depth; the
+    bookmark tree read back with `fitz` (`get_toc`); the back-compat case.
+
+  **Phase 3 — The game-book look and the screen PDF** *(medium)*.
+  - **Game-book presets**, single column first (two-column ones follow Phase 4): an
+    **Edenfall-style dark screen book** (the author's own look, above), a light Letter
+    rulebook, an A5/digest zine (OSR style). Genre look, not a copy of anyone's books.
+  - **Dark pages:** a screen target needs a page colour *and* a text colour (today text is
+    always black), and every block's colours need a dark-page value too. Dark is
+    screen-only: the print build of the same book is light.
+  - **A build target, "Colour PDF (screen)"** beside print and press-ready: RGB, page
+    backgrounds on, bookmarks and links (Phase 2), colour ornaments. Print turns
+    backgrounds off and uses each block's print-safe values; press-ready keeps the CMYK
+    path. One preset, three outputs: the preset carries a `screen` and a `print` value only
+    where they differ.
+  - **Page backgrounds** (`page_background: {image, color, opacity}`), drawn under body
+    pages by an `onPage` hook. A **parchment texture generated by the app** (Pillow noise,
+    no licence question — the ornaments' lesson, #56). Screen PDF only until Phase 6's
+    full-bleed pages exist: a background on a print interior without bleed would print a
+    white edge, a print-incorrect promise.
+  - Page furniture ornaments (a header bar, corner pieces, a footer band) as vectors in
+    `ornaments.py`, so PDF, EPUB and picker share one definition.
+  - **Fonts:** Cinzel and Cinzel Decorative (OFL; what the author's book uses), plus
+    perhaps one more display face, licences checked and filed in `fonts/licenses/` as #44
+    did. EB Garamond is already bundled.
+  - **Trade dress:** no fonts, page art, logos or names from the official books (no
+    "inspired by" clones of their faces); the tapered red rule and a stat block's order are
+    genre convention, the specific art is not.
+  - EPUB: block CSS, no backgrounds.
+
+  **Phase 4 — Two columns** *(large; the risky one)*. **Gate: a spike in the real engine
+  before any feature code**, passing all of:
+  1. a two-column chapter in `BookDoc` with mirrored margins: column x positions measured
+     off the PDF on recto and verso (the parity check in Conventions);
+  2. every block type inside a column at column width — figures (clamped to the *column*,
+     then the page, so `KeepTogether` never gets something taller than the frame), tables
+     (`_table_widths` at the narrow measure), lists, quotes, poems, doc blocks, the Phase 1
+     game blocks, ornaments (width fraction of the column);
+  3. spanning elements: the chapter opener, and a figure or table marked `span="yes"`,
+     breaking a run and starting a fresh balanced one below;
+  4. footnotes: either `FnProbe` inside a column reports the right page and the reserve
+     still holds, or two-column books set notes as endnotes (fallback, stated in the style
+     editor) — decided by the spike, not assumed;
+  5. no words lost (manuscript words in = PDF words out) and no infinite layout loop on an
+     unsplittable flowable taller than a column;
+  6. a 300-page two-column book builds in a time comparable to one column (`BalancedColumns`
+     re-wraps to balance; measure it) — the TOC and footnote passes multiply this.
+  Then the feature:
+  - Preset `columns: {count: 1|2, gap, rule, balance_end}`; 1 is every existing style,
+    unchanged byte for byte.
+  - `_build_story` groups consecutive in-column blocks into runs; `avail_w` is threaded as
+    the column width into every renderer (it is already a parameter of each).
+  - `span="yes"` on `figure` and `table` (and a chapter opener always spans).
+  - The EPUB ignores columns; the rich editor stays a one-column writing view; the page
+    preview shows the real columns because it renders the PDF.
+  - **Tests:** a `test_columns.py` built on the spike's checks, plus the word-count and
+    loop guards.
+
+  **Phase 5 — Index and page references** *(medium–large)*.
+  - Inline markers `{index: Owlbear}` and `{index: Monsters > Owlbear}` (invisible in
+    print). In the document model they are **their own run type**, never plain text — the
+    lesson of note runs (#69): never coalesce across one, never detect one from run text.
+  - The build captures each marker's page in the measuring pass (as the TOC pass does) and
+    sets an **Index** back-matter page (a `matter.py` entry): two columns, grouped by
+    letter, page ranges merged. EPUB: the index links to anchors.
+  - Page references `[see the Guard Room](#a3-guard-room)` printed as "(page 42)" from the
+    same pass; since that changes text length, iterate to a fixed point with a cap, like
+    the footnote pass.
+
+  **Phase 6 — The special-pages designer** *(large)*. Shared with picture books (#75): build
+  it once for both.
+  - **Prerequisite: full-bleed interior pages** (Tier 5E): the document built at trim +
+    0.125" on the outer edges, every margin, frame and folio re-checked with the recto/verso
+    checklist. This also unlocks Phase 3's backgrounds in print.
+  - A **page design** document per special page — the wrap designer's model (#72): elements
+    anchored to the page (text, image, rect, vector, later a fillable box), the same SVG
+    editor, width tables that break lines where the PDF does, safe-zone, bleed and dpi
+    checks.
+  - Placed into the book with `~~~ page src="handout-1"` (its own page, recto/verso or
+    spread as asked); the engine draws it with `wrap_design`'s routines; the EPUB gets it
+    as an image page, as covers do (#43).
+  - Uses: maps, handouts, character sheets, chapter title spreads, adverts. Fillable PDF
+    form fields on character sheets are a possible follow-up, not in this phase.
+
+  **Order and why.** 1 and 2 are cheap and pay off in single column (and 2 helps every
+  nonfiction book). 3 comes before columns because the author's own books are single
+  column: it reaches their look soonest. 4 is gated on its spike; if the spike fails,
+  everything else still stands. 5 needs 2's headings (and can build a "by Challenge
+  Rating" index from the stat blocks' `cr`, which the Bestiary keeps by hand today). 6
+  needs full-bleed pages and is shared with #75.
+
+  **Open questions, to settle at the start of the phase they belong to:** which OFL display
+  faces (3); whether a sidebar may hold lists or tables (needs nested blocks; 1 says no);
+  Letter or A4 as the default rulebook trim (3); whether two-column footnotes are worth
+  having if the spike says they are hard (4); the tagline syntax (2). *Decided
+  2026-10-07 (user):* Homebrewery blocks are only wrapped in a fence by the paste and
+  import converter, never read outside one; the 2024 saves print as their own column (a
+  `table-2024` scores setting); plain-text entry names are recognised inside a stat block
+  fence only (`decided` in `statblock_formats.json`). The six stat block grammar questions
+  were decided the same day, all as recommended ("Decided" in `test_fixtures/ttrpg/README.md`):
+  Phase 1 has no open grammar questions.
 
 - **75. Children's books: picture books and early readers** — **FUTURE** *(large; noted
   2026-10-06 at the user's request, not scheduled)*. Another big self-publishing market, and
@@ -3056,6 +3323,28 @@ the fore-edge, head or tail when the cut wandered. Uploaded art (#66) already ra
   bindings, and compares a strip just inside each cut with one just outside it. The old
   engine fails 88 of those checks; vintage's vignette over the gradient alone was within
   tolerance even before.
+
+**77. Word import: emphasis that closes, and documents with no Normal style** *(small;
+found in the author's own 5e books, 2026-10-07, unreleased)*
+
+Importing the author's Edenfall Bestiary printed **902 stray asterisks** (two per trait and
+action name), and their Compendium would not import at all.
+- **Emphasis ending in a space.** Word stores "***Keen Smell.*** The wolf…" as a
+  bold-italic run *ending in the space*, and `_emph` wrapped the whole run, giving
+  `***Keen Smell. ***`, which the parser can't close. `_emph` now keeps leading and
+  trailing whitespace outside the markers (a run that is only whitespace gets none). Bold
+  alone happened to survive it; bold-italic and italic did not.
+- **One phrase in several runs.** Word splits a styled phrase into runs at will, and
+  `*Pack **Tactics*` came out of an italic split. `_emph` joins adjacent runs with the
+  same emphasis first, and `_para_md` now hands it the runs between links and note
+  references together (a note reference still follows its own run).
+- **No Normal style.** A document made by a tool rather than Word may define no Normal
+  style, so python-docx gives an unstyled paragraph `style = None`, and `import_docx`
+  stopped on `p.style.name`. It is body text now.
+- Tests in `test_import.py` build each case as a real Word file; the old importer fails all
+  seven. Re-importing the author's three books (local only): 0 stray asterisks in the
+  Bestiary and the adventure. The Compendium's remaining 92 are typed into its text and
+  import literally, as they should.
 
 ### ◻ Tier 5 — competitive gap backlog (from the paid-app scan, 2026-07-26)
 

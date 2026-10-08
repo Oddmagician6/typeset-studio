@@ -1,0 +1,421 @@
+{
+ "_about": "Record what the app does today with the TTRPG fixtures (ROADMAP #74).",
+ "version": "1.3.2",
+ "files": {
+  "adventure.md": {
+   "chapters": 4,
+   "fences": 13,
+   "new_type_fences": 10,
+   "statblocks_with_one_para": 2,
+   "round_trip_identical": false,
+   "fence_detail": [
+    {
+     "type": "sidebar",
+     "attrs": {
+      "title": "Running This Adventure"
+     },
+     "paras": 2
+    },
+    {
+     "type": "table",
+     "attrs": {},
+     "paras": 5
+    },
+    {
+     "type": "readaloud",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "list",
+     "attrs": {},
+     "paras": 4
+    },
+    {
+     "type": "readaloud",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "sidebar",
+     "attrs": {
+      "title": "Hesk Knows More Than She Says"
+     },
+     "paras": 2
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Bog-Thrall",
+      "meta": "Medium undead, unaligned"
+     },
+     "paras": 1
+    },
+    {
+     "type": "readaloud",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "table",
+     "attrs": {},
+     "paras": 5
+    },
+    {
+     "type": "sidebar",
+     "attrs": {
+      "title": "Variant: A Peaceful Approach"
+     },
+     "paras": 1
+    },
+    {
+     "type": "readaloud",
+     "attrs": {},
+     "paras": 2
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Orla, the Drowned Abbess",
+      "meta": "Medium undead, lawful neutral"
+     },
+     "paras": 1
+    },
+    {
+     "type": "sidebar",
+     "attrs": {
+      "title": "Rewards"
+     },
+     "paras": 1
+    }
+   ],
+   "pdf_pages": 15,
+   "pdf_seconds": 0.31,
+   "epub": "ok"
+  },
+  "statblocks.md": {
+   "chapters": 1,
+   "fences": 9,
+   "new_type_fences": 9,
+   "statblocks_with_one_para": 9,
+   "round_trip_identical": false,
+   "fence_detail": [
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Lantern Moth",
+      "meta": "Tiny beast, unaligned"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Reed Stalker",
+      "meta": "Medium monstrosity, neutral"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Tamsin Aldous, Reeve of Hollin",
+      "meta": "Medium humanoid (human), lawful good"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "The Mere-Wyrm, Eater of Bells",
+      "meta": "Gargantuan dragon, chaotic evil"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Hedge-Witch"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Marsh Ghoul",
+      "meta": "Chaotic, undead"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "The Bell-Keeper's Choir",
+      "meta": "Horde, terrifying, intelligent"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Bilge Thing",
+      "meta": "Hostile organism"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Old Hesk",
+      "meta": "Supporting character"
+     },
+     "paras": 1
+    }
+   ],
+   "pdf_pages": 7,
+   "pdf_seconds": 0.06,
+   "epub": "ok"
+  },
+  "statblock_formats.md": {
+   "chapters": 1,
+   "fences": 7,
+   "new_type_fences": 7,
+   "statblocks_with_one_para": 7,
+   "round_trip_identical": false,
+   "fence_detail": [
+    {
+     "type": "statblock",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Bog-Thrall",
+      "meta": "Medium undead, unaligned"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Marsh Ghoul",
+      "meta": "Undead, chaotic"
+     },
+     "paras": 1
+    }
+   ],
+   "pdf_pages": 7,
+   "pdf_seconds": 0.05,
+   "epub": "ok"
+  },
+  "edge_cases.md": {
+   "chapters": 1,
+   "fences": 24,
+   "new_type_fences": 23,
+   "statblocks_with_one_para": 15,
+   "round_trip_identical": false,
+   "fence_detail": [
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Nameless Thing"
+     },
+     "paras": 0
+    },
+    {
+     "type": "statblock",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Five Scores"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Extremes"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Wrong Modifier"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Odd Scores"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Pipes"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Blank Field"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Colons"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Rules"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Marked Up"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Tom & Jerry <the twins>",
+      "meta": "Small *humanoid*, 50% evil"
+     },
+     "paras": 1
+    },
+    {
+     "type": "sidebar",
+     "attrs": {
+      "title": "Rule #1: Don't Panic & Don't Run"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "readaloud",
+     "attrs": {},
+     "paras": 0
+    },
+    {
+     "type": "sidebar",
+     "attrs": {
+      "title": "Empty"
+     },
+     "paras": 0
+    },
+    {
+     "type": "readaloud",
+     "attrs": {},
+     "paras": 2
+    },
+    {
+     "type": "sidebar",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "sidebar",
+     "attrs": {
+      "title": "Nested"
+     },
+     "paras": 1
+    },
+    {
+     "type": "",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Shouty"
+     },
+     "paras": 1
+    },
+    {
+     "type": "readaloud",
+     "attrs": {},
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Ærinþ the Ŵyrmling",
+      "meta": "Tiny dragon, neutral"
+     },
+     "paras": 1
+    },
+    {
+     "type": "statblock",
+     "attrs": {
+      "name": "Unclosed"
+     },
+     "paras": 1
+    }
+   ],
+   "pdf_pages": 9,
+   "pdf_seconds": 0.04,
+   "epub": "ok"
+  },
+  "generated/long_book.md": {
+   "chapters": 22,
+   "fences": 506,
+   "new_type_fences": 462,
+   "statblocks_with_one_para": 132,
+   "round_trip_identical": false,
+   "pdf_pages": 311,
+   "pdf_seconds": 0.88,
+   "epub": "ok"
+  },
+  "generated/long_statblock.md": {
+   "chapters": 1,
+   "fences": 1,
+   "new_type_fences": 1,
+   "statblocks_with_one_para": 1,
+   "round_trip_identical": false,
+   "pdf_pages": 7,
+   "pdf_seconds": 0.13,
+   "epub": "ok"
+  }
+ }
+}

@@ -1,0 +1,44 @@
+{
+  "_about": [
+    "DRAFT preset sections for the Phase 1 game blocks (ROADMAP #74), in the shape of app.DEFAULTS. Not read by any code yet.",
+    "Conventions copied from the existing sections: font_size 0 = the body size; sizes and gaps in points, indents in inches; colours as '#rrggbb' or '' (none).",
+    "Every colour has a print_ twin: the value a print build uses (Phase 3's screen/print split). Until Phase 3, builds use the print_ value, so a black-and-white interior is safe from the first release. Every print_ fill is a light grey or '' and every print_ rule is black or grey.",
+    "The defaults below are deliberately plain (a light box, black rules) so that any existing style gets a sensible look without editing; the game-book presets (Phase 3) carry the genre colours.",
+    "Large print: add 'readaloud', 'sidebar' and 'statblock' to the min_text_size loop at app.py ~2167 (for key in ('document_block', 'poem', ...)), or a large-print book sets them smaller than 16pt."
+  ],
+  "readaloud": {
+    "font_size": 0, "line_leading": 1.35, "style": "italic",
+    "fill": "#efe6d2", "print_fill": "#eeeeee",
+    "rule": "left", "rule_width": 3.0, "rule_color": "#7a5c2e", "print_rule_color": "#555555",
+    "pad_x": 8.0, "pad_y": 6.0, "para_gap": 4.0, "space_around": 12.0,
+    "_rule_choices": "left | box | top-bottom | none"
+  },
+  "sidebar": {
+    "font_size": 0, "line_leading": 1.3, "style": "regular",
+    "fill": "#e4ece4", "print_fill": "#f0f0f0",
+    "border_width": 0.75, "border_color": "#3e5a46", "print_border_color": "#000000",
+    "title_size": 0, "title_style": "bold", "title_caps": true,
+    "title_fill": "#3e5a46", "print_title_fill": "",
+    "title_color": "#ffffff", "print_title_color": "#000000",
+    "pad_x": 8.0, "pad_y": 6.0, "para_gap": 4.0, "space_around": 12.0
+  },
+  "statblock": {
+    "font_size": 0, "line_leading": 1.25,
+    "fill": "#f6efdc", "print_fill": "",
+    "name_size": 0, "name_style": "bold", "name_caps": true,
+    "name_color": "#7a1f12", "print_name_color": "#000000",
+    "meta_style": "italic",
+    "rule": "tapered", "rule_width": 1.5, "rule_color": "#9c2b17", "print_rule_color": "#000000",
+    "field_label_style": "bold",
+    "scores": "row", "score_label_style": "bold",
+    "section_style": "smallcaps", "section_size": 0,
+    "section_rule": true,
+    "entry_name_style": "bolditalic", "entry_indent": 0.0, "entry_gap": 3.0,
+    "pad_x": 6.0, "pad_y": 5.0, "space_around": 12.0,
+    "border": "top-bottom", "border_width": 2.0,
+    "_rule_choices": "tapered | plain | none (the rule under the name and under the fields)",
+    "_scores_choices": "row (one table row of NAME over score) | grid (two rows of three) - grid is for narrow columns",
+    "_border_choices": "top-bottom | box | none",
+    "_note": "'tapered' is the genre's convention (a rule thick in the middle, thin at the ends), drawn as a vector; the shape is common to the genre, so it is not trade dress, but the colours and fonts here must not copy any publisher's."
+  }
+}

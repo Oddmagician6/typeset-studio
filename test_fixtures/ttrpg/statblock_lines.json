@@ -1,0 +1,839 @@
+{
+ "_about": [
+  "The stat block line grammar (ROADMAP #74, Phase 1), as expected results for one line at a time.",
+  "The full rules, and the formats they serve, are 'reading_rules' in statblock_formats.json; this file checks them line by line. Where the two disagree, statblock_formats.json wins.",
+  "Each case gives the raw source line (before inline markup and smart punctuation: classify FIRST, then inline each part, the way table cells are split before _inline) and where it sits: 'head' (before the end of the head: the line after a Challenge, CR or Proficiency Bonus field, a section heading, or a named entry) or 'section' (after it).",
+  "kind is one of: field {label, value} | fields {fields: [{label, value}]} | scores {cells: [{name, score, mod, save?}], auto} | section {name} | entry {text, name?} | ignore (a wrapper line: rules, {{monster, }}, a lone ':'). Multi-line score shapes (a names line then a values line; a Markdown table) are block-level and live in statblock_formats.md.",
+  "mod is the modifier as printed, with a true minus sign (U+2212) for negatives; auto is true when the modifiers were worked out rather than written.",
+  "All the open questions were decided by the user on 2026-10-07; see 'Decided' in README.md."
+ ],
+ "cases": [
+  {
+   "line": "Armor Class: 17 (natural armor)",
+   "at": "head",
+   "expect": {
+    "kind": "field",
+    "label": "Armor Class",
+    "value": "17 (natural armor)"
+   }
+  },
+  {
+   "line": "Hit Points: 82 (11d8 + 33)",
+   "at": "head",
+   "expect": {
+    "kind": "field",
+    "label": "Hit Points",
+    "value": "82 (11d8 + 33)"
+   }
+  },
+  {
+   "line": "Speed: 30 ft., swim 30 ft.",
+   "at": "head",
+   "expect": {
+    "kind": "field",
+    "label": "Speed",
+    "value": "30 ft., swim 30 ft."
+   }
+  },
+  {
+   "line": "Senses:",
+   "at": "head",
+   "expect": {
+    "kind": "field",
+    "label": "Senses",
+    "value": ""
+   }
+  },
+  {
+   "line": "Languages: —",
+   "at": "head",
+   "expect": {
+    "kind": "field",
+    "label": "Languages",
+    "value": "—"
+   }
+  },
+  {
+   "line": "Damage Resistances: cold; bludgeoning, piercing, and slashing from nonmagical attacks",
+   "at": "head",
+   "expect": {
+    "kind": "field",
+    "label": "Damage Resistances",
+    "value": "cold; bludgeoning, piercing, and slashing from nonmagical attacks"
+   }
+  },
+  {
+   "line": "AC: 6 [13]",
+   "at": "head",
+   "expect": {
+    "kind": "field",
+    "label": "AC",
+    "value": "6 [13]"
+   }
+  },
+  {
+   "line": "Great (+4): Notice",
+   "at": "head",
+   "expect": {
+    "kind": "field",
+    "label": "Great (+4)",
+    "value": "Notice"
+   }
+  },
+  {
+   "line": "Languages: *Common*, **Draconic**",
+   "at": "head",
+   "expect": {
+    "kind": "field",
+    "label": "Languages",
+    "value": "*Common*, **Draconic**"
+   },
+   "note": "markup in the value is fine; it is inlined after classification"
+  },
+  {
+   "line": "***Amphibious.*** The hag can breathe air and water.",
+   "at": "head",
+   "expect": {
+    "kind": "entry",
+    "text": "***Amphibious.*** The hag can breathe air and water."
+   },
+   "note": "starts with '*', so never a field"
+  },
+  {
+   "line": "This is a long sentence that happens to contain a colon: like this one.",
+   "at": "head",
+   "expect": {
+    "kind": "entry",
+    "text": "This is a long sentence that happens to contain a colon: like this one."
+   },
+   "note": "label longer than 6 words, so an entry"
+  },
+  {
+   "line": "Note: this creature never attacks first.",
+   "at": "section",
+   "expect": {
+    "kind": "entry",
+    "text": "Note: this creature never attacks first."
+   }
+  },
+  {
+   "line": "At will: *light*, *mage hand*",
+   "at": "section",
+   "expect": {
+    "kind": "entry",
+    "text": "At will: *light*, *mage hand*"
+   }
+  },
+  {
+   "line": "STR 18 | DEX 12 | CON 16 | INT 13 | WIS 14 | CHA 16",
+   "at": "head",
+   "expect": {
+    "kind": "scores",
+    "auto": true,
+    "cells": [
+     {
+      "name": "STR",
+      "score": "18",
+      "mod": "+4"
+     },
+     {
+      "name": "DEX",
+      "score": "12",
+      "mod": "+1"
+     },
+     {
+      "name": "CON",
+      "score": "16",
+      "mod": "+3"
+     },
+     {
+      "name": "INT",
+      "score": "13",
+      "mod": "+1"
+     },
+     {
+      "name": "WIS",
+      "score": "14",
+      "mod": "+2"
+     },
+     {
+      "name": "CHA",
+      "score": "16",
+      "mod": "+3"
+     }
+    ]
+   }
+  },
+  {
+   "line": "STR 2 | DEX 15 | CON 10 | INT 1 | WIS 10 | CHA 4",
+   "at": "head",
+   "expect": {
+    "kind": "scores",
+    "auto": true,
+    "cells": [
+     {
+      "name": "STR",
+      "score": "2",
+      "mod": "−4"
+     },
+     {
+      "name": "DEX",
+      "score": "15",
+      "mod": "+2"
+     },
+     {
+      "name": "CON",
+      "score": "10",
+      "mod": "+0"
+     },
+     {
+      "name": "INT",
+      "score": "1",
+      "mod": "−5"
+     },
+     {
+      "name": "WIS",
+      "score": "10",
+      "mod": "+0"
+     },
+     {
+      "name": "CHA",
+      "score": "4",
+      "mod": "−3"
+     }
+    ]
+   }
+  },
+  {
+   "line": "STR 1 | DEX 30 | CON 0 | INT 31 | WIS 10 | CHA 11",
+   "at": "head",
+   "expect": {
+    "kind": "scores",
+    "auto": true,
+    "cells": [
+     {
+      "name": "STR",
+      "score": "1",
+      "mod": "−5"
+     },
+     {
+      "name": "DEX",
+      "score": "30",
+      "mod": "+10"
+     },
+     {
+      "name": "CON",
+      "score": "0",
+      "mod": "−5"
+     },
+     {
+      "name": "INT",
+      "score": "31",
+      "mod": "+10"
+     },
+     {
+      "name": "WIS",
+      "score": "10",
+      "mod": "+0"
+     },
+     {
+      "name": "CHA",
+      "score": "11",
+      "mod": "+0"
+     }
+    ]
+   }
+  },
+  {
+   "line": "STR 15 (+2) | DEX 16 (+3) | CON 14 (+2) | INT 6 (−2) | WIS 13 (+1) | CHA 7 (-2)",
+   "at": "head",
+   "expect": {
+    "kind": "scores",
+    "auto": false,
+    "cells": [
+     {
+      "name": "STR",
+      "score": "15",
+      "mod": "+2"
+     },
+     {
+      "name": "DEX",
+      "score": "16",
+      "mod": "+3"
+     },
+     {
+      "name": "CON",
+      "score": "14",
+      "mod": "+2"
+     },
+     {
+      "name": "INT",
+      "score": "6",
+      "mod": "−2"
+     },
+     {
+      "name": "WIS",
+      "score": "13",
+      "mod": "+1"
+     },
+     {
+      "name": "CHA",
+      "score": "7",
+      "mod": "−2"
+     }
+    ]
+   },
+   "note": "a hyphen-minus in a written modifier is printed as a true minus"
+  },
+  {
+   "line": "STR 18 (+1) | DEX 10 (+0) | CON 10 (−0) | INT 10 | WIS 10 | CHA 10",
+   "at": "head",
+   "expect": {
+    "kind": "scores",
+    "auto": false,
+    "cells": [
+     {
+      "name": "STR",
+      "score": "18",
+      "mod": "+1"
+     },
+     {
+      "name": "DEX",
+      "score": "10",
+      "mod": "+0"
+     },
+     {
+      "name": "CON",
+      "score": "10",
+      "mod": "−0"
+     },
+     {
+      "name": "INT",
+      "score": "10",
+      "mod": "+0"
+     },
+     {
+      "name": "WIS",
+      "score": "10",
+      "mod": "+0"
+     },
+     {
+      "name": "CHA",
+      "score": "10",
+      "mod": "+0"
+     }
+    ]
+   },
+   "note": "written modifiers kept even when wrong; the cells without one are still worked out (auto is false because some were written)"
+  },
+  {
+   "line": "STR 10 | DEX 10 | CON 10 | INT 10 | WIS 10",
+   "at": "head",
+   "expect": {
+    "kind": "scores",
+    "auto": false,
+    "cells": [
+     {
+      "name": "STR",
+      "score": "10",
+      "mod": ""
+     },
+     {
+      "name": "DEX",
+      "score": "10",
+      "mod": ""
+     },
+     {
+      "name": "CON",
+      "score": "10",
+      "mod": ""
+     },
+     {
+      "name": "INT",
+      "score": "10",
+      "mod": ""
+     },
+     {
+      "name": "WIS",
+      "score": "10",
+      "mod": ""
+     }
+    ]
+   },
+   "note": "not the six 5e names, so no modifiers"
+  },
+  {
+   "line": "STR 40 | SPD 25 | INT 10 | CMB 45",
+   "at": "head",
+   "expect": {
+    "kind": "scores",
+    "auto": false,
+    "cells": [
+     {
+      "name": "STR",
+      "score": "40",
+      "mod": ""
+     },
+     {
+      "name": "SPD",
+      "score": "25",
+      "mod": ""
+     },
+     {
+      "name": "INT",
+      "score": "10",
+      "mod": ""
+     },
+     {
+      "name": "CMB",
+      "score": "45",
+      "mod": ""
+     }
+    ]
+   },
+   "note": "another system's scores: never a 5e modifier"
+  },
+  {
+   "line": "STR 18 | DEX high | CON 10 | INT 10 | WIS 10 | CHA 10",
+   "at": "head",
+   "expect": {
+    "kind": "entry",
+    "text": "STR 18 | DEX high | CON 10 | INT 10 | WIS 10 | CHA 10"
+   }
+  },
+  {
+   "line": "STR 18",
+   "at": "head",
+   "expect": {
+    "kind": "entry",
+    "text": "STR 18"
+   },
+   "note": "one cell is not a row"
+  },
+  {
+   "line": "Speed: 30 ft. | climb 20 ft.",
+   "at": "head",
+   "expect": {
+    "kind": "field",
+    "label": "Speed",
+    "value": "30 ft. | climb 20 ft."
+   },
+   "note": "one field: 'climb 20 ft.' is not Label: value, so the line is not split"
+  },
+  {
+   "line": "Combat: 45 | Instinct: 60 | Armor: 10",
+   "at": "head",
+   "expect": {
+    "kind": "fields",
+    "fields": [
+     {
+      "label": "Combat",
+      "value": "45"
+     },
+     {
+      "label": "Instinct",
+      "value": "60"
+     },
+     {
+      "label": "Armor",
+      "value": "10"
+     }
+    ]
+   },
+   "note": "split, because every |-separated piece is Label: value (decided 2026-10-07)"
+  },
+  {
+   "line": "str 18 | dex 12 | con 16 | int 13 | wis 14 | cha 16",
+   "at": "head",
+   "expect": {
+    "kind": "entry",
+    "text": "str 18 | dex 12 | con 16 | int 13 | wis 14 | cha 16"
+   },
+   "note": "names must be capitals or title case (STR or Str), never lower case"
+  },
+  {
+   "line": "--- Actions",
+   "at": "head",
+   "expect": {
+    "kind": "section",
+    "name": "Actions"
+   }
+  },
+  {
+   "line": "--- Legendary Actions",
+   "at": "section",
+   "expect": {
+    "kind": "section",
+    "name": "Legendary Actions"
+   }
+  },
+  {
+   "line": "---",
+   "at": "head",
+   "expect": {
+    "kind": "section",
+    "name": ""
+   }
+  },
+  {
+   "line": "--- ",
+   "at": "section",
+   "expect": {
+    "kind": "section",
+    "name": ""
+   }
+  },
+  {
+   "line": "----- Actions",
+   "at": "head",
+   "expect": {
+    "kind": "section",
+    "name": "Actions"
+   },
+   "note": "any run of three or more hyphens"
+  },
+  {
+   "line": "\\--- not a section",
+   "at": "section",
+   "expect": {
+    "kind": "entry",
+    "text": "--- not a section"
+   },
+   "note": "the escape is removed; the text must not be smart-punctuated into an em dash either"
+  },
+  {
+   "line": "—— Actions",
+   "at": "head",
+   "expect": {
+    "kind": "entry",
+    "text": "—— Actions"
+   },
+   "note": "em dashes are not a section marker"
+  },
+  {
+   "line": "***Multiattack.*** Orla makes two Bell-Rope attacks.",
+   "at": "section",
+   "expect": {
+    "kind": "entry",
+    "text": "***Multiattack.*** Orla makes two Bell-Rope attacks."
+   }
+  },
+  {
+   "line": "The water in the crypt surges.",
+   "at": "section",
+   "expect": {
+    "kind": "entry",
+    "text": "The water in the crypt surges."
+   }
+  },
+  {
+   "line": "Ein Hauch — kalt wie der Winter.",
+   "at": "section",
+   "expect": {
+    "kind": "entry",
+    "text": "Ein Hauch — kalt wie der Winter."
+   }
+  },
+  {
+   "line": "**Armor Class** 12 (leather armor)",
+   "at": "head",
+   "format": "1a",
+   "expect": {
+    "kind": "field",
+    "label": "Armor Class",
+    "value": "12 (leather armor)"
+   }
+  },
+  {
+   "line": "**Armor Class:** 12 (leather armor)",
+   "at": "head",
+   "format": "1a",
+   "expect": {
+    "kind": "field",
+    "label": "Armor Class",
+    "value": "12 (leather armor)"
+   }
+  },
+  {
+   "line": "Armor Class 12 (leather armor)",
+   "at": "head",
+   "format": "1b",
+   "expect": {
+    "kind": "field",
+    "label": "Armor Class",
+    "value": "12 (leather armor)"
+   },
+   "note": "a known label with no markup, in the head"
+  },
+  {
+   "line": "Speed Demon. The creature moves twice on its turn.",
+   "at": "section",
+   "format": "1b",
+   "expect": {
+    "kind": "entry",
+    "name": "Speed Demon.",
+    "text": "The creature moves twice on its turn."
+   },
+   "note": "after the head a known label is not a field; the full stop makes 'Speed Demon.' the entry's name"
+  },
+  {
+   "line": "Legendary Actions",
+   "at": "section",
+   "format": "1b",
+   "expect": {
+    "kind": "section",
+    "name": "Legendary Actions"
+   }
+  },
+  {
+   "line": "**Actions**",
+   "at": "head",
+   "format": "1a",
+   "expect": {
+    "kind": "section",
+    "name": "Actions"
+   }
+  },
+  {
+   "line": "### Actions",
+   "at": "head",
+   "format": "2a",
+   "expect": {
+    "kind": "section",
+    "name": "Actions"
+   }
+  },
+  {
+   "line": "**Hit Points**  :: 26 (4d8 + 8)",
+   "at": "head",
+   "format": "2a",
+   "expect": {
+    "kind": "field",
+    "label": "Hit Points",
+    "value": "26 (4d8 + 8)"
+   }
+  },
+  {
+   "line": "{{monster,frame",
+   "at": "head",
+   "format": "2a",
+   "expect": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "line": "}}",
+   "at": "section",
+   "format": "2a",
+   "expect": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "line": ":",
+   "at": "section",
+   "format": "2a",
+   "expect": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "line": "___",
+   "at": "head",
+   "format": "2a",
+   "expect": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "line": "> - **Speed** 25 ft., swim 30 ft.",
+   "at": "head",
+   "format": "2b",
+   "expect": {
+    "kind": "field",
+    "label": "Speed",
+    "value": "25 ft., swim 30 ft."
+   }
+  },
+  {
+   "line": ">___",
+   "at": "head",
+   "format": "2b",
+   "expect": {
+    "kind": "ignore"
+   }
+  },
+  {
+   "line": "> ***Peat-Preserved.*** The thrall drops to 1 hit point.",
+   "at": "section",
+   "format": "2b",
+   "expect": {
+    "kind": "entry",
+    "text": "***Peat-Preserved.*** The thrall drops to 1 hit point."
+   }
+  },
+  {
+   "line": "STR 18 (+4) DEX 12 (+1) CON 16 (+3) INT 13 (+1) WIS 14 (+2) CHA 16 (+3)",
+   "at": "head",
+   "format": "1b",
+   "expect": {
+    "kind": "scores",
+    "auto": false,
+    "cells": [
+     {
+      "name": "STR",
+      "score": "18",
+      "mod": "+4"
+     },
+     {
+      "name": "DEX",
+      "score": "12",
+      "mod": "+1"
+     },
+     {
+      "name": "CON",
+      "score": "16",
+      "mod": "+3"
+     },
+     {
+      "name": "INT",
+      "score": "13",
+      "mod": "+1"
+     },
+     {
+      "name": "WIS",
+      "score": "14",
+      "mod": "+2"
+     },
+     {
+      "name": "CHA",
+      "score": "16",
+      "mod": "+3"
+     }
+    ]
+   },
+   "note": "no pipes: cells found by their names"
+  },
+  {
+   "line": "**AC** 9    **Initiative** −1 (9)",
+   "at": "head",
+   "format": "4",
+   "expect": {
+    "kind": "fields",
+    "fields": [
+     {
+      "label": "AC",
+      "value": "9"
+     },
+     {
+      "label": "Initiative",
+      "value": "−1 (9)"
+     }
+    ]
+   }
+  },
+  {
+   "line": "Str 14 +2 +2 | Dex 8 −1 −1 | Con 15 +2 +2",
+   "at": "head",
+   "format": "4",
+   "expect": {
+    "kind": "scores",
+    "auto": false,
+    "cells": [
+     {
+      "name": "Str",
+      "score": "14",
+      "mod": "+2",
+      "save": "+2"
+     },
+     {
+      "name": "Dex",
+      "score": "8",
+      "mod": "−1",
+      "save": "−1"
+     },
+     {
+      "name": "Con",
+      "score": "15",
+      "mod": "+2",
+      "save": "+2"
+     }
+    ]
+   },
+   "note": "half a 2024 table; the next line's three cells merge into the same row"
+  },
+  {
+   "line": "**CR** 1/2 (XP 100; PB +2)",
+   "at": "head",
+   "format": "4",
+   "expect": {
+    "kind": "field",
+    "label": "CR",
+    "value": "1/2 (XP 100; PB +2)"
+   },
+   "note": "a CR field also ends the head"
+  },
+  {
+   "line": "AC 6 [13], HD 2* (9hp), Att 2 × claw (1d3 + paralysis), 1 × bite (1d3), THAC0 18 [+1], MV 90' (30')",
+   "at": "head",
+   "format": "5",
+   "expect": {
+    "kind": "fields",
+    "fields": [
+     {
+      "label": "AC",
+      "value": "6 [13]"
+     },
+     {
+      "label": "HD",
+      "value": "2* (9hp)"
+     },
+     {
+      "label": "Att",
+      "value": "2 × claw (1d3 + paralysis), 1 × bite (1d3)"
+     },
+     {
+      "label": "THAC0",
+      "value": "18 [+1]"
+     },
+     {
+      "label": "MV",
+      "value": "90' (30')"
+     }
+    ]
+   },
+   "note": "split only at a comma followed by a known abbreviation"
+  },
+  {
+   "line": "Drowned voices whisper from the walls. One creature has disadvantage.",
+   "at": "section",
+   "format": "1b",
+   "expect": {
+    "kind": "entry",
+    "text": "Drowned voices whisper from the walls. One creature has disadvantage."
+   },
+   "note": "sentence case, so not a name"
+  },
+  {
+   "line": "Called by the Bell. While the abbey bell rings, the thrall can't be frightened.",
+   "at": "section",
+   "format": "1b",
+   "expect": {
+    "kind": "entry",
+    "name": "Called by the Bell.",
+    "text": "While the abbey bell rings, the thrall can't be frightened."
+   },
+   "note": "title case with minor words in lower case"
+  },
+  {
+   "line": "Toll (Recharge 5–6). Orla pulls the bell-rope.",
+   "at": "section",
+   "format": "1b",
+   "expect": {
+    "kind": "entry",
+    "name": "Toll (Recharge 5–6).",
+    "text": "Orla pulls the bell-rope."
+   }
+  }
+ ]
+}

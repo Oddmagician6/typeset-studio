@@ -1,0 +1,322 @@
+{
+ "_about": [
+  "Expected readings of statblock_formats.md (ROADMAP #74, Phase 1): every accepted stat block format, most common first, and the model each must read into.",
+  "The model: {name, meta, fields: [{label, value}], scores: [{name, score, mod, save}], sections: [{name, entries: [text]}]}. Entries before the first section heading go in a section named ''. Text keeps its inline markup as written (bold/italic markers are not part of the model's labels and names). mod and save use a true minus sign. save is '' unless the format gives one. Whether a modifier was written or worked out is not part of the model, so a format that writes them and one that doesn't read the same.",
+  "Formats 1a, 1b, 2a, 2b and 3 must read into exactly the same model, 'bog_thrall_classic', except that 1b has no markup to keep (its entries are compared with markup stripped). Format 4 reads into 'bog_thrall_2024'; format 5 into 'marsh_ghoul_osr'.",
+  "The source is stored as written: a stat block is a line-oriented fence, so the Markdown round trip keeps every line in whatever format it was pasted. Only the reading is normalised, and so only the printed result looks the same."
+ ],
+ "rank": [
+  {
+   "format": "1a",
+   "name": "Classic 5e layout, bold labels with no colon",
+   "why": "How 5e homebrew is typed in Word and Google Docs, and what copying from D&D Beyond gives; the author's own Bestiary is written this way."
+  },
+  {
+   "format": "1b",
+   "name": "Classic layout pasted from a PDF, no formatting",
+   "why": "Copying a stat block out of any PDF; the commonest way a block arrives without markup."
+  },
+  {
+   "format": "2a",
+   "name": "Homebrewery V3 ({{monster}} with :: fields)",
+   "why": "The most used free tool for DMs Guild homebrew; V3 is its current renderer."
+  },
+  {
+   "format": "2b",
+   "name": "Homebrewery legacy / GM Binder (___ and > lines)",
+   "why": "A large back catalogue of homebrew is in this form, and GM Binder still uses it."
+  },
+  {
+   "format": "3",
+   "name": "Colon form (Label: value)",
+   "why": "Forums, Reddit, plain-text notes; the app's own native form."
+  },
+  {
+   "format": "4",
+   "name": "2024 5e layout",
+   "why": "The current edition's books and the SRD 5.2 (CC-BY-4.0) use it; newer homebrew follows."
+  },
+  {
+   "format": "5",
+   "name": "Old-school one-line stat line",
+   "why": "OSR games (Old-School Essentials, B/X clones) write a creature as one line of abbreviations."
+  }
+ ],
+ "reading_rules": [
+  "Fence attributes win: name= and meta= on the fence line are the name and meta; otherwise the first line is the name (with any ** or ## removed) and the next line is the meta if it is italic or, unformatted, begins with a size (Tiny, Small, Medium, Large, Huge, Gargantuan).",
+  "Wrapper lines are ignored: a line that is only ___ or ---- style rules (three or more underscores), '{{monster' and its options, '}}', a lone ':', and a lone '>' or a blank line. A leading '> ' and a leading '- ' list bullet are stripped from every line first.",
+  "A field is any of: 'Label: value'; '**Label** value'; '**Label:** value'; '**Label** :: value'; or, with no markup, a known label at the start of the line followed by its value. Known labels: Armor Class, AC, Hit Points, HP, Speed, Initiative, Saving Throws, Skills, Damage Vulnerabilities, Damage Resistances, Damage Immunities, Vulnerabilities, Resistances, Immunities, Condition Immunities, Gear, Senses, Languages, Challenge, CR, Proficiency Bonus.",
+  "A line with two or more bold labels is that many fields ('**AC** 9    **Initiative** −1 (9)').",
+  "A line of two or more '|'-separated pieces that are each 'Label: value' is that many fields ('Combat: 45 | Instinct: 60 | Armor: 10'); if any piece is not, the line is one field ('Speed: 30 ft. | climb 20 ft.').",
+  "Unformatted known labels are only read as fields in the head: the head ends after the Challenge, CR or Proficiency Bonus line, or at the first section heading, so a trait called 'Speed Demon.' after them is an entry.",
+  "Scores, in any of these shapes, consecutive lines merged into one row: 'STR 14 | DEX 8 | …'; 'STR 14 (+2) DEX 8 (−1) …' with no pipes; a line of names then a line of values ('STR DEX CON INT WIS CHA' / '14 (+2) 8 (−1) …'); a Markdown table of names, an alignment row and values; the 2024 'Str 14 +2 +2' (score, modifier, save), in rows of three or six. Names in capitals or title case (Str or STR), never lower case. Modifiers are worked out only for the six 5e names.",
+  "A section heading is any of: '--- Name'; '### Name' or '## Name' after the name line; a line that is only bold ('**Actions**'); or, unformatted, a line that is only a known section name. Known section names: Traits, Actions, Bonus Actions, Reactions, Legendary Actions, Mythic Actions, Lair Actions, Regional Effects, Spellcasting.",
+  "An old-school stat line is one line of known abbreviations (AC, HD, Att, THAC0, MV, SV, ML, AL, XP, NA, TT, and also Move, Save, Morale, Attacks, No. Appearing, Treasure); it splits into fields at each comma or semicolon that is followed by one of them, so commas inside a value stay in it.",
+  "With no markup, an entry's name is a phrase of up to 6 words at the start of a line, in title case (every word capitalised except a, an, the, and, or, of, by, in, on, to, with, for), ending in a full stop (optionally after a parenthesis, as in 'Toll (Recharge 5–6).') and followed by more text; it is printed as the style prints entry names. A sentence in sentence case ('Drowned voices whisper from the walls. One creature…') is never a name. 'ft.' and other abbreviations inside a field value are not affected, since fields are read first.",
+  "Everything else is an entry."
+ ],
+ "models": {
+  "bog_thrall_classic": {
+   "name": "Bog-Thrall",
+   "meta": "Medium undead, unaligned",
+   "fields": [
+    {
+     "label": "Armor Class",
+     "value": "9"
+    },
+    {
+     "label": "Hit Points",
+     "value": "26 (4d8 + 8)"
+    },
+    {
+     "label": "Speed",
+     "value": "25 ft., swim 30 ft."
+    },
+    {
+     "label": "Saving Throws",
+     "value": "Wis +1"
+    },
+    {
+     "label": "Damage Immunities",
+     "value": "poison"
+    },
+    {
+     "label": "Condition Immunities",
+     "value": "exhausted, poisoned"
+    },
+    {
+     "label": "Senses",
+     "value": "darkvision 60 ft., passive Perception 9"
+    },
+    {
+     "label": "Languages",
+     "value": "understands the languages it knew in life but can't speak"
+    },
+    {
+     "label": "Challenge",
+     "value": "1/2 (100 XP)"
+    }
+   ],
+   "scores": [
+    {
+     "name": "STR",
+     "score": "14",
+     "mod": "+2",
+     "save": ""
+    },
+    {
+     "name": "DEX",
+     "score": "8",
+     "mod": "−1",
+     "save": ""
+    },
+    {
+     "name": "CON",
+     "score": "15",
+     "mod": "+2",
+     "save": ""
+    },
+    {
+     "name": "INT",
+     "score": "3",
+     "mod": "−4",
+     "save": ""
+    },
+    {
+     "name": "WIS",
+     "score": "8",
+     "mod": "−1",
+     "save": ""
+    },
+    {
+     "name": "CHA",
+     "score": "5",
+     "mod": "−3",
+     "save": ""
+    }
+   ],
+   "sections": [
+    {
+     "name": "",
+     "entries": [
+      "***Peat-Preserved.*** The thrall drops to 1 hit point instead of 0 unless the damage is fire or radiant.",
+      "***Called by the Bell.*** While the abbey bell rings, the thrall can't be frightened or charmed."
+     ]
+    },
+    {
+     "name": "Actions",
+     "entries": [
+      "***Grasping Hands.*** *Melee Weapon Attack:* +4 to hit, reach 5 ft., one target. *Hit:* 6 (1d8 + 2) bludgeoning damage, and the target is grappled (escape DC 12).",
+      "***Drag Under.*** The thrall swims up to its speed, pulling a creature it is grappling with it."
+     ]
+    }
+   ]
+  },
+  "bog_thrall_2024": {
+   "name": "Bog-Thrall",
+   "meta": "Medium Undead, Unaligned",
+   "fields": [
+    {
+     "label": "AC",
+     "value": "9"
+    },
+    {
+     "label": "Initiative",
+     "value": "−1 (9)"
+    },
+    {
+     "label": "HP",
+     "value": "26 (4d8 + 8)"
+    },
+    {
+     "label": "Speed",
+     "value": "25 ft., Swim 30 ft."
+    },
+    {
+     "label": "Immunities",
+     "value": "Poison; Exhaustion, Poisoned"
+    },
+    {
+     "label": "Senses",
+     "value": "Darkvision 60 ft.; Passive Perception 9"
+    },
+    {
+     "label": "Languages",
+     "value": "Understands the languages it knew in life but can't speak"
+    },
+    {
+     "label": "CR",
+     "value": "1/2 (XP 100; PB +2)"
+    }
+   ],
+   "scores": [
+    {
+     "name": "Str",
+     "score": "14",
+     "mod": "+2",
+     "save": "+2"
+    },
+    {
+     "name": "Dex",
+     "score": "8",
+     "mod": "−1",
+     "save": "−1"
+    },
+    {
+     "name": "Con",
+     "score": "15",
+     "mod": "+2",
+     "save": "+2"
+    },
+    {
+     "name": "Int",
+     "score": "3",
+     "mod": "−4",
+     "save": "−4"
+    },
+    {
+     "name": "Wis",
+     "score": "8",
+     "mod": "−1",
+     "save": "+1"
+    },
+    {
+     "name": "Cha",
+     "score": "5",
+     "mod": "−3",
+     "save": "−3"
+    }
+   ],
+   "sections": [
+    {
+     "name": "Traits",
+     "entries": [
+      "***Peat-Preserved.*** The thrall drops to 1 Hit Point instead of 0 unless the damage is Fire or Radiant.",
+      "***Called by the Bell.*** While the abbey bell rings, the thrall can't have the Frightened or Charmed condition."
+     ]
+    },
+    {
+     "name": "Actions",
+     "entries": [
+      "***Grasping Hands.*** *Melee Attack Roll:* +4, reach 5 ft. *Hit:* 6 (1d8 + 2) Bludgeoning damage, and the target has the Grappled condition (escape DC 12).",
+      "***Drag Under.*** The thrall swims up to its Speed, pulling a creature it is grappling with it."
+     ]
+    }
+   ]
+  },
+  "marsh_ghoul_osr": {
+   "name": "Marsh Ghoul",
+   "meta": "Undead, chaotic",
+   "fields": [
+    {
+     "label": "AC",
+     "value": "6 [13]"
+    },
+    {
+     "label": "HD",
+     "value": "2* (9hp)"
+    },
+    {
+     "label": "Att",
+     "value": "2 × claw (1d3 + paralysis), 1 × bite (1d3)"
+    },
+    {
+     "label": "THAC0",
+     "value": "18 [+1]"
+    },
+    {
+     "label": "MV",
+     "value": "90' (30')"
+    },
+    {
+     "label": "SV",
+     "value": "D12 W13 P14 B15 S16 (1)"
+    },
+    {
+     "label": "ML",
+     "value": "9"
+    },
+    {
+     "label": "AL",
+     "value": "Chaotic"
+    },
+    {
+     "label": "XP",
+     "value": "25"
+    },
+    {
+     "label": "NA",
+     "value": "1d6 (2d8)"
+    },
+    {
+     "label": "TT",
+     "value": "B"
+    }
+   ],
+   "scores": [],
+   "sections": [
+    {
+     "name": "",
+     "entries": [
+      "***Paralysis.*** A non-elf touched must save versus paralysis or be paralysed for 2d4 turns."
+     ]
+    }
+   ]
+  }
+ },
+ "expect": {
+  "1a": "bog_thrall_classic",
+  "1b": "bog_thrall_classic (entries compared with markup stripped)",
+  "2a": "bog_thrall_classic",
+  "2b": "bog_thrall_classic",
+  "3": "bog_thrall_classic",
+  "4": "bog_thrall_2024",
+  "5": "marsh_ghoul_osr",
+  "unfenced": "Exactly two stat blocks found and wrapped in ~~~ statblock fences (one V3, one legacy), each reading as a shortened Bog-Thrall (Armor Class, Challenge, the score row, one action); the three paragraphs around them stay paragraphs."
+ },
+ "decided": [
+  "Homebrewery blocks ({{monster}} … }} and the legacy '___' + '> ##' form) are only wrapped in a fence by the paste and import converter; the parser never reads them outside a fence, since a '>' line or '___' rule in a novel must never become a stat block. (User, 2026-10-07.)",
+  "The 2024 layout's saving throws print as their own column, as the 2024 books do: the preset's 'scores' setting gains 'table-2024' beside 'row' and 'grid'. (User, 2026-10-07.)",
+  "Unformatted entry names (title case, ending in a full stop) are recognised, inside a stat block fence only. (User, 2026-10-07.)"
+ ]
+}
