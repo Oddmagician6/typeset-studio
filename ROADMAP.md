@@ -37,9 +37,9 @@ Start here in a new session. Each item points at its full entry below.
    with Word import and Homebrewery paste. Phase 2: `###`/`####` headings, the `#>`
    tagline, contents depth, PDF bookmarks, running heads by chapter or section,
    Letter/A4/A5 trims, Word headings by level. Both are in CHANGELOG's `## Unreleased`
-   beside #77; each phase's leftovers end its entry. **Next: Phase 3** (game-book
-   presets and the colour screen PDF, dark pages included) — check its plan with the
-   user first. Six phases in all; the author's own books are local test material in
+   beside #77; each phase's leftovers end its entry. **Next: Phase 3a** (the colour
+   model, the screen PDF, Cinzel, the dark style); its plan was agreed on 2026-10-08,
+   decisions at the head of the Phase 3 entry. Six phases in all; the author's own books are local test material in
    `Edenfall for test/` (gitignored).
    **State at hand-off (2026-10-08):** on branch `ttrpg-phase1`, Phase 1 is committed
    (d3ca54e, the user chose "commit on the branch") and so is Phase 2 (6f9e426). All
@@ -2720,6 +2720,25 @@ doc_model / WYSIWYG round-trip:
   `###`; the rich editor edits a tagline in Markdown mode, as it does a byline.
 
   **Phase 3 — The game-book look and the screen PDF** *(medium)*.
+  *Decided with the user (2026-10-08), all as recommended:*
+  - **The screen PDF is opt-in per book and comes with the print one:** a book checkbox
+    "Also make a colour screen PDF"; each build then writes both, so the print interior
+    and the DriveThruRPG file can't drift apart.
+  - **Fonts: Cinzel and Cinzel Decorative only** (OFL); more on request.
+  - **The light rulebook's default trim is US Letter.**
+  - **Two halves.** **3a:** the colour model (a page colour and a text colour; every
+    hard-coded grey — chapter number, byline, contents, running heads, folios, notes —
+    becomes a muted tone derived from the two; `screen`/`print` values only where they
+    differ; print always light), the screen build, the fonts, and the dark style in the
+    author's look. **3b:** page backgrounds and the generated parchment, furniture
+    ornaments, the light Letter rulebook and the A5 zine.
+  - **The first test, written before 3a's code:** every fixture built on a dark page,
+    failing on any text span too dark to read on it (a contrast floor); then the print
+    build of a dark style checked light. It is the audit for the hard-coded greys.
+  - **The author's look, measured from their Volume 1 PDF:** US Letter; page about
+    `#0c1116`; text `#ddd5c2`; headings gold `#c2a35e`; accents teal `#62c3c8`; muted
+    `#b8b3a3` / `#8a8576`; Garamond text, Cinzel and Cinzel Decorative display. The
+    bundled style takes a generic name (the repo is public).
   - **Game-book presets**, single column first (two-column ones follow Phase 4): an
     **Edenfall-style dark screen book** (the author's own look, above), a light Letter
     rulebook, an A5/digest zine (OSR style). Genre look, not a copy of anyone's books.
@@ -2808,8 +2827,9 @@ doc_model / WYSIWYG round-trip:
   needs full-bleed pages and is shared with #75.
 
   **Open questions, to settle at the start of the phase they belong to:** which OFL display
-  faces (3); whether a sidebar may hold lists or tables (needs nested blocks; 1 says no);
-  Letter or A4 as the default rulebook trim (3); whether two-column footnotes are worth
+  faces (3, decided: Cinzel and Cinzel Decorative); whether a sidebar may hold lists or
+  tables (needs nested blocks; 1 says no); Letter or A4 as the default rulebook trim (3,
+  decided: Letter); whether two-column footnotes are worth
   having if the spike says they are hard (4); the tagline syntax (2). *Decided
   2026-10-07 (user):* Homebrewery blocks are only wrapped in a fence by the paste and
   import converter, never read outside one; the 2024 saves print as their own column (a
