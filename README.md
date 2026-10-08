@@ -473,7 +473,7 @@ labelled placeholder box (so you see it in the proof) and the ebook simply opens
 without it. In the ebook the picture is stored once and marked decorative, so a
 screen reader doesn't announce it at the head of every chapter.
 
-The three starting styles:
+Some of the bundled styles:
 
 - **Classic Literary (6×9)** — warm, traditional novel interior; a good default.
 - **Gothic / Horror (5.5×8.5)** — tighter trim, denser page, sunken drop-cap openings.
@@ -481,6 +481,12 @@ The three starting styles:
 - **Game Book — Dark Screen (8.5×11)** — a tabletop adventure or sourcebook: Garamond
   text, Cinzel headings, running heads by chapter; its colour screen PDF is set on a
   near-black page with gold headings and teal accents, and its print build is black on white.
+- **Game Book — Light Rulebook (8.5×11)** — a rulebook or sourcebook: Crimson Pro text,
+  Cinzel headings, deep red titles; on screen it is set on parchment with a tapered bar
+  under the running head and a band above the page number.
+- **Game Zine — A5 (5.83×8.27)** — an old-school adventure zine: compact Spectral text,
+  plain bold headings, tight stat blocks, black and white with a red spot colour on screen
+  and wedge corners on every page.
 
 ---
 
@@ -594,7 +600,18 @@ with the same layout and page count:
   so a dark page needs no other settings. Blank fields keep the printed look.
 - **Game blocks in their screen colours** (the **Screen** fields under Game blocks). Text
   in a box follows the box: a light fill keeps dark text even on a dark page.
+- **A page background** (the style's **Page background**): a picture from your figure
+  library under every page, at a **Strength** from 0 to 1 over the page colour (or the
+  **Under it** colour). The app makes a parchment texture for this, `parchment.jpg`, the
+  first time it runs. A faint picture over a dark page works as well as a full one over a
+  light page; the screen PDF only, since a printed interior has no bleed for it.
 - **Bookmarks and links** as in every PDF, and the cover page in its own colours.
+
+**Page furniture** (the style editor's section of that name) works in both PDFs: a header
+bar under the running head (left off chapter openings, like the running head), a footer
+band above the page number, and a piece in each corner of every page of the book proper,
+inset from the trim and kept clear of the text. They print in grey; the screen PDF draws
+them in the **Screen colour**, or a muted tone of its text colour.
 
 The printed book never uses any of it: a dark screen style prints black on white.
 

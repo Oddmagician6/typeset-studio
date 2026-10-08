@@ -81,6 +81,19 @@ line here.
   game blocks set off to match.
 - **The game blocks' screen colours can be edited** in the style editor (the
   **Screen** fields beside the printed ones).
+- **Page backgrounds for the screen PDF.** A style's **Page background** lays a
+  picture from the figure library under every page of the screen PDF, at a
+  strength you choose over the page colour. The app makes its own parchment
+  texture for it (`parchment.jpg` in your figures). The printed book never has
+  one: without bleed it would print with a white edge.
+- **Page furniture.** A header bar under the running head, a footer band above
+  the page number and a piece in each corner, chosen in the style editor's new
+  **Page furniture** section from three of each. They print in grey; the screen
+  PDF draws them in a colour of your choice.
+- **Two more game styles: Game Book — Light Rulebook** (US Letter, Crimson Pro
+  and Cinzel, deep red titles; parchment, a tapered bar and a footer band on
+  screen) and **Game Zine — A5** (compact Spectral, one-line stat blocks, black
+  and white with a red spot colour, wedge corners).
 
 ### Fixed
 

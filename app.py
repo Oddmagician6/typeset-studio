@@ -682,6 +682,10 @@ engine.COVER_ASSET_DIR = COVER_ASSET_DIR
 engine.FIGURE_DIR = FIGURE_DIR
 epub.FIGURE_DIR = FIGURE_DIR
 manuscript.FIGURE_DIR = FIGURE_DIR    # where .docx images are extracted to
+try:
+    engine.ensure_parchment()         # the page background the app ships (#74)
+except OSError:
+    pass
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 app.secret_key = 'typeset-studio-local'
@@ -1095,6 +1099,12 @@ DEFAULTS = {
     # the colour screen PDF's palette (#74 Phase 3): page, text, and the heading
     # and accent colours; '' keeps the print look. Print builds never read it
     'screen': dict(engine.SCREEN_DEFAULTS),
+    # a picture under every screen page (figure library; the app makes the
+    # parchment), over the page colour or `color`, at `opacity`. Screen-only
+    'page_background': dict(engine.PAGE_BACKGROUND_DEFAULTS),
+    # page furniture: a header bar, footer band and corner pieces on every body
+    # page (ornaments.FURNITURE ids, '' = none) and their screen colour
+    'furniture': dict(engine.FURNITURE_DEFAULTS),
 }
 
 
@@ -1550,6 +1560,7 @@ STYLE_RANGES = {
     's_size': (1.0, 144.0), 's_gap': _PT, 'sb_ornament_width': (0.0, 1.0),
     'rh_size': (1.0, 72.0), 'rh_gap': _IN, 'fo_size': (1.0, 72.0), 'fo_gap': _IN,
     'hd_section_size': (0.0, 72.0), 'hd_subsection_size': (0.0, 72.0),
+    'pb_opacity': (0.0, 1.0),
 }
 
 
@@ -1702,6 +1713,19 @@ def _preset_fields(form):
         'screen': {k: (form.get('sc_' + k, '') or '').strip()
                    if _COLOR_RE.match((form.get('sc_' + k, '') or '').strip()) else ''
                    for k in engine.SCREEN_DEFAULTS},
+        'page_background': {
+            'image':   form.get('pb_image', '').strip(),
+            'color':   (form.get('pb_color', '') or '').strip()
+                       if _COLOR_RE.match((form.get('pb_color', '') or '').strip()) else '',
+            'opacity': _fs(form, 'pb_opacity', 1.0),
+        },
+        'furniture': {
+            **{slot: (form.get('fu_' + slot, '') or '').strip()
+               if ornaments.furniture(form.get('fu_' + slot, ''), slot) else ''
+               for slot in ornaments.FURNITURE_SLOTS},
+            'color': (form.get('fu_color', '') or '').strip()
+                     if _COLOR_RE.match((form.get('fu_color', '') or '').strip()) else '',
+        },
         'body': {'size': _fs(form, 'b_size', 11.0), 'leading': _fs(form, 'b_leading', 15.5),
                  'indent': _fs(form, 'b_indent', 0.3),
                  'justify': 'b_justify' in form, 'hyphenate': 'b_hyphenate' in form},
@@ -2227,18 +2251,28 @@ def ornament_tiles():
             for d in ornaments.DEFS]
 
 
+def furniture_options():
+    """The page-furniture pieces by slot, for the style editor's pickers."""
+    return {slot: [{'id': d['id'], 'name': d['name'], 'note': d['note'],
+                    'svg': ornaments.svg(d['id'], color='currentColor')}
+                   for d in ornaments.FURNITURE if d['slot'] == slot]
+            for slot in ornaments.FURNITURE_SLOTS}
+
+
 @app.route('/editor/new')
 def editor_new():
     return render_template('editor.html', pid=None, p=DEFAULTS, is_new=True,
                            fonts=list_fonts(), trim_presets=TRIM_PRESETS,
-                           ornaments=ornament_tiles(), figures=list_figures())
+                           ornaments=ornament_tiles(), figures=list_figures(),
+                           furniture=furniture_options())
 
 
 @app.route('/editor/<pid>')
 def editor(pid):
     return render_template('editor.html', pid=pid, p=load_preset(pid), is_new=False,
                            fonts=list_fonts(), trim_presets=TRIM_PRESETS,
-                           ornaments=ornament_tiles(), figures=list_figures())
+                           ornaments=ornament_tiles(), figures=list_figures(),
+                           furniture=furniture_options())
 
 
 @app.route('/save', methods=['POST'])
@@ -3477,6 +3511,8 @@ def _figure_uses(fn):
             uses.append(f'the style “{it["data"].get("name") or it["id"]}” (chapter art)')
         if _named(engine.scene_image_src(it['data']), fn):
             uses.append(f'the style “{it["data"].get("name") or it["id"]}” (scene breaks)')
+        if _named(engine.page_background_src(it['data']), fn):
+            uses.append(f'the style “{it["data"].get("name") or it["id"]}” (page background)')
     for it in list_projects():
         text = _project_manuscript_text(it['data'], report_import=False)
         for line in text.splitlines():

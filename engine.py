@@ -2183,24 +2183,28 @@ def register_fonts(preset):
 
 
 # ---------------------------------------------------------------- flowables
-def _draw_ornament(canv, oid, x0, y0, w, h):
+def _draw_ornament(canv, oid, x0, y0, w, h, color=None, fx=False, fy=False):
     """Paint a bundled vector ornament into the box (x0, y0, w, h).
 
     Walks the same primitive list `ornaments.svg()` walks, so the mark in the
     PDF and the one in the EPUB come from one definition. The box maps the
     ornament's own coordinates (x 0→aspect, y 0→1) with a single uniform
     scale, which is why line widths and radii can be given in box-height units.
+    `fx` / `fy` mirror it across the box (a corner piece in the other three
+    corners); `color` is its ink, black when not given.
     """
     d = _orn.get(oid)
     if not d:
         return False
     s = h  # uniform: the ornament box is `aspect` wide by 1 tall
+    a = d['aspect']
     def P(x, y):
-        return (x0 + x * s, y0 + y * s)
+        return (x0 + ((a - x) if fx else x) * s, y0 + ((1 - y) if fy else y) * s)
 
     canv.saveState()
-    canv.setFillColorRGB(0, 0, 0)
-    canv.setStrokeColorRGB(0, 0, 0)
+    ink = color if color is not None else _colors.black
+    canv.setFillColor(ink)
+    canv.setStrokeColor(ink)
     canv.setLineCap(1)
     canv.setLineJoin(1)
     for op in d['ops']:
@@ -2728,6 +2732,7 @@ class BookDoc(BaseDocTemplate):
 
     _press_canvas = None          # set by build_pdf for a press-ready build
     _screen = None                # the screen palette, on a screen build
+    _background = None            # the style's page background, on a screen build
 
     def build(self, flowables, **kw):
         """Route a press build through the CMYK canvas, measuring passes included.
@@ -2751,9 +2756,31 @@ class BookDoc(BaseDocTemplate):
         canv._ts_ink_off = True
         canv.setFillColor(self._screen['page'])
         canv.rect(0, 0, self._pw, self._ph, stroke=0, fill=1)
+        if self._background:
+            self._paint_background(canv, self._background)
         canv._ts_ink_off = False
         canv.setFillColor(_colors.black)
         canv.setStrokeColor(_colors.black)
+
+    def _paint_background(self, canv, bg):
+        """The style's page background: its colour, then its picture at its
+        opacity, scaled to cover the page (the page edge crops the overflow)."""
+        canv.saveState()
+        if bg['color'] is not None:
+            canv.setFillColor(bg['color'])
+            canv.rect(0, 0, self._pw, self._ph, stroke=0, fill=1)
+        if bg['path']:
+            try:
+                from reportlab.lib.utils import ImageReader
+                iw, ih = ImageReader(bg['path']).getSize()
+                s = max(self._pw / iw, self._ph / ih)
+                w, h = iw * s, ih * s
+                canv.setFillAlpha(bg['opacity'])
+                canv.drawImage(bg['path'], (self._pw - w) / 2, (self._ph - h) / 2,
+                               width=w, height=h, mask=None)
+            except Exception:
+                pass        # an unreadable picture: the page colour alone
+        canv.restoreState()
 
     def handle_flowable(self, flowables):
         f = flowables[0]
@@ -2778,6 +2805,42 @@ class BookDoc(BaseDocTemplate):
             return
         BaseDocTemplate.handle_flowable(self, flowables)
 
+    def _draw_page_ornaments(self, canv, opener, text_left, tw):
+        """The style's page furniture (#74 Phase 3b): a header bar under the
+        running head (not on chapter openers, like the running head), a footer
+        band above the folio, and a corner piece in each corner, inset from the
+        trim and kept clear of the text. Grey ink, which the screen canvas moves
+        onto its palette; the style's colour on a screen build."""
+        fu = {**FURNITURE_DEFAULTS, **(self.preset.get('furniture') or {})}
+        ink = _colors.Color(0.3, 0.3, 0.3)
+        if self._screen is not None:
+            c = (fu.get('color') or '').strip()
+            if re.fullmatch(r'#?(?:[0-9a-fA-F]{3}){1,2}', c):
+                ink = _fixed(_hex(c))
+        head = _orn.furniture(fu.get('header'), 'header')
+        if head and not opener:
+            h = tw / head['aspect']
+            rh_gap = self.preset['running_head']['gap'] * inch
+            y = self._ph - self._top + rh_gap * 0.42 - h / 2
+            _draw_ornament(canv, head['id'], text_left, y, tw, h, color=ink)
+        foot = _orn.furniture(fu.get('footer'), 'footer')
+        if foot:
+            h = tw / foot['aspect']
+            fo = self.preset['folio']
+            top_of_folio = self._bottom - fo['gap'] * inch + fo['size'] * 0.75
+            y = (self._bottom + top_of_folio) / 2 - h / 2
+            _draw_ornament(canv, foot['id'], text_left, y, tw, h, color=ink)
+        corner = _orn.furniture(fu.get('corner'), 'corner')
+        if corner:
+            inset = 0.25 * inch
+            room = min(self._top, self._bottom, self._inside, self._outside) - inset - 0.06 * inch
+            s = min(0.55 * inch, room)
+            if s > 0.12 * inch:
+                for fx, fy in ((False, False), (True, False), (False, True), (True, True)):
+                    x = self._pw - inset - s if fx else inset
+                    y = self._ph - inset - s if fy else inset
+                    _draw_ornament(canv, corner['id'], x, y, s, s, color=ink, fx=fx, fy=fy)
+
     def _furniture(self, canv, doc):
         p = self.preset
         page = canv.getPageNumber()
@@ -2794,6 +2857,8 @@ class BookDoc(BaseDocTemplate):
         tw = self._pw - self._inside - self._outside
         text_left = self._inside if recto else self._outside
         cx = text_left + tw / 2.0
+
+        self._draw_page_ornaments(canv, opener, text_left, tw)
 
         rh = p['running_head']
         if rh['show'] and not opener:
@@ -5167,6 +5232,92 @@ def _screen_preset(preset):
     return out
 
 
+# A page background for the screen PDF (#74 Phase 3b): a picture from the
+# figure library laid under every body page, over the page colour (or `color`,
+# when set) at `opacity`. Screen-only: a print interior without bleed would show
+# a white edge round it, so the print and press builds never draw it.
+PAGE_BACKGROUND_DEFAULTS = {'image': '', 'color': '', 'opacity': 1.0}
+# Page furniture (#74 Phase 3b): `ornaments.FURNITURE` ids for the header bar,
+# footer band and corner pieces of every body page ('' = none), and their
+# colour on the screen PDF ('' = the palette's muted ink; print is always grey).
+FURNITURE_DEFAULTS = {'header': '', 'footer': '', 'corner': '', 'color': ''}
+# the parchment the app makes itself, so a style can ship with one
+PARCHMENT = 'parchment.jpg'
+
+
+def make_parchment(path, w=1275, h=1650, seed=74):
+    """Write a parchment texture to `path`: soft blotches at three scales, a
+    fine grain and darker edges, toned from a warm brown to cream. Pillow
+    noise from a fixed seed, so it is the same file on every machine and there
+    is no licence to check."""
+    import random
+    from PIL import Image, ImageFilter, ImageOps
+    rng = random.Random(seed)
+
+    def noise(gw, gh, blur=0):
+        im = Image.frombytes('L', (gw, gh), rng.randbytes(gw * gh))
+        im = im.resize((w, h), Image.BICUBIC)
+        return im.filter(ImageFilter.GaussianBlur(blur)) if blur else im
+
+    tone = noise(5, 7, 40)
+    tone = Image.blend(tone, noise(18, 24, 12), 0.4)
+    tone = Image.blend(tone, noise(70, 92, 3), 0.25)
+    tone = ImageOps.autocontrast(tone)
+    grain = Image.frombytes('L', (w, h), rng.randbytes(w * h)).filter(ImageFilter.GaussianBlur(0.7))
+    tone = Image.blend(tone, grain, 0.12)
+    # darker towards the edges
+    edge = Image.radial_gradient('L').resize((w, h), Image.BICUBIC)
+    edge = edge.point(lambda v: max(0, v - 120) * 2)
+    tone = Image.composite(Image.new('L', (w, h), 0), tone,
+                           edge.point(lambda v: v * 0.6))
+    tone = tone.point(lambda v: 150 + v * 0.41)
+    img = ImageOps.colorize(tone, black='#6e5230', white='#f8f0dc')
+    img.save(path, 'JPEG', quality=86)
+    return path
+
+
+def ensure_parchment():
+    """The bundled parchment's path in the figure library, made if it is missing."""
+    path = os.path.join(FIGURE_DIR, PARCHMENT)
+    if not os.path.exists(path):
+        os.makedirs(FIGURE_DIR, exist_ok=True)
+        make_parchment(path)
+    return path
+
+
+def page_background_src(preset):
+    """The picture a style lays under its screen pages, or ''."""
+    return ((preset.get('page_background') or {}).get('image') or '').strip()
+
+
+def page_background(preset):
+    """A style's page background as {path, color, opacity}, or None (none set).
+
+    The parchment is made on first use; any other missing or unreadable file
+    leaves just the colour, if there is one."""
+    pb = {**PAGE_BACKGROUND_DEFAULTS, **(preset.get('page_background') or {})}
+    src = page_background_src(preset)
+    path = None
+    if src:
+        if src == PARCHMENT:
+            try:
+                ensure_parchment()
+            except OSError:
+                pass
+        path = _figure_asset_path(src)
+        if path and picture_unreadable(path):
+            path = None
+    c = (pb.get('color') or '').strip()
+    color = _fixed(_hex(c)) if re.fullmatch(r'#?(?:[0-9a-fA-F]{3}){1,2}', c) else None
+    if not path and not color:
+        return None
+    try:
+        opacity = max(0.0, min(float(pb.get('opacity', 1.0)), 1.0))
+    except (TypeError, ValueError):
+        opacity = 1.0
+    return {'path': path, 'color': color, 'opacity': opacity}
+
+
 def _screen_ink(theme):
     """colour -> colour for the screen canvas.
 
@@ -5441,6 +5592,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             doc._press_canvas = _press_canvasmaker(doc._pw, doc._ph)
         elif screen:
             doc._screen = preset['_screen']
+            doc._background = page_background(preset)
         return doc
 
     def _resolve_foot(make_toc=None):

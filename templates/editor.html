@@ -737,6 +737,60 @@
               <input type="text" name="sc_{{ key }}" value="{{ sc.get(key, '') }}" placeholder="blank = print look"></div>
             {% endfor %}
           </div>
+          {% set pb = p.get('page_background', {}) or {} %}
+          {% set pb_img = pb.get('image', '') %}
+          <div class="row">
+            <div class="field"><label>Page background</label><span class="hint">a picture under every page · from your figure library</span>
+              <select name="pb_image">
+                <option value="">None — the page colour alone</option>
+                {% set figs = figures or [] %}
+                {% if pb_img and pb_img not in figs %}
+                  <option value="{{ pb_img }}" selected>{{ pb_img }} (not in your figure library)</option>
+                {% endif %}
+                {% for f in figs %}
+                  <option value="{{ f }}" {{ 'selected' if pb_img == f }}>{{ f }}{{ ' (made by the app)' if f == 'parchment.jpg' }}</option>
+                {% endfor %}
+              </select></div>
+            <div class="field"><label>Strength</label><span class="hint">0–1 · lower lets the colour show through</span>
+              <input type="number" name="pb_opacity" min="0" max="1" step="0.05" value="{{ pb.get('opacity', 1.0) }}"></div>
+            <div class="field"><label>Under it</label><span class="hint">#rrggbb · blank = the page colour</span>
+              <input type="text" name="pb_color" value="{{ pb.get('color', '') }}" placeholder="blank = page colour"></div>
+          </div>
+          <p class="hint" style="margin:6px 0 0">Screen PDF only: a printed interior has no bleed
+            for it, so it would print with a white edge.</p>
+        </div>
+      </fieldset>
+
+      {% set fu = p.get('furniture', {}) or {} %}
+      <fieldset>
+        <legend>Page furniture</legend>
+        <div class="fs-body">
+          <p class="hint" style="margin:0 0 8px;line-height:1.6">Marks on every page of the
+            book proper, in the margins: a bar under the running head (not on chapter
+            openings), a band above the page number, and a piece in each corner. They print
+            in grey; the screen PDF draws them in the colour below, or a muted tone of its
+            text colour.</p>
+          <div class="row">
+            {% for slot, label, hint in [('header', 'Header bar', 'under the running head'),
+                                         ('footer', 'Footer band', 'above the page number'),
+                                         ('corner', 'Corners', 'all four corners')] %}
+            <div class="field"><label>{{ label }}</label><span class="hint">{{ hint }}</span>
+              <select name="fu_{{ slot }}">
+                <option value="">None</option>
+                {% for o in (furniture or {}).get(slot, []) %}
+                <option value="{{ o.id }}" {{ 'selected' if fu.get(slot) == o.id }} title="{{ o.note }}">{{ o.name }}</option>
+                {% endfor %}
+              </select>
+              {% if slot == 'corner' %}
+              <div class="fu-tiles" style="display:flex;gap:8px;margin-top:6px">
+                {% for o in (furniture or {}).get(slot, []) %}
+                <span title="{{ o.name }}: {{ o.note }}" style="display:inline-block;width:26px;height:26px">{{ o.svg|safe }}</span>
+                {% endfor %}
+              </div>{% endif %}</div>
+            {% endfor %}
+            <div class="field"><label>Screen colour</label><span class="hint">#rrggbb · blank = muted text colour</span>
+              <input type="text" name="fu_color" value="{{ fu.get('color', '') }}" placeholder="blank = muted"></div>
+          </div>
         </div>
       </fieldset>
 

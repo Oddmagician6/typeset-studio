@@ -206,11 +206,108 @@ IDS = [d['id'] for d in DEFS]
 DEFAULT_ID = 'swelled-rule'
 
 
+# ------------------------------------------------------------ page furniture
+# Marks drawn on every body page of a game book (#74 Phase 3b), in the margins:
+# a header bar across the text width under the running head, a footer band
+# across it above the folio, and a corner piece in each corner of the page.
+# Same primitives and box as above. A corner is drawn for the page's
+# bottom-left corner (the corner at 0,0, arms along +x and +y) and mirrored
+# into the other three. Genre convention only: no official book's art.
+FURNITURE = [
+    {
+        'id': 'bar-tapered', 'slot': 'header', 'name': 'Tapered bar',
+        'note': 'thick at the start, running to a point',
+        'aspect': 120.0,
+        'ops': [('poly', [(0.0, 0.0), (0.0, 1.0), (120.0, 0.5)])],
+    },
+    {
+        'id': 'bar-diamond', 'slot': 'header', 'name': 'Diamond bar',
+        'note': 'two hairlines broken by a lozenge',
+        'aspect': 100.0,
+        'ops': [('line', 0.0, 0.72, 47.6, 0.72, 0.09),
+                ('line', 0.0, 0.28, 47.6, 0.28, 0.09),
+                ('line', 52.4, 0.72, 100.0, 0.72, 0.09),
+                ('line', 52.4, 0.28, 100.0, 0.28, 0.09),
+                _lozenge(50.0, 0.5, 2.0, 0.5)],
+    },
+    {
+        'id': 'bar-studded', 'slot': 'header', 'name': 'Studded bar',
+        'note': 'a rule set with small studs',
+        'aspect': 80.0,
+        'ops': ([('line', 0.0, 0.5, 80.0, 0.5, 0.16)]
+                 + [('dot', 4.0 + i * 8.0, 0.5, 0.42) for i in range(10)]),
+    },
+    {
+        'id': 'band-solid', 'slot': 'footer', 'name': 'Solid band',
+        'note': 'a filled strip with notched ends',
+        'aspect': 70.0,
+        'ops': [('poly', [(0.0, 0.0), (1.2, 0.5), (0.0, 1.0), (70.0, 1.0),
+                          (68.8, 0.5), (70.0, 0.0)])],
+    },
+    {
+        'id': 'band-double', 'slot': 'footer', 'name': 'Double band',
+        'note': 'thick over thin',
+        'aspect': 80.0,
+        'ops': [('line', 0.0, 0.8, 80.0, 0.8, 0.36),
+                ('line', 0.0, 0.12, 80.0, 0.12, 0.13)],
+    },
+    {
+        'id': 'band-tapered', 'slot': 'footer', 'name': 'Tapered band',
+        'note': 'swelling in the middle, pointed at both ends',
+        'aspect': 90.0,
+        'ops': [('fill', [
+            ('m', 0.0, 0.5),
+            ('c', 18.0, 0.5, 27.0, 1.0, 45.0, 1.0),
+            ('c', 63.0, 1.0, 72.0, 0.5, 90.0, 0.5),
+            ('c', 72.0, 0.5, 63.0, 0.0, 45.0, 0.0),
+            ('c', 27.0, 0.0, 18.0, 0.5, 0.0, 0.5),
+            ('z',)])],
+    },
+    {
+        'id': 'corner-bracket', 'slot': 'corner', 'name': 'Bracket',
+        'note': 'a double right angle with a stud',
+        'aspect': 1.0,
+        'ops': [('stroke', [('m', 1.0, 0.04), ('l', 0.04, 0.04), ('l', 0.04, 1.0)], 0.05),
+                ('stroke', [('m', 0.62, 0.16), ('l', 0.16, 0.16), ('l', 0.16, 0.62)], 0.025),
+                ('dot', 0.28, 0.28, 0.05)],
+    },
+    {
+        'id': 'corner-flourish', 'slot': 'corner', 'name': 'Flourish',
+        'note': 'two scrolls curling out of the corner',
+        'aspect': 1.0,
+        'ops': [('stroke', [('m', 0.04, 0.04), ('c', 0.40, 0.04, 0.70, 0.10, 1.0, 0.06)], 0.035),
+                ('stroke', [('m', 0.04, 0.04), ('c', 0.04, 0.40, 0.10, 0.70, 0.06, 1.0)], 0.035),
+                ('stroke', [('m', 0.12, 0.12), ('c', 0.45, 0.14, 0.52, 0.30, 0.40, 0.36),
+                            ('c', 0.32, 0.40, 0.26, 0.32, 0.32, 0.27)], 0.025),
+                ('stroke', [('m', 0.12, 0.12), ('c', 0.14, 0.45, 0.30, 0.52, 0.36, 0.40),
+                            ('c', 0.40, 0.32, 0.32, 0.26, 0.27, 0.32)], 0.025),
+                _lozenge(0.10, 0.10, 0.07, 0.07)],
+    },
+    {
+        'id': 'corner-wedge', 'slot': 'corner', 'name': 'Wedge',
+        'note': 'a solid triangle with an inner line',
+        'aspect': 1.0,
+        'ops': [('poly', [(0.0, 0.0), (0.62, 0.0), (0.0, 0.62)]),
+                ('stroke', [('m', 0.82, 0.0), ('l', 0.0, 0.82)], 0.03)],
+    },
+]
+FURNITURE_BY_ID = {d['id']: d for d in FURNITURE}
+FURNITURE_SLOTS = ('header', 'footer', 'corner')
+
+
+def furniture(fid, slot=None):
+    """The furniture piece with this id (in `slot`, when given), or None."""
+    d = FURNITURE_BY_ID.get((fid or '').strip())
+    return d if d and (slot is None or d['slot'] == slot) else None
+
+
 def get(oid):
     """The ornament with this id, or None. Callers must handle None: a preset
     may name an ornament that a later version renamed, and a scene break is
-    never worth crashing a build over."""
-    return BY_ID.get((oid or '').strip())
+    never worth crashing a build over. Furniture pieces are looked up too, so
+    `svg()` draws them for the picker."""
+    oid = (oid or '').strip()
+    return BY_ID.get(oid) or FURNITURE_BY_ID.get(oid)
 
 
 def size(oid, avail_w, width_frac=0.0):

@@ -1,0 +1,255 @@
+{
+  "name": "Game Zine — A5",
+  "description": "An old-school adventure zine on A5: compact Spectral text, bold plain headings, one-line stat blocks set tight, black and white with a red spot colour on screen. Wedge corners and a double footer band frame every page.",
+  "trim": {
+    "w": 5.83,
+    "h": 8.27
+  },
+  "margins": {
+    "top": 0.6,
+    "bottom": 0.62,
+    "inside": 0.62,
+    "outside": 0.5
+  },
+  "font_family": "Spectral",
+  "font_files": {
+    "regular": "Spectral-Regular.ttf",
+    "bold": "Spectral-Bold.ttf",
+    "italic": "Spectral-Italic.ttf"
+  },
+  "body": {
+    "size": 9.5,
+    "leading": 12.4,
+    "indent": 0.18,
+    "justify": true,
+    "hyphenate": true
+  },
+  "chapter": {
+    "start": "any",
+    "sink": 0.3,
+    "show_number": false,
+    "number_format": "Chapter {n}",
+    "number_size": 10.0,
+    "title_size": 18.0,
+    "after_title": 0.22,
+    "open_style": "none",
+    "leadin_words": 4,
+    "dropcap_lines": 3
+  },
+  "chapter_art": {
+    "image": "",
+    "position": "above",
+    "width": 0.32,
+    "align": "center",
+    "gap": 0.16,
+    "max_height": 1.6
+  },
+  "part_divider": {
+    "show_number": true,
+    "number_format": "Part {n}",
+    "number_size": 11.0,
+    "title_size": 22.0,
+    "sink": 0.38
+  },
+  "document_block": {
+    "frame": "ruled",
+    "indent": 0.25,
+    "font_size": 0,
+    "first_indent": 0.0,
+    "space_around": 12.0,
+    "header_size": 9.5,
+    "dateline_style": "italic"
+  },
+  "figure": {
+    "width": 0.8,
+    "align": "center",
+    "max_height": 0.8,
+    "space_around": 12.0,
+    "caption_size": 0,
+    "caption_style": "italic",
+    "caption_align": "center",
+    "caption_gap": 5.0
+  },
+  "list": {
+    "bullet": "•",
+    "number_format": "{n}.",
+    "indent": 0.25,
+    "marker_gap": 0.22,
+    "item_gap": 3.0,
+    "space_around": 10.0,
+    "font_size": 0,
+    "line_leading": 1.35
+  },
+  "quote": {
+    "indent": 0.35,
+    "right_indent": 0.35,
+    "first_indent": 0.0,
+    "font_size": 0,
+    "line_leading": 1.35,
+    "style": "regular",
+    "space_around": 11.0,
+    "para_gap": 4.0,
+    "source_style": "italic",
+    "source_align": "right",
+    "source_gap": 3.0
+  },
+  "align": {
+    "space_around": 9.0,
+    "indent": 0.0,
+    "para_gap": 3.0
+  },
+  "readaloud": {
+    "font_size": 0,
+    "line_leading": 1.35,
+    "style": "italic",
+    "title_style": "smallcaps",
+    "fill": "",
+    "print_fill": "",
+    "rule": "left",
+    "rule_width": 2.0,
+    "rule_color": "#a3201a",
+    "print_rule_color": "#000000",
+    "pad_x": 6.0,
+    "pad_y": 3.0,
+    "para_gap": 4.0,
+    "space_around": 9.0
+  },
+  "sidebar": {
+    "font_size": 0,
+    "line_leading": 1.3,
+    "style": "regular",
+    "fill": "",
+    "print_fill": "",
+    "border_width": 0.75,
+    "border_color": "#1b1b1b",
+    "print_border_color": "#000000",
+    "title_size": 0,
+    "title_style": "bold",
+    "title_caps": true,
+    "title_fill": "#1b1b1b",
+    "print_title_fill": "#000000",
+    "title_color": "#f4f1ea",
+    "print_title_color": "#ffffff",
+    "pad_x": 6.0,
+    "pad_y": 4.0,
+    "para_gap": 4.0,
+    "space_around": 9.0
+  },
+  "statblock": {
+    "font_size": 0,
+    "line_leading": 1.2,
+    "fill": "",
+    "print_fill": "",
+    "name_size": 0,
+    "name_style": "bold",
+    "name_caps": true,
+    "name_color": "#a3201a",
+    "print_name_color": "#000000",
+    "meta_style": "italic",
+    "rule": "plain",
+    "rule_width": 0.75,
+    "rule_color": "#1b1b1b",
+    "print_rule_color": "#000000",
+    "field_label_style": "bold",
+    "scores": "row",
+    "score_label_style": "bold",
+    "section_style": "bold",
+    "section_size": 0,
+    "section_rule": true,
+    "entry_name_style": "bolditalic",
+    "entry_indent": 0.0,
+    "entry_gap": 2.0,
+    "pad_x": 0.0,
+    "pad_y": 2.0,
+    "space_around": 8.0,
+    "border": "none",
+    "border_width": 2.0
+  },
+  "table": {
+    "font_size": 0,
+    "line_leading": 1.3,
+    "header_style": "bold",
+    "rules": "all",
+    "rule_width": 0.5,
+    "cell_pad_x": 3.0,
+    "cell_pad_y": 2.0,
+    "space_around": 8.0,
+    "width": 1.0,
+    "align": "center",
+    "caption_size": 0,
+    "caption_style": "italic",
+    "caption_align": "center",
+    "caption_gap": 5.0
+  },
+  "link": {
+    "underline": false,
+    "color": "",
+    "epub_underline": true
+  },
+  "endnotes": {
+    "placement": "end",
+    "heading": "Notes",
+    "group_by_chapter": true,
+    "font_size": 0,
+    "line_leading": 1.35,
+    "indent": 0.3,
+    "entry_gap": 3.0,
+    "group_gap": 12.0,
+    "marker_scale": 0.62,
+    "foot_gap": 10.0,
+    "foot_rule": true,
+    "foot_rule_width": 0.3,
+    "foot_max_height": 0.4
+  },
+  "scene_break": {
+    "type": "ornament",
+    "glyph": "* * *",
+    "size": 11.0,
+    "gap": 9.0,
+    "image": "",
+    "ornament": "diamond-trio",
+    "ornament_width": 0.0
+  },
+  "running_head": {
+    "show": true,
+    "caps": true,
+    "size": 7.5,
+    "gap": 0.26,
+    "content": "chapter"
+  },
+  "folio": {
+    "show": true,
+    "position": "outer",
+    "size": 8.5,
+    "gap": 0.34,
+    "hide_on_opener": false
+  },
+  "headings": {
+    "section_style": "bold",
+    "section_align": "left",
+    "section_size": 10.5,
+    "subsection_style": "italic",
+    "subsection_align": "left",
+    "subsection_size": 0
+  },
+  "toc": {
+    "depth": 3
+  },
+  "screen": {
+    "page": "#f4f1ea",
+    "text": "#1b1b1b",
+    "heading": "#1b1b1b",
+    "accent": "#a3201a"
+  },
+  "page_background": {
+    "image": "",
+    "color": "",
+    "opacity": 1.0
+  },
+  "furniture": {
+    "header": "",
+    "footer": "band-double",
+    "corner": "corner-wedge",
+    "color": "#1b1b1b"
+  }
+}

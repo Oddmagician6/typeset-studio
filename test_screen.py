@@ -1,4 +1,4 @@
-"""The colour screen PDF (ROADMAP #74, Phase 3a)  (run: python test_screen.py).
+"""The colour screen PDF (ROADMAP #74, Phases 3a and 3b)  (run: python test_screen.py).
 
 No test framework -- keeps the app dependency-light. Exits non-zero on failure.
 
@@ -66,7 +66,10 @@ def _rgb(n):
 
 def _low_contrast(path, floor=FLOOR, dpi=48):
     """[(page, text, ratio)] for every span under `floor` against the most
-    common pixel colour in its box (the text itself is the minority)."""
+    common colour in its box (the text itself is the minority). Pixels are
+    grouped by near colour first and the winning group averaged: on a textured
+    page background (Phase 3b's parchment) no two pixels match exactly, and a
+    solid heading would otherwise outvote the page behind it."""
     import collections
     import fitz
     from reportlab.lib.colors import Color
@@ -82,13 +85,15 @@ def _low_contrast(path, floor=FLOOR, dpi=48):
                     if not span['text'].strip():
                         continue
                     x0, y0, x1, y1 = span['bbox']
-                    seen = collections.Counter()
+                    seen = collections.defaultdict(list)
                     for px in range(max(0, int(x0 * sx)), min(pix.width, int(x1 * sx) + 1)):
                         for py in range(max(0, int(y0 * sy)), min(pix.height, int(y1 * sy) + 1)):
-                            seen[pix.pixel(px, py)[:3]] += 1
+                            rgb = pix.pixel(px, py)[:3]
+                            seen[tuple(v // 24 for v in rgb)].append(rgb)
                     if not seen:
                         continue
-                    bg = Color(*[v / 255.0 for v in seen.most_common(1)[0][0]])
+                    group = max(seen.values(), key=len)
+                    bg = Color(*[sum(c[i] for c in group) / len(group) / 255.0 for i in range(3)])
                     ratio = engine.contrast(Color(*_rgb(span['color'])), bg)
                     if ratio < floor:
                         bad.append((pno + 1, span['text'][:30], round(ratio, 2)))
@@ -249,6 +254,131 @@ def test_bundled_style():
     _check("…and reads", not bad, bad[:6])
 
 
+PARCH = {'page': '#f3e9d2', 'text': '#2a2118', 'heading': '#6b1d14', 'accent': '#7d3a12'}
+
+
+def test_backgrounds():
+    print("\npage backgrounds (Phase 3b)")
+    import fitz
+    import engine
+    a, b = os.path.join(TMP, 'p1.jpg'), os.path.join(TMP, 'p2.jpg')
+    engine.make_parchment(a)
+    engine.make_parchment(b)
+    _check("the parchment is the same file every time",
+           open(a, 'rb').read() == open(b, 'rb').read())
+    _check("the app has put it in the figure library",
+           os.path.exists(os.path.join(engine.FIGURE_DIR, engine.PARCHMENT)))
+    bg = {'image': engine.PARCHMENT, 'color': '', 'opacity': 1.0}
+    for name, md in _fixtures():
+        out, res = _build(md, _preset(screen=PARCH, page_background=bg), 'parch-' + name[:-3],
+                          meta={'front_matter': 'full'})
+        bad = _low_contrast(out)
+        _check(f"{name}: every span reads on parchment ({res['page_count']} pages)",
+               not bad, bad[:6])
+    md = open(os.path.join(FIX, 'adventure.md'), encoding='utf-8').read()
+    out, _ = _build(md, _preset(screen=PARCH, page_background=bg), 'parch-imgs')
+    d = fitz.open(out)
+    _check("every page of the screen PDF has the picture under it",
+           all(p.get_images() for p in d), [i for i, p in enumerate(d) if not p.get_images()])
+    _check("…embedded once", len({x[0] for p in d for x in p.get_images()}) == 1)
+    out, _ = _build(md, _preset(screen=PARCH, page_background=bg), 'parch-print', screen=False)
+    d = fitz.open(out)
+    _check("the print build has no background",
+           not any(p.get_images() for p in d) and d[4].get_pixmap(dpi=20).pixel(2, 2)[:3]
+           == (255, 255, 255))
+    # a faint parchment over the dark page still reads
+    out, _ = _build(md, _preset(page_background=dict(bg, opacity=0.1)), 'parch-dark')
+    bad = _low_contrast(out)
+    _check("a faint background on the dark page reads", not bad, bad[:6])
+    # the colour under it, and a picture that is gone
+    out, _ = _build('# One\n\nText.\n', _preset(page_background={'image': 'gone.png',
+                                                                'color': '#203040'}),
+                    'bg-colour', meta={'include_toc': False, 'front_matter': 'none'})
+    px = fitz.open(out)[0].get_pixmap(dpi=20).pixel(2, 2)[:3]
+    _check("a missing picture leaves the colour under it",
+           all(abs(v - w) <= 2 for v, w in zip(px, (0x20, 0x30, 0x40))), px)
+    # and the measure sees a background that drowns the text: light ink on parchment
+    out, _ = _build('# Lost\n\nText.\n', _preset(page_background=bg), 'parch-lost',
+                    meta={'include_toc': False, 'front_matter': 'none'})
+    _check("the contrast measure flags text the background drowns",
+           len(_low_contrast(out)) >= 2, _low_contrast(out))
+
+
+def test_furniture():
+    print("\npage furniture (Phase 3b)")
+    import fitz
+    import engine
+    import ornaments
+    _check("every piece has a known slot",
+           all(d['slot'] in ornaments.FURNITURE_SLOTS for d in ornaments.FURNITURE))
+    _check("no piece shares an id with a scene-break ornament",
+           not set(ornaments.FURNITURE_BY_ID) & set(ornaments.BY_ID))
+    _check("each draws as SVG for the picker",
+           all(ornaments.svg(d['id']).startswith('<svg') for d in ornaments.FURNITURE))
+    md = open(os.path.join(FIX, 'reference.md'), encoding='utf-8').read()
+    for hd, ft, co in (('bar-tapered', 'band-solid', 'corner-bracket'),
+                       ('bar-diamond', 'band-double', 'corner-flourish'),
+                       ('bar-studded', 'band-tapered', 'corner-wedge')):
+        fu = {'header': hd, 'footer': ft, 'corner': co, 'color': ''}
+        out, _ = _build(md, _preset(furniture=fu), 'fu-' + hd)
+        bad = _low_contrast(out)
+        _check(f"{hd} / {ft} / {co}: the text still reads", not bad, bad[:6])
+    fu = {'header': 'bar-tapered', 'footer': 'band-solid', 'corner': 'corner-wedge',
+          'color': '#c2a35e'}
+    plain, _ = _build(md, _preset(), 'fu-none')
+    out, _ = _build(md, _preset(furniture=fu), 'fu-gold')
+    a, b = fitz.open(plain), fitz.open(out)
+
+    def corner(page):
+        """The pixel just inside the bottom-left corner piece (inset 0.25in)."""
+        pix = page.get_pixmap(dpi=72)
+        return pix.pixel(int(0.29 * 72), pix.height - int(0.29 * 72))[:3]
+    gold = [i for i, p in enumerate(b) if corner(p)[0] > 150 and corner(p)[2] < 130]
+    _check("corner pieces are drawn in the style's colour", gold, [corner(p) for p in b])
+    _check("…on body pages only: the first pages are as they were",
+           gold and all(a[i].get_pixmap(dpi=20).samples == b[i].get_pixmap(dpi=20).samples
+                        for i in range(min(gold))))
+    out, _ = _build(md, _preset(furniture=fu), 'fu-print', screen=False)
+    px = [corner(p) for i, p in enumerate(fitz.open(out)) if i in gold]
+    _check("the print build draws them grey",
+           px and all(c[0] == c[1] == c[2] and c[0] < 200 for c in px), px[:3])
+    try:
+        engine.build_pdf(manuscript.parse_markdown(md), _preset(furniture=fu),
+                         os.path.join(TMP, 'fu-press.pdf'),
+                         {'title': 'T', 'author': 'A'}, press=True)
+        ok = True
+    except Exception as e:        # the CMYK canvas refuses any colour
+        ok = str(e)
+    _check("…and the press build accepts them", ok is True, ok)
+    out, _ = _build('# One\n\nText.\n', _preset(furniture={'header': 'corner-wedge',
+                                                            'footer': 'nonsense'}), 'fu-bad')
+    _check("a piece in the wrong slot, or unknown, is ignored", os.path.exists(out))
+
+
+def test_bundled_3b():
+    print("\nthe light rulebook and the A5 zine")
+    import app
+    import fitz
+    md = open(os.path.join(FIX, 'adventure.md'), encoding='utf-8').read()
+    for pid, trim in (('game-light-rulebook', (8.5, 11.0)), ('game-zine-a5', (5.83, 8.27))):
+        p = app.load_preset(pid)
+        _check(f"{pid}: its trim", (p['trim']['w'], p['trim']['h']) == trim, p['trim'])
+        _check(f"{pid}: no poem section (the style editor can't save one)", 'poem' not in p)
+        out, _ = _build(md, p, pid + '-screen', meta={'front_matter': 'full'})
+        bad = _low_contrast(out)
+        _check(f"{pid}: its screen PDF reads", not bad, bad[:6])
+        out, _ = _build(md, p, pid + '-print', screen=False, meta={'front_matter': 'full'})
+        d = fitz.open(out)
+        _check(f"{pid}: its print build is light, no background",
+               d[4].get_pixmap(dpi=20).pixel(2, 2)[:3] == (255, 255, 255)
+               and not any(pg.get_images() for pg in d))
+        bad = _low_contrast(out)
+        _check(f"{pid}: …and reads", not bad, bad[:6])
+    p = app.load_preset('game-light-rulebook')
+    _check("the rulebook's screen PDF is on parchment",
+           p['page_background']['image'] == app.engine.PARCHMENT)
+
+
 def test_style_form():
     print("\nthe style form")
     import app
@@ -262,6 +392,27 @@ def test_style_form():
     with app.app.test_request_context():
         p = app.parse_preset_form({})
     _check("no display face: the key is left out", 'display' not in p['font_files'])
+    _check("no background or furniture by default",
+           p['page_background'] == app.engine.PAGE_BACKGROUND_DEFAULTS
+           and p['furniture'] == app.engine.FURNITURE_DEFAULTS, (p['page_background'], p['furniture']))
+    with app.app.test_request_context():
+        p = app.parse_preset_form({'pb_image': 'parchment.jpg', 'pb_opacity': '1.7',
+                                   'pb_color': 'brown', 'fu_header': 'bar-diamond',
+                                   'fu_footer': 'corner-wedge', 'fu_corner': 'corner-flourish',
+                                   'fu_color': '#6b1d14'})
+    _check("the background is saved, its strength clamped, a bad colour cleared",
+           p['page_background'] == {'image': 'parchment.jpg', 'color': '', 'opacity': 1.0},
+           p['page_background'])
+    _check("furniture is saved, a piece in the wrong slot cleared",
+           p['furniture'] == {'header': 'bar-diamond', 'footer': '', 'corner': 'corner-flourish',
+                              'color': '#6b1d14'}, p['furniture'])
+    with app.app.test_client() as c:
+        page = c.get('/editor/game-light-rulebook').get_data(as_text=True)
+    _check("the editor shows the background and furniture pickers",
+           'name="pb_image"' in page and 'name="fu_corner"' in page
+           and 'value="bar-tapered" selected' in page, '')
+    _check("deleting the parchment would warn which style uses it",
+           any('page background' in u for u in app._figure_uses(app.engine.PARCHMENT)))
 
 
 def test_app_builds_both():
@@ -312,6 +463,9 @@ if __name__ == "__main__":
     test_blocks_screen_colours()
     test_cover_kept()
     test_bundled_style()
+    test_backgrounds()
+    test_furniture()
+    test_bundled_3b()
     test_style_form()
     test_app_builds_both()
     print()
