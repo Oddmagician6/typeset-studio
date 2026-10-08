@@ -8,6 +8,20 @@ line here.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Word files import with their bold and italic intact.** A bold or italic
+  phrase whose run ended in a space, which is how Word usually stores a name
+  like "***Keen Smell.***" before the text after it, came in with its
+  closing marks in the wrong place, and the book printed stray asterisks: two
+  for every trait and action in a stat block. An italic phrase Word had split
+  into pieces did the same. Both now come in as the emphasis they were.
+- **A Word file with no "Normal" style imports.** Documents made by some
+  tools rather than by Word itself don't define one, and importing them
+  stopped with an error. Their unstyled paragraphs now import as body text.
+
 ## 1.3.2 — 7 October 2026
 
 A small fix for print covers: a designed cover’s art, colour and bands now run

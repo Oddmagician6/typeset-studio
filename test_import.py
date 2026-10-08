@@ -431,6 +431,60 @@ try:
     check('markup characters in a cell stay literal',
           'file_name' in cell_text and '*starred*' in cell_text
           and '<i>' not in cell_text, cell_text)
+
+    # A 5e bestiary written in Word (found in a real one): every trait name is
+    # a bold-italic run ending in the space before the description, which came
+    # out as `***Keen Smell. ***` and printed two asterisks per trait.
+    def _runs(d, *parts):
+        p = d.add_paragraph()
+        for text, bold, italic in parts:
+            r = p.add_run(text)
+            r.bold, r.italic = bold, italic
+
+    def _statblock_runs(d):
+        d.add_heading('C', level=1)
+        d.add_paragraph('Opening line.')
+        _runs(d, ('Keen Smell. ', True, True),
+              ('The wolf has advantage.', None, None))
+        _runs(d, ('Armor Class ', True, None), ('12 (leather armor)', None, None))
+        _runs(d, ('Pack ', None, True), ('Tactics', None, True),
+              (' is a trait.', None, None))
+        _runs(d, ('Lore. ', True, True), ('It hunts at dusk.', None, True))
+        _runs(d, ('one', None, None), (' ', True, None), ('two', None, None))
+
+    md, rep, parsed = _imported(_statblock_runs)
+    paras = [b[1] for b in _blocks(parsed) if b[0] == 'para']
+    check('a bold-italic run ending in a space closes before the space',
+          '<b><i>Keen Smell.</i></b> The wolf' in paras[1], paras[1])
+    check('a bold label ending in a space closes before the space',
+          '<b>Armor Class</b> 12' in paras[2], paras[2])
+    check('one italic phrase split across runs is one span',
+          '<i>Pack Tactics</i> is a trait.' in paras[3], paras[3])
+    check('bold-italic then italic both close',
+          '<b><i>Lore.</i></b> <i>It hunts at dusk.</i>' in paras[4], paras[4])
+    check('a bold run that is only a space adds no markers',
+          paras[5] == 'one two', paras[5])
+    check('no asterisk reaches the book from any of them',
+          not any('*' in t for t in paras), paras)
+
+    # A document made by a tool rather than Word can define no Normal style,
+    # so python-docx gives its unstyled paragraphs no style at all, and the
+    # importer stopped at the first one.
+    def _no_normal(d):
+        d.add_heading('Chapter', level=1)
+        d.add_paragraph('An unstyled paragraph.')
+        styles = d.styles.element
+        for st in styles.findall(qn('w:style')):
+            if st.get(qn('w:styleId')) == 'Normal':
+                styles.remove(st)
+
+    try:
+        md, rep, parsed = _imported(_no_normal)
+        check('a document with no Normal style imports',
+              any('An unstyled paragraph.' in b[1] for b in _blocks(parsed)
+                  if b[0] == 'para'), md)
+    except Exception as exc:
+        check('a document with no Normal style imports', False, repr(exc))
 finally:
     shutil.rmtree(_tmp2, ignore_errors=True)
 

@@ -656,24 +656,37 @@ def _emph(runs, plain=False):
     wants, since the engine stores chapter and part titles raw and would print
     any marker as the character it is.
     """
-    out = []
+    if plain:
+        return ''.join(r.text for r in runs if r.text)
+    # Word splits one styled phrase into several runs at will (an edit, a
+    # spell-check), and `*a**b*` reads back with a stray asterisk, so runs
+    # with the same emphasis are joined into one span first.
+    spans = []
     for r in runs:
-        t = r.text
-        if not t:
+        if not r.text:
             continue
-        if plain:
-            out.append(t)
-            continue
+        key = (bool(r.bold), bool(r.italic))
+        if spans and spans[-1][0] == key:
+            spans[-1][1] += r.text
+        else:
+            spans.append([key, r.text])
+    out = []
+    for (bold, italic), t in spans:
         t = _escape_literal(t)
         # bold *and* italic is one span: emitting `**t**` here dropped the
         # italic on the way in, before anything downstream could keep it
-        if r.bold and r.italic:
-            t = f'***{t}***'
-        elif r.bold:
-            t = f'**{t}**'
-        elif r.italic:
-            t = f'*{t}*'
-        out.append(t)
+        mark = '***' if bold and italic else '**' if bold else '*' if italic else ''
+        core = t.strip()
+        if not mark or not core:
+            out.append(t)
+            continue
+        # A run usually ends in the space before the next word ("Keen
+        # Smell. " then "The wolf…"). Inside the markers that space
+        # makes `***Keen Smell. ***`, which doesn't close, and printed
+        # two asterisks per trait in a 5e bestiary. Keep it outside.
+        lead = t[:len(t) - len(t.lstrip())]
+        trail = t[len(t.rstrip()):]
+        out.append(f'{lead}{mark}{core}{mark}{trail}')
     return ''.join(out)
 
 
@@ -769,8 +782,16 @@ def _para_md(p, report, notes=None, plain=False):
         return _emph(p.runs, plain) or _fallback(p.text)
 
     chunks = []
+    pending = []                 # plain runs, joined by _emph across run splits
+
+    def flush_runs():
+        if pending:
+            chunks.append(_emph(pending, plain))
+            pending.clear()
+
     for item in parts:
         if hasattr(item, 'address'):             # Hyperlink
+            flush_runs()
             text = _emph(item.runs, plain)
             md = None if plain else _link_md(text, getattr(item, 'address', ''))
             if md:
@@ -781,10 +802,13 @@ def _para_md(p, report, notes=None, plain=False):
                     report['links'] += 1
                 chunks.append(text)
             continue
-        chunks.append(_emph([item], plain))
-        if notes is not None:
-            for ref in _run_note_refs(item):
+        pending.append(item)
+        refs = _run_note_refs(item) if notes is not None else []
+        if refs:                                 # the reference follows its run
+            flush_runs()
+            for ref in refs:
                 chunks.append(_note_ref(ref, notes, report))
+    flush_runs()
     return ''.join(chunks) or _fallback(p.text)
 
 
@@ -1018,7 +1042,9 @@ def import_docx(path, report=None):
             continue
 
         p = item
-        style = (p.style.name or '').lower()
+        # A document with no Normal style (made by a tool, not by Word) gives
+        # an unstyled paragraph no style at all; it is body text.
+        style = ((p.style.name if p.style is not None else '') or '').lower()
         # keep the manual line breaks for now; each branch below decides whether
         # they mean anything (verse, an address block) or should be collapsed
         raw = _para_md(p, rep, notes).strip()
