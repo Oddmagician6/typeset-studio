@@ -162,9 +162,27 @@ def index_path(item):
 
 
 def strip_index(text):
-    """Markup with its index markers taken out, for text set where an index
-    can't point (a front-matter page, a title)."""
-    return INDEX_TAG_RE.sub('', text) if '<index ' in text else text
+    """Markup with its index markers, anchors and page references taken out,
+    for text set where none of them can point (a front-matter page, a title,
+    a note's text)."""
+    if '<index ' in text:
+        text = INDEX_TAG_RE.sub('', text)
+    if '<anchor ' in text:
+        text = ANCHOR_TAG_RE.sub('', text)
+    if '<pageref ' in text:
+        text = PAGEREF_TAG_RE.sub('', text)
+    return text
+
+
+# Page references (#74 Phase 5b). `{#a3}` names the spot it sits in and prints
+# nothing; `{page: a3}` prints the page that spot is on. Parsed text carries
+# them as the neutral `<anchor name="…"/>` and `<pageref to="…"/>`, which each
+# builder turns into its own markup. A name is spelt as a link's `#target` is.
+ANCHOR_RE = re.compile(r'\{#([A-Za-z0-9][\w\-]*)\}')
+PAGE_RE = re.compile(r'\{page:[ \t]*#?([A-Za-z0-9][\w\-]*)[ \t]*\}')
+ANCHOR_TAG_RE = re.compile(r'<anchor name="([\w\-]+)"/>')
+PAGEREF_TAG_RE = re.compile(r'<pageref to="([\w\-]+)"/>')
+_TAGS_RE = re.compile(r'<[^>]+>')
 
 
 def _is_block_line(line):
@@ -270,6 +288,20 @@ def _inline(text, smartquotes=True):
 
     text = INDEX_RE.sub(_stash_index, text)
 
+    # Anchors and page references likewise: a name may hold `_`.
+    names = []
+
+    def _stash_anchor(m):
+        names.append(m.group(1))
+        return f'\x06{len(names) - 1}\x07'
+
+    def _stash_page(m):
+        names.append(m.group(1))
+        return f'\x10{len(names) - 1}\x11'
+
+    text = ANCHOR_RE.sub(_stash_anchor, text)
+    text = PAGE_RE.sub(_stash_page, text)
+
     # Bold-italic first, and as one span. Left to the ** and * passes below it
     # comes out cross-nested (`<b><i>x</b></i>`), which is not well-formed: it
     # aborts the whole PDF build in ReportLab's parser, and makes the EPUB's
@@ -301,6 +333,11 @@ def _inline(text, smartquotes=True):
         text = re.sub(r'\x04(\d+)\x05',
                       lambda m: '<index item="{}"/>'.format(
                           terms[int(m.group(1))].replace('"', '&quot;')), text)
+    if names:
+        text = re.sub(r'\x06(\d+)\x07',
+                      lambda m: f'<anchor name="{names[int(m.group(1))]}"/>', text)
+        text = re.sub(r'\x10(\d+)\x11',
+                      lambda m: f'<pageref to="{names[int(m.group(1))]}"/>', text)
     return _restore_escapes(text)
 
 
@@ -812,6 +849,50 @@ def book_anchors(chapters):
     return out
 
 
+def book_targets(chapters):
+    """Everything in a book a link or a page reference can point at (#74
+    Phase 5b), named once for both builders: `{'chapters', 'headings', 'own',
+    'where'}`.
+
+    `chapters` is `book_anchors`, unchanged, so an old link still lands where
+    it did. `headings[i]` maps a block's position in chapter i (from 0) to the
+    name of a `##`, `###` or `####` heading: its words as a slug, with `-2`,
+    `-3` once a name is taken. `own` is every `{#name}` as written, in reading
+    order; a name already taken is left out and its anchor prints nothing.
+    `where[name]` is the chapter it lives in, counting from 1.
+    """
+    out = {'chapters': book_anchors(chapters), 'headings': [], 'own': [],
+           'where': {}}
+    for n, names in enumerate(out['chapters'], 1):
+        for name in names:
+            out['where'][name] = n
+    found = []
+
+    def collect(text, ch):
+        found.extend((ch_no[id(ch)], m.group(1)) for m in ANCHOR_TAG_RE.finditer(text))
+        return text
+    ch_no = {id(ch): n for n, ch in enumerate(chapters, 1)}
+    map_block_texts(chapters, collect)
+    for n, name in found:
+        if name not in out['where']:
+            out['where'][name] = n
+            out['own'].append(name)
+    for n, ch in enumerate(chapters, 1):
+        names = {}
+        for i, block in enumerate(ch.get('blocks', [])):
+            if block[0] not in HEADING_KINDS:
+                continue
+            words = ' '.join(html.unescape(_TAGS_RE.sub('', block[1])).split())
+            base = slugify(words) or 'section'
+            name, k = base, 2
+            while name in out['where']:
+                name, k = f'{base}-{k}', k + 1
+            out['where'][name] = n
+            names[i] = name
+        out['headings'].append(names)
+    return out
+
+
 def _slug(name):
     return slugify(name) or 'image'
 
@@ -828,7 +909,9 @@ def _escape_literal(text):
                 .replace('*', r'\*')
                 .replace('_', r'\_')
                 .replace('[', r'\[')
-                .replace('{index:', r'\{index:'))
+                .replace('{index:', r'\{index:')
+                .replace('{#', r'\{#')
+                .replace('{page:', r'\{page:'))
 
 
 def block_collision(line):

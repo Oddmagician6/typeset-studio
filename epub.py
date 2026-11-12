@@ -24,6 +24,11 @@ from manuscript import (book_anchors as _ms_book_anchors, LINK_RE as _LINK_RE,
                         map_block_texts as _ms_map_texts,
                         INDEX_RE as _MS_INDEX_SRC_RE,
                         strip_index as _ms_strip_index,
+                        book_targets as _ms_targets,
+                        ANCHOR_RE as _MS_ANCHOR_SRC_RE,
+                        PAGE_RE as _MS_PAGE_SRC_RE,
+                        ANCHOR_TAG_RE as _MS_ANCHOR_TAG_RE,
+                        PAGEREF_TAG_RE as _MS_PAGEREF_TAG_RE,
                         CELL_SEP as _MS_CELL)
 
 _NOTE_MARK_RE = re.compile(r'<note n="(\d+)" id="[\w\-]+"/>')
@@ -155,6 +160,81 @@ def _index_xhtml(chapters, marks, meta, preset):
     return _xhtml(_bookindex.HEADING, '\n'.join(body))
 
 
+def _target_id(name):
+    """A heading's or a `{#name}`'s id in its chapter's file: prefixed, so a
+    writer's name can never be one of the ids the ebook makes itself."""
+    return f'at-{name}'
+
+
+def _apply_page_refs(chapters, meta, preset):
+    """Link targets and page references in an ebook (#74 Phase 5b), which has
+    no page numbers: `(chapters, hrefs)`.
+
+    Each heading and each `{#name}` becomes an empty `<span>` with an id, and
+    `hrefs[name]` is where it is (`chapter002.xhtml#at-name`; a chapter's own
+    names are its file). A `{page: name}` becomes a link reading the target's
+    name: a chapter's title, a heading's words, or for a `{#name}` the heading
+    above it. A page reference that names nothing prints "??", as in print.
+    """
+    targets = _ms_targets(chapters)
+    num_fmt = (preset.get('chapter') or {}).get('number_format', 'Chapter {n}')
+    nums = _ms_numbers(chapters)
+    hrefs, labels = {}, {}
+    for n, names in enumerate(targets['chapters'], 1):
+        ch = chapters[n - 1]
+        label = ch.get('title') or (num_fmt.format(n=nums[n - 1])
+                                    if nums[n - 1] else f'Section {n}')
+        for name in names:
+            hrefs[name], labels[name] = f'chapter{n:03d}.xhtml', label
+    own = set(targets['own'])
+    out = []
+    for n, ch in enumerate(chapters, 1):
+        file = f'chapter{n:03d}.xhtml'
+        label = labels[targets['chapters'][n - 1][0]]
+        heads = targets['headings'][n - 1]
+        blocks = list(ch.get('blocks', []))
+        for i, block in enumerate(blocks):
+            if i in heads:
+                name = heads[i]
+                label = ' '.join(html.unescape(re.sub(r'<[^>]+>', '', block[1])).split())
+                hrefs[name], labels[name] = f'{file}#{_target_id(name)}', label
+                blocks[i] = (block[0], f'<anchor name="{name}"/>' + block[1]) + tuple(block[2:])
+                own_here = blocks[i]
+            else:
+                own_here = block
+
+            def collect(text, _ch, label=label):
+                for m in _MS_ANCHOR_TAG_RE.finditer(text):
+                    if m.group(1) in own and m.group(1) not in hrefs:
+                        hrefs[m.group(1)] = f'{file}#{_target_id(m.group(1))}'
+                        labels[m.group(1)] = label
+                return text
+            _ms_map_texts([{'blocks': [own_here]}], collect)
+        out.append(dict(ch, blocks=blocks))
+
+    planted = set()
+
+    def render(text, _ch):
+        def plant(m):
+            name = m.group(1)
+            if name in hrefs and '#' in hrefs[name] and name not in planted:
+                planted.add(name)
+                return f'<span id="{_target_id(name)}"></span>'
+            return ''
+
+        def ref(m):
+            name = m.group(1)
+            if name not in labels:
+                return '??'
+            return f'<a href="#{name}">{html.escape(labels[name], quote=False)}</a>'
+        if '<anchor ' in text:
+            text = _MS_ANCHOR_TAG_RE.sub(plant, text)
+        if '<pageref ' in text:
+            text = _MS_PAGEREF_TAG_RE.sub(ref, text)
+        return text
+    return _ms_map_texts(out, render), hrefs
+
+
 # In-book links (`[see](#the-salt-road)`) carry a bare fragment, which in a
 # multi-file EPUB has to become "that chapter's file". Filled per build, and
 # per thread: two books exported at once on the threaded server each need their own.
@@ -233,8 +313,10 @@ def _md_emph_to_html(text):
     runs the same text through `_ms_inline`, so without this the ebook showed
     literal asterisks and dropped every link on the Also By page.
     """
-    # an index marker on a matter page has nowhere to point: it prints nothing
-    text = re.sub(r'(?<!\\)' + _MS_INDEX_SRC_RE.pattern, '', text)
+    # an index marker on a matter page has nowhere to point: it prints nothing,
+    # and so do an anchor and a page reference there
+    for rx in (_MS_INDEX_SRC_RE, _MS_ANCHOR_SRC_RE, _MS_PAGE_SRC_RE):
+        text = re.sub(r'(?<!\\)' + rx.pattern, '', text)
     text = html.escape(text, quote=False)
 
     targets = []
@@ -1414,11 +1496,15 @@ def build_epub(manuscript, preset, out_path, meta):
     # without the ornament, where the PDF proof draws its placeholder box
     art_href = fig_href.get(art_src, '')
 
-    # anchor -> chapter file, so `[see](#slug)` resolves across the spine
+    # anchor -> chapter file, so `[see](#slug)` resolves across the spine;
+    # a heading or a `{#name}` -> its place in that file (#74 Phase 5b)
+    chapters, ref_hrefs = _apply_page_refs(chapters, meta, preset)
     _BUILD.anchors = anchors = {}
     for _i, _names in enumerate(_ms_book_anchors(chapters), start=1):
         for _a in _names:
             anchors.setdefault(_a, f'chapter{_i:03d}.xhtml')
+    for _a, _href in ref_hrefs.items():
+        anchors.setdefault(_a, _href)
 
     level = meta.get('front_matter', 'full')
     if level is True:  level = 'full'

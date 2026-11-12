@@ -34,6 +34,9 @@ from manuscript import (_inline as _ms_inline_raw, book_anchors as _ms_book_anch
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts,
                         strip_index as _ms_strip_index,
+                        book_targets as _ms_targets,
+                        ANCHOR_TAG_RE as _MS_ANCHOR_TAG_RE,
+                        PAGEREF_TAG_RE as _MS_PAGEREF_TAG_RE,
                         CELL_SEP as _MS_CELL)
 
 
@@ -2801,6 +2804,7 @@ class BookDoc(BaseDocTemplate):
         self._fn_flow     = {}
         self._fn_drawn    = set()   # notes actually set on a page
         self._index_hits  = []      # (marker key, page) as each index marker is set
+        self._anchor_hits = {}      # link target -> the page it was first set on
         self._cover = cover or {}        # {path, overlay, color, title_font}
         trim = preset['trim']
         pw, ph = trim['w'] * inch, trim['h'] * inch
@@ -2902,6 +2906,13 @@ class BookDoc(BaseDocTemplate):
     def beforeDocument(self):
         # a paragraph's `<onDraw name="_ts_index" …/>` calls this on the canvas
         self.canv.setNamedCB('_ts_index', self._on_index)
+        self.canv.setNamedCB('_ts_anchor', self._on_anchor)
+
+    def _on_anchor(self, canv, kind, label):
+        """A link target has been set (#74 Phase 5b): note its page for the
+        page references. Its destination is the `<a name>` beside the tag."""
+        if label:
+            self._anchor_hits.setdefault(label, canv.getPageNumber())
 
     def _on_index(self, canv, kind, label):
         """An index marker has been set: note its page, and leave a
@@ -3305,6 +3316,8 @@ def _opening_para(text, st, preset, fonts, hyph=None):
     # markers are lifted out and report from just before it
     marks = ([IndexMark(_INDEX_DRAW_RE.findall(text))]
              if style != 'none' and '_ts_index' in text else [])
+    if style != 'none' and '_ts_anchor' in text:      # link targets likewise
+        marks.append(AnchorMark(_ANCHOR_DRAW_RE.findall(text)))
     if style == 'dropcap':
         plain_h = _hyphenate_markup(plain, hyph) if hyph else plain
         return marks + [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
@@ -4988,6 +5001,108 @@ class IndexMark(Flowable):
                 doc._on_index(self.canv, 'onDraw', key)
 
 
+# ------------------------------------------------------------------ page references
+# Page references (#74 Phase 5b). Every link target (a chapter, a heading, a
+# writer's `{#name}`) is set as `<a name>` for the link to land on, beside an
+# `<onDraw>` tag that reports its page to `BookDoc._on_anchor`. A pass sets the
+# numbers from what the pass before found; since a number can change a line's
+# length, `_build_pdf` sets the book again until they agree.
+
+_REF_PLACEHOLDER = '00'      # a page not known yet: about a number's width
+
+
+def _anchor_tag(name):
+    return f'<a name="{name}"/><onDraw name="_ts_anchor" label="{name}"/>'
+
+
+_ANCHOR_DRAW_RE = re.compile(r'<onDraw name="_ts_anchor" label="([\w\-]+)"/>')
+
+
+class AnchorMark(Flowable):
+    """Link targets for text that is set without paragraph markup (a drop
+    cap's paragraph): the destination and the page report sit just before it."""
+    width = height = 0
+
+    def __init__(self, names):
+        super().__init__()
+        self.names = list(names)
+
+    def wrap(self, w, h): return (0, 0)
+
+    def draw(self):
+        doc = getattr(self.canv, '_doctemplate', None)
+        for name in self.names:
+            self.canv.bookmarkHorizontal(name, 0, 0)
+            if isinstance(doc, BookDoc):
+                doc._on_anchor(self.canv, 'onDraw', name)
+
+
+def _link_pages_on(meta):
+    """Whether an in-book link prints its page after it: on unless the book
+    turns it off."""
+    return bool(meta.get('link_pages', True))
+
+
+def _page_refs_wanted(chapters, meta):
+    """(wanted, dead): whether the book prints any page number, and every
+    `{page: name}` that names nothing, as `#name`."""
+    known = _ms_targets(chapters)['where']
+    links = _link_pages_on(meta)
+    state = {'any': False, 'dead': []}
+
+    def look(text, _ch):
+        for m in _MS_PAGEREF_TAG_RE.finditer(text):
+            if m.group(1) in known:
+                state['any'] = True
+            else:
+                state['dead'].append('#' + m.group(1))
+        if links and not state['any']:
+            state['any'] = any(m.group(1) in known
+                               for m in _INBOOK_LINK_RE.finditer(text))
+        return text
+    _ms_map_texts(chapters, look)
+    return state['any'], state['dead']
+
+
+def _apply_page_refs(chapters, targets, refs, meta):
+    """Plant each `{#name}` and print each page number. `refs` is what the
+    pass before found (`_refs_found`); a page not known yet prints as
+    `_REF_PLACEHOLDER`. A `{page: name}` that names nothing prints "??"."""
+    own, planted, known = set(targets['own']), set(), targets['where']
+    links = _link_pages_on(meta)
+
+    def number(name):
+        page = (refs or {}).get(name)
+        return str(page) if page else _REF_PLACEHOLDER
+
+    def plant(m):
+        name = m.group(1)
+        if name in own and name not in planted:
+            planted.add(name)
+            return _anchor_tag(name)
+        return ''
+
+    def render(text, _ch):
+        if '<anchor ' in text:
+            text = _MS_ANCHOR_TAG_RE.sub(plant, text)
+        if links and '<a href="#' in text:
+            text = _INBOOK_LINK_RE.sub(
+                lambda m: m.group(0) + (f' (page {number(m.group(1))})'
+                                        if m.group(1) in known else ''), text)
+        if '<pageref ' in text:
+            text = _MS_PAGEREF_TAG_RE.sub(
+                lambda m: (f'<a href="#{m.group(1)}">{number(m.group(1))}</a>'
+                           if m.group(1) in known else '??'), text)
+        return text
+    return _ms_map_texts(chapters, render)
+
+
+def _refs_found(doc):
+    """Each link target's folio, counted as the folios are."""
+    start = doc._body_start or 1
+    return {name: max(page - start + 1, 1) for name, page in doc._anchor_hits.items()}
+
+
 def _index_found(doc):
     """What a finished pass learned: each marker's folio, counted as the
     folios are, from the first chapter opener."""
@@ -5180,15 +5295,19 @@ def _page_open(story):
 
 def _build_story(manuscript, preset, meta, fonts, st, head_font,
                  has_cover=False, avail_w=0, hyph=None, toc_flowables=None,
-                 fn_measure=False, fn_probe=None, matter_unlink=None, index=None):
+                 fn_measure=False, fn_probe=None, matter_unlink=None, index=None,
+                 refs=None):
     """`index` is what the pass before found (`_index_found`): given, the book
     ends with its Index page; None, the markers still report but no page is
-    set (the pass that finds them, and the footnote measuring passes)."""
+    set (the pass that finds them, and the footnote measuring passes).
+    `refs` is likewise each link target's page (`_refs_found`)."""
     glyph = preset['scene_break']['glyph']
     story = []
     # note markers are neutral in the parsed model; make them superscripts before
     # any of this text reaches ReportLab
     manuscript = dict(manuscript)
+    targets = _ms_targets(manuscript['chapters'])
+    manuscript['chapters'] = _apply_page_refs(manuscript['chapters'], targets, refs, meta)
     manuscript['chapters'] = _apply_note_markers(manuscript['chapters'], preset,
                                                  measure=fn_measure)
     manuscript['chapters'], ix_marks = _apply_index_markers(manuscript['chapters'], meta)
@@ -5336,7 +5455,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         if art and art_pos == 'above':
             story.extend(art)
         # Destinations for in-book links: `[see](#chapter-2)` or the title's slug.
-        anchors = ''.join(f'<a name="{a}"/>' for a in _anchors[idx - 1])
+        anchors = ''.join(_anchor_tag(a) for a in _anchors[idx - 1])
+        heading_names = targets['headings'][idx - 1]
         if c.get('show_number', True) and _numbers[idx - 1] is not None:
             label = c.get('number_format', 'Chapter {n}').format(n=_numbers[idx - 1])
             story.append(Paragraph(anchors + label, st['chap_num']))
@@ -5372,9 +5492,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 page_story.append(_column_run(story, preset, last=last))
                 story = []
 
-        for block in ch['blocks']:
+        for bi, block in enumerate(ch['blocks']):
             kind = block[0]
             val  = block[1]
+            if bi in heading_names:              # a heading a link can land on
+                val = _anchor_tag(heading_names[bi]) + val
             if ncols == 2 and kind == 'doc_block' and _spans(block):
                 _flush_run()
                 blk_meta = block[2] if len(block) > 2 else {}
@@ -5917,8 +6039,9 @@ _INBOOK_LINK_RE = re.compile(r'<a href="#([^"]*)">(.*?)</a>', re.S)
 
 
 def _inbook_anchors(chapters):
-    """Every `#anchor` this book plants a destination for."""
-    return {a for names in _ms_book_anchors(chapters) for a in names}
+    """Every `#anchor` this book plants a destination for: its chapters, its
+    headings and the writer's own `{#name}` (`manuscript.book_targets`)."""
+    return set(_ms_targets(chapters)['where'])
 
 
 def _unlink_dead(text, known, dead):
@@ -6089,6 +6212,13 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             doc._background = page_background(preset)
         return doc
 
+    # page references (#74 Phase 5b): what the last pass found, for the next
+    has_refs, dead_refs = _page_refs_wanted(manuscript['chapters'], meta)
+    found_refs = {'refs': None}
+
+    def _refs_of(doc):
+        return _refs_found(doc) if has_refs else None
+
     def _resolve_foot(make_toc=None):
         """Measure and plan the footnotes, with the TOC already in place.
 
@@ -6105,7 +6235,8 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
                                  has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
                                  fn_measure=True, fn_probe=probe,
                                  toc_flowables=make_toc() if make_toc else None,
-                                 matter_unlink=matter_unlink)
+                                 matter_unlink=matter_unlink,
+                                 refs=found_refs['refs'])
             d = _make_doc(tmp)
             d._fn_reserve, d._fn_assign = reserve, assign
             d.build(story)
@@ -6142,6 +6273,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         body_start = doc1._body_start or 1
         entries    = doc1._toc_entries
         index      = _index_found(doc1) if has_index else None
+        refs       = found_refs['refs'] = _refs_of(doc1)
         try:
             os.remove(tmp)
         except OSError:
@@ -6165,24 +6297,26 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         # without the room footnotes take, so a chapter can land on another
         # page here than it did there: set the contents again from where this
         # pass put things, until what they say is where things are.
-        for _settle in range(3):
+        for _settle in range(4 if has_refs else 3):
             story2 = _build_story(manuscript, preset, meta, fonts, st, head_font,
                                    has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
                                    toc_flowables=_build_toc(entries, body_start, avail_w,
                                                             preset, fonts, st),
-                                   matter_unlink=matter_unlink, index=index)
+                                   matter_unlink=matter_unlink, index=index, refs=refs)
             doc2 = _make_doc(out_path)
             doc2.build(story2)
             said = _toc_folios(entries, body_start)
             entries, body_start = doc2._toc_entries, doc2._body_start or 1
             listed, index = index, (_index_found(doc2) if has_index else None)
-            if _toc_folios(entries, body_start) == said and index == listed:
+            printed, refs = refs, _refs_of(doc2)
+            if (_toc_folios(entries, body_start) == said and index == listed
+                    and refs == printed):
                 break
         page_count = doc2.page
         unplaced_notes.extend(_notes_not_drawn(fn_flow, doc2._fn_drawn))
     else:
-        index = None
-        if has_index:
+        index = refs = None
+        if has_index or has_refs:
             # a pass to learn each marker's page; the index is the last thing
             # in the book, so the pass that sets it puts them where this did
             fd, tmp = tempfile.mkstemp(suffix='.pdf')
@@ -6190,17 +6324,26 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             probe_doc = _make_doc(tmp)
             probe_doc.build(_build_story(manuscript, preset, meta, fonts, st, head_font,
                                          has_cover=bool(cover), avail_w=avail_w,
-                                         hyph=hyph, matter_unlink=matter_unlink))
-            index = _index_found(probe_doc)
+                                         hyph=hyph, matter_unlink=matter_unlink,
+                                         refs=found_refs['refs']))
+            index = _index_found(probe_doc) if has_index else None
+            refs = _refs_of(probe_doc)
             try:
                 os.remove(tmp)
             except OSError:
                 pass
-        story = _build_story(manuscript, preset, meta, fonts, st, head_font,
-                             has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
-                             matter_unlink=matter_unlink, index=index)
-        doc = _make_doc(out_path)
-        doc.build(story)
+        # a page number printed can move what it counts (a line runs longer):
+        # set the book again until what it prints is where things are
+        for _settle in range(4 if has_refs else 1):
+            story = _build_story(manuscript, preset, meta, fonts, st, head_font,
+                                 has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
+                                 matter_unlink=matter_unlink, index=index, refs=refs)
+            doc = _make_doc(out_path)
+            doc.build(story)
+            printed, refs = refs, _refs_of(doc)
+            listed, index = index, (_index_found(doc) if has_index else None)
+            if refs == printed and index == listed:
+                break
         page_count = doc.page
         unplaced_notes.extend(_notes_not_drawn(fn_flow, doc._fn_drawn))
     if cover_path:
@@ -6211,7 +6354,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
     return {
         'page_count':     page_count,
         'notes_unplaced': len(set(unplaced_notes)),
-        'dead_links':     dead_links + sorted(_matter_dead),
+        'dead_links':     dead_links + dead_refs + sorted(_matter_dead),
         'font_family':    fonts['family'],
         'font_fallback':  fonts['fallback'],
         'font_details':   fonts['details'],

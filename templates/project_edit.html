@@ -297,6 +297,10 @@
         <div class="check" style="margin-top:6px">
           <input type="checkbox" id="index_cr" name="index_cr" {{ 'checked' if proj.get('index_cr', True) }}>
           <label for="index_cr">Add a list of the stat blocks by challenge rating to the index</label></div>
+        <div class="check" style="margin-top:6px">
+          <input type="checkbox" id="link_pages" name="link_pages" {{ 'checked' if proj.get('link_pages', True) }}>
+          <label for="link_pages">Print the page after a link inside the book —
+            “see the Guard Room (page 42)”</label></div>
       </div>
     </fieldset>
 

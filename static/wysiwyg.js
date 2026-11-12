@@ -43,6 +43,31 @@
     return s;
   }
 
+  // A link target `{#name}` and a page reference `{page: name}` (#74 Phase 5b)
+  // are chips likewise; the name rides on data-anchor / data-pageref.
+  function anchorEl(name) {
+    var s = document.createElement('span');
+    s.className = 'wb-anchor';
+    s.setAttribute('contenteditable', 'false');
+    s.dataset.anchor = name;
+    s.title = 'Link target: #' + name;
+    s.textContent = name;
+    return s;
+  }
+  function pagerefEl(name) {
+    var s = document.createElement('span');
+    s.className = 'wb-pageref';
+    s.setAttribute('contenteditable', 'false');
+    s.dataset.pageref = name;
+    s.title = 'The page of #' + name;
+    s.textContent = name;
+    return s;
+  }
+  function markEl(r) {
+    return r.note ? noteEl(r.text) : r.index ? indexEl(r.text)
+         : r.anchor ? anchorEl(r.text) : r.pageref ? pagerefEl(r.text) : null;
+  }
+
   // A non-breaking space the manuscript really has (a Word import's U+00A0 in
   // "Mr. Smith") is wrapped in a marked span. The browser makes its own, for a typed space it
   // would otherwise collapse — after a note or a link, or a second space — and
@@ -64,7 +89,7 @@
 
   function appendInline(el, runs) {
     (runs || []).forEach(function (r) {
-      var node = r.note ? noteEl(r.text) : r.index ? indexEl(r.text) : textNode(r.text);
+      var node = markEl(r) || textNode(r.text);
       if (r.bold && r.italic) {
         var s = document.createElement('strong'), e = document.createElement('em');
         e.appendChild(node); s.appendChild(e); node = s;
@@ -358,6 +383,16 @@
                       link: link || '', index: true });
           return;
         }
+        if (child.dataset && child.dataset.anchor) {    // a link target
+          runs.push({ text: child.dataset.anchor, bold: bold, italic: italic,
+                      link: '', anchor: true });
+          return;
+        }
+        if (child.dataset && child.dataset.pageref) {   // a page reference
+          runs.push({ text: child.dataset.pageref, bold: bold, italic: italic,
+                      link: '', pageref: true });
+          return;
+        }
         if (isForeignEl(child)) return;                 // an extension's own overlay
         var href = link || '';
         if (child.tagName === 'A') {
@@ -370,8 +405,9 @@
     });
   }
 
-  // a note reference or an index marker: a run that is never merged or trimmed
-  function isMark(r) { return !!(r.note || r.index); }
+  // a note reference, an index marker, a link target or a page reference: a
+  // run that is never merged or trimmed
+  function isMark(r) { return !!(r.note || r.index || r.anchor || r.pageref); }
 
   function coalesce(runs) {
     var out = [];
@@ -384,6 +420,8 @@
         var c = { text: r.text, bold: r.bold, italic: r.italic, link: r.link || '' };
         if (r.note) c.note = true;
         if (r.index) c.index = true;
+        if (r.anchor) c.anchor = true;
+        if (r.pageref) c.pageref = true;
         out.push(c);
       }
     });
@@ -413,18 +451,24 @@
   }
 
   // Typing the `}` that closes `{index: term}` turns it into an index marker, the
-  // same way. Returns true if it made one.
+  // same way; and `{#name}` a link target, `{page: name}` a page reference.
+  // Returns true if it made one.
   var TYPED_INDEX_RE = /\{index:[ \t]*([^{}\[\]]*[^{}\[\]\s])[ \t]*\}$/;
+  var TYPED_ANCHOR_RE = /\{#([A-Za-z0-9][\w\-]*)\}$/;
+  var TYPED_PAGE_RE = /\{page:[ \t]*#?([A-Za-z0-9][\w\-]*)[ \t]*\}$/;
   function indexInputRule(root) {
     var sel = root.ownerDocument.getSelection();
     if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
     var node = sel.anchorNode, off = sel.anchorOffset;
     if (!node || node.nodeType !== 3 || !root.contains(node)) return false;
-    var m = TYPED_INDEX_RE.exec(node.data.slice(0, off));
-    if (!m) return false;
+    var before = node.data.slice(0, off), m, chip;
+    if ((m = TYPED_INDEX_RE.exec(before))) chip = indexEl(m[1]);
+    else if ((m = TYPED_ANCHOR_RE.exec(before))) chip = anchorEl(m[1]);
+    else if ((m = TYPED_PAGE_RE.exec(before))) chip = pagerefEl(m[1]);
+    else return false;
     var after = node.splitText(off);
     node.data = node.data.slice(0, off - m[0].length);
-    node.parentNode.insertBefore(indexEl(m[1]), after);
+    node.parentNode.insertBefore(chip, after);
     var r = root.ownerDocument.createRange();
     r.setStart(after, 0); r.collapse(true);
     sel.removeAllRanges(); sel.addRange(r);
@@ -503,6 +547,13 @@
           }
           if (child.dataset && child.dataset.index) {         // likewise
             cur.push({ text: child.dataset.index, bold: bold, italic: italic, link: link, index: true });
+            return;
+          }
+          if (child.dataset && (child.dataset.anchor || child.dataset.pageref)) {   // likewise
+            var mk = { text: child.dataset.anchor || child.dataset.pageref, bold: bold,
+                       italic: italic, link: '' };
+            mk[child.dataset.anchor ? 'anchor' : 'pageref'] = true;
+            cur.push(mk);
             return;
           }
           if (child.dataset && child.dataset.block === 'scene') { flush(); blocks.push({ scene: true }); return; }

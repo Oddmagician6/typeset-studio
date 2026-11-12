@@ -226,6 +226,12 @@
     line-height:1;vertical-align:.25em;color:var(--red);border:1px dotted currentColor;border-radius:3px;
     padding:0 3px;margin:0 1px;cursor:default;user-select:all;white-space:nowrap}
   .ms-rich .wb-index::before{content:"index\00a0"; opacity:.6}
+  /* a link target and a page reference (#74 Phase 5b): tags likewise */
+  .ms-rich .wb-anchor,.ms-rich .wb-pageref{font-family:var(--mono);font-size:.58em;font-weight:400;
+    font-style:normal;line-height:1;vertical-align:.25em;color:var(--red);border:1px dotted currentColor;
+    border-radius:3px;padding:0 3px;margin:0 1px;cursor:default;user-select:all;white-space:nowrap}
+  .ms-rich .wb-anchor::before{content:"#"; opacity:.6}
+  .ms-rich .wb-pageref::before{content:"page\00a0"; opacity:.6}
   @media (max-width:880px){.work{grid-template-columns:1fr}.side{position:static}}
 {% endblock %}
 
@@ -326,7 +332,8 @@
           <tr><td><code>~~~ sidebar title="…"</code> … <code>~~~</code></td><td>a callout box with a title bar. <code>style="note"</code> sets a label and a line, no box</td></tr>
           <tr><td><code>~~~ statblock name="…" meta="…"</code> … <code>~~~</code></td><td>a stat block, one line per line: <code>Label: value</code> fields, a score row <code>STR 18 | DEX 12 | …</code> (modifiers worked out), <code>--- Actions</code> sections and <code>***Name.***</code> entries. Paste one from Word, a PDF or the Homebrewery as it is; <code>cr="…"</code> and <code>count="2"</code> go on the name line</td></tr>
           <tr><td><code>~~~ center</code> · <code>~~~ right</code> · <code>~~~ left</code></td><td>an aligned block — one line per line</td></tr>
-          <tr><td><code>[text](https://…)</code></td><td>a link — also <code>mailto:</code> and <code>#chapter-2</code> inside the book</td></tr>
+          <tr><td><code>[text](https://…)</code></td><td>a link — also <code>mailto:</code> and <code>#chapter-2</code> inside the book, or a heading by its words: <code>#the-guard-room</code>. In print an in-book link is followed by its page, “(page 42)”, unless the book turns that off</td></tr>
+          <tr><td><code>the vault{{ '{#a3}' }}</code> + <code>see page {page: a3}</code></td><td>name a place, then print the page it is on. The name prints nothing; <code>{page: the-guard-room}</code> works for a heading too. In the ebook it reads as a link to the place. In rich mode typing the closing <code>}</code> makes either</td></tr>
           <tr><td><code>a claim.[^src]</code> + <code>[^src]: the note</code></td><td>an endnote; numbers restart each chapter and a Notes page is added automatically. A note can cite another, and in rich mode typing the closing <code>]</code> makes the reference</td></tr>
           <tr><td><code>the owlbear{index: Owlbear}</code></td><td>an index entry for this place; it prints nothing here, and an Index is added at the back of the book. <code>{index: Monsters &gt; Owlbear}</code> files it under a main entry. In rich mode typing the closing <code>}</code> makes the marker</td></tr>
           <tr><td>blank line</td><td>new paragraph</td></tr>
@@ -1098,7 +1105,7 @@
           while (el.firstChild) neu.appendChild(el.firstChild);
         } else {
           var bare = el.cloneNode(true);
-          Array.prototype.forEach.call(bare.querySelectorAll('sup.wb-note, .wb-index'), function(n){ n.remove(); });
+          Array.prototype.forEach.call(bare.querySelectorAll('sup.wb-note, .wb-index, .wb-anchor, .wb-pageref'), function(n){ n.remove(); });
           neu.textContent = bare.textContent.replace(/\s+/g, ' ').trim();
         }
         if (!neu.textContent && !neu.querySelector('sup')) { neu.innerHTML = ''; neu.appendChild(document.createElement('br')); }

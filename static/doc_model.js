@@ -19,6 +19,8 @@
  *     run = {text:str, bold:bool, italic:bool, link:str}
  *     note run = {..., text:label, note:true}   -- an endnote reference `[^label]`
  *     index run = {..., text:term, index:true}  -- an index marker `{index: term}`
+ *     anchor run = {..., text:name, anchor:true}   -- a link target `{#name}`
+ *     pageref run = {..., text:name, pageref:true} -- a page reference `{page: name}`
  */
 (function (global) {
   'use strict';
@@ -39,6 +41,10 @@
   var NOTE_REF_RE = /\[\^([\w\-]+)\]/g;
   // `{index: term}` — an index marker. Mirrors manuscript.INDEX_RE.
   var INDEX_RE = /\{index:[ \t]*([^{}\[\]\x00-\x08]*[^{}\[\]\s\x00-\x08])[ \t]*\}/g;
+  // `{#name}` and `{page: name}` — a link target and a page reference (#74
+  // Phase 5b). Mirror manuscript.ANCHOR_RE / PAGE_RE.
+  var ANCHOR_RE = /\{#([A-Za-z0-9][\w\-]*)\}/g;
+  var PAGE_RE = /\{page:[ \t]*#?([A-Za-z0-9][\w\-]*)[ \t]*\}/g;
   var SCENE_BREAK_RE = /^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$/;
   var CHAPTER_RE     = /^#\s+(.*)$/;
   // `#* Prologue` — a chapter that takes no number. Mirrors manuscript.UNNUMBERED_RE.
@@ -82,7 +88,14 @@
   var PARK_NOTE = '';      // stands in for one `[^label]` during emphasis
   var PARK_BRACE = '\uE005';
   var PARK_INDEX = '\uE006';   // stands in for one `{index: term}` likewise
-  var MARK_SPLIT = new RegExp('([' + PARK_NOTE + PARK_INDEX + '])');
+  var PARK_ANCHOR = '', PARK_PAGE = '';   // one `{#name}`, one `{page: name}`
+  var MARK_SPLIT = new RegExp('([' + PARK_NOTE + PARK_INDEX + PARK_ANCHOR + PARK_PAGE + '])');
+  // a literal `{index:`, `{#` or `{page:` escaped, so it reads back as text
+  function escapeMarks(text) {
+    return text.split('{index:').join(BSL + '{index:')
+               .split('{#').join(BSL + '{#')
+               .split('{page:').join(BSL + '{page:');
+  }
 
   function parkEscapes(text) {
     return text.split(BSL + BSL).join(PARK_BSL)   // \\ -> literal backslash
@@ -99,11 +112,10 @@
                .split(PARK_BSL).join(BSL);
   }
   function escapeAll(text) {
-    return text.split(BSL).join(BSL + BSL)
+    return escapeMarks(text.split(BSL).join(BSL + BSL)
                .split('*').join(BSL + '*')
                .split('_').join(BSL + '_')
-               .split('[').join(BSL + '[')
-               .split('{index:').join(BSL + '{index:');
+               .split('[').join(BSL + '['));
   }
 
   function run(text, bold, italic, link) {
@@ -120,11 +132,21 @@
   function indexRun(term, bold, italic) {
     return { text: term, bold: !!bold, italic: !!italic, link: '', index: true };
   }
-  function isMark(r) { return !!(r.note || r.index); }
+  // A link target `{#name}` and a page reference `{page: name}`: runs of their
+  // own likewise. Match doc_model.py.
+  function anchorRun(name, bold, italic) {
+    return { text: name, bold: !!bold, italic: !!italic, link: '', anchor: true };
+  }
+  function pagerefRun(name, bold, italic) {
+    return { text: name, bold: !!bold, italic: !!italic, link: '', pageref: true };
+  }
+  function isMark(r) { return !!(r.note || r.index || r.anchor || r.pageref); }
   function copyRun(r) {
     var c = { text: r.text, bold: r.bold, italic: r.italic, link: r.link || '' };
     if (r.note) c.note = true;
     if (r.index) c.index = true;
+    if (r.anchor) c.anchor = true;
+    if (r.pageref) c.pageref = true;
     return c;
   }
 
@@ -214,15 +236,19 @@
   // its own marker — so one inside **bold** comes out as a bold note run.
   // Index markers are split out the same way.
   function noteRuns(text) {
-    var labels = [], terms = [];
+    var labels = [], terms = [], anchors = [], pages = [];
     text = text.replace(NOTE_REF_RE, function (_, label) { labels.push(label); return PARK_NOTE; });
     text = text.replace(INDEX_RE, function (_, term) { terms.push(term); return PARK_INDEX; });
-    if (!labels.length && !terms.length) return emphasisRuns(text);
-    var out = [], q = 0, t = 0;
+    text = text.replace(ANCHOR_RE, function (_, name) { anchors.push(name); return PARK_ANCHOR; });
+    text = text.replace(PAGE_RE, function (_, name) { pages.push(name); return PARK_PAGE; });
+    if (!labels.length && !terms.length && !anchors.length && !pages.length) return emphasisRuns(text);
+    var out = [], q = 0, t = 0, a = 0, p = 0;
     emphasisRuns(text).forEach(function (r) {
       r.text.split(MARK_SPLIT).forEach(function (piece) {
         if (piece === PARK_NOTE) out.push(noteRun(labels[q++], r.bold, r.italic));
         else if (piece === PARK_INDEX) out.push(indexRun(restoreEscapes(terms[t++]), r.bold, r.italic));
+        else if (piece === PARK_ANCHOR) out.push(anchorRun(anchors[a++], r.bold, r.italic));
+        else if (piece === PARK_PAGE) out.push(pagerefRun(pages[p++], r.bold, r.italic));
         else if (piece) out.push({ text: piece, bold: r.bold, italic: r.italic, link: r.link || '' });
       });
     });
@@ -240,6 +266,8 @@
       // the term is written bare, but for the three characters that would end it early
       if (r.index) return '{index: ' + r.text.split(BSL).join(BSL + BSL)
                             .split('{').join(BSL + '{').split('[').join(BSL + '[') + '}';
+      if (r.anchor) return '{#' + r.text + '}';          // a name: nothing to escape
+      if (r.pageref) return '{page: ' + r.text + '}';
       return (mark || forceEscape) ? escapeAll(r.text) : escapePlain(r.text);
     }).join('') + mark;
   }
@@ -276,7 +304,8 @@
     for (var i = 0; i < a.length; i++) {
       if (a[i].text !== b[i].text || a[i].bold !== b[i].bold || a[i].italic !== b[i].italic
           || (a[i].link || '') !== (b[i].link || '') || !a[i].note !== !b[i].note
-          || !a[i].index !== !b[i].index)
+          || !a[i].index !== !b[i].index || !a[i].anchor !== !b[i].anchor
+          || !a[i].pageref !== !b[i].pageref)
         return false;
     }
     return true;
@@ -286,9 +315,8 @@
     // Escape only if the literal text would otherwise re-parse as emphasis.
     var escapedBsl = text.split(BSL).join(BSL + BSL);
     if (sameRuns(parseInline(escapedBsl), [run(text, false, false)])) return escapedBsl;
-    return escapedBsl.split('*').join(BSL + '*').split('_').join(BSL + '_')
-                     .split('[').join(BSL + '[')
-                     .split('{index:').join(BSL + '{index:');
+    return escapeMarks(escapedBsl.split('*').join(BSL + '*').split('_').join(BSL + '_')
+                     .split('[').join(BSL + '['));
   }
 
   function isBlockLine(line) {
