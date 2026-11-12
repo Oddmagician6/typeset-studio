@@ -8,6 +8,29 @@ line here.
 
 ---
 
+## Unreleased
+
+### New
+
+- **Page references.** A link to another place in the book now prints the
+  page it goes to: "see the Guard Room (page 42)". Write `{page: name}` to
+  print just the number, in a sentence of your own: "see page 42". A link can
+  now go to any heading by its words (`#the-guard-room`), or to a place you
+  name yourself with `{#name}`, which prints nothing. The numbers are always
+  right: the book is set again until each one matches where its place landed,
+  with or without a contents page, in two columns, and with footnotes. Each
+  number links to its page. In the ebook, which has no page numbers, a link
+  stays a link and `{page: name}` becomes a link reading the place's name.
+  In the manuscript editor's rich view both show as small tags.
+- **A switch for it.** "Print the page after a link inside the book" is on
+  the book's page and on unless you untick it, so a book that already links
+  between its chapters shows the pages when it is rebuilt. Untick it to keep
+  links as they were; `{page: name}` prints its number either way.
+- A `{page: name}` that names nothing prints `??` and the build lists it
+  with the other links that go nowhere.
+
+---
+
 ## 1.5.0 — 12 November 2026
 
 An index. Mark a word with `{index: Term}` and the book gets an Index as its

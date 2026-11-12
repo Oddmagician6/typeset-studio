@@ -201,6 +201,7 @@ The tool reads a light, plain-text convention:
 | `[text](https://…)` | a link (also `mailto:` and `#in-book` targets) |
 | `[^label]` … `[^label]: text` | an endnote reference and its text |
 | `{index: Term}` or `{index: Main > sub}` | an index entry for this place (it prints nothing here) |
+| `{#name}` … `{page: name}` | name a place, then print the page it is on |
 | `*italic*`         | *italic*                      |
 | `**bold**`         | **bold**                      |
 | blank line         | new paragraph                 |
@@ -341,9 +342,33 @@ Three kinds of target are recognised, and only these — so ordinary prose like
 
 - `https://…` or `http://…`
 - `mailto:…`
-- `#in-book` — either `#chapter-2` or the chapter title's slug, e.g. `#the-plateau`
+- `#in-book` — either `#chapter-2` or the chapter title's slug, e.g. `#the-plateau`;
+  a `##`, `###` or `####` heading by its words, e.g. `#the-guard-room` (a second
+  heading with the same words is `#the-guard-room-2`); or a place you named
+  yourself with `{#name}`
 
 To type a literal bracket that would otherwise start a link, escape it: `\[`.
+
+### Page references
+
+```
+The key hangs in the vault.{#vault-key}
+
+Search [the Guard Room](#the-guard-room), or see page {page: vault-key}.
+```
+
+In print a link inside the book is followed by the page it goes to: "the Guard
+Room (page 42)". Untick **Print the page after a link inside the book** on the
+book's page to keep links as they were. `{page: name}` prints just the number,
+for sentences you word yourself; it points at anything a link can, and the number
+links there too. `{#name}` names the place it sits and prints nothing. The numbers
+are the book's own folios, and the book is set again until every one is right.
+A `{page: …}` that names nothing prints `??` and the build names it.
+
+The **ebook** has no page numbers: a link stays a link, and `{page: name}` becomes
+a link reading the place's name (its heading, or the heading above a `{#name}`).
+In the rich view both show as small tags, and typing the closing `}` makes either;
+`\{#…}` and `\{page: …}` print their braces.
 
 In print, links are **clickable but unstyled** by default: no colour, no underline,
 because a POD interior is usually black and a blue link looks like a mistake on paper.

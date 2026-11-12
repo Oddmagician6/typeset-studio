@@ -39,6 +39,8 @@ A document is a list of blocks. Each block is a plain JSON-able dict:
                                                         # `[^label]`; never merged
     index run = {..., "text": term, "index": True}      # an index marker
                                                         # `{index: term}`; never merged
+    anchor run = {..., "text": name, "anchor": True}    # a link target `{#name}`
+    pageref run = {..., "text": name, "pageref": True}  # `{page: name}`; both never merged
 
 Chapter and part titles are stored raw (no smartening / emphasis) to mirror the
 engine; subheads and paragraphs carry smartened text with emphasis runs.
@@ -85,7 +87,16 @@ _PARK_BRK = chr(0xE003)
 _PARK_NOTE = chr(0xE004)       # stands in for one `[^label]` during emphasis
 _PARK_BRACE = chr(0xE005)
 _PARK_INDEX = chr(0xE006)      # stands in for one `{index: term}` likewise
-_MARK_SPLIT = re.compile('([' + _PARK_NOTE + _PARK_INDEX + '])')
+_PARK_ANCHOR = chr(0xE007)     # ... one `{#name}`
+_PARK_PAGE = chr(0xE008)       # ... one `{page: name}`
+_MARK_SPLIT = re.compile('([' + _PARK_NOTE + _PARK_INDEX + _PARK_ANCHOR + _PARK_PAGE + '])')
+
+
+def _escape_marks(text):
+    """A literal `{index:`, `{#` or `{page:` escaped, so it reads back as text."""
+    return (text.replace('{index:', _BSL + '{index:')
+                .replace('{#', _BSL + '{#')
+                .replace('{page:', _BSL + '{page:'))
 
 
 def _park_escapes(text):
@@ -107,11 +118,10 @@ def _restore_escapes(text):
 
 def _escape_all(text):
     """Escape every literal emphasis char (used inside emphasis spans)."""
-    return (text.replace(_BSL, _BSL + _BSL)
-                .replace('*', _BSL + '*')
-                .replace('_', _BSL + '_')
-                .replace('[', _BSL + '[')
-                .replace('{index:', _BSL + '{index:'))
+    return _escape_marks(text.replace(_BSL, _BSL + _BSL)
+                             .replace('*', _BSL + '*')
+                             .replace('_', _BSL + '_')
+                             .replace('[', _BSL + '['))
 
 
 def _escape_plain(text):
@@ -125,10 +135,9 @@ def _escape_plain(text):
     escaped_bsl = text.replace(_BSL, _BSL + _BSL)
     if _parse_inline(escaped_bsl, smartquotes=False) == [_run(text)]:
         return escaped_bsl
-    return (escaped_bsl.replace('*', _BSL + '*')
-                       .replace('_', _BSL + '_')
-                       .replace('[', _BSL + '[')
-                       .replace('{index:', _BSL + '{index:'))
+    return _escape_marks(escaped_bsl.replace('*', _BSL + '*')
+                                    .replace('_', _BSL + '_')
+                                    .replace('[', _BSL + '['))
 
 
 # ---------------------------------------------------------------------------
@@ -155,9 +164,21 @@ def _index_run(term, bold=False, italic=False):
     return {"text": term, "bold": bold, "italic": italic, "link": "", "index": True}
 
 
+def _anchor_run(name, bold=False, italic=False):
+    """A link target `{#name}` (#74 Phase 5b): prints nothing, names its spot."""
+    return {"text": name, "bold": bold, "italic": italic, "link": "", "anchor": True}
+
+
+def _pageref_run(name, bold=False, italic=False):
+    """A page reference `{page: name}` (#74 Phase 5b): prints that spot's page."""
+    return {"text": name, "bold": bold, "italic": italic, "link": "", "pageref": True}
+
+
 def _is_mark(run):
-    """A note reference or an index marker: a run that is never merged."""
-    return bool(run.get("note") or run.get("index"))
+    """A note reference, an index marker, a link target or a page reference:
+    a run that is never merged."""
+    return bool(run.get("note") or run.get("index") or run.get("anchor")
+                or run.get("pageref"))
 
 
 def _parse_inline(text, smartquotes=True):
@@ -192,7 +213,7 @@ def _parse_inline(text, smartquotes=True):
 def _note_runs(text):
     """Emphasis runs for a link-free stretch, with its note references and
     index markers split out."""
-    labels, terms = [], []
+    labels, terms, anchor_names, page_names = [], [], [], []
 
     def park(m):
         labels.append(m.group(1))
@@ -202,12 +223,21 @@ def _note_runs(text):
         terms.append(m.group(1))
         return _PARK_INDEX
 
+    def park_into(names, mark):
+        def one(m):
+            names.append(m.group(1))
+            return mark
+        return one
+
     text = manuscript.NOTE_REF_RE.sub(park, text)
     text = manuscript.INDEX_RE.sub(park_index, text)
-    if not labels and not terms:
+    text = manuscript.ANCHOR_RE.sub(park_into(anchor_names, _PARK_ANCHOR), text)
+    text = manuscript.PAGE_RE.sub(park_into(page_names, _PARK_PAGE), text)
+    if not labels and not terms and not anchor_names and not page_names:
         return _emphasis_runs(text)
     out = []
     queue, index_queue = iter(labels), iter(terms)
+    anchors, pages = iter(anchor_names), iter(page_names)
     for r in _emphasis_runs(text):
         for piece in _MARK_SPLIT.split(r["text"]):
             if piece == _PARK_NOTE:
@@ -215,6 +245,10 @@ def _note_runs(text):
             elif piece == _PARK_INDEX:
                 out.append(_index_run(_restore_escapes(next(index_queue)),
                                       r["bold"], r["italic"]))
+            elif piece == _PARK_ANCHOR:
+                out.append(_anchor_run(next(anchors), r["bold"], r["italic"]))
+            elif piece == _PARK_PAGE:
+                out.append(_pageref_run(next(pages), r["bold"], r["italic"]))
             elif piece:
                 out.append(dict(r, text=piece))
     return out
@@ -329,6 +363,10 @@ def _emph_md(group, force_escape=False):
             parts.append("{index: " + (r["text"].replace(_BSL, _BSL + _BSL)
                                                 .replace('{', _BSL + '{')
                                                 .replace('[', _BSL + '[')) + "}")
+        elif r.get("anchor"):                  # a name is `[\w-]`: nothing to escape
+            parts.append("{#" + r["text"] + "}")
+        elif r.get("pageref"):
+            parts.append("{page: " + r["text"] + "}")
         elif mark or force_escape:
             parts.append(_escape_all(r["text"]))
         else:

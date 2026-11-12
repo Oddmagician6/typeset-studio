@@ -302,6 +302,26 @@ f.onload = function () {
     if (rich.querySelectorAll('.wb-index').length) return 'A CHIP';
     caret(q('.wb-para'), true); type(' now'); return getMd();
   });
+  // #74 Phase 5b: a link target and a page reference are chips likewise
+  run('ref-survives-edit', function () {
+    loadMd('# One\n\nThe vault{#a3} is on page {page: a3}\n');
+    var a = q('.wb-anchor'), p = q('.wb-pageref');
+    if (!a || a.dataset.anchor !== 'a3' || !p || p.dataset.pageref !== 'a3') return 'NO CHIP';
+    caret(q('.wb-para'), true); type(' here'); return getMd();
+  });
+  run('ref-typed', function () {
+    loadMd('# One\n\nThe vault\n'); caret(q('.wb-para'), true);
+    type('{#a3}');
+    if (rich.querySelectorAll('.wb-anchor').length !== 1) return 'NO ANCHOR CHIP';
+    type(' see page {page: a3}');
+    if (rich.querySelectorAll('.wb-pageref').length !== 1) return 'NO PAGE CHIP';
+    type(' now'); return getMd();
+  });
+  run('ref-literal-stays', function () {
+    loadMd('# One\n\nA \\{#a3} and \\{page: a3} here\n');
+    if (rich.querySelectorAll('.wb-anchor, .wb-pageref').length) return 'A CHIP';
+    caret(q('.wb-para'), true); type(' now'); return getMd();
+  });
 
   var x = new XMLHttpRequest();
   x.open('POST', '/_rich_result', false); x.send(JSON.stringify(out));

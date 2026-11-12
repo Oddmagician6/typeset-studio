@@ -324,6 +324,10 @@
         <div class="check" style="margin-top:6px">
           <input type="checkbox" id="index_cr" name="index_cr" {{ 'checked' if not form or form.get('index_cr') }}>
           <label for="index_cr">Add a list of the stat blocks by challenge rating to the index</label></div>
+        <div class="check" style="margin-top:6px">
+          <input type="checkbox" id="link_pages" name="link_pages" {{ 'checked' if not form or form.get('link_pages') }}>
+          <label for="link_pages">Print the page after a link inside the book —
+            “see the Guard Room (page 42)”</label></div>
         <p class="hint" style="margin:4px 0 0">Sets black text as a single ink instead of
           RGB — the difference between crisp type and a four-ink black that mis-registers —
           declares the trim box, and leaves out links and the cover page, which a printer

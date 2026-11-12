@@ -60,6 +60,8 @@ The *opening* paragraph with **bold**, ***both***, a [link](https://example.com/
 
 An indexed word{index: Salt Road > the first_mile}, an **indexed{index: Bold one} bold**, a literal \{index: not one} and a [link {index: In a link} too](#the-salt-road).
 
+A named spot{#the_spot}, its page {page: the_spot}, a *styled{#styled-one} one*, the subhead's page {page: a-subhead-with-a-note} and literal \{#not-one} and \{page: nor-this}.
+
 * * *
 
 ~~~ letter from="Ann" to="Bo" date="May 1"
@@ -153,6 +155,10 @@ EXPECT = {
     'index-typed': '# One\n\nThe owlbear{index: Monsters > Owlbear} attacks\n',
     'index-deleted-whole': '# One\n\nThe owlbear attacks\n',
     'index-literal-stays': '# One\n\nA \\{index: literal} here now\n',
+    # #74 Phase 5b: link targets and page references likewise
+    'ref-survives-edit': '# One\n\nThe vault{#a3} is on page {page: a3} here\n',
+    'ref-typed': '# One\n\nThe vault{#a3} see page {page: a3} now\n',
+    'ref-literal-stays': '# One\n\nA \\{#a3} and \\{page: a3} here now\n',
     'scene-button': '# One\n\nText.\n\n* * *\n\nAfter\n',
     'statblock-button': ('# One\n\nText.\n\n~~~ statblock\nCreature Name\n*Medium humanoid, neutral*\n'
                          'Armor Class: 12\nHit Points: 11 (2d8 + 2)\nSpeed: 30 ft.\n'

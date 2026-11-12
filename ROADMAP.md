@@ -58,16 +58,20 @@ Start here in a new session. Each item points at its full entry below.
    **Phase 5 was planned with the user the same day:** the index first (5a), page
    references after (5b); index entries from `{index: …}` markers plus the stat blocks
    (by name, and an optional list by challenge rating), the automatic parts set per book.
-   **Phase 5a (the index) is built on branch `ttrpg-phase5`, uncommitted and unreleased**
-   (see "Phase 5a as built" in the Phase 5 entry; CHANGELOG's Unreleased has it; all 39
-   test files pass, `test_index.py` is new). **START HERE:** ask the user before
-   committing, merging or releasing it (it would be 1.5.0). Then Phase 5b (page
-   references): its plan is in the Phase 5 entry; check it with the user before starting.
+   **Phase 5a (the index) is released as 1.5.0 (2026-11-12).**
+   **Phase 5b (page references) is merged to master, not pushed, not released** (its plan
+   agreed with the user the same day; see "Phase 5b as built" in the Phase 5 entry;
+   CHANGELOG's Unreleased has it; `test_pagerefs.py` is new; all 40 test files pass).
+   **START HERE:** ask the user about a 1.6.0 release, and confirm three choices of mine:
+   the ebook's `{page: x}` reads the place's name ("see page The Guard Room"), a
+   reference to nothing prints `??`, and `##` subheads are link targets too. Then Phase 6
+   (the special-pages designer), whose plan must be checked with the user first.
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
    style editor's round trip, and a new book option must not be written into books that
-   never set it (`test_project_edit`'s "the same book").
+   never set it (`test_project_edit`'s "the same book"). A literal `{#` in a template
+   opens a Jinja comment and breaks the page: write it as `{{ '{#a3}' }}`.
    **Children's books (#75)** sit beside it: early-reader presets are cheap and could come
    first; picture books wait on full-bleed interior pages (Tier 5E) and a per-page designer.
 5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
@@ -3028,6 +3032,45 @@ doc_model / WYSIWYG round-trip:
     (a marker is typed); no "see" / "see also" entries; a sub-entry list that runs into
     the next column has no "(continued)" line; Word's own index fields (XE) are not
     imported; the result page doesn't say how many entries the index has.
+
+  **Phase 5b as built (2026-11-12, branch `ttrpg-phase5b`).** The user chose: targets are
+  chapters, every heading by its words, and hand-placed `{#name}`; print has both forms
+  (an in-book link gains " (page N)", a bare `{page: name}` prints the number); a book
+  switch `link_pages`, on when a book doesn't say.
+  - **Grammar:** `manuscript.ANCHOR_RE` / `PAGE_RE` (a name is spelt as a link's
+    `#target`; `{page: #x}` is accepted), parked through emphasis like an index marker,
+    leaving `<anchor name="…"/>` and `<pageref to="…"/>`. `strip_index` takes them out
+    too, wherever an index marker is dropped (matter pages, bylines, a note's text).
+  - **Names:** `manuscript.book_targets` is what both builders read. Chapter names are
+    `book_anchors`, unchanged. A written `{#name}` is reserved next (first wins; a
+    repeat, or a chapter's name, prints nothing). Then each `##`/`###`/`####` heading
+    gets its words' slug, `-2`, `-3` once taken. `engine._inbook_anchors` is all of them,
+    so a link to a heading is no longer unlinked as dead.
+  - **PDF:** every target is `<a name>` plus `<onDraw name="_ts_anchor">`, which reports
+    its page to `BookDoc._on_anchor` (an `AnchorMark` before a decorative opening, as
+    `IndexMark` does). `_apply_page_refs` writes the numbers from the pass before
+    (`_refs_found`, folios counted as the index counts them); a page not yet known prints
+    `00`. The contents' settle loop also waits for the numbers (4 rounds with
+    references, else 3); without contents a probe pass, then up to 4 rounds. A book with
+    no reference costs nothing (`_page_refs_wanted`). Footnote measuring uses the last
+    numbers found. A `{page: x}` naming nothing prints `??` and joins `dead_links`.
+  - **EPUB:** a heading or `{#name}` is an empty `<span id="at-name">` (prefixed so it
+    can't meet an id the ebook makes); `href="#name"` resolves to its file and id; a
+    `{page: x}` is a link reading the target's heading, or for a `{#name}` the heading
+    above it, or the chapter's title. No page after a link.
+  - **Editor:** `anchor` and `pageref` runs in both document models (never merged); the
+    rich view's chips `wb-anchor` / `wb-pageref`, made by typing the closing `}`; the
+    Word importer and the escape layer write `\{#` and `\{page:`; cheat sheet rows.
+  - **Tests:** `test_pagerefs.py` (grammar, names, round trip; every number against the
+    folio of its target and every number's link, in one and two columns, with contents,
+    footnotes, a drop cap, and a 100-page book; the switch; `??`; an unchanged book; the
+    ebook), three `ref-*` scenarios and a corpus line in `test_rich_editor`.
+    `test_reference` now expects the target span in each heading.
+  - **Leftovers:** the word "page" is fixed English (no style setting); no "(page N)" is
+    left out when the target is on the same page or the facing one; a link in a
+    decorative first paragraph still loses its link (its number prints); a `{page: x}`
+    in a note prints nothing; the ebook's link text for `{page: x}` reads "see page The
+    Guard Room" if the writer wrote "see page" (confirm with the user).
 
   **Phase 6 — The special-pages designer** *(large)*. Shared with picture books (#75): build
   it once for both.
