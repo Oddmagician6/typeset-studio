@@ -8,6 +8,17 @@ line here.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Left-hand pages mirror their margins.** The text on every left-hand page
+  sat where it does on a right-hand page, with the wider inside margin on the
+  outer edge instead of at the spine, while the running head, page number and
+  footnotes were already in the right place. The text now sits under them, so
+  the wider margin is at the spine on both pages of a spread. A style whose
+  inside and outside margins are equal is unchanged.
+
 ## 1.3.3 — 12 November 2026
 
 Tabletop RPG books. Read-aloud boxes, sidebars and stat blocks, with stat

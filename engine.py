@@ -2648,6 +2648,10 @@ class BookDoc(BaseDocTemplate):
         if '_fullHeight' not in f.__dict__:
             f.__dict__['_fullHeight'] = f._height
             f.__dict__['_fullY1'] = f._y1
+        # mirrored margins: the text block sits where the running head, the
+        # folio and the footnotes are already drawn, inside margin at the spine
+        if f.id in ('recto', 'verso'):
+            f.__dict__['_x1'] = self._inside if self.page % 2 == 1 else self._outside
         keep = self._fn_reserve.get(self.page, 0)
         f.__dict__['_y1'] = f._fullY1 + keep
         f.__dict__['_height'] = f._fullHeight - keep
