@@ -46,10 +46,30 @@ Start here in a new session. Each item points at its full entry below.
    stat block's `−`).
    **Phase 4 (two columns): the spike passed all six gates on 2026-11-12** (branch
    `ttrpg-phase4`, unmerged; see "The spike as run" in the Phase 4 entry). The column engine
-   is in and inert; **next is the feature around it** (style editor, presets, `span` in the
-   editor, the leftovers listed there). Unreleased beside it: the verso-margin fix the
-   spike found, which moves the text on every left-hand page of every book whose inside
-   and outside margins differ — ask the user before releasing it (1.3.4).
+   is in and inert.
+   **START HERE (hand-off 2026-11-12) — the user asked for these three, in order:**
+   1. **Fix the part divider on the contents page.** With a style whose chapters start on
+      any page (`chapter.start` "any": the three game styles) and a contents page, the
+      first part divider (or first chapter) is set on the contents page itself: in
+      `_build_story`, `need_break` starts False, so nothing breaks the page after the
+      contents or the front-matter extras. One column too, so it is in 1.3.3. Watch for a
+      doubled break (the title and copyright pages already end in `PageBreak`; check what
+      the contents flowables and `_matter_page` end with) and add a test (`test_reference.py`
+      builds contents; the adventure fixture has parts). CHANGELOG `### Fixed` entry under
+      `## Unreleased`, beside the margin fix.
+   2. **Commit** it on `ttrpg-phase4` (commits so far, local and unpushed: 4fd4c40 the
+      verso-margin fix, 48e890e the spike, then this hand-off).
+   3. **Release 1.3.4 — approved by the user on 2026-11-12**, push and publish included
+      ("Cutting a release" below). It carries the two fixes. Merge `ttrpg-phase4` into
+      master for it (fast-forward): the column engine comes along but is inert, since no
+      style, preset or page sets `columns`, so the release notes don't mention columns.
+      All 38 test files must pass first (`test_columns.py` is the 38th). The verso-margin
+      fix moves the text on every left-hand page of a book whose inside and outside margins
+      differ; the CHANGELOG entry says so, and the release notes should too.
+   **After that: the Phase 4 feature** around the engine (style editor's Columns section,
+   two-column presets, `span` in the editor's figure and table dialogs, the leftovers under
+   "The spike as run"). The user was asked whether to go ahead and has not answered yet:
+   ask again before starting.
    Watch-outs: write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
    style editor's round trip, and a new book option must not be written into books that
