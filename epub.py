@@ -715,8 +715,9 @@ def _figure_html(caption_paras, attrs, figures):
             style = f' style="width:{min(100.0, max(5.0, float(width) * 100)):.0f}%"'
         except (TypeError, ValueError):
             style = ''
+    # a page of its own, inside the margins or to the edge (a reader has no bleed)
     cls = 'figure figure-full' if str(attrs.get('full', '')).strip().lower() \
-        in ('1', 'yes', 'true', 'page') else 'figure'
+        in ('1', 'yes', 'true', 'page', 'bleed') else 'figure'
     out = [f'  <figure class="{cls}">']
     if href:
         out.append(f'    <img src="{href}" alt="{alt}"{style}/>')

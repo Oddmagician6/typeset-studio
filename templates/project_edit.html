@@ -291,6 +291,11 @@
           <label for="screen_pdf">Also make a colour screen PDF — the style's screen colours
             and page colour, for selling as a download (DriveThruRPG and the like)</label></div>
         <div class="check" style="margin-top:6px">
+          <input type="checkbox" id="bleed" name="bleed" {{ 'checked' if proj.get('bleed') }}>
+          <label for="bleed">Pages print to the edge (bleed) — each page 0.125" bigger on its
+            outer edge, top and bottom, for <code>full="bleed"</code> figures and the style's
+            page background</label></div>
+        <div class="check" style="margin-top:6px">
           <input type="checkbox" id="index_statblocks" name="index_statblocks" {{ 'checked' if proj.get('index_statblocks', True) }}>
           <label for="index_statblocks">List every stat block in the index, by name — an Index
             page is added at the back of the book</label></div>

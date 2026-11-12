@@ -61,7 +61,7 @@ It runs on your own machine and sends nothing anywhere.
   [Checking the ebook](#checking-the-ebook)
 - [Handing off to print](#handing-off-to-print) —
   [press-ready interiors](#press-ready-interiors), [the colour screen PDF](#the-colour-screen-pdf),
-  [the wrap](#the-print-wrap--paperback-or-hardcover)
+  [full-bleed pages](#full-bleed-pages), [the wrap](#the-print-wrap--paperback-or-hardcover)
 - [Contributing](#contributing) · [Licence](#licence) · [Folder map](#folder-map)
 
 ---
@@ -457,6 +457,12 @@ the opening line:
 - `width="0.5"` — fraction of the text width (default comes from the style)
 - `align="left"` / `"center"` / `"right"`
 - `full="yes"` — give the figure its own page
+- `full="bleed"` — give it its own page and fill that page out to the paper's edge, with
+  no page number or running head; a caption sits on a band at the foot of the text area.
+  This needs a book whose pages print to the edge (see
+  [Full-bleed pages](#full-bleed-pages)). In a book without bleed the figure gets a page
+  inside the margins, as `full="yes"`, and the result page says so. On the screen PDF it
+  always fills the page.
 - `span="yes"` — in a two-column style, set the figure across both columns (a width is
   then a fraction of the page's text width, not the column's)
 
@@ -659,7 +665,8 @@ with the same layout and page count:
   library under every page, at a **Strength** from 0 to 1 over the page colour (or the
   **Under it** colour). The app makes a parchment texture for this, `parchment.jpg`, the
   first time it runs. A faint picture over a dark page works as well as a full one over a
-  light page; the screen PDF only, since a printed interior has no bleed for it.
+  light page. Print uses it only in a book whose pages print to the edge (see
+  [Full-bleed pages](#full-bleed-pages)); without bleed it would print with a white edge.
 - **Bookmarks and links** as in every PDF, and the cover page in its own colours.
 
 **Page furniture** (the style editor's section of that name) works in both PDFs: a header
@@ -668,7 +675,22 @@ band above the page number, and a piece in each corner of every page of the book
 inset from the trim and kept clear of the text. They print in grey; the screen PDF draws
 them in the **Screen colour**, or a muted tone of its text colour.
 
-The printed book never uses any of it: a dark screen style prints black on white.
+The printed book never uses the screen colours: a dark screen style prints black on white.
+
+### Full-bleed pages
+
+A picture that should reach the edge of the paper has to be printed a little past it, and
+the paper is then cut back to the trim. Tick **Pages print to the edge (bleed)** on a
+book's Edit page (or the compose page) and the print PDF is built with every page 0.125"
+bigger on its outer edge, top and bottom: the right edge of a right-hand page, the left
+of a left-hand one. The text, margins and page numbers stay exactly where they were,
+measured from the trim, and each page declares its trim box so the printer knows where
+to cut. Two things then run out to the edge: `full="bleed"` figures, and the style's
+**Page background**, which prints too.
+
+When you upload the interior to KDP or IngramSpark, choose **bleed** (the print package's
+spec sheet says which to choose). The switch is off unless you tick it, and the screen PDF
+never has bleed: a screen has nothing to cut off.
 
 After a press build the result page adds a **Press check** card, measured off the finished
 file: colour, illustrations, transparency, annotations, trim box.

@@ -278,7 +278,7 @@ BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'preset
              'created', 'updated', 'last_pdf', 'last_epub', 'last_print_package',
              'last_package_scope', 'last_screen_pdf')
 BOOK_FLAGS = ('include_toc', 'smartquotes', 'right_hand_starts', 'cover_overlay', 'press',
-              'screen_pdf', 'index_statblocks', 'index_cr', 'link_pages')
+              'screen_pdf', 'index_statblocks', 'index_cr', 'link_pages', 'bleed')
 # the book flags that are on when a book doesn't say: the index options (#74
 # Phase 5a) and the page after an in-book link (Phase 5b)
 ON_FLAGS = ('index_statblocks', 'index_cr', 'link_pages')
@@ -886,6 +886,21 @@ def _preflight(build_result, preset, page_count):
                        f'text: {shown}' + (f' (+{more} more)' if more > 0 else '') +
                        ' — check the anchor spelling, or the chapter title it was '
                        'made from')})
+
+    if build_result.get('bleed'):
+        checks.append({
+            'label': 'Bleed', 'ok': True,
+            'detail': ('Built with bleed: each page runs 0.125" past the trim on its '
+                       'outer edge, top and bottom. Choose "bleed" when you upload the '
+                       'interior')})
+    wanted = build_result.get('bleed_wanted') or []
+    if wanted:
+        checks.append({
+            'label': 'Bleed', 'ok': False,
+            'detail': (f'{len(wanted)} figure(s) marked full="bleed" ({", ".join(wanted[:3])}) '
+                       'were set inside the margins, because this book has no bleed. '
+                       'To print them to the edge of the paper, tick "Pages print to the '
+                       'edge (bleed)" on the book\'s page')})
 
     missing = build_result.get('notes_unplaced', 0)
     if missing:
@@ -3859,6 +3874,7 @@ def generate():
         'smartquotes':    'smartquotes' in form,
         'press':          'press' in form,
         'screen_pdf':     'screen_pdf' in form,
+        'bleed':          'bleed' in form,
         **{k: k in form for k in ON_FLAGS},
         **{k: form.get(k, '').strip() for k in matter.KEYS},
     }
@@ -4265,6 +4281,7 @@ def project_create():
         'smartquotes': form.get('smartquotes') == '1',
         'press': form.get('press') == '1',
         'screen_pdf': form.get('screen_pdf') == '1',
+        'bleed': form.get('bleed') == '1',
         # the index options and in-book link pages (#74 Phase 5), on unless turned off
         **{k: form.get(k) == '1' for k in ON_FLAGS if k in form},
         **{k: form.get(k, '').strip() for k in matter.KEYS},
@@ -4457,6 +4474,8 @@ def project_edit(pid):
             # option changes nothing in it
             **({'screen_pdf': 'screen_pdf' in form}
                if 'screen_pdf' in form or 'screen_pdf' in proj else {}),
+            **({'bleed': 'bleed' in form}
+               if 'bleed' in form or 'bleed' in proj else {}),
             # on when a book doesn't say: written once it differs from that
             **{k: k in form for k in ON_FLAGS
                if (k in form) != proj.get(k, True) or k in proj},
@@ -5178,6 +5197,7 @@ def _project_meta(proj):
         'include_toc':   proj.get('include_toc', False),
         'smartquotes':   proj.get('smartquotes', True),
         'screen_pdf':    proj.get('screen_pdf', False),
+        'bleed':         proj.get('bleed', False),
         **{k: proj.get(k, True) for k in ON_FLAGS},
         'press':         proj.get('press', False),
         **{k: proj.get(k, '') for k in matter.KEYS},
@@ -5450,6 +5470,7 @@ def build_print_package(proj, scope='print'):
             'trim_w': preset['trim']['w'], 'trim_h': preset['trim']['h'],
             'pages': pages, 'wrap': wres, 'bleed': dims['bleed'],
             'press_ready': bool(built.get('press')),
+            'interior_bleed': bool(built.get('bleed')),
             'checks': sorted(checks, key=lambda c: c['ok']), 'press': press,
         }
         spec_name = 'PUBLISH-SPEC.txt' if publish else 'PRINT-SPEC.txt'
@@ -5556,6 +5577,10 @@ def _print_spec_text(info, names):
            f'{info["cover_art"]["dpi"]} dpi on the front panel)'
            if info.get('cover_art') else ''),
         f'  Interior     {"press-ready (single-ink black, no cover)" if info["press_ready"] else "ordinary RGB — see checks"}',
+        f'  Bleed        ' + ('yes, 0.125 in on the outer edge, top and bottom (choose '
+                              '"bleed" when you upload the interior)'
+                              if info.get('interior_bleed') else 'no (choose "no bleed" when '
+                              'you upload the interior)'),
     ]
     if info.get('ebook'):
         px = info.get('cover_px')
