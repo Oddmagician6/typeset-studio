@@ -8,7 +8,13 @@ line here.
 
 ---
 
-## Unreleased
+## 1.3.4 — 12 November 2026
+
+Four fixes to the printed page, and nothing new. Left-hand pages now mirror
+their margins, the contents page lists each chapter under the number printed
+on its page, and the first chapter no longer shares a page with the contents.
+A book's text or page count can change when you rebuild it: read the entries
+below before sending a rebuilt book to print.
 
 ### Fixed
 
