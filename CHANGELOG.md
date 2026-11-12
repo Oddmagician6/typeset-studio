@@ -8,7 +8,12 @@ line here.
 
 ---
 
-## Unreleased
+## 1.4.0 — 12 November 2026
+
+Two columns. A style can now set a book's text in two columns, with figures
+and tables that run across both, and two new game-book styles are set that
+way. The title of a sidebar, a read-aloud box or a stat block no longer ends
+a page on its own, which can change where a rebuilt book breaks its pages.
 
 ### New
 
