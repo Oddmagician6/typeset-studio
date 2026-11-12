@@ -8,7 +8,12 @@ line here.
 
 ---
 
-## Unreleased
+## 1.5.0 — 12 November 2026
+
+An index. Mark a word with `{index: Term}` and the book gets an Index as its
+last page, in print with page numbers and in the ebook with chapter links. A
+book's stat blocks are listed in it by name, with a list by challenge rating
+after it, so a bestiary needs no markers at all.
 
 ### New
 
