@@ -64,9 +64,11 @@ Start here in a new session. Each item points at its full entry below.
    a reference to nothing prints `??`, `##` subheads are link targets).
    **Phase 6 was planned with the user the same day** (see "Phase 6 plan" in the #74
    entry): 6a full-bleed interiors first, a release of its own; 6b the page designer.
-   **6a is BUILT on branch `ttrpg-phase6a`, UNCOMMITTED** ("Phase 6a as built"; all 41
-   test files pass). **START HERE:** ask the user about commit, merge and a 1.7.0
-   release, and confirm three choices listed under "Phase 6a as built"; then 6b.
+   **6a (full-bleed pages) is released as 1.7.0 (2026-11-12)**, fixtures frozen.
+   **START HERE:** confirm with the user the three choices listed under "Phase 6a as
+   built" (not yet answered), then plan 6b's details with them before any work: the
+   page-design document and where it lives (per book), how `~~~ page src=` reads, the
+   designer's interior-page mode (bleed and safe-zone guides), the ebook's image page.
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
@@ -3122,8 +3124,7 @@ doc_model / WYSIWYG round-trip:
   The TTRPG baseline is identical to master's with the switch off.
   **Decisions of mine to confirm with the user:** the background prints whenever bleed
   is on (no separate switch); a bleed plate's caption sits on a white band over the
-  picture; a plate page has no folio. **Next:** commit/merge/release (1.7.0) on the
-  user's word, then 6b.
+  picture; a plate page has no folio. **Released as 1.7.0 (2026-11-12).** Next: 6b.
 
   **Order and why.** 1 and 2 are cheap and pay off in single column (and 2 helps every
   nonfiction book). 3 comes before columns because the author's own books are single
