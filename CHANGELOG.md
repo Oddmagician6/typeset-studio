@@ -8,7 +8,15 @@ line here.
 
 ---
 
-## Unreleased
+## 1.3.3 — 12 November 2026
+
+Tabletop RPG books. Read-aloud boxes, sidebars and stat blocks, with stat
+blocks read in every common format and found by the Word import; sections and
+sub-sections, a deeper contents page, PDF bookmarks and running heads by
+chapter or section; US Letter, A4 and A5 pages; and a colour screen PDF for
+selling downloads, with a display font, page backgrounds, page furniture and
+three game-book styles. Word files also import with their bold and italic
+intact.
 
 ### New
 
