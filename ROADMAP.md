@@ -41,12 +41,12 @@ Start here in a new session. Each item points at its full entry below.
    app-made parchment, page furniture (header bar, footer band, corners), and the Light
    Rulebook and A5 Zine styles. All shipped in 1.3.3 beside #77; each
    phase's leftovers end its "as built" note in the #74 entry.
-   **State (2026-11-12):** `ttrpg-phase1` is merged to master and released as 1.3.3. All 37
-   test files pass; run them with `PYTHONIOENCODING=utf-8` (a Windows console can't print a
-   stat block's `−`).
-   **Phase 4 (two columns): the spike passed all six gates on 2026-11-12** (branch
-   `ttrpg-phase4`, unmerged; see "The spike as run" in the Phase 4 entry). The column engine
-   is in and inert.
+   **State (2026-11-12, hand-off after 1.3.4):** master is released as 1.3.4, pushed and
+   clean, its fixtures frozen; branch `ttrpg-phase4` sits at master. All 38 test files
+   pass; run them with `PYTHONIOENCODING=utf-8` (a Windows console can't print a stat
+   block's `−`).
+   **Phase 4 (two columns): the spike passed all six gates on 2026-11-12** (see "The spike
+   as run" in the Phase 4 entry). The column engine is in and inert.
    **1.3.4 (2026-11-12)** carries four fixes and nothing else a user can see: left-hand
    pages mirror their margins, the first part divider or chapter keeps off the contents
    page, contents numbers are the numbers on the pages, and no blank page before the
@@ -54,9 +54,11 @@ Start here in a new session. Each item points at its full entry below.
    column engine came along inert (no style, preset or page sets `columns`).
    **Next: the Phase 4 feature** around the engine (style editor's Columns section,
    two-column presets, `span` in the editor's figure and table dialogs, the leftovers under
-   "The spike as run"). The user was asked whether to go ahead and has not answered yet:
-   ask again before starting.
-   Watch-outs: write patch scripts with the Write tool, never `python - <<EOF`, whenever
+   "The spike as run"). **START HERE:** the user was asked whether to go ahead (twice, the
+   second time after 1.3.4 went out) and has not answered yet: ask again before starting,
+   and work on a branch off master.
+   Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
+   so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
    style editor's round trip, and a new book option must not be written into books that
    never set it (`test_project_edit`'s "the same book").
