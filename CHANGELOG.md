@@ -8,7 +8,12 @@ line here.
 
 ---
 
-## Unreleased
+## 1.6.0 — 12 November 2026
+
+Page references. A link to another place in the book now prints the page it
+goes to, `{page: name}` prints just the number, and any heading or a place you
+name with `{#name}` can be linked to. The numbers are always right, in one
+column or two.
 
 ### New
 
