@@ -236,6 +236,8 @@
           <input type="hidden" name="smartquotes"      value="{{ '1' if meta.smartquotes else '' }}">
           <input type="hidden" name="press"            value="{{ '1' if meta.press else '' }}">
           <input type="hidden" name="screen_pdf"       value="{{ '1' if meta.get('screen_pdf') else '' }}">
+          <input type="hidden" name="index_statblocks" value="{{ '1' if meta.get('index_statblocks') else '' }}">
+          <input type="hidden" name="index_cr"         value="{{ '1' if meta.get('index_cr') else '' }}">
           <input type="hidden" name="last_screen_pdf"  value="{{ screen_name or '' }}">
           {% for k in matter_keys %}
           <input type="hidden" name="{{ k }}" value="{{ meta.get(k,'') }}">

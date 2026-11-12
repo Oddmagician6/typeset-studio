@@ -37,6 +37,8 @@ A document is a list of blocks. Each block is a plain JSON-able dict:
            "link": str}                                 # "" outside a link
     note run = {..., "text": label, "note": True}       # an endnote reference
                                                         # `[^label]`; never merged
+    index run = {..., "text": term, "index": True}      # an index marker
+                                                        # `{index: term}`; never merged
 
 Chapter and part titles are stored raw (no smartening / emphasis) to mirror the
 engine; subheads and paragraphs carry smartened text with emphasis runs.
@@ -81,6 +83,9 @@ _PARK_UNDER = chr(0xE001)
 _PARK_BSL = chr(0xE002)
 _PARK_BRK = chr(0xE003)
 _PARK_NOTE = chr(0xE004)       # stands in for one `[^label]` during emphasis
+_PARK_BRACE = chr(0xE005)
+_PARK_INDEX = chr(0xE006)      # stands in for one `{index: term}` likewise
+_MARK_SPLIT = re.compile('([' + _PARK_NOTE + _PARK_INDEX + '])')
 
 
 def _park_escapes(text):
@@ -88,6 +93,7 @@ def _park_escapes(text):
     text = text.replace(_BSL + '*', _PARK_STAR)      # \*  -> literal *
     text = text.replace(_BSL + '_', _PARK_UNDER)     # \_  -> literal _
     text = text.replace(_BSL + '[', _PARK_BRK)       # \[  -> literal [
+    text = text.replace(_BSL + '{', _PARK_BRACE)     # \{  -> literal {
     return text
 
 
@@ -95,6 +101,7 @@ def _restore_escapes(text):
     return (text.replace(_PARK_STAR, '*')
                 .replace(_PARK_UNDER, '_')
                 .replace(_PARK_BRK, '[')
+                .replace(_PARK_BRACE, '{')
                 .replace(_PARK_BSL, _BSL))
 
 
@@ -103,7 +110,8 @@ def _escape_all(text):
     return (text.replace(_BSL, _BSL + _BSL)
                 .replace('*', _BSL + '*')
                 .replace('_', _BSL + '_')
-                .replace('[', _BSL + '['))
+                .replace('[', _BSL + '[')
+                .replace('{index:', _BSL + '{index:'))
 
 
 def _escape_plain(text):
@@ -119,7 +127,8 @@ def _escape_plain(text):
         return escaped_bsl
     return (escaped_bsl.replace('*', _BSL + '*')
                        .replace('_', _BSL + '_')
-                       .replace('[', _BSL + '['))
+                       .replace('[', _BSL + '[')
+                       .replace('{index:', _BSL + '{index:'))
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +145,19 @@ def _note_run(label, bold=False, italic=False):
     run text alone cannot tell the two apart. The key is only present on note
     runs, so a note-free model is exactly what it was before references existed."""
     return {"text": label, "bold": bold, "italic": italic, "link": "", "note": True}
+
+
+def _index_run(term, bold=False, italic=False):
+    """An index marker `{index: term}` (#74 Phase 5a). A run of its own for the
+    reason a note is: a literal `\\{index: x}` is a plain run that reads the
+    same, and only the key tells them apart. It prints nothing; `text` is the
+    term as written."""
+    return {"text": term, "bold": bold, "italic": italic, "link": "", "index": True}
+
+
+def _is_mark(run):
+    """A note reference or an index marker: a run that is never merged."""
+    return bool(run.get("note") or run.get("index"))
 
 
 def _parse_inline(text, smartquotes=True):
@@ -158,7 +180,7 @@ def _parse_inline(text, smartquotes=True):
     for m in manuscript.LINK_RE.finditer(text):
         if m.start() > pos:
             out.extend(_note_runs(text[pos:m.start()]))
-        for r in _emphasis_runs(m.group(1)):
+        for r in _note_runs(m.group(1)):       # a link's words can be indexed
             r["link"] = _restore_escapes(m.group(2))
             out.append(r)
         pos = m.end()
@@ -168,24 +190,32 @@ def _parse_inline(text, smartquotes=True):
 
 
 def _note_runs(text):
-    """Emphasis runs for a link-free stretch, with its note references split out."""
-    labels = []
+    """Emphasis runs for a link-free stretch, with its note references and
+    index markers split out."""
+    labels, terms = [], []
 
     def park(m):
         labels.append(m.group(1))
         return _PARK_NOTE
 
+    def park_index(m):
+        terms.append(m.group(1))
+        return _PARK_INDEX
+
     text = manuscript.NOTE_REF_RE.sub(park, text)
-    if not labels:
+    text = manuscript.INDEX_RE.sub(park_index, text)
+    if not labels and not terms:
         return _emphasis_runs(text)
     out = []
-    queue = iter(labels)
+    queue, index_queue = iter(labels), iter(terms)
     for r in _emphasis_runs(text):
-        pieces = r["text"].split(_PARK_NOTE)
-        for k, piece in enumerate(pieces):
-            if k:
+        for piece in _MARK_SPLIT.split(r["text"]):
+            if piece == _PARK_NOTE:
                 out.append(_note_run(next(queue), r["bold"], r["italic"]))
-            if piece:
+            elif piece == _PARK_INDEX:
+                out.append(_index_run(_restore_escapes(next(index_queue)),
+                                      r["bold"], r["italic"]))
+            elif piece:
                 out.append(dict(r, text=piece))
     return out
 
@@ -270,7 +300,7 @@ def _coalesce(runs):
         if (out and out[-1]["bold"] == r["bold"]
                 and out[-1]["italic"] == r["italic"]
                 and out[-1].get("link", "") == r.get("link", "")
-                and not out[-1].get("note") and not r.get("note")):
+                and not _is_mark(out[-1]) and not _is_mark(r)):
             out[-1]["text"] += r["text"]
         else:
             out.append(dict(r))
@@ -293,6 +323,12 @@ def _emph_md(group, force_escape=False):
     for r in group:
         if r.get("note"):
             parts.append(f"[^{r['text']}]")
+        elif r.get("index"):
+            # the term is written bare (a marker is set aside before emphasis
+            # is read), but for the three characters that would end it early
+            parts.append("{index: " + (r["text"].replace(_BSL, _BSL + _BSL)
+                                                .replace('{', _BSL + '{')
+                                                .replace('[', _BSL + '[')) + "}")
         elif mark or force_escape:
             parts.append(_escape_all(r["text"]))
         else:
@@ -347,7 +383,7 @@ def _statblock_line(runs):
     itself, so they are written as they are, with no escaping. Emphasis put on
     by the editor is written as markers."""
     if all(not r["bold"] and not r["italic"] and not r.get("link")
-           and not r.get("note") for r in runs):
+           and not _is_mark(r) for r in runs):
         return "".join(r["text"] for r in runs)
     return "".join(_emph_md([r]) if (r["bold"] or r["italic"]) else r["text"]
                    for r in runs)

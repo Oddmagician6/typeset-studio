@@ -43,7 +43,7 @@ Start here in a new session. Each item points at its full entry below.
    phase's leftovers end its "as built" note in the #74 entry.
    **State (2026-11-12, hand-off after 1.3.4):** master is released as 1.3.4, pushed and
    clean, its fixtures frozen; branch `ttrpg-phase4` sits at master. All 38 test files
-   pass; run them with `PYTHONIOENCODING=utf-8` (a Windows console can't print a stat
+   pass (39 with Phase 5a's `test_index.py`); run them with `PYTHONIOENCODING=utf-8` (a Windows console can't print a stat
    block's `−`).
    **Phase 4 (two columns): the spike passed all six gates on 2026-11-12** (see "The spike
    as run" in the Phase 4 entry). The column engine is in and inert.
@@ -52,11 +52,17 @@ Start here in a new session. Each item points at its full entry below.
    page, contents numbers are the numbers on the pages, and no blank page before the
    contents with right-hand starts off. `ttrpg-phase4` was merged to master for it; the
    column engine came along inert (no style, preset or page sets `columns`).
-   **The Phase 4 feature is built (2026-11-12) on branch `ttrpg-phase4`, unreleased** (see
-   "Phase 4 as built" in the Phase 4 entry; CHANGELOG's Unreleased has it). **START HERE:**
-   ask the user before merging it to master or releasing it (it would be 1.4.0: a new
-   feature). After it, Phase 5 (index and page references): check its plan with the user
-   before starting.
+   **Phase 4 (two columns) is released as 1.4.0 (2026-11-12)**, merged, pushed, published
+   and its fixtures frozen; the user confirmed its two open choices (new two-column
+   styles beside the old ones; the span button shown in every book).
+   **Phase 5 was planned with the user the same day:** the index first (5a), page
+   references after (5b); index entries from `{index: …}` markers plus the stat blocks
+   (by name, and an optional list by challenge rating), the automatic parts set per book.
+   **Phase 5a (the index) is built on branch `ttrpg-phase5`, uncommitted and unreleased**
+   (see "Phase 5a as built" in the Phase 5 entry; CHANGELOG's Unreleased has it; all 39
+   test files pass, `test_index.py` is new). **START HERE:** ask the user before
+   committing, merging or releasing it (it would be 1.5.0). Then Phase 5b (page
+   references): its plan is in the Phase 5 entry; check it with the user before starting.
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
@@ -2978,6 +2984,48 @@ doc_model / WYSIWYG round-trip:
   - Page references `[see the Guard Room](#a3-guard-room)` printed as "(page 42)" from the
     same pass; since that changes text length, iterate to a fixed point with a cap, like
     the footnote pass.
+
+  **Phase 5a as built (2026-11-12, branch `ttrpg-phase5`).** The index; page references
+  are 5b (the user chose the split, and "markers plus stat blocks" for the entries).
+  - **Grammar:** `manuscript.INDEX_RE`; `_inline` parks a marker through the emphasis
+    passes (a term may hold `*` or `_`) and leaves the neutral `<index item="…"/>`, as it
+    does a note. A term holds no brace and no bracket, so never a note or a link.
+    `\{` is a new escape (`\{index: x}` prints its braces); the Word importer writes it.
+  - **`bookindex.py`** (stdlib only, like `matter.py`) is what the builders share:
+    `assign` gives each marker a key and lets the builder write its own anchor in the
+    tag's place, `tree` turns "where each key landed" into entries and the challenge
+    list, `sort_key`/`letter` order and group them (accents and case aside, digits first).
+  - **PDF:** the tag becomes `<onDraw name="_ts_index" label="key"/>`; ReportLab calls
+    `BookDoc._on_index` as the line is set (registered with `canv.setNamedCB`), which
+    notes the page and bookmarks it. The Index is the **last thing in the book**, so
+    setting it moves nothing it lists: it is set from what the pass before found
+    (`_index_found`), one extra pass without contents, none extra with (the contents'
+    settle loop also waits for the index to agree). `_index_page`: two columns even in a
+    one-column style (`ColumnRun`), letters kept with their first entry, runs of pages
+    merged, each number a link, a PDF bookmark. A decorative opening sets plain words, so
+    its markers report from an `IndexMark` flowable just before it.
+  - **Dropped, not indexed:** a marker on a matter page, in a byline or tagline, or in a
+    note's text (`engine._ms_inline` strips them; `_note_text_markers`; the ebook's
+    `_markup_to_html` and `_md_emph_to_html`).
+  - **Stat blocks:** book flags `index_statblocks` (each by name) and `index_cr` (a "By
+    Challenge Rating" list after the index, from `cr="…"` or the block's Challenge line),
+    both **off by default** and written into a book only once set, so no existing book
+    gains a page. Either makes an index on its own, without a marker in the book.
+  - **EPUB:** markers become empty `<span id="ix-N">` anchors, `bookindex.xhtml` is last
+    in the spine and in the nav; an entry links to each chapter it is marked in, by the
+    chapter's name (no page numbers in an ebook).
+  - **Editor:** an `index` run in both document models (never merged, like a note run;
+    a link's words can hold one); the rich view shows a chip (`wb-index`, the term on
+    `data-index`), made by typing the closing `}`; the cheat sheet has the row.
+  - **Tests:** `test_index.py` (grammar and round trip; every printed number against the
+    page its marker's word is on, in one and two columns, with contents, footnotes and a
+    drop cap; stat blocks and the challenge list; a book with no markers unchanged; the
+    ebook), four `index-*` scenarios and a corpus line in `test_rich_editor`.
+  - **Leftovers:** the headings "Index" and "By Challenge Rating" are fixed words
+    (`bookindex.HEADING`), with no style section for the index's type; no toolbar button
+    (a marker is typed); no "see" / "see also" entries; a sub-entry list that runs into
+    the next column has no "(continued)" line; Word's own index fields (XE) are not
+    imported; the result page doesn't say how many entries the index has.
 
   **Phase 6 — The special-pages designer** *(large)*. Shared with picture books (#75): build
   it once for both.

@@ -58,6 +58,8 @@ The *opening* paragraph with **bold**, ***both***, a [link](https://example.com/
 
 ## A *subhead* with a note[^b]
 
+An indexed word{index: Salt Road > the first_mile}, an **indexed{index: Bold one} bold**, a literal \{index: not one} and a [link {index: In a link} too](#the-salt-road).
+
 * * *
 
 ~~~ letter from="Ann" to="Bo" date="May 1"
@@ -145,6 +147,12 @@ EXPECT = {
     'span-table-on-then-type': '# One\n\n~~~ table span="yes"\nA | B\n1 | 20\n~~~\n',
     'span-table-off': '# One\n\n~~~ table caption="C"\nA | B\n1 | 2\n~~~\n',
     'span-no-button-elsewhere': '0',
+    # #74 Phase 5a: an index marker is a chip that survives an edit beside it,
+    # is made by typing its closing brace, and goes when it is deleted
+    'index-survives-edit': '# One\n\nThe owlbear{index: Owlbear} attacks here\n',
+    'index-typed': '# One\n\nThe owlbear{index: Monsters > Owlbear} attacks\n',
+    'index-deleted-whole': '# One\n\nThe owlbear attacks\n',
+    'index-literal-stays': '# One\n\nA \\{index: literal} here now\n',
     'scene-button': '# One\n\nText.\n\n* * *\n\nAfter\n',
     'statblock-button': ('# One\n\nText.\n\n~~~ statblock\nCreature Name\n*Medium humanoid, neutral*\n'
                          'Armor Class: 12\nHit Points: 11 (2d8 + 2)\nSpeed: 30 ft.\n'

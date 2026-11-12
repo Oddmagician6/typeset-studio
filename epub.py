@@ -17,10 +17,13 @@ from datetime import datetime, timezone
 # the PDF), and `manuscript` supplies the link-anchor rule so `[see](#slug)`
 # resolves to the same chapter in both outputs.
 import matter as _matter
+import bookindex as _bookindex
 import ornaments as _orn
 from manuscript import (book_anchors as _ms_book_anchors, LINK_RE as _LINK_RE,
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts,
+                        INDEX_RE as _MS_INDEX_SRC_RE,
+                        strip_index as _ms_strip_index,
                         CELL_SEP as _MS_CELL)
 
 _NOTE_MARK_RE = re.compile(r'<note n="(\d+)" id="[\w\-]+"/>')
@@ -94,6 +97,64 @@ def _endnotes_xhtml(chapters, preset):
     return _xhtml(heading, '\n'.join(body))
 
 
+def _index_id(key):
+    return f'ix-{key}'
+
+
+def _apply_index_markers(chapters, meta):
+    """Every index marker as an empty anchor the Index page links to:
+    (chapters, marks). See `bookindex.assign`."""
+    return _bookindex.assign(
+        chapters, meta, lambda key: f'<span class="ix" id="{_index_id(key)}"></span>')
+
+
+def _index_xhtml(chapters, marks, meta, preset):
+    """The Index page. An ebook has no page numbers, so each entry links to
+    the chapters it is marked in, by name, and to the first marker in each."""
+    c = preset.get('chapter', {})
+    num_fmt = c.get('number_format', 'Chapter {n}')
+    nums = _ms_numbers(chapters)
+
+    def label(n):
+        ch = chapters[n - 1]
+        return ch.get('title') or (num_fmt.format(n=nums[n - 1])
+                                   if nums[n - 1] else f'Section {n}')
+
+    def links(hits):
+        first = {}
+        for where, key in sorted(hits):
+            first.setdefault(where, key)
+        return ', '.join(
+            f'<a href="chapter{n:03d}.xhtml#{_index_id(key)}">{_text_to_html(label(n))}</a>'
+            for n, key in sorted(first.items()))
+
+    def line(text, hits, cls):
+        found = links(hits)
+        return (f'  <p class="{cls}">{_text_to_html(text)}'
+                + (f': {found}' if found else '') + '</p>')
+
+    entries, challenges = _bookindex.tree(
+        marks, [(key, m['chapter']) for key, m in enumerate(marks)], meta)
+    body = ['<div class="matter-body book-index">',
+            f'  <h1 class="matter-head">{_text_to_html(_bookindex.HEADING)}</h1>']
+    at = None
+    for main, hits, subs in entries:
+        head = _bookindex.letter(main)
+        if head != at:
+            at = head
+            if head:
+                body.append(f'  <h2 class="ix-letter">{_text_to_html(head)}</h2>')
+        body.append(line(main, hits, 'ix-entry'))
+        body.extend(line(text, sub_hits, 'ix-sub') for text, sub_hits in subs)
+    if challenges:
+        body.append(f'  <h2 class="ix-part">{_text_to_html(_bookindex.CR_HEADING)}</h2>')
+        for cr, names in challenges:
+            body.append(f'  <h2 class="ix-letter">CR {_text_to_html(cr)}</h2>')
+            body.extend(line(name, hits, 'ix-entry') for name, hits in names)
+    body.append('</div>')
+    return _xhtml(_bookindex.HEADING, '\n'.join(body))
+
+
 # In-book links (`[see](#the-salt-road)`) carry a bare fragment, which in a
 # multi-file EPUB has to become "that chapter's file". Filled per build, and
 # per thread: two books exported at once on the threaded server each need their own.
@@ -122,7 +183,9 @@ def _markup_to_html(text):
     """
     text = text.replace('<b>', '<strong>').replace('</b>', '</strong>')
     text = text.replace('<i>', '<em>').replace('</i>', '</em>')
-    return _resolve_anchors(text)
+    # an index marker still neutral here sits where the index can't point (a
+    # note's text): it is dropped, as the PDF drops it
+    return _resolve_anchors(_ms_strip_index(text))
 
 
 def _text_to_html(text):
@@ -170,6 +233,8 @@ def _md_emph_to_html(text):
     runs the same text through `_ms_inline`, so without this the ebook showed
     literal asterisks and dropped every link on the Also By page.
     """
+    # an index marker on a matter page has nowhere to point: it prints nothing
+    text = re.sub(r'(?<!\\)' + _MS_INDEX_SRC_RE.pattern, '', text)
     text = html.escape(text, quote=False)
 
     targets = []
@@ -354,6 +419,10 @@ sup.noteref a { text-decoration: none; }
 .endnotes h2.note-group { font-size: 1em; font-weight: bold; text-align: left; margin: 1.4em 0 0.5em; }
 .endnotes p.note { text-indent: -1.2em; padding-left: 1.2em; margin: 0 0 0.4em; font-size: 0.9em; }
 .endnotes .note-back { text-decoration: none; font-weight: bold; }
+.book-index h2.ix-letter { font-size: 1em; font-weight: bold; text-align: left; margin: 1.1em 0 0.3em; }
+.book-index h2.ix-part { font-size: 1.15em; font-weight: bold; text-align: center; margin: 2em 0 0.6em; }
+.book-index p.ix-entry { text-indent: -1.2em; padding-left: 1.2em; margin: 0 0 0.15em; text-align: left; }
+.book-index p.ix-sub { text-indent: -1.2em; padding-left: 2.4em; margin: 0 0 0.15em; text-align: left; }
 .part-page { margin: 0 5%; text-align: center; padding-top: 30%; }
 .part-page .part-num { font-size: 0.9em; color: #666; margin: 0 0 0.5em; letter-spacing: 0.06em; }
 .part-page .part-title { font-size: 1.6em; font-weight: bold; margin: 0; }
@@ -888,7 +957,9 @@ def _game_block_html(btype, paras, attrs):
             head += f' × {_text_to_html(count)}'
         if cr:
             head = f'<span class="sb-cr">CR {_text_to_html(cr)}</span>' + head
-        out.append(f'    <p class="sb-name">{head}</p>')
+        anchor = (f' id="{_index_id(attrs["_ix"])}"'
+                  if attrs.get('_ix') is not None else '')     # it is in the index
+        out.append(f'    <p class="sb-name"{anchor}>{head}</p>')
     if m.get('meta'):
         out.append(f'    <p class="sb-meta">{_markup_to_html(m["meta"])}</p>')
     fields, scores = m.get('fields', []), m.get('scores', [])
@@ -1211,7 +1282,8 @@ def _nav_li(href, label, kids=()):
     return out + '</li>'
 
 
-def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=False):
+def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=False,
+               has_index=False):
     c        = preset.get('chapter', {})
     show_num = c.get('show_number', True)
     num_fmt  = c.get('number_format', 'Chapter {n}')
@@ -1253,6 +1325,8 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
     for _sec in _matter.present(meta, 'back'):
         toc.append((_sec['href'],
                     _matter.heading(_sec, author) or _sec['key'].title()))
+    if has_index:
+        toc.append(('bookindex.xhtml', _bookindex.HEADING))
 
     items = '\n'.join(_nav_li(*entry) for entry in toc)
     body = (
@@ -1331,6 +1405,8 @@ def build_epub(manuscript, preset, out_path, meta):
     modified = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     chapters = _apply_note_markers(manuscript['chapters'])
     has_notes = any(ch.get('notes') for ch in chapters)
+    chapters, ix_marks = _apply_index_markers(chapters, meta)
+    has_index = _bookindex.wanted(ix_marks, meta)
     art_src  = chapter_art_src(preset)
     figures  = _collect_figures(chapters, extra=[art_src] if art_src else [])
     fig_href = {src: f['href'] for src, f in figures.items()}
@@ -1422,6 +1498,11 @@ def build_epub(manuscript, preset, out_path, meta):
                                 'type': 'application/xhtml+xml'})
         spine_items.append(_sec['eid'])
 
+    if has_index:                      # the last page of the book, as in print
+        manifest_items.append({'id': 'bookindex', 'href': 'bookindex.xhtml',
+                                'type': 'application/xhtml+xml'})
+        spine_items.append('bookindex')
+
     with zipfile.ZipFile(out_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
         # mimetype must be first and stored uncompressed
         zf.writestr(zipfile.ZipInfo('mimetype'), 'application/epub+zip',
@@ -1431,7 +1512,7 @@ def build_epub(manuscript, preset, out_path, meta):
                     _content_opf(uid, meta, manifest_items, spine_items, modified))
         zf.writestr('OEBPS/nav.xhtml',
                     _nav_xhtml(chapters, has_cover, has_front, preset, meta=meta,
-                               has_notes=has_notes))
+                               has_notes=has_notes, has_index=has_index))
         zf.writestr('OEBPS/style.css', _style_css(preset))
 
         if scene_orn:
@@ -1479,5 +1560,9 @@ def build_epub(manuscript, preset, out_path, meta):
                         _matter_xhtml(_matter.heading(_sec, _author),
                                       meta[_sec['key']].strip(),
                                       _MATTER_CSS.get(_sec['style'], 'matter-body')))
+
+        if has_index:
+            zf.writestr('OEBPS/bookindex.xhtml',
+                        _index_xhtml(chapters, ix_marks, meta, preset))
 
     return out_path

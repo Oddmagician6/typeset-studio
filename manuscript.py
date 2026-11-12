@@ -109,6 +109,7 @@ _PARK_STAR  = chr(0xE000)
 _PARK_UNDER = chr(0xE001)
 _PARK_BSL   = chr(0xE002)
 _PARK_BRK   = chr(0xE003)
+_PARK_BRACE = chr(0xE005)      # 0xE004 is doc_model's stand-in for a note
 
 
 def _park_escapes(text):
@@ -116,6 +117,7 @@ def _park_escapes(text):
     text = text.replace(_BSL + '*', _PARK_STAR)      # \*  -> literal *
     text = text.replace(_BSL + '_', _PARK_UNDER)     # \_  -> literal _
     text = text.replace(_BSL + '[', _PARK_BRK)       # \[  -> literal [
+    text = text.replace(_BSL + '{', _PARK_BRACE)     # \{  -> literal {
     return text
 
 
@@ -123,6 +125,7 @@ def _restore_escapes(text):
     return (text.replace(_PARK_STAR, '*')
                 .replace(_PARK_UNDER, '_')
                 .replace(_PARK_BRK, '[')
+                .replace(_PARK_BRACE, '{')
                 .replace(_PARK_BSL, _BSL))
 
 
@@ -140,6 +143,28 @@ LINK_RE = re.compile(r'\[([^\[\]]+)\]\((' + LINK_TARGET + r')\)')
 NOTE_REF_RE = re.compile(r'\[\^([\w\-]+)\]')
 NOTE_DEF_RE = re.compile(r'^\s*\[\^([\w\-]+)\]:\s*(.*)$')
 _NOTE_TAG_RE = re.compile(r'<note n="(\d+)" id="([\w\-]+)"/>')
+
+# Index markers (#74 Phase 5). `{index: Owlbear}` sits in the sentence and
+# prints nothing; `{index: Monsters > Owlbear}` files the entry under a main
+# one. Parsed text carries it as the neutral `<index item="…"/>`, which each
+# builder turns into its own anchor, exactly as it does a note's marker.
+# A term holds no bracket (so never a note or a link) and no brace.
+INDEX_RE = re.compile(
+    r'\{index:[ \t]*([^{}\[\]\x00-\x08]*[^{}\[\]\s\x00-\x08])[ \t]*\}')
+INDEX_TAG_RE = re.compile(r'<index item="([^"]*)"/>')
+
+
+def index_path(item):
+    """An index marker's words as (main, sub, …): split on `>`, each part
+    trimmed, empty parts dropped. `item` is the tag's attribute, still escaped."""
+    words = html.unescape(item)
+    return tuple(' '.join(p.split()) for p in words.split('>') if p.strip())
+
+
+def strip_index(text):
+    """Markup with its index markers taken out, for text set where an index
+    can't point (a front-matter page, a title)."""
+    return INDEX_TAG_RE.sub('', text) if '<index ' in text else text
 
 
 def _is_block_line(line):
@@ -236,6 +261,15 @@ def _inline(text, smartquotes=True):
 
     text = NOTE_REF_RE.sub(_stash_note, text)
 
+    # Index markers are parked the same way: a term may hold `*` or `_`.
+    terms = []
+
+    def _stash_index(m):
+        terms.append(m.group(1))
+        return f'\x04{len(terms) - 1}\x05'
+
+    text = INDEX_RE.sub(_stash_index, text)
+
     # Bold-italic first, and as one span. Left to the ** and * passes below it
     # comes out cross-nested (`<b><i>x</b></i>`), which is not well-formed: it
     # aborts the whole PDF build in ReportLab's parser, and makes the EPUB's
@@ -262,6 +296,11 @@ def _inline(text, smartquotes=True):
     if labels:
         text = re.sub(r'\x02(\d+)\x03',
                       lambda m: f'<note id="{labels[int(m.group(1))]}"/>', text)
+    if terms:
+        # escaped with the rest of the line already; only the quote is left
+        text = re.sub(r'\x04(\d+)\x05',
+                      lambda m: '<index item="{}"/>'.format(
+                          terms[int(m.group(1))].replace('"', '&quot;')), text)
     return _restore_escapes(text)
 
 
@@ -788,7 +827,8 @@ def _escape_literal(text):
     return (text.replace('\\', '\\\\')
                 .replace('*', r'\*')
                 .replace('_', r'\_')
-                .replace('[', r'\['))
+                .replace('[', r'\[')
+                .replace('{index:', r'\{index:'))
 
 
 def block_collision(line):

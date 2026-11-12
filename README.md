@@ -200,6 +200,7 @@ The tool reads a light, plain-text convention:
 | `~~~ table` … `~~~` | a table — one row per line, cells split on `\|` |
 | `[text](https://…)` | a link (also `mailto:` and `#in-book` targets) |
 | `[^label]` … `[^label]: text` | an endnote reference and its text |
+| `{index: Term}` or `{index: Main > sub}` | an index entry for this place (it prints nothing here) |
 | `*italic*`         | *italic*                      |
 | `**bold**`         | **bold**                      |
 | blank line         | new paragraph                 |
@@ -300,6 +301,26 @@ page's notes are longer than the page can hold, the surplus can't be placed — 
 build tells you how many, so you can shorten them or switch to endnotes. Nothing is
 ever dropped silently. In the **ebook** notes are always endnotes, linked both ways;
 an ebook has no pages to put a footnote at the bottom of.
+
+### An index
+
+```
+The owlbear{index: Owlbear} nests in the old mill{index: Places > the old mill}.
+```
+
+Put `{index: Term}` beside the words an index entry should point at. It prints
+nothing where it sits; the book gets an **Index** as its last page, in two columns,
+grouped by letter, with each entry's page numbers (pages in a row become a range,
+`15–17`). `{index: Main > sub}` files an entry under a main one. In the rich view a
+marker shows as a small tag, and typing its closing `}` makes one; a line that
+should print the braces is written `\{index: …}`.
+
+A book of monsters need not mark each one. On a book's page, **List every stat
+block in the index** adds each stat block by its name, and **Add a list of the stat
+blocks by challenge rating** adds that list after the index. In the PDF each number
+links to its page. The **ebook** has no page numbers, so an entry links to each
+chapter it is marked in, by the chapter's name. A marker on a front- or back-matter
+page, or inside a note, is ignored.
 
 ### Links
 
