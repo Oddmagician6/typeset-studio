@@ -221,6 +221,11 @@
   .ms-rich a{color:var(--red);text-decoration:underline;text-underline-offset:2px}
   .ms-rich .wb-note{font-family:var(--mono);font-size:.62em;font-weight:400;font-style:normal;
     color:var(--red);padding:0 1px;cursor:default;user-select:all}
+  /* an index marker: it prints nothing in the book, so it reads as a tag, not as text */
+  .ms-rich .wb-index{font-family:var(--mono);font-size:.58em;font-weight:400;font-style:normal;
+    line-height:1;vertical-align:.25em;color:var(--red);border:1px dotted currentColor;border-radius:3px;
+    padding:0 3px;margin:0 1px;cursor:default;user-select:all;white-space:nowrap}
+  .ms-rich .wb-index::before{content:"index\00a0"; opacity:.6}
   @media (max-width:880px){.work{grid-template-columns:1fr}.side{position:static}}
 {% endblock %}
 
@@ -323,6 +328,7 @@
           <tr><td><code>~~~ center</code> · <code>~~~ right</code> · <code>~~~ left</code></td><td>an aligned block — one line per line</td></tr>
           <tr><td><code>[text](https://…)</code></td><td>a link — also <code>mailto:</code> and <code>#chapter-2</code> inside the book</td></tr>
           <tr><td><code>a claim.[^src]</code> + <code>[^src]: the note</code></td><td>an endnote; numbers restart each chapter and a Notes page is added automatically. A note can cite another, and in rich mode typing the closing <code>]</code> makes the reference</td></tr>
+          <tr><td><code>the owlbear{index: Owlbear}</code></td><td>an index entry for this place; it prints nothing here, and an Index is added at the back of the book. <code>{index: Monsters &gt; Owlbear}</code> files it under a main entry. In rich mode typing the closing <code>}</code> makes the marker</td></tr>
           <tr><td>blank line</td><td>new paragraph</td></tr>
         </table>
       </details>
@@ -1044,6 +1050,8 @@
       rich.addEventListener('input', function(e){
         // `[^label]` becomes a note reference as its closing bracket is typed
         if (e.inputType === 'insertText' && e.data === ']') WYS.noteInputRule(rich);
+        // and `{index: term}` an index marker as its closing brace is typed
+        if (e.inputType === 'insertText' && e.data === '}') WYS.indexInputRule(rich);
         status('Editing…');
         // unsaved from this keystroke, not from the sync half a second on:
         // leaving inside that half second lost the edit
@@ -1090,7 +1098,7 @@
           while (el.firstChild) neu.appendChild(el.firstChild);
         } else {
           var bare = el.cloneNode(true);
-          Array.prototype.forEach.call(bare.querySelectorAll('sup.wb-note'), function(n){ n.remove(); });
+          Array.prototype.forEach.call(bare.querySelectorAll('sup.wb-note, .wb-index'), function(n){ n.remove(); });
           neu.textContent = bare.textContent.replace(/\s+/g, ' ').trim();
         }
         if (!neu.textContent && !neu.querySelector('sup')) { neu.innerHTML = ''; neu.appendChild(document.createElement('br')); }

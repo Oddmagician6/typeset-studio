@@ -30,6 +30,19 @@
     return s;
   }
 
+  // An index marker `{index: term}` is one uneditable chip for the same reasons.
+  // It prints nothing in the book; here it shows its term, small, so the writer
+  // can see what is indexed and delete it whole. The term rides on data-index.
+  function indexEl(term) {
+    var s = document.createElement('span');
+    s.className = 'wb-index';
+    s.setAttribute('contenteditable', 'false');
+    s.dataset.index = term;
+    s.title = 'Index: ' + term;
+    s.textContent = term;
+    return s;
+  }
+
   // A non-breaking space the manuscript really has (a Word import's U+00A0 in
   // "Mr. Smith") is wrapped in a marked span. The browser makes its own, for a typed space it
   // would otherwise collapse — after a note or a link, or a second space — and
@@ -51,7 +64,7 @@
 
   function appendInline(el, runs) {
     (runs || []).forEach(function (r) {
-      var node = r.note ? noteEl(r.text) : textNode(r.text);
+      var node = r.note ? noteEl(r.text) : r.index ? indexEl(r.text) : textNode(r.text);
       if (r.bold && r.italic) {
         var s = document.createElement('strong'), e = document.createElement('em');
         e.appendChild(node); s.appendChild(e); node = s;
@@ -340,6 +353,11 @@
                       link: '', note: true });
           return;
         }
+        if (child.dataset && child.dataset.index) {     // an index marker
+          runs.push({ text: child.dataset.index, bold: bold, italic: italic,
+                      link: link || '', index: true });
+          return;
+        }
         if (isForeignEl(child)) return;                 // an extension's own overlay
         var href = link || '';
         if (child.tagName === 'A') {
@@ -352,16 +370,20 @@
     });
   }
 
+  // a note reference or an index marker: a run that is never merged or trimmed
+  function isMark(r) { return !!(r.note || r.index); }
+
   function coalesce(runs) {
     var out = [];
     runs.forEach(function (r) {
       var last = out[out.length - 1];
       if (last && last.bold === r.bold && last.italic === r.italic
           && (last.link || '') === (r.link || '')
-          && !last.note && !r.note) last.text += r.text;
+          && !isMark(last) && !isMark(r)) last.text += r.text;
       else {
         var c = { text: r.text, bold: r.bold, italic: r.italic, link: r.link || '' };
         if (r.note) c.note = true;
+        if (r.index) c.index = true;
         out.push(c);
       }
     });
@@ -390,14 +412,33 @@
     return true;
   }
 
+  // Typing the `}` that closes `{index: term}` turns it into an index marker, the
+  // same way. Returns true if it made one.
+  var TYPED_INDEX_RE = /\{index:[ \t]*([^{}\[\]]*[^{}\[\]\s])[ \t]*\}$/;
+  function indexInputRule(root) {
+    var sel = root.ownerDocument.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
+    var node = sel.anchorNode, off = sel.anchorOffset;
+    if (!node || node.nodeType !== 3 || !root.contains(node)) return false;
+    var m = TYPED_INDEX_RE.exec(node.data.slice(0, off));
+    if (!m) return false;
+    var after = node.splitText(off);
+    node.data = node.data.slice(0, off - m[0].length);
+    node.parentNode.insertBefore(indexEl(m[1]), after);
+    var r = root.ownerDocument.createRange();
+    r.setStart(after, 0); r.collapse(true);
+    sel.removeAllRanges(); sel.addRange(r);
+    return true;
+  }
+
   // A line never starts or ends with a space in the manuscript, so the edges are
   // trimmed — which is also what turns an empty line's placeholder <br> back
   // into nothing.
   function trimEdges(runs) {
-    while (runs.length && !runs[0].note && !(runs[0].text = runs[0].text.replace(/^\s+/, '')))
+    while (runs.length && !isMark(runs[0]) && !(runs[0].text = runs[0].text.replace(/^\s+/, '')))
       runs.shift();
     var n = runs.length - 1;
-    while (n >= 0 && !runs[n].note && !(runs[n].text = runs[n].text.replace(/\s+$/, ''))) {
+    while (n >= 0 && !isMark(runs[n]) && !(runs[n].text = runs[n].text.replace(/\s+$/, ''))) {
       runs.pop(); n--;
     }
     return runs;
@@ -460,6 +501,10 @@
             cur.push({ text: child.dataset.note, bold: bold, italic: italic, link: '', note: true });
             return;
           }
+          if (child.dataset && child.dataset.index) {         // likewise
+            cur.push({ text: child.dataset.index, bold: bold, italic: italic, link: link, index: true });
+            return;
+          }
           if (child.dataset && child.dataset.block === 'scene') { flush(); blocks.push({ scene: true }); return; }
           if (isForeignEl(child)) return;
           var block = PASTE_BLOCK_RE.test(child.tagName);
@@ -487,11 +532,11 @@
     // edge (a double-click takes the one after it), and dropping that glues the
     // word to its neighbour. The plain-text copy says whether there was one.
     var firstB = blocks[0], lastB = blocks[blocks.length - 1];
-    if (text && firstB && firstB.runs && /^[ \t]/.test(text) && !firstB.runs[0].note)
+    if (text && firstB && firstB.runs && /^[ \t]/.test(text) && !isMark(firstB.runs[0]))
       firstB.runs[0].text = ' ' + firstB.runs[0].text;
     if (text && lastB && lastB.runs && /[ \t]$/.test(text)) {
       var lr = lastB.runs[lastB.runs.length - 1];
-      if (!lr.note) lr.text += ' ';
+      if (!isMark(lr)) lr.text += ' ';
     }
     return blocks;
   }
@@ -664,6 +709,6 @@
   }
 
   global.WYS = { render: render, read: read, renderBlock: renderBlock, readInline: readInline,
-                 noteInputRule: noteInputRule, pasteBlocks: pasteBlocks,
+                 noteInputRule: noteInputRule, indexInputRule: indexInputRule, pasteBlocks: pasteBlocks,
                  insertPaste: insertPaste, lineOf: lineOf };
 })(typeof window !== 'undefined' ? window : this);

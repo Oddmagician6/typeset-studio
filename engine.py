@@ -28,11 +28,21 @@ except ImportError:
     _HAVE_PYPHEN = False
 
 import matter as _matter
+import bookindex as _bookindex
 import ornaments as _orn
-from manuscript import (_inline as _ms_inline, book_anchors as _ms_book_anchors,
+from manuscript import (_inline as _ms_inline_raw, book_anchors as _ms_book_anchors,
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts,
+                        strip_index as _ms_strip_index,
                         CELL_SEP as _MS_CELL)
+
+
+def _ms_inline(text, smartquotes=True):
+    """Markup for text the engine inlines itself (a matter page, a byline, a
+    tagline): an index marker there has nowhere to point, and the neutral tag
+    is not paragraph markup, so it is taken out. A chapter's own blocks come
+    already inlined and keep theirs (see `_apply_index_markers`)."""
+    return _ms_strip_index(_ms_inline_raw(text, smartquotes))
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle as _RLParagraphStyle
@@ -2790,7 +2800,8 @@ class BookDoc(BaseDocTemplate):
         self._fn_assign   = {}
         self._fn_flow     = {}
         self._fn_drawn    = set()   # notes actually set on a page
-        self._cover = cover or {}          # {path, overlay, color, title_font}
+        self._index_hits  = []      # (marker key, page) as each index marker is set
+        self._cover = cover or {}        # {path, overlay, color, title_font}
         trim = preset['trim']
         pw, ph = trim['w'] * inch, trim['h'] * inch
         m = preset['margins']
@@ -2887,6 +2898,20 @@ class BookDoc(BaseDocTemplate):
         f.__dict__['_height'] = f._fullHeight - keep
         f._geom()
         f._reset()
+
+    def beforeDocument(self):
+        # a paragraph's `<onDraw name="_ts_index" …/>` calls this on the canvas
+        self.canv.setNamedCB('_ts_index', self._on_index)
+
+    def _on_index(self, canv, kind, label):
+        """An index marker has been set: note its page, and leave a
+        destination there for the index's page number to link to."""
+        try:
+            key = int(label)
+        except (TypeError, ValueError):
+            return
+        self._index_hits.append((key, canv.getPageNumber()))
+        canv.bookmarkPage(_index_anchor(key))
 
     def _outline(self, canv, title, level):
         """Add a PDF bookmark for the current page at `level` (0 = top)."""
@@ -3276,20 +3301,25 @@ def _opening_para(text, st, preset, fonts, hyph=None):
             lambda m: _unicode_super(m.group(1), fonts['regular']) or m.group(1),
             text)
     plain = _plain(text)
+    # the decorative openings set plain words, so the paragraph's index
+    # markers are lifted out and report from just before it
+    marks = ([IndexMark(_INDEX_DRAW_RE.findall(text))]
+             if style != 'none' and '_ts_index' in text else [])
     if style == 'dropcap':
         plain_h = _hyphenate_markup(plain, hyph) if hyph else plain
-        return [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
-                        lines=preset['chapter'].get('dropcap_lines', 3))]
+        return marks + [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
+                                lines=preset['chapter'].get('dropcap_lines', 3))]
     if style == 'raised_initial':
         rest = _hyphenate_markup(plain[1:], hyph) if hyph else plain[1:]
-        return [RaisedInitial(plain[:1], rest, st['first'], fonts['regular'])]
+        return marks + [RaisedInitial(plain[:1], rest, st['first'], fonts['regular'])]
     if style == 'smallcaps_leadin':
         words = plain.split(' ')
         n     = preset['chapter'].get('leadin_words', 4)
         lead, rest = ' '.join(words[:n]), ' '.join(words[n:])
         big   = int(st['first'].fontSize * 1.05)
         rest  = _hyphenate_markup(rest, hyph) if hyph else rest
-        return [Paragraph(f'<font size="{big}">{lead.upper()}</font> {rest}', st['first'])]
+        return marks + [Paragraph(f'<font size="{big}">{lead.upper()}</font> {rest}',
+                                  st['first'])]
     text_h = _hyphenate_markup(text, hyph) if hyph else text
     return [Paragraph(text_h, st['first'])]
 
@@ -4436,6 +4466,8 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     ncolor = _gb_color(sm, 'name_color') or base.textColor
     if name or count or cr:
         text = _caps_markup(name) if sm.get('name_caps', True) else name
+        if attrs.get('_ix') is not None:      # the block is in the index
+            text = _index_tag(attrs['_ix']) + text
         if count:
             text += (f' <font name="{fonts["regular"]}">&#215;&#160;'
                      f'{_ms_inline(count, False)}</font>')
@@ -4693,7 +4725,8 @@ def _note_text_markers(text, ch_idx, size, link):
     def one(m):
         mark = f'<super size="{size}">{m.group(1)}</super>'
         return f'<a href="#{_note_anchor(ch_idx, m.group(1))}">{mark}</a>' if link else mark
-    return _NOTE_MARK_RE.sub(one, text)
+    # an index marker inside a note is dropped: the index points at the text
+    return _NOTE_MARK_RE.sub(one, _ms_strip_index(text))
 
 
 _FN_SCHEME = 'tsfn://'          # measuring-pass marker; never reaches a real build
@@ -4913,6 +4946,128 @@ def _endnotes_page(chapters, fonts, st, preset):
     return out
 
 
+# ------------------------------------------------------------------ index
+# The index (#74 Phase 5a). A chapter's text carries `<index item="…"/>` where
+# the writer put `{index: …}`. Each becomes an `<onDraw>` tag with a key: when
+# its line is set, ReportLab calls `BookDoc._on_index`, which notes the page.
+# The Index page is set from what the pass before found; it is the last thing
+# in the book, so adding it moves nothing it points at.
+
+def _index_anchor(key):
+    return f'ts-ix-{key}'
+
+
+def _index_tag(key):
+    return f'<onDraw name="_ts_index" label="{key}"/>'
+
+
+_INDEX_DRAW_RE = re.compile(r'<onDraw name="_ts_index" label="(\d+)"/>')
+
+
+def _apply_index_markers(chapters, meta):
+    """Every index marker as its `<onDraw>` tag: (chapters, marks). See
+    `bookindex.assign`."""
+    return _bookindex.assign(chapters, meta, _index_tag)
+
+
+class IndexMark(Flowable):
+    """Index markers for text that is set without paragraph markup (a drop
+    cap's paragraph): they report from here, just before it."""
+    width = height = 0
+
+    def __init__(self, keys):
+        super().__init__()
+        self.keys = list(keys)
+
+    def wrap(self, w, h): return (0, 0)
+
+    def draw(self):
+        doc = getattr(self.canv, '_doctemplate', None)
+        if isinstance(doc, BookDoc):
+            for key in self.keys:
+                doc._on_index(self.canv, 'onDraw', key)
+
+
+def _index_found(doc):
+    """What a finished pass learned: each marker's folio, counted as the
+    folios are, from the first chapter opener."""
+    start = doc._body_start or 1
+    return sorted({(key, max(page - start + 1, 1)) for key, page in doc._index_hits})
+
+
+def _index_pages(found):
+    """Page numbers for one entry, as linked markup: `12, 15–17`. `found` is
+    its [(folio, key)]; a run of pages links to where it starts."""
+    first = {}
+    for folio, key in sorted(found):
+        first.setdefault(folio, key)
+    folios = sorted(first)
+    out, i = [], 0
+    while i < len(folios):
+        j = i
+        while j + 1 < len(folios) and folios[j + 1] == folios[j] + 1:
+            j += 1
+        text = str(folios[i]) if j == i else f'{folios[i]}–{folios[j]}'
+        out.append(f'<a href="#{_index_anchor(first[folios[i]])}">{text}</a>')
+        i = j + 1
+    return ', '.join(out)
+
+
+def _index_page(marks, found, meta, preset, fonts, st):
+    """Flowables for the Index: two columns, grouped by letter, runs of pages
+    merged, each number a link to its place."""
+    entries, challenges = _bookindex.tree(marks, found, meta)
+    size = max(st['body'].fontSize - 1.0, 6.0)
+    lead = size * 1.25
+    em = size
+    entry = ParagraphStyle('ixentry', parent=st['body'], fontName=fonts['regular'],
+                           fontSize=size, leading=lead, alignment=TA_LEFT,
+                           leftIndent=2 * em, firstLineIndent=-2 * em,
+                           spaceBefore=0, spaceAfter=0)
+    sub = ParagraphStyle('ixsub', parent=entry, leftIndent=3 * em, firstLineIndent=-2 * em)
+    letter = ParagraphStyle('ixletter', parent=entry,
+                            fontName=fonts.get('bold', fonts['regular']),
+                            fontSize=size + 1, leading=(size + 1) * 1.25,
+                            leftIndent=0, firstLineIndent=0,
+                            spaceBefore=lead * 0.8, spaceAfter=lead * 0.2,
+                            keepWithNext=1)
+
+    def line(text, hits, style):
+        pages = _index_pages(hits)
+        return Paragraph(_esc_markup(text) + (', ' + pages if pages else ''), style)
+
+    out = [BlankMarker(), OutlineMarker(_bookindex.HEADING),
+           Paragraph(_bookindex.HEADING, st['chap_title']), Spacer(1, 0.3 * inch)]
+    run, at = [], None
+    for main, hits, subs in entries:
+        head = _bookindex.letter(main)
+        if head != at:
+            at = head
+            if head:
+                run.append(Paragraph(head, letter))
+        run.append(line(main, hits, entry))
+        run.extend(line(text, sub_hits, sub) for text, sub_hits in subs)
+    if run:
+        out.append(_index_run(run, preset))
+    if challenges:
+        if run:
+            out.append(Spacer(1, lead))
+        out.append(Paragraph(_bookindex.CR_HEADING, st['subhead']))
+        run = []
+        for cr, names in challenges:
+            run.append(Paragraph('CR ' + _esc_markup(cr), letter))
+            run.extend(line(name, hits, entry) for name, hits in names)
+        out.append(_index_run(run, preset))
+    return out
+
+
+def _index_run(flowables, preset):
+    """The index's two columns, in a one-column style as well, always evened
+    out where they end."""
+    gap = columns_of(preset)[1] if columns_of(preset)[0] == 2 else 0.25 * inch
+    return ColumnRun(flowables, gap, rule=False, balance=True)
+
+
 def _matter_page(heading, text, fonts, st, smartquotes, style='body', unlink=None):
     """Flowables for one front/back matter page. Caller handles page breaks.
 
@@ -5025,7 +5180,10 @@ def _page_open(story):
 
 def _build_story(manuscript, preset, meta, fonts, st, head_font,
                  has_cover=False, avail_w=0, hyph=None, toc_flowables=None,
-                 fn_measure=False, fn_probe=None, matter_unlink=None):
+                 fn_measure=False, fn_probe=None, matter_unlink=None, index=None):
+    """`index` is what the pass before found (`_index_found`): given, the book
+    ends with its Index page; None, the markers still report but no page is
+    set (the pass that finds them, and the footnote measuring passes)."""
     glyph = preset['scene_break']['glyph']
     story = []
     # note markers are neutral in the parsed model; make them superscripts before
@@ -5033,6 +5191,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     manuscript = dict(manuscript)
     manuscript['chapters'] = _apply_note_markers(manuscript['chapters'], preset,
                                                  measure=fn_measure)
+    manuscript['chapters'], ix_marks = _apply_index_markers(manuscript['chapters'], meta)
 
     # ---- cover page (full-bleed art drawn by the page template) ----
     if has_cover:
@@ -5284,6 +5443,13 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                                   meta[_sec['key']].strip(),
                                   fonts, st, sq, _sec['style'],
                                   unlink=matter_unlink))
+
+    # The index closes the book: nothing follows it, so its own length moves
+    # no page it lists.
+    if index is not None and _bookindex.wanted(ix_marks, meta):
+        story.append((RectoBreak() if rhs else PageBreak()) if _bm_first else PageBreak())
+        story.append(RunningHeadMarker(_bookindex.HEADING))
+        story.extend(_index_page(ix_marks, index, meta, preset, fonts, st))
 
     return story
 
@@ -5952,6 +6118,9 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         fn_flow.update(pieces)                  # the parts of notes that run on
         unplaced_notes.clear(); unplaced_notes.extend(homeless)
 
+    has_index = _bookindex.wanted(
+        _apply_index_markers(manuscript['chapters'], meta)[1], meta)
+
     if foot_notes and not meta.get('include_toc'):
         try:
             _resolve_foot()
@@ -5972,6 +6141,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         doc1.build(story1)
         body_start = doc1._body_start or 1
         entries    = doc1._toc_entries
+        index      = _index_found(doc1) if has_index else None
         try:
             os.remove(tmp)
         except OSError:
@@ -6000,19 +6170,35 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
                                    has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
                                    toc_flowables=_build_toc(entries, body_start, avail_w,
                                                             preset, fonts, st),
-                                   matter_unlink=matter_unlink)
+                                   matter_unlink=matter_unlink, index=index)
             doc2 = _make_doc(out_path)
             doc2.build(story2)
             said = _toc_folios(entries, body_start)
             entries, body_start = doc2._toc_entries, doc2._body_start or 1
-            if _toc_folios(entries, body_start) == said:
+            listed, index = index, (_index_found(doc2) if has_index else None)
+            if _toc_folios(entries, body_start) == said and index == listed:
                 break
         page_count = doc2.page
         unplaced_notes.extend(_notes_not_drawn(fn_flow, doc2._fn_drawn))
     else:
+        index = None
+        if has_index:
+            # a pass to learn each marker's page; the index is the last thing
+            # in the book, so the pass that sets it puts them where this did
+            fd, tmp = tempfile.mkstemp(suffix='.pdf')
+            os.close(fd)
+            probe_doc = _make_doc(tmp)
+            probe_doc.build(_build_story(manuscript, preset, meta, fonts, st, head_font,
+                                         has_cover=bool(cover), avail_w=avail_w,
+                                         hyph=hyph, matter_unlink=matter_unlink))
+            index = _index_found(probe_doc)
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
         story = _build_story(manuscript, preset, meta, fonts, st, head_font,
                              has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
-                             matter_unlink=matter_unlink)
+                             matter_unlink=matter_unlink, index=index)
         doc = _make_doc(out_path)
         doc.build(story)
         page_count = doc.page

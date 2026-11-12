@@ -279,6 +279,29 @@ f.onload = function () {
     loadMd('# One\n\n~~~ letter from="A"\nDear B,\n~~~\n\n~~~ sidebar title="T"\nText.\n~~~\n');
     return String(rich.querySelectorAll('.wb-span').length);
   });
+  // #74 Phase 5a: index markers
+  run('index-survives-edit', function () {
+    loadMd('# One\n\nThe owlbear{index: Owlbear} attacks\n');
+    var chip = q('.wb-index');
+    if (!chip || chip.dataset.index !== 'Owlbear') return 'NO CHIP';
+    caret(q('.wb-para'), true); type(' here'); return getMd();
+  });
+  run('index-typed', function () {
+    loadMd('# One\n\nThe owlbear\n'); caret(q('.wb-para'), true);
+    type('{index: Monsters > Owlbear}');
+    if (rich.querySelectorAll('.wb-index').length !== 1) return 'NO CHIP';
+    type(' attacks'); return getMd();
+  });
+  run('index-deleted-whole', function () {
+    loadMd('# One\n\nThe owlbear{index: Owlbear} attacks\n');
+    q('.wb-index').remove(); rich.dispatchEvent(new w.Event('input', {bubbles: true}));
+    return getMd();
+  });
+  run('index-literal-stays', function () {
+    loadMd('# One\n\nA \\{index: literal} here\n');
+    if (rich.querySelectorAll('.wb-index').length) return 'A CHIP';
+    caret(q('.wb-para'), true); type(' now'); return getMd();
+  });
 
   var x = new XMLHttpRequest();
   x.open('POST', '/_rich_result', false); x.send(JSON.stringify(out));

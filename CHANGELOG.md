@@ -8,6 +8,29 @@ line here.
 
 ---
 
+## Unreleased
+
+### New
+
+- **An index.** Put `{index: Owlbear}` beside the words an entry should point
+  at. It prints nothing there, and the book gets an **Index** as its last
+  page: two columns, grouped by letter, each entry with its page numbers, and
+  pages in a row merged into a range. `{index: Monsters > Owlbear}` files an
+  entry under a main one. In the PDF each number links to its page; in the
+  ebook, which has no page numbers, an entry links to each chapter it is
+  marked in. In the manuscript editor's rich view a marker shows as a small
+  tag, and typing its closing `}` makes one.
+- **Stat blocks in the index.** Two new options on a book: **List every stat
+  block in the index** adds each stat block by its name without a marker, and
+  **Add a list of the stat blocks by challenge rating** puts that list after
+  the index, lowest rating first. A bestiary gets its index from these alone.
+
+### Changed
+
+- **`{index: …}` is now read as an index marker.** A manuscript that should
+  print those braces as text needs a backslash in front: `\{index: …}`. The
+  Word importer adds it for you.
+
 ## 1.4.0 — 12 November 2026
 
 Two columns. A style can now set a book's text in two columns, with figures

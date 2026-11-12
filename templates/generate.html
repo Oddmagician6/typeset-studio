@@ -317,6 +317,13 @@
           <input type="checkbox" id="screen_pdf" name="screen_pdf" {{ 'checked' if form and form.get('screen_pdf') }}>
           <label for="screen_pdf">Also make a colour screen PDF — the style's screen colours
             and page colour, for selling as a download (DriveThruRPG and the like)</label></div>
+        <div class="check" style="margin-top:6px">
+          <input type="checkbox" id="index_statblocks" name="index_statblocks" {{ 'checked' if (form or {}).get('index_statblocks') }}>
+          <label for="index_statblocks">List every stat block in the index, by name — an Index
+            page is added at the back of the book</label></div>
+        <div class="check" style="margin-top:6px">
+          <input type="checkbox" id="index_cr" name="index_cr" {{ 'checked' if (form or {}).get('index_cr') }}>
+          <label for="index_cr">Add a list of the stat blocks by challenge rating to the index</label></div>
         <p class="hint" style="margin:4px 0 0">Sets black text as a single ink instead of
           RGB — the difference between crisp type and a four-ink black that mis-registers —
           declares the trim box, and leaves out links and the cover page, which a printer

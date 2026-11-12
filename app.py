@@ -278,7 +278,7 @@ BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'preset
              'created', 'updated', 'last_pdf', 'last_epub', 'last_print_package',
              'last_package_scope', 'last_screen_pdf')
 BOOK_FLAGS = ('include_toc', 'smartquotes', 'right_hand_starts', 'cover_overlay', 'press',
-              'screen_pdf')
+              'screen_pdf', 'index_statblocks', 'index_cr')
 
 
 def _shape_ref(kind):
@@ -3856,6 +3856,8 @@ def generate():
         'smartquotes':    'smartquotes' in form,
         'press':          'press' in form,
         'screen_pdf':     'screen_pdf' in form,
+        'index_statblocks': 'index_statblocks' in form,
+        'index_cr':       'index_cr' in form,
         **{k: form.get(k, '').strip() for k in matter.KEYS},
     }
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -4037,6 +4039,8 @@ def _book_from_compose_form(tmp_files):
         'cover_color': form.get('cover_color', 'light'),
         'include_toc':    'include_toc' in form,
         'smartquotes':    'smartquotes' in form,
+        'index_statblocks': 'index_statblocks' in form,
+        'index_cr':       'index_cr' in form,
         **{k: form.get(k, '').strip() for k in matter.KEYS},
     }
 
@@ -4260,6 +4264,9 @@ def project_create():
         'smartquotes': form.get('smartquotes') == '1',
         'press': form.get('press') == '1',
         'screen_pdf': form.get('screen_pdf') == '1',
+        # the index options (#74 Phase 5a) are kept only when set, as a book
+        # from before them has neither
+        **{k: True for k in ('index_statblocks', 'index_cr') if form.get(k) == '1'},
         **{k: form.get(k, '').strip() for k in matter.KEYS},
         'manuscript_file': ms_file,
         'manuscript_type': ms_type,
@@ -4450,6 +4457,8 @@ def project_edit(pid):
             # option changes nothing in it
             **({'screen_pdf': 'screen_pdf' in form}
                if 'screen_pdf' in form or 'screen_pdf' in proj else {}),
+            **{k: k in form for k in ('index_statblocks', 'index_cr')
+               if k in form or k in proj},
             **{k: form.get(k, '').strip() for k in matter.KEYS},
             'title':            form.get('title', '').strip(),
             'subtitle':         form.get('subtitle', '').strip(),
@@ -4897,6 +4906,8 @@ def project_write_preview(pid):
         'right_hand_starts': proj.get('right_hand_starts', True),
         'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
         'include_toc': False, 'smartquotes': proj.get('smartquotes', True),
+        'index_statblocks': proj.get('index_statblocks', False),
+        'index_cr': proj.get('index_cr', False),
         **{k: proj.get(k, '') for k in matter.KEYS},
     }
     ms = manuscript.parse_markdown(text, smartquotes=meta['smartquotes'])
@@ -5167,6 +5178,8 @@ def _project_meta(proj):
         'include_toc':   proj.get('include_toc', False),
         'smartquotes':   proj.get('smartquotes', True),
         'screen_pdf':    proj.get('screen_pdf', False),
+        'index_statblocks': proj.get('index_statblocks', False),
+        'index_cr':      proj.get('index_cr', False),
         'press':         proj.get('press', False),
         **{k: proj.get(k, '') for k in matter.KEYS},
     }
