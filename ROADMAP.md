@@ -7,13 +7,12 @@ sections before changing the engine.
 
 ---
 
-## Next up — priority order (as of 2026-10-08, after 1.3.2)
+## Next up — priority order (as of 2026-11-12, after 1.3.3)
 
 Start here in a new session. Each item points at its full entry below.
 
-1. **Word import fixes (#77) — done, merged, unreleased.** Emphasis that closes (the
-   author's Bestiary printed 902 stray asterisks) and documents with no Normal style. They
-   wait in CHANGELOG's `## Unreleased`; cut **1.3.3** when the user asks. (The bleed fix,
+1. **Word import fixes (#77) — done, released in 1.3.3.** Emphasis that closes (the
+   author's Bestiary printed 902 stray asterisks) and documents with no Normal style. (The bleed fix,
    #76, shipped in 1.3.2.)
 2. **Bug hunt plan: all 12 items done and released in 1.3.1.** Harnesses to copy:
    `test_upgrade.py` with `test_fixtures/make_fixtures.py` (release step 6),
@@ -32,7 +31,7 @@ Start here in a new session. Each item points at its full entry below.
 3. **Small, on request only:** per-piece epigraphs in anthologies (#31's deferred bullet), a
    free-form titled matter page (Tier 5F), a store-link page (Tier 5B), an EPUB 2 fallback
    (Tier 5D, only if a store refuses EPUB 3).
-4. **Tabletop RPG books (#74) — Phases 1, 2, 3a and 3b done, unreleased (2026-10-08).**
+4. **Tabletop RPG books (#74) — Phases 1, 2, 3a and 3b done, released in 1.3.3 (2026-11-12).**
    Phase 1: the game blocks (read-aloud, sidebar and note, stat block in every accepted
    format) with Word import and Homebrewery paste. Phase 2: `###`/`####` headings, the
    `#>` tagline, contents depth, PDF bookmarks, running heads by chapter or section,
@@ -40,17 +39,13 @@ Start here in a new session. Each item points at its full entry below.
    "Also make a colour screen PDF"), the style's screen palette, a display font, Cinzel,
    and the Game Book — Dark Screen style. Phase 3b: page backgrounds (screen only) with the
    app-made parchment, page furniture (header bar, footer band, corners), and the Light
-   Rulebook and A5 Zine styles. All are in CHANGELOG's `## Unreleased` beside #77; each
+   Rulebook and A5 Zine styles. All shipped in 1.3.3 beside #77; each
    phase's leftovers end its "as built" note in the #74 entry.
-   **State at hand-off (2026-10-08):** branch `ttrpg-phase1`, everything committed —
-   Phase 1 d3ca54e, Phase 2 6f9e426, Phase 3 plan 7cfcfcc, Phase 3a d605ee2, Phase 3b after
-   them. The branch is NOT merged to master and nothing is released: ask the user before
-   merging, and before cutting a release (1.3.3 would carry #77 and all of this). All 37
+   **State (2026-11-12):** `ttrpg-phase1` is merged to master and released as 1.3.3. All 37
    test files pass; run them with `PYTHONIOENCODING=utf-8` (a Windows console can't print a
    stat block's `−`).
-   **Next: Phase 4 (two columns)**, gated on its spike in the real engine; **check its plan
-   with the user before starting** (the plan is the Phase 4 entry). Also worth offering the
-   user first: merging the branch and a 1.3.3 release, since Phase 3 is a coherent piece.
+   **Next: Phase 4 (two columns)**, gated on its spike in the real engine; the user
+   approved the plan as written on 2026-11-12 (the plan is the Phase 4 entry).
    Watch-outs: write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
    style editor's round trip, and a new book option must not be written into books that
