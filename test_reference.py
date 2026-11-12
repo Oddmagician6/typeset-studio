@@ -213,6 +213,132 @@ def test_pdf():
                abs(r.width - w * 72) < 0.5 and abs(r.height - h * 72) < 0.5, r)
 
 
+def _pages(md, start, rhs, toc=True, name='fm', **meta):
+    """(first lines, contents numbers, foot folio) for each page of a build."""
+    import fitz
+    m = dict({'include_toc': toc, 'right_hand_starts': rhs}, **meta)
+    out, _ = _build(md, _preset(chapter__start=start), m, name=name)
+    doc = fitz.open(out)
+    pages = []
+    for pg in doc:
+        lines = [l.strip() for l in pg.get_text().splitlines() if l.strip()]
+        listed = {}
+        for ln in lines:
+            hit = re.match(r'(.+?)\s*\.{4,}\s*(\d+)$', ln)
+            if hit:
+                listed[hit.group(1).strip()] = int(hit.group(2))
+        foot = [w[4] for w in pg.get_text('words') if w[1] > pg.rect.height * 0.9]
+        pages.append((lines, listed, foot))
+    doc.close()
+    return pages
+
+
+def _page_of(pages, *first):
+    """Index of the page whose text opens with these lines."""
+    for i, (lines, _listed, _foot) in enumerate(pages):
+        if lines[:len(first)] == list(first):
+            return i
+    return None
+
+
+def test_contents_pages():
+    print("\ncontents and the pages around them")
+    filler = ' '.join(['Water rises in the old stones and falls again.'] * 40)
+    plain = ''.join(f'# {t}\n\n{filler}\n\n' for t in ('One', 'Two', 'Three'))
+    parts = (f'=== The Valley\n\n# One\n\n{filler}\n\n# Two\n\n{filler}\n\n'
+             f'=== The Hills\n\n# Three\n\n{filler}\n')
+
+    # chapters that start on any page (the game styles) once set the first part
+    # divider, or the first chapter, on the contents page itself
+    pg = _pages(parts, 'any', True, name='fm-parts')
+    _check("contents keep their page to themselves when chapters start anywhere",
+           pg[0][0][0] == 'Contents' and not any('Part 1' in l for l in pg[0][0]),
+           pg[0][0])
+    _check("…the first part divider has the next page, and the chapter the one after",
+           pg[1][0] == ['Part 1', 'The Valley'] and pg[2][0][:2] == ['Chapter 1', 'One'],
+           [p[0][:2] for p in pg[:3]])
+    pg = _pages(plain, 'any', True, name='fm-plain')
+    _check("with no parts the first chapter starts the page after the contents",
+           'Chapter 1' not in pg[0][0] and pg[1][0][:2] == ['Chapter 1', 'One'],
+           [p[0][:2] for p in pg[:2]])
+    pg = _pages(parts, 'any', True, toc=False, name='fm-ded',
+                dedication='For the valley.')
+    _check("a dedication keeps its page too",
+           pg[0][0] == ['For the valley.'] and pg[1][0] == ['Part 1', 'The Valley'],
+           [p[0][:3] for p in pg[:2]])
+    pg = _pages(plain, 'any', True, name='fm-both', dedication='For the valley.')
+    ded = _page_of(pg, 'For the valley.')
+    _check("contents, then the dedication, then the first chapter",
+           pg[0][0][0] == 'Contents' and ded is not None
+           and pg[ded][0] == ['For the valley.']
+           and pg[ded + 1][0][:2] == ['Chapter 1', 'One'], [p[0][:2] for p in pg[:5]])
+
+    # no forced right-hand pages: nothing asks for a blank page before the contents
+    pg = _pages(plain, 'recto', False, name='fm-rhs-off')
+    _check("right-hand starts off: the book opens on its contents, not a blank page",
+           pg[0][0][:1] == ['Contents'] and pg[1][0][:2] == ['Chapter 1', 'One'],
+           [p[0][:2] for p in pg[:3]])
+    pg = _pages(plain, 'any', False, name='fm-rhs-off-full', front_matter='full')
+    _check("…and with a title and copyright page there is no blank page among them",
+           all(p[0] for p in pg) and pg[3][0][:1] == ['Contents'],
+           [p[0][:1] for p in pg[:5]])
+    pg = _pages(plain, 'any', False, toc=False, name='fm-rhs-off-ded',
+                front_matter='full', dedication='For the valley.')
+    _check("…nor before a dedication",
+           all(p[0] for p in pg) and pg[3][0] == ['For the valley.'],
+           [p[0][:1] for p in pg[:5]])
+
+    # a book with forced right-hand pages is laid out as it always was
+    pg = _pages(parts, 'recto', True, name='fm-recto', front_matter='full')
+    _check("right-hand starts on: contents, divider and chapter each on a right-hand page",
+           [i for i, p in enumerate(pg) if p[0][:1] in (['Contents'], ['Part 1'],
+                                                         ['Chapter 1'])] == [4, 6, 8],
+           [p[0][:1] for p in pg[:9]])
+
+    # the number the contents give a chapter is the number on its page: page 1
+    # is the first chapter's opener (which prints none), so the page after an
+    # opener carries the opener's number plus one
+    for label, md, start, rhs, meta in (
+            ('right-hand starts', plain, 'recto', True, {'front_matter': 'full'}),
+            ('chapters anywhere', parts, 'any', True, {}),
+            ('right-hand starts off', plain, 'any', False, {'front_matter': 'full'}),
+            ('a dedication between', plain, 'any', True,
+             {'dedication': 'For the valley.'})):
+        pg = _pages(md, start, rhs, name='fm-folio', **meta)
+        listed = next(p[1] for p in pg if p[0][:1] == ['Contents'])
+        got, want = [], []
+        for n, title in enumerate(('One', 'Two', 'Three'), start=1):
+            i = _page_of(pg, f'Chapter {n}', title)
+            got.append(listed.get(title))
+            want.append(int(pg[i + 1][2][0]) - 1 if i is not None and pg[i + 1][2] else None)
+        _check(f"contents give each chapter the number on its page ({label})",
+               got == want and got[0] == 1, f'contents {got}, pages {want}')
+
+    # footnotes take room pass 1 never measured: the contents still say where
+    # each chapter landed
+    note = ' '.join(['A note long enough to take its share of the foot of the page.'] * 3)
+    body = ' '.join(f'Water rises in the old stones[^{n}] and falls again.'
+                    for n in range(1, 13))
+    notes = '\n'.join(f'[^{n}]: {note}' for n in range(1, 13))
+    md = ''.join(f'# {t}\n\n{body}\n\n{filler}\n\n{notes}\n\n' for t in ('One', 'Two', 'Three'))
+    p = _preset(chapter__start='any', endnotes__placement='foot')
+    out, _ = _build(md, p, {'include_toc': True}, name='fm-notes')
+    import fitz
+    doc = fitz.open(out)
+    listed = {}
+    for ln in doc[0].get_text().splitlines():
+        hit = re.match(r'(.+?)\s*\.{4,}\s*(\d+)$', ln.strip())
+        if hit:
+            listed[hit.group(1).strip()] = int(hit.group(2))
+    marks = {title: page for _l, title, page in doc.get_toc()}
+    start = marks.get('One')
+    _check("…with footnotes at the foot of the page as well",
+           start and [listed.get(t) for t in ('One', 'Two', 'Three')]
+           == [marks[t] - start + 1 for t in ('One', 'Two', 'Three')],
+           f'contents {listed}, bookmarks {marks}')
+    doc.close()
+
+
 def test_epub():
     print("\nepub")
     import epub
@@ -350,6 +476,7 @@ if __name__ == "__main__":
     test_parse()
     test_round_trip()
     test_pdf()
+    test_contents_pages()
     test_epub()
     test_word()
     test_style_form()

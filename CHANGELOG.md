@@ -18,6 +18,20 @@ line here.
   footnotes were already in the right place. The text now sits under them, so
   the wider margin is at the spine on both pages of a spread. A style whose
   inside and outside margins are equal is unchanged.
+- **The contents page gives the right page numbers.** Every number on a
+  contents page was too high by the number of pages the contents took: one
+  too high in most books, so a chapter on page 3 was listed as page 4. A book
+  with footnotes at the foot of the page could be further out, because the
+  room the notes take was not counted. Each chapter is now listed with the
+  number printed on its page.
+- **The first chapter no longer starts on the contents page.** In a style
+  whose chapters start on any page (the three game-book styles), the first
+  part divider or the first chapter was set on the contents page itself, or
+  on the dedication or epigraph page. It now starts on a page of its own. The
+  same happened in any style with right-hand starts turned off.
+- **No blank page before the contents.** With right-hand starts turned off, a
+  blank page was left before the contents page and before a dedication, and a
+  book with no title page opened on a blank one.
 
 ## 1.3.3 — 12 November 2026
 

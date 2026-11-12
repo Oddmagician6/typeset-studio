@@ -47,26 +47,12 @@ Start here in a new session. Each item points at its full entry below.
    **Phase 4 (two columns): the spike passed all six gates on 2026-11-12** (branch
    `ttrpg-phase4`, unmerged; see "The spike as run" in the Phase 4 entry). The column engine
    is in and inert.
-   **START HERE (hand-off 2026-11-12) — the user asked for these three, in order:**
-   1. **Fix the part divider on the contents page.** With a style whose chapters start on
-      any page (`chapter.start` "any": the three game styles) and a contents page, the
-      first part divider (or first chapter) is set on the contents page itself: in
-      `_build_story`, `need_break` starts False, so nothing breaks the page after the
-      contents or the front-matter extras. One column too, so it is in 1.3.3. Watch for a
-      doubled break (the title and copyright pages already end in `PageBreak`; check what
-      the contents flowables and `_matter_page` end with) and add a test (`test_reference.py`
-      builds contents; the adventure fixture has parts). CHANGELOG `### Fixed` entry under
-      `## Unreleased`, beside the margin fix.
-   2. **Commit** it on `ttrpg-phase4` (commits so far, local and unpushed: 4fd4c40 the
-      verso-margin fix, 48e890e the spike, then this hand-off).
-   3. **Release 1.3.4 — approved by the user on 2026-11-12**, push and publish included
-      ("Cutting a release" below). It carries the two fixes. Merge `ttrpg-phase4` into
-      master for it (fast-forward): the column engine comes along but is inert, since no
-      style, preset or page sets `columns`, so the release notes don't mention columns.
-      All 38 test files must pass first (`test_columns.py` is the 38th). The verso-margin
-      fix moves the text on every left-hand page of a book whose inside and outside margins
-      differ; the CHANGELOG entry says so, and the release notes should too.
-   **After that: the Phase 4 feature** around the engine (style editor's Columns section,
+   **1.3.4 (2026-11-12)** carries four fixes and nothing else a user can see: left-hand
+   pages mirror their margins, the first part divider or chapter keeps off the contents
+   page, contents numbers are the numbers on the pages, and no blank page before the
+   contents with right-hand starts off. `ttrpg-phase4` was merged to master for it; the
+   column engine came along inert (no style, preset or page sets `columns`).
+   **Next: the Phase 4 feature** around the engine (style editor's Columns section,
    two-column presets, `span` in the editor's figure and table dialogs, the leftovers under
    "The spike as run"). The user was asked whether to go ahead and has not answered yet:
    ask again before starting.
@@ -976,9 +962,17 @@ created, updated    ISO 8601 datetime strings
 
 - **TOC two-pass build:** when `meta['include_toc']` is True, `build_pdf` runs the story
   through a first (temp-file) build to capture `doc._toc_entries` and `doc._body_start`,
-  estimates the TOC page count, adjusts folios by that count, then does a second build with
-  the TOC injected via `_build_story(..., toc_flowables=...)`. The TOC is inserted after
-  the copyright page and before dedications/epigraph.
+  then does a second build with the TOC injected via `_build_story(..., toc_flowables=...)`.
+  The TOC is inserted after the copyright page and before dedications/epigraph. A contents
+  number is the folio: `page - body_start + 1` (`_toc_folios`), with nothing added for the
+  contents pages, which sit before `body_start` (until 1.3.4 the TOC page count was added,
+  so every number was that much too high). Pass 1 has no contents and no footnote reserve,
+  so pass 2 is repeated (three times at most) from its own entries until the contents say
+  where the chapters are.
+- **Breaks before the body:** the title, copyright and cover pages end in their own
+  `PageBreak`; the contents flowables and `_matter_page` do not. `_page_open(story)` says
+  whether a break is owed, and the body's `need_break` starts from it. A plain `PageBreak`
+  on an empty page makes a blank page, so never add one unconditionally there.
 
 - **Front/back matter blank pages:** only the *first* item in each group (front extras:
   dedication + epigraph; back matter: acknowledgments + about + also-by) is recto-forced
@@ -2934,9 +2928,13 @@ doc_model / WYSIWYG round-trip:
     block's title bar can part from its body at a column's end (a table row split, as at a
     page's end in one column); `PageBreak`s inside a run are not expected and not handled;
     more than two columns; the EPUB and the rich editor need nothing.
-  - **Also seen, not fixed (one column too):** with a style whose chapters start on any
-    page (the three game styles) and a contents page, the first part divider is set on the
-    contents page itself (`need_break` starts False after the front matter).
+  - **Also seen (one column too), fixed in 1.3.4:** with a style whose chapters start on
+    any page (the three game styles) and a contents page, the first part divider was set on
+    the contents page itself (`need_break` started False after the front matter). Fixing it
+    turned up two more in the same lines, fixed with it: contents numbers too high by the
+    contents' page count (since contents were added), and a blank page before the contents
+    or a dedication when right-hand starts are off. `test_reference.py`'s
+    `test_contents_pages` holds all three.
 
   **Phase 5 — Index and page references** *(medium–large)*.
   - Inline markers `{index: Owlbear}` and `{index: Monsters > Owlbear}` (invisible in

@@ -4959,6 +4959,12 @@ def _spans(block):
                 and str(meta.get('full', '')).strip().lower() in yes))
 
 
+def _page_open(story):
+    """Whether the story so far leaves a page with something on it, so that
+    what comes next needs a break to start on a page of its own."""
+    return bool(story) and not isinstance(story[-1], PageBreak)
+
+
 def _build_story(manuscript, preset, meta, fonts, st, head_font,
                  has_cover=False, avail_w=0, hyph=None, toc_flowables=None,
                  fn_measure=False, fn_probe=None, matter_unlink=None):
@@ -5030,18 +5036,25 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             story += copyright_page()
 
     # ---- table of contents (inserted after copyright, before front extras) ----
+    # The pages before these end in their own `PageBreak`, so a plain break
+    # here would leave a blank page: break only a page that has something on
+    # it. (`RectoBreak` works that out for itself when the page is laid out.)
     if toc_flowables:
-        story.append(RectoBreak() if rhs else PageBreak())
+        if rhs:
+            story.append(RectoBreak())
+        elif _page_open(story):
+            story.append(PageBreak())
         story.extend(toc_flowables)
 
     # ---- front matter extras (order comes from matter.SECTIONS) ----
     sq = meta.get('smartquotes', True)
-    _fm_need_break = len(story) > 0
     _fm_first = True   # only the first extra page gets recto-forced
     for _sec in _matter.present(meta, 'front'):
-        if _fm_need_break:
-            story.append((RectoBreak() if rhs else PageBreak()) if _fm_first else PageBreak())
-        _fm_need_break = True
+        if _fm_first and rhs:
+            if story:
+                story.append(RectoBreak())
+        elif _page_open(story):
+            story.append(PageBreak())
         _fm_first = False
         story.extend(_matter_page(_matter.heading(_sec, meta.get('author', '')),
                                   meta[_sec['key']].strip(),
@@ -5054,7 +5067,12 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     m  = preset['margins']
     text_h = (preset['trim']['h'] - m['top'] - m['bottom']) * inch
 
-    need_break      = False   # True after the first body element is placed
+    # True once the page has something on it: after the first body element,
+    # and from the start when a contents page or a front-matter extra (which
+    # end without a break) comes before the body. Without that, a book whose
+    # chapters start on any page set its first part divider or chapter on the
+    # contents page itself.
+    need_break      = _page_open(story)
     current_part_num = None
 
     _numbers = _ms_numbers(manuscript['chapters'])
@@ -5212,7 +5230,13 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     return story
 
 
-def _build_toc(entries, body_start, avail_w, preset, fonts, st, folio_offset=0):
+def _toc_folios(entries, body_start):
+    """The page number the contents prints for each entry: counted from the
+    first chapter opener, which is page 1, exactly as the folios are."""
+    return [max(e['page'] - (body_start or 1) + 1, 1) for e in entries]
+
+
+def _build_toc(entries, body_start, avail_w, preset, fonts, st):
     """Return flowables for the Contents page(s)."""
     c       = preset['chapter']
     num_fmt = c.get('number_format', 'Chapter {n}')
@@ -5237,13 +5261,10 @@ def _build_toc(entries, body_start, avail_w, preset, fonts, st, folio_offset=0):
         depth = 1
     part = None                       # the part of the chapter last listed
 
-    for e in entries:
+    for e, folio in zip(entries, _toc_folios(entries, body_start)):
         level = e.get('heading')
         if level and level > depth:
             continue
-        folio = (e['page'] - (body_start or 1) + 1) + folio_offset
-        if folio < 1:
-            folio = 1
 
         if level:
             # a heading inside a chapter, indented a step per level under it
@@ -5278,14 +5299,6 @@ def _build_toc(entries, body_start, avail_w, preset, fonts, st, folio_offset=0):
         out.append(Paragraph(line, s))
 
     return out
-
-
-def _estimate_toc_pages(toc_flowables, preset):
-    m  = preset['margins']
-    ph = (preset['trim']['h'] - m['top'] - m['bottom']) * inch
-    pw = (preset['trim']['w'] - m['inside'] - m['outside']) * inch
-    total = sum(f.wrap(pw, ph)[1] for f in toc_flowables if hasattr(f, 'wrap'))
-    return max(1, math.ceil(total / ph))
 
 
 def _prepare_cover(meta, preset):
@@ -5906,33 +5919,36 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         except OSError:
             pass
 
-        # Estimate TOC page count, then rebuild TOC with adjusted folios
-        toc_draft = _build_toc(entries, body_start, avail_w, preset, fonts, st)
-        toc_pages = _estimate_toc_pages(toc_draft, preset)
-        toc_final = _build_toc(entries, body_start, avail_w, preset, fonts, st,
-                                folio_offset=toc_pages)
-
+        # The contents count pages as the folios do, from the first chapter
+        # opener: the contents pages themselves come before it and shift
+        # nothing that is counted.
         if foot_notes:
             try:
                 # a fresh TOC per pass: platypus flowables carry layout state, and
                 # a list already drawn once comes out blank the second time
                 _resolve_foot(lambda: _build_toc(entries, body_start, avail_w,
-                                                 preset, fonts, st,
-                                                 folio_offset=toc_pages))
+                                                 preset, fonts, st))
             except ImportError:
                 preset = dict(preset)
                 preset['endnotes'] = dict(preset.get('endnotes', {}), placement='end')
                 foot_notes = False
 
-        # Pass 2 — with TOC injected
-        story2 = _build_story(manuscript, preset, meta, fonts, st, head_font,
-                               has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
-                               toc_flowables=_build_toc(entries, body_start, avail_w,
-                                                        preset, fonts, st,
-                                                        folio_offset=toc_pages),
-                               matter_unlink=matter_unlink)
-        doc2 = _make_doc(out_path)
-        doc2.build(story2)
+        # Pass 2 — with TOC injected. Pass 1 was set without the contents and
+        # without the room footnotes take, so a chapter can land on another
+        # page here than it did there: set the contents again from where this
+        # pass put things, until what they say is where things are.
+        for _settle in range(3):
+            story2 = _build_story(manuscript, preset, meta, fonts, st, head_font,
+                                   has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
+                                   toc_flowables=_build_toc(entries, body_start, avail_w,
+                                                            preset, fonts, st),
+                                   matter_unlink=matter_unlink)
+            doc2 = _make_doc(out_path)
+            doc2.build(story2)
+            said = _toc_folios(entries, body_start)
+            entries, body_start = doc2._toc_entries, doc2._body_start or 1
+            if _toc_folios(entries, body_start) == said:
+                break
         page_count = doc2.page
         unplaced_notes.extend(_notes_not_drawn(fn_flow, doc2._fn_drawn))
     else:
