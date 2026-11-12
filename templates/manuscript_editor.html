@@ -205,6 +205,12 @@
     padding:22px 10px;color:var(--faint);font-family:var(--mono);font-size:12px}
   .ms-rich .wb-figure-note{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;
     letter-spacing:.1em;color:var(--faint);margin:6px 0 2px}
+  /* "across both columns" on a figure's or a table's label line (two-column styles) */
+  .ms-rich .wb-span{font:inherit;text-transform:inherit;letter-spacing:inherit;color:var(--faint);
+    background:transparent;border:1px solid var(--rule);border-radius:2px;padding:1px 6px;
+    margin-left:10px;cursor:pointer}
+  .ms-rich .wb-span:hover{color:var(--ink);border-color:var(--rule-strong)}
+  .ms-rich .wb-span.on{color:var(--ink);border-color:var(--rule-strong);background:var(--surface-2)}
   .ms-rich .wb-figure-cap{font-style:italic;color:var(--muted)}
   .ms-rich .wb-figure-para{margin:0;min-height:1.2em}
   .ms-rich .wb-figure-cap > .wb-figure-para:only-child:empty::before{
@@ -307,10 +313,10 @@
           <tr><td><code>*italic*</code> · <code>**bold**</code></td><td>inline emphasis</td></tr>
           <tr><td><code>~~~ letter from="…" to="…"</code> … <code>~~~</code></td><td>a letter/journal/telegram block</td></tr>
           <tr><td><code>~~~ poem title="…"</code> … <code>~~~</code></td><td>a poem (line breaks kept; blank line = new stanza)</td></tr>
-          <tr><td><code>~~~ figure src="map.png"</code> … <code>~~~</code></td><td>an illustration; the block's text is the caption. Add <code>width="0.5"</code>, <code>align="left"</code> or <code>full="yes"</code></td></tr>
+          <tr><td><code>~~~ figure src="map.png"</code> … <code>~~~</code></td><td>an illustration; the block's text is the caption. Add <code>width="0.5"</code>, <code>align="left"</code> or <code>full="yes"</code>; in a two-column style, <code>span="yes"</code> sets it across both columns</td></tr>
           <tr><td><code>~~~ list</code> … <code>~~~</code></td><td>a bulleted list — one item per line. <code>~~~ list type="number"</code> numbers them</td></tr>
           <tr><td><code>~~~ quote source="…"</code> … <code>~~~</code></td><td>an inset quotation; the source line is optional</td></tr>
-          <tr><td><code>~~~ table</code> … <code>~~~</code></td><td>a table — one row per line, cells split on <code>|</code>. The first row is the header (<code>header="no"</code> to turn that off); add <code>align="left,right"</code>, <code>widths="3,1"</code> or <code>caption="…"</code></td></tr>
+          <tr><td><code>~~~ table</code> … <code>~~~</code></td><td>a table — one row per line, cells split on <code>|</code>. The first row is the header (<code>header="no"</code> to turn that off); add <code>align="left,right"</code>, <code>widths="3,1"</code> or <code>caption="…"</code>; in a two-column style, <code>span="yes"</code> sets it across both columns</td></tr>
           <tr><td><code>~~~ readaloud title="…"</code> … <code>~~~</code></td><td>boxed text to read aloud to the players; the title is optional</td></tr>
           <tr><td><code>~~~ sidebar title="…"</code> … <code>~~~</code></td><td>a callout box with a title bar. <code>style="note"</code> sets a label and a line, no box</td></tr>
           <tr><td><code>~~~ statblock name="…" meta="…"</code> … <code>~~~</code></td><td>a stat block, one line per line: <code>Label: value</code> fields, a score row <code>STR 18 | DEX 12 | …</code> (modifiers worked out), <code>--- Actions</code> sections and <code>***Name.***</code> entries. Paste one from Word, a PDF or the Homebrewery as it is; <code>cr="…"</code> and <code>count="2"</code> go on the name line</td></tr>

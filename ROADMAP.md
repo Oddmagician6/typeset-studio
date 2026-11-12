@@ -52,11 +52,11 @@ Start here in a new session. Each item points at its full entry below.
    page, contents numbers are the numbers on the pages, and no blank page before the
    contents with right-hand starts off. `ttrpg-phase4` was merged to master for it; the
    column engine came along inert (no style, preset or page sets `columns`).
-   **Next: the Phase 4 feature** around the engine (style editor's Columns section,
-   two-column presets, `span` in the editor's figure and table dialogs, the leftovers under
-   "The spike as run"). **START HERE:** the user was asked whether to go ahead (twice, the
-   second time after 1.3.4 went out) and has not answered yet: ask again before starting,
-   and work on a branch off master.
+   **The Phase 4 feature is built (2026-11-12) on branch `ttrpg-phase4`, unreleased** (see
+   "Phase 4 as built" in the Phase 4 entry; CHANGELOG's Unreleased has it). **START HERE:**
+   ask the user before merging it to master or releasing it (it would be 1.4.0: a new
+   feature). After it, Phase 5 (index and page references): check its plan with the user
+   before starting.
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
@@ -2937,6 +2937,36 @@ doc_model / WYSIWYG round-trip:
     contents' page count (since contents were added), and a blank page before the contents
     or a dedication when right-hand starts are off. `test_reference.py`'s
     `test_contents_pages` holds all three.
+
+  **Phase 4 as built (2026-11-12, branch `ttrpg-phase4`).** The feature around the spike's
+  engine:
+  - **Style:** `engine.COLUMNS_DEFAULTS` (`count`, `gap`, `rule`, `balance_end`) is
+    `app.DEFAULTS['columns']`; the style editor's **Columns** fieldset sits after Trim &
+    margins (`col_count`, `col_gap` held to 0.1–1.0 in, `col_rule`, `col_balance_end`; the
+    hidden `col__form` marks a form that has the section, so an older form keeps
+    `balance_end` on).
+  - **`balance_end`:** off, only the run that ends a chapter is left unbalanced
+    (`_column_run(last=True)` → `ColumnRun(balance=False)`); a run that stops for a
+    spanning block is always balanced, or the block would sit under one long column.
+  - **Styles:** `game-rulebook-two-column` and `game-dark-two-column`, new files beside
+    the one-column game styles (10 pt text, 0.3 in gap), not changes to them: a book
+    already set in a game style must not reflow on an update.
+  - **`span` in the editor:** there are no figure or table dialogs (block attrs are
+    Markdown-only in the rich view), so the rich view has an **across both columns** button
+    on a figure's and a table's label line (`wysiwyg.js` `fillDocHead`: writes or removes
+    `span="yes"` in `data-attrs`, then fires `input`); the cheat sheet and README name the
+    attribute. The button shows in every book: the editor doesn't know the book's style.
+  - **Kept headings (the spike's leftover, fixed):** `_GbTable` with `_gb_box(keep=)`: a
+    sidebar's or read-aloud's title row, a stat block's name, meta line and section
+    headings never end a page or column; the split is made above them instead. If nothing
+    but headings would stay, the block goes over whole (only when under 2 in remain, so a
+    block is never refused on a fresh page). **This applies in one column too**: a 1.3.4
+    book with these blocks can paginate differently (in CHANGELOG under Changed).
+  - **Tests:** `test_columns.py` gate 7 (the form, `balance_end`, both styles in print and
+    on screen, kept headings in one and two columns: it fails with `_GbTable.split` put
+    back to `Table.split`); four `span-*` scenarios in `test_rich_editor`.
+  - **Leftovers:** `PageBreak`s inside a run; more than two columns; the span button could
+    hide in a one-column book if the editor were told the style.
 
   **Phase 5 — Index and page references** *(medium–large)*.
   - Inline markers `{index: Owlbear}` and `{index: Monsters > Owlbear}` (invisible in

@@ -14,12 +14,16 @@ roadmap set before any feature code. Each builds real books through
   5. no words lost, and no loop on something taller than a column;
   6. a long book in two columns, timed against one (needs the generated long
      book: `python test_fixtures/ttrpg/make_long_book.py`; skipped without it).
+
+Gate 7 is the feature built on them: the style editor's Columns fields,
+`balance_end`, the two bundled two-column styles in print and on screen, and
+the headings of a boxed block kept off the foot of a column.
 """
 import copy, json, os, re, sys, tempfile, time, traceback
 from collections import Counter
 
 REPO = os.path.dirname(os.path.abspath(__file__))
-GATES = set(sys.argv[1].split(',')) if len(sys.argv) > 1 else set('123456')
+GATES = set(sys.argv[1].split(',')) if len(sys.argv) > 1 else set('1234567')
 sys.path.insert(0, REPO)
 os.chdir(REPO)
 import logging; logging.disable(logging.INFO)
@@ -611,7 +615,139 @@ def gate6():
         check(f'with contents: within 3x ({a[0]}s vs {b[0]}s)', b[0] <= 3 * a[0] + 5)
 
 
-for g, fn in (('1', gate1), ('2', gate2), ('3', gate3), ('4', gate4), ('5', gate5), ('6', gate6)):
+# ---------------------------------------------------------------- gate 7
+def column_ends(pdf, p, gap=0.25):
+    """Per page: {column: (y of its last line, that line's text)} for the lines
+    inside the text block."""
+    m = p['margins']
+    tw = (p['trim']['w'] - m['inside'] - m['outside']) * INCH
+    top, bot = m['top'] * INCH, (p['trim']['h'] - m['bottom']) * INCH
+    out = []
+    with fitz.open(pdf) as d:
+        for pno, pg in enumerate(d, start=1):
+            left = (m['inside'] if pno % 2 else m['outside']) * INCH
+            mid = left + tw / 2
+            last = {}
+            for b in pg.get_text('dict')['blocks']:
+                for ln in b.get('lines', []):
+                    x0, y0, x1, y1 = ln['bbox']
+                    t = ''.join(sp['text'] for sp in ln['spans']).strip()
+                    if not t or y0 < top - 1 or y1 > bot + 1:
+                        continue
+                    col = 0 if x0 < mid - 4 else 1
+                    if col not in last or y1 > last[col][0]:
+                        last[col] = (y1, t)
+            out.append(last)
+    return out
+
+
+def gate7():
+    print('\nGate 7: the feature (the style editor\'s form, balance_end, the styles, kept headings)')
+    from werkzeug.datastructures import MultiDict
+    form = lambda **kw: A.parse_preset_form(MultiDict(kw))['columns']
+    c = form()
+    check('a form from before the section: one column, balanced',
+          c['count'] == 1 and c['balance_end'] is True and c['rule'] is False, c)
+    c = form(col__form='1', col_count='2', col_gap='0.3', col_rule='on')
+    check('two columns, a rule, the balance box unticked',
+          c == {'count': 2, 'gap': 0.3, 'rule': True, 'balance_end': False}, c)
+    c = form(col__form='1', col_count='7', col_gap='9', col_balance_end='on')
+    check('a count that is not 1 or 2 is 1, and the gap is held to its range',
+          c['count'] == 1 and c['gap'] == 1.0 and c['balance_end'] is True, c)
+    c = form(col__form='1', col_count='2', col_gap='nonsense')
+    check('a gap that is not a number takes the default', c['gap'] == 0.25, c)
+    check('every style starts at one column', A.DEFAULTS['columns'] == engine.COLUMNS_DEFAULTS
+          and engine.COLUMNS_DEFAULTS['count'] == 1, A.DEFAULTS['columns'])
+
+    # balance_end: a short chapter's two columns end level, or the first fills first
+    md = '# The Causeway\n\n' + '\n\n'.join(para(2, f'p{i}') for i in range(4))
+    even = column_ends(build(md, preset(), 'g7-even')[0], preset())[-1]
+    p_off = preset(columns={'balance_end': False})
+    off = column_ends(build(md, p_off, 'g7-off')[0], p_off)[-1]
+    check('balance_end on: both columns used and level', set(even) == {0, 1}
+          and abs(even[0][0] - even[1][0]) <= 45, even)
+    check('balance_end off: the first column takes it all', set(off) == {0}, off)
+    # ...but a run that stops for a spanning block is balanced either way
+    md = (f'# The Long Stair\n\n{para(6, "before")}\n\n~~~ table span="yes"\nStep | What waits there\n'
+          f'1 | A warden asleep at his post\n~~~\n\n{para(2, "after")}\n')
+    pdf, _ = build(md, p_off, 'g7-off-span')
+    m = p_off['margins']
+    mid = (m['inside'] + (p_off['trim']['w'] - m['inside'] - m['outside']) / 2) * INCH
+    ends, after = {}, set()
+    with fitz.open(pdf) as d:
+        for b in d[0].get_text('dict')['blocks']:
+            for ln in b.get('lines', []):
+                t = ''.join(sp['text'] for sp in ln['spans'])
+                col = 0 if ln['bbox'][0] < mid - 4 else 1
+                if 'Markerbefore' in t:
+                    ends[col] = max(ends.get(col, 0), ln['bbox'][3])
+                if 'Markerafter' in t:
+                    after.add(col)
+    check('balance_end off: the run above a spanning table is still balanced',
+          set(ends) == {0, 1} and abs(ends[0] - ends[1]) <= 45, ends)
+    check('balance_end off: the run that ends the chapter is not', after == {0}, after)
+
+    # the two bundled styles: two columns in print and on screen, nothing lost
+    for pid in ('game-rulebook-two-column', 'game-dark-two-column'):
+        try:
+            p = A.load_preset(pid)
+            n, gap = engine.columns_of(p)
+            check(f'{pid}: a two-column style', n == 2 and gap > 0, (n, gap))
+            # hyphens off for the count: a word broken at a line's end reads as two
+            p['body'] = dict(p['body'], hyphenate=False)
+            one = copy.deepcopy(p)
+            one['columns'] = dict(one['columns'], count=1)
+            md = all_blocks_md()
+            outs = {}
+            for label, pp, screen in (('one', one, False), ('print', p, False), ('screen', p, True)):
+                out = os.path.join(TMP, f'g7-{pid}-{label}.pdf')
+                engine.build_pdf(manuscript.parse_markdown(md), pp, out, dict(META), screen=screen)
+                outs[label] = out
+            w = {k: body_words(v, p) for k, v in outs.items()}
+            for k in ('Roll', 'Encounter', 'Notes'):
+                for c in w.values():
+                    c.pop(k, None)
+            check(f'{pid}: print and screen keep the one-column words',
+                  w['one'] == w['print'] == w['screen'],
+                  ((w['one'] - w['print']).most_common(6), (w['print'] - w['one']).most_common(6),
+                   (w['one'] - w['screen']).most_common(6)))
+            both = [set(e) for e in column_ends(outs['print'], p, gap / INCH)]
+            check(f'{pid}: its pages are set in two columns', both and all(s == {0, 1} for s in both), both)
+        except Exception:
+            check(f'{pid}: builds', False, traceback.format_exc()[-900:])
+
+    # a box's title, a stat block's name and its section headings never end a column
+    parts = ['# The Watch']
+    for i in range(40):
+        parts.append(para(1 + i % 3, f'k{i}'))
+        parts.append(f'~~~ sidebar title="Wardnote{i}"\n{LOREM * (1 + i % 4)}\n~~~')
+        parts.append(f'~~~ readaloud title="Doorvoice{i}"\n{LOREM * (1 + i % 2)}\n~~~')
+        parts.append(f'~~~ statblock\nBellkeeper{i}\nMedium humanoid, lawful neutral\n\n'
+                     f'Armor Class: 16 (chain)\nHit Points: 39 (6d8 + 12)\n\n'
+                     f'### Actions\n***Halberd.*** {LOREM}\n***Horn.*** {LOREM}\n\n'
+                     f'### Reactions\n***Parry.*** {LOREM}\n~~~')
+    md = '\n\n'.join(parts) + '\n'
+    is_head = re.compile(r'^(wardnote\d+|doorvoice\d+|bellkeeper\d+|actions|reactions|'
+                         r'medium humanoid, lawful neutral)$', re.I)
+    for cols in (2, 1):
+        p = preset(cols)
+        pdf, _ = build(md, p, f'g7-keep-{cols}')
+        ends = column_ends(pdf, p)
+        stranded = [(pno, col, t) for pno, last in enumerate(ends, start=1)
+                    for col, (_, t) in last.items() if is_head.match(t)]
+        if cols == 1:        # one column: a page's last line is its lowest in either half
+            stranded = [(pno, t) for pno, last in enumerate(ends, start=1) if last
+                        for t in [max(last.values())[1]] if is_head.match(t)]
+        with fitz.open(pdf) as d:
+            text = '\n'.join(pg.get_text() for pg in d)
+        seen = len(re.findall(r'(?i)wardnote\d+|doorvoice\d+|bellkeeper\d+', text))
+        check(f'{"two columns" if cols == 2 else "one column"}: no title or section heading '
+              f'ends a {"column" if cols == 2 else "page"} ({seen} titles, {len(ends)} pages)',
+              not stranded and seen == 120, (seen, stranded[:6]))
+
+
+for g, fn in (('1', gate1), ('2', gate2), ('3', gate3), ('4', gate4), ('5', gate5), ('6', gate6),
+              ('7', gate7)):
     if g in GATES:
         try:
             fn()

@@ -385,6 +385,7 @@ Optional attributes:
 - `widths="3,1,1"` — relative column widths. Left out, widths are measured from the
   content, and no column is ever squeezed narrower than its longest word.
 - `caption="…"` — a caption above the table (book convention; figure captions go below).
+- `span="yes"` — in a two-column style, set the table across both columns.
 
 Emphasis and links work inside a cell. A cell cannot contain a literal `|` — that
 character always starts a new column.
@@ -409,6 +410,8 @@ the opening line:
 - `width="0.5"` — fraction of the text width (default comes from the style)
 - `align="left"` / `"center"` / `"right"`
 - `full="yes"` — give the figure its own page
+- `span="yes"` — in a two-column style, set the figure across both columns (a width is
+  then a fraction of the page's text width, not the column's)
 
 Caption size, style and spacing belong to the **style**, under *Figures* in the style
 editor, so every illustration in a book matches. If a `src` can't be found, the page
@@ -484,6 +487,11 @@ Some of the bundled styles:
 - **Game Book — Light Rulebook (8.5×11)** — a rulebook or sourcebook: Crimson Pro text,
   Cinzel headings, deep red titles; on screen it is set on parchment with a tapered bar
   under the running head and a band above the page number.
+- **Game Book — Two-Column Rulebook (8.5×11)** — the light rulebook's look set in two
+  columns at 10 points: chapter titles run across the page, and so does a figure or table
+  marked `span="yes"`.
+- **Game Book — Two-Column Dark (8.5×11)** — the dark screen style's look set in two
+  columns.
 - **Game Zine — A5 (5.83×8.27)** — an old-school adventure zine: compact Spectral text,
   plain bold headings, tight stat blocks, black and white with a red spot colour on screen
   and wedge corners on every page.

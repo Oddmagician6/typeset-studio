@@ -258,6 +258,28 @@ f.onload = function () {
     paste('<span>hello </span>', 'hello '); return getMd();
   });
 
+  // "across both columns": the button writes span="yes" and takes it out again
+  run('span-figure-on', function () {
+    loadMd('# One\n\n~~~ figure src="m.png" width="0.5"\nCap.\n~~~\n');
+    q('.wb-figure .wb-span').click(); return getMd();
+  });
+  run('span-table-on-then-type', function () {
+    loadMd('# One\n\n~~~ table\nA | B\n1 | 2\n~~~\n');
+    q('.wb-doc[data-btype="table"] .wb-span').click();
+    var rows = rich.querySelectorAll('.wb-doc-para'); caret(rows[rows.length - 1], true); type('0');
+    return getMd();
+  });
+  run('span-table-off', function () {
+    loadMd('# One\n\n~~~ table span="yes" caption="C"\nA | B\n1 | 2\n~~~\n');
+    var b = q('.wb-doc[data-btype="table"] .wb-span');
+    var was = b.classList.contains('on'); b.click();
+    return (was ? '' : 'NOT SHOWN ON ') + getMd();
+  });
+  run('span-no-button-elsewhere', function () {
+    loadMd('# One\n\n~~~ letter from="A"\nDear B,\n~~~\n\n~~~ sidebar title="T"\nText.\n~~~\n');
+    return String(rich.querySelectorAll('.wb-span').length);
+  });
+
   var x = new XMLHttpRequest();
   x.open('POST', '/_rich_result', false); x.send(JSON.stringify(out));
 };

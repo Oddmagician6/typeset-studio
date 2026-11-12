@@ -1105,6 +1105,10 @@ DEFAULTS = {
     # page furniture: a header bar, footer band and corner pieces on every body
     # page (ornaments.FURNITURE ids, '' = none) and their screen colour
     'furniture': dict(engine.FURNITURE_DEFAULTS),
+    # one column or two (#74 Phase 4): the gap between them in inches, a
+    # hairline rule down it, and whether a chapter's last page evens them out.
+    # Print and screen PDFs only: an ebook is always one column
+    'columns': dict(engine.COLUMNS_DEFAULTS),
 }
 
 
@@ -1561,6 +1565,7 @@ STYLE_RANGES = {
     'rh_size': (1.0, 72.0), 'rh_gap': _IN, 'fo_size': (1.0, 72.0), 'fo_gap': _IN,
     'hd_section_size': (0.0, 72.0), 'hd_subsection_size': (0.0, 72.0),
     'pb_opacity': (0.0, 1.0),
+    'col_gap': (0.1, 1.0),
 }
 
 
@@ -1861,6 +1866,14 @@ def _preset_fields(form):
             'subsection_size':  _fs(form, 'hd_subsection_size', 0),
         },
         'toc': {'depth': int(_pick(form, 'toc_depth', ('1', '2', '3', '4')))},
+        'columns': {
+            'count': int(_pick(form, 'col_count', ('1', '2'))),
+            'gap': _fs(form, 'col_gap', 0.25),
+            'rule': 'col_rule' in form,
+            # an unticked box sends nothing: a form from before the section
+            # (no marker) keeps the default, balanced
+            'balance_end': ('col_balance_end' in form) if 'col__form' in form else True,
+        },
         'folio': {'show': 'fo_show' in form, 'position': form.get('fo_position', 'outer'),
                   'size': _fs(form, 'fo_size', 9.5), 'gap': _fs(form, 'fo_gap', 0.42),
                   'hide_on_opener': 'fo_hide_on_opener' in form},

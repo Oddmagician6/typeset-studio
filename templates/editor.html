@@ -133,6 +133,32 @@
         </div>
       </fieldset>
 
+      {% set col = p.get('columns', {}) or {} %}
+      <fieldset>
+        <legend>Columns</legend>
+        <div class="fs-body">
+          <input type="hidden" name="col__form" value="1">
+          <p class="hint" style="margin:0 0 8px;line-height:1.6">Two columns suit rulebooks
+            and reference books on a large page (US Letter or A4), with body text of 9 to
+            10.5 points. Chapter titles run across the page; so does a figure or a table
+            marked <code>span="yes"</code>. Footnotes are set across the foot of the page.
+            The ebook is always one column.</p>
+          <div class="row">
+            <div class="field"><label>Text columns</label><span class="hint">print and screen PDF</span>
+              <select name="col_count" id="f-colcount">
+                <option value="1" {{ 'selected' if col.get('count', 1) != 2 }}>One</option>
+                <option value="2" {{ 'selected' if col.get('count', 1) == 2 }}>Two</option>
+              </select></div>
+            <div class="field num"><label>Gap</label><span class="hint">inches · between the columns</span>
+              <input type="number" step="0.01" name="col_gap" value="{{ col.get('gap', 0.25) }}"></div>
+            <div class="check"><input type="checkbox" id="f-colrule" name="col_rule" {{ 'checked' if col.get('rule') }}>
+              <label for="f-colrule">A hairline rule between the columns</label></div>
+            <div class="check"><input type="checkbox" id="f-colbal" name="col_balance_end" {{ 'checked' if col.get('balance_end', True) }}>
+              <label for="f-colbal">Even out the columns where a chapter ends</label></div>
+          </div>
+        </div>
+      </fieldset>
+
       <fieldset>
         <legend>Body text</legend>
         <div class="fs-body">

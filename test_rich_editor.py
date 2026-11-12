@@ -141,6 +141,10 @@ EXPECT = {
     'bold-button': '# One\n\nmake **this** bold please\n',
     'bold-across-note': '# One\n\n**make**[^a]** this** bold\n\n[^a]: N.\n',
     'figure-caption-enter': '# One\n\n~~~ figure src="m.png"\nCap one.\n\nCap two.\n~~~\n',
+    'span-figure-on': '# One\n\n~~~ figure src="m.png" width="0.5" span="yes"\nCap.\n~~~\n',
+    'span-table-on-then-type': '# One\n\n~~~ table span="yes"\nA | B\n1 | 20\n~~~\n',
+    'span-table-off': '# One\n\n~~~ table caption="C"\nA | B\n1 | 2\n~~~\n',
+    'span-no-button-elsewhere': '0',
     'scene-button': '# One\n\nText.\n\n* * *\n\nAfter\n',
     'statblock-button': ('# One\n\nText.\n\n~~~ statblock\nCreature Name\n*Medium humanoid, neutral*\n'
                          'Armor Class: 12\nHit Points: 11 (2d8 + 2)\nSpeed: 30 ft.\n'

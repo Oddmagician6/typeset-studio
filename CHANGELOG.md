@@ -8,6 +8,38 @@ line here.
 
 ---
 
+## Unreleased
+
+### New
+
+- **Two columns.** A style can set a book's text in two columns, the way
+  rulebooks and reference books are set. The style editor has a new
+  **Columns** section: one column or two, the gap between them, an optional
+  hairline rule down the gap, and whether the two columns are evened out where
+  a chapter ends. Chapter titles run across the whole page, footnotes are set
+  across the foot of it, and every block (stat blocks, sidebars, read-aloud
+  boxes, tables, lists, poems, figures) is set at the column's width. Columns
+  are for the print and screen PDFs; the ebook is always one column, and the
+  manuscript editor stays a one-column writing view.
+- **Across both columns.** A figure or a table can break out of the columns
+  and run the full width of the page: add `span="yes"` to its first line, or
+  press **across both columns** on its label in the rich view. The text above
+  it is evened out and carries on in two columns below. In a one-column book
+  it changes nothing.
+- **Two two-column styles.** *Game Book — Two-Column Rulebook* (US Letter,
+  Crimson Pro and Cinzel, deep red titles, parchment on screen) and *Game
+  Book — Two-Column Dark* (US Letter, Garamond and Cinzel, a near-black screen
+  page). The existing game-book styles are unchanged and stay one column.
+
+### Changed
+
+- **A box's title stays with its text.** The title bar of a sidebar or a
+  read-aloud box, a stat block's name, and a stat block's section headings
+  ("Actions", "Reactions") could be the last line on a page, with what they
+  head on the next. They now move over with it. This applies in one column
+  too, so a book with these blocks can break its pages differently when you
+  rebuild it: check a rebuilt book's page count before sending it to print.
+
 ## 1.3.4 — 12 November 2026
 
 Four fixes to the printed page, and nothing new. Left-hand pages now mirror

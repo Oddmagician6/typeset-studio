@@ -2400,6 +2400,12 @@ class HeadingPara(Paragraph):
                 self._ts_heading = None
 
 
+# Two columns (#74 Phase 4): `count` 1 or 2; the `gap` between the columns in
+# inches; a hairline `rule` down the gap; `balance_end` evens the two columns
+# where a chapter ends (off, the first column fills before the second starts).
+COLUMNS_DEFAULTS = {'count': 1, 'gap': 0.25, 'rule': False, 'balance_end': True}
+
+
 def columns_of(preset):
     """(count, gap in points) for the style's `columns` section; 1 column when
     the style has none."""
@@ -2411,13 +2417,18 @@ def columns_of(preset):
     return (2 if n == 2 else 1), _num(c.get('gap', 0.25), 0.25) * inch
 
 
-def _column_run(flowables, preset):
-    """One run of in-column flowables as a single flowable for the page frame."""
+def _column_run(flowables, preset, last=False):
+    """One run of in-column flowables as a single flowable for the page frame.
+    `last` is the run that ends its chapter: the only one the style's
+    `balance_end` can leave unbalanced (a run that stops for a spanning block
+    is always balanced, or the block would sit under one long column)."""
     _, gap = columns_of(preset)
+    c = preset.get('columns') or {}
     for f in flowables:
         if isinstance(f, HeadingPara):
             f._ts_in_columns = True
-    return ColumnRun(flowables, gap, rule=(preset.get('columns') or {}).get('rule'))
+    return ColumnRun(flowables, gap, rule=bool(c.get('rule')),
+                     balance=not last or bool(c.get('balance_end', True)))
 
 
 _COL_EPS = 0.01
@@ -2466,8 +2477,9 @@ class ColumnRun(Flowable):
     apply to it as to any flowable.
     """
 
-    def __init__(self, content, gap, rule=None, laid=None):
+    def __init__(self, content, gap, rule=None, laid=None, balance=True):
         super().__init__()
+        self._balance = balance
         self._content = [_Kept(f._content) if isinstance(f, KeepTogether) else f
                          for f in content]
         self._gap, self._rule = gap, rule
@@ -2545,7 +2557,7 @@ class ColumnRun(Flowable):
             return self._memo[1]
         canv = self.canv
         cols, rest = self._layout(canv, aW, aH)
-        if not rest and any(c[0] for c in cols):
+        if not rest and self._balance and any(c[0] for c in cols):
             # it ends here: balance. The shortest height that still holds it all.
             lo, hi, best = 0.0, max(c[1] for c in cols), None
             for _ in range(14):
@@ -2582,7 +2594,8 @@ class ColumnRun(Flowable):
         # would be read before its second column.
         height = aH if rest else max(c[1] for c in cols)
         head = ColumnRun([], self._gap, self._rule, laid=(cols, height, aW))
-        return [head, ColumnRun(rest, self._gap, self._rule)] if rest else [head]
+        return ([head, ColumnRun(rest, self._gap, self._rule, balance=self._balance)]
+                if rest else [head])
 
     def draw(self):
         cols, height, aW = self._laid
@@ -4210,12 +4223,49 @@ class TaperedRule(Flowable):
         c.restoreState()
 
 
-def _gb_box(rows, avail_w, pad_x, pad_y, fill, border, border_w, border_c, extra=()):
+class _GbTable(Table):
+    """A boxed block's table whose heading rows stay with what they head: a
+    split that would leave one of `_ts_keep`'s rows last on its page or in its
+    column is made above that row instead (a sidebar's title bar, a stat
+    block's name and its section headings)."""
+    _ts_keep = frozenset()
+
+    def split(self, availWidth, availHeight):
+        parts = Table.split(self, availWidth, availHeight)
+        keep = self._ts_keep
+        if len(parts) != 2 or not keep:
+            return parts
+        n0, total = len(parts[0]._cellvalues), len(self._cellvalues)
+        clean = n0 + len(parts[1]._cellvalues) == total     # between two rows
+        shift = n0 if clean else n0 - 1
+        if clean and (n0 - 1) in keep:
+            k = n0 - 1
+            while k and (k - 1) in keep:
+                k -= 1
+            if k == 0:
+                # nothing but headings would stay: the block goes over whole.
+                # On a fresh page (anything this tall) the split stands, so a
+                # block can never be refused for good.
+                if availHeight < 2 * inch:
+                    return []
+            else:
+                again = Table.split(self, availWidth,
+                                    sum(self._rowHeights[:k]) + 0.01)
+                if len(again) == 2 and len(again[0]._cellvalues) == k:
+                    parts, shift = again, k
+        parts[1]._ts_keep = frozenset(i - shift for i in keep if i >= shift)
+        return parts
+
+
+def _gb_box(rows, avail_w, pad_x, pad_y, fill, border, border_w, border_c, extra=(),
+            keep=()):
     """Rows -> one splittable single-column Table. A row is a flowable, or
     (flowable, space before it): a cell ignores its paragraph's own spacing,
-    so the gaps between rows are the cells' padding."""
+    so the gaps between rows are the cells' padding. `keep`: the rows that
+    head the row after them and never end a page or column."""
     rows = [r if isinstance(r, tuple) else (r, 0) for r in rows]
-    t = Table([[r] for r, _ in rows], colWidths=[avail_w], splitInRow=1)
+    t = _GbTable([[r] for r, _ in rows], colWidths=[avail_w], splitInRow=1)
+    t._ts_keep = frozenset(keep)
     style = [
         ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
         ('LEFTPADDING',   (0, 0), (-1, -1), pad_x),
@@ -4277,7 +4327,8 @@ def _render_readaloud_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
         rows.append(Spacer(1, lead))      # an empty box still shows where it goes
     tbl = _gb_box(rows, avail_w, ra.get('pad_x', 8.0), ra.get('pad_y', 6.0),
                   _gb_color(ra, 'fill'), ra.get('rule', 'left'),
-                  ra.get('rule_width', 3.0), _gb_color(ra, 'rule_color'))
+                  ra.get('rule_width', 3.0), _gb_color(ra, 'rule_color'),
+                  keep=(0,) if title else ())
     return [Spacer(1, space), tbl, Spacer(1, space)]
 
 
@@ -4328,7 +4379,8 @@ def _render_sidebar_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=N
         if titled and len(rows) > 1:
             rows[1] = (rows[1][0], 2)
         tbl = _gb_box(rows, avail_w, pad_x, 2.0, None, 'left',
-                      max(0.5, sb.get('border_width', 0.75)), border_c)
+                      max(0.5, sb.get('border_width', 0.75)), border_c,
+                      keep=(0,) if titled else ())
         return [Spacer(1, space), tbl, Spacer(1, space)]
 
     if not rows:
@@ -4342,7 +4394,8 @@ def _render_sidebar_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=N
         if title_fill is not None:
             extra.append(('BACKGROUND', (0, 0), (-1, 0), title_fill))
     tbl = _gb_box(rows, avail_w, pad_x, pad_y, _gb_color(sb, 'fill'), 'box',
-                  sb.get('border_width', 0.75), border_c, extra)
+                  sb.get('border_width', 0.75), border_c, extra,
+                  keep=(0,) if titled else ())
     return [Spacer(1, space), tbl, Spacer(1, space)]
 
 
@@ -4426,7 +4479,9 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
                                  + (f' {body}' if body else ''), field_style))
         return out
 
+    keep = set(range(len(rows)))          # the name and its meta line
     if rows and (fields or scores):
+        keep.add(len(rows))
         rows.append(rule())
     rows += field_rows(fields[:at])
     if scores:
@@ -4450,9 +4505,11 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
         if k == 0 and rows and (fields or scores):
             rows.append(rule())           # the end of the head
         if sec['name']:
+            keep.add(len(rows))
             rows.append((Paragraph(_gb_caps(sec['name'], sstyle), sec_style),
                          gap * 2 if k or not (fields or scores) else 0))
             if sm.get('section_rule', True):
+                keep.add(len(rows))
                 rows.append(HRule(color=(rule_c.red, rule_c.green, rule_c.blue),
                                   thickness=0.5))
         elif k and rows:
@@ -4467,7 +4524,8 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     if not rows:
         return []
     tbl = _gb_box(rows, avail_w, pad_x, pad_y, _gb_color(sm, 'fill'),
-                  sm.get('border', 'top-bottom'), sm.get('border_width', 2.0), rule_c)
+                  sm.get('border', 'top-bottom'), sm.get('border_width', 2.0), rule_c,
+                  keep={i for i in keep if i < len(rows) - 1})
     return [Spacer(1, space), tbl, Spacer(1, space)]
 
 
@@ -5149,10 +5207,10 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         if ncols == 2:
             story, avail_w = [], (page_w - col_gap) / 2.0
 
-        def _flush_run():
+        def _flush_run(last=False):
             nonlocal story
             if ncols == 2 and story:
-                page_story.append(_column_run(story, preset))
+                page_story.append(_column_run(story, preset, last=last))
                 story = []
 
         for block in ch['blocks']:
@@ -5202,7 +5260,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                     val_h = _hyphenate_markup(val, hyph) if hyph else val
                     story.append(Paragraph(val_h, st['body']))
                 flush_next = False
-        _flush_run()
+        _flush_run(last=True)
         story, avail_w = page_story, page_w
 
     # ---- back matter (order comes from matter.SECTIONS) ----

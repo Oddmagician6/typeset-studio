@@ -80,6 +80,41 @@
     return parts.join('  ·  ');
   }
 
+  // "Across both columns" (#74 Phase 4): the one placement attr this view sets,
+  // on a figure and on a table. It writes `span="yes"` into the block's
+  // data-attrs (or takes it out) and reports an edit; the values read as "on"
+  // are engine._spans's.
+  var SPAN_ON = { '1': 1, 'yes': 1, 'true': 1, 'page': 1 };
+  function spansOn(attrs) {
+    return SPAN_ON.hasOwnProperty(String(attrs.span == null ? '' : attrs.span).trim().toLowerCase());
+  }
+  function fillDocHead(head, el, blockType) {
+    var attrs = {};
+    try { attrs = JSON.parse(el.dataset.attrs || '{}'); } catch (e) { attrs = {}; }
+    head.textContent = '';
+    var label = document.createElement('span');
+    label.textContent = docHeadLabel(blockType, attrs);
+    head.appendChild(label);
+    if (blockType !== 'figure' && blockType !== 'table') return;
+    var on = spansOn(attrs);
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'wb-span' + (on ? ' on' : '');
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = 'In a two-column style, set this across the whole page. '
+              + 'It changes nothing in a one-column book.';
+    btn.textContent = on ? '✓ across both columns' : 'across both columns';
+    btn.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      if (on) delete attrs.span; else attrs.span = 'yes';
+      el.dataset.attrs = JSON.stringify(attrs);
+      fillDocHead(head, el, blockType);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    head.appendChild(btn);
+  }
+
   function makeVerse(runs) {
     var v = document.createElement('div');
     v.className = 'wb-verse';
@@ -115,7 +150,7 @@
 
   // A figure shows its actual image with an editable caption under it. Placement
   // attrs (src / alt / width / align / full) ride on data-attrs and are edited in
-  // Markdown mode, like other doc-block metadata.
+  // Markdown mode, like other doc-block metadata; `span` alone has a button.
   function renderFigure(b) {
     var attrs = b.attrs || {};
     var el = document.createElement('div');
@@ -145,7 +180,7 @@
     var note = document.createElement('div');
     note.className = 'wb-figure-note';
     note.setAttribute('contenteditable', 'false');
-    note.textContent = docHeadLabel('figure', attrs);
+    fillDocHead(note, el, 'figure');
     el.appendChild(note);
 
     var cap = document.createElement('div');
@@ -227,7 +262,7 @@
       var head = document.createElement('div');
       head.className = 'wb-doc-head';
       head.setAttribute('contenteditable', 'false');
-      head.textContent = docHeadLabel(b.block_type, b.attrs || {});
+      fillDocHead(head, el, b.block_type || '');
       el.appendChild(head);
       var body = document.createElement('div');
       body.className = 'wb-doc-body';
