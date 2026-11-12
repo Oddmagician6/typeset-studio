@@ -8,6 +8,29 @@ line here.
 
 ---
 
+## Unreleased
+
+### New
+
+- **Pages that print to the edge (bleed).** Tick "Pages print to the edge
+  (bleed)" on a book's page and its print PDF is built with every page 0.125"
+  bigger on its outer edge, top and bottom, which is what KDP and IngramSpark
+  ask for when anything reaches the edge of the paper. The text, margins and
+  page numbers stay exactly where they were, and each page tells the printer
+  where to cut. The print package's spec sheet says to choose "bleed" when
+  you upload. Off unless you tick it, so no book changes by itself.
+- **Pictures to the edge of the paper.** `~~~ figure src="map.png"
+  full="bleed"` gives a picture a page of its own and fills that page out to
+  the edge, with no page number or running head; a caption sits on a band at
+  the foot. In a book without bleed it gets a page inside the margins, as
+  `full="yes"` does, and the result page says so. The screen PDF and the
+  ebook give it a page of its own too.
+- **Page backgrounds in print.** A style's page background, such as the
+  parchment of the light game styles, now prints in a book with bleed, out to
+  the edge. Before, it was on the screen PDF only.
+
+---
+
 ## 1.6.0 — 12 November 2026
 
 Page references. A link to another place in the book now prints the page it

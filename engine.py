@@ -2784,8 +2784,15 @@ class RaisedInitial(Flowable):
 
 # ---------------------------------------------------------------- doc template
 class BookDoc(BaseDocTemplate):
-    def __init__(self, filename, preset, meta, head_font, cover=None, **kw):
+    """The book. Everything is laid out and drawn in trim coordinates: (0, 0)
+    is the trimmed page's bottom-left corner on every page. With `bleed`
+    (points, #74 Phase 6a) each page is that much bigger on its outer edge,
+    top and bottom, and `handle_pageBegin` moves the origin onto the trim, so
+    no margin, frame, folio or ornament needs to know the bleed is there; only
+    what is meant to reach the paper's edge asks `_bleed_rect`."""
+    def __init__(self, filename, preset, meta, head_font, cover=None, bleed=0, **kw):
         self.preset, self.meta = preset, meta
+        self._bleed = bleed
         self.head_font = head_font
         self._body_start  = None           # page number of the first chapter opener
         self._toc_entries = []             # filled by TocMarker during build
@@ -2821,7 +2828,7 @@ class BookDoc(BaseDocTemplate):
                       leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
         full = Frame(0, 0, pw, ph, id='full',
                      leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
-        super().__init__(filename, pagesize=(pw, ph), **kw)
+        super().__init__(filename, pagesize=(pw + bleed, ph + 2 * bleed), **kw)
         templates = []
         if self._cover.get('path') or self._cover.get('mode') == 'designed':
             # cover first, so page 1 paints the artwork / designed layout full-bleed
@@ -2836,6 +2843,14 @@ class BookDoc(BaseDocTemplate):
                          onPageEnd=self._furniture),
         ]
         self.addPageTemplates(templates)
+
+    def _bleed_rect(self, page):
+        """(x, y, w, h) in trim coordinates of everything that prints on
+        `page`: the trim, plus the bleed on its outer edge (the right of a
+        recto, the left of a verso), top and bottom."""
+        b = self._bleed
+        x = 0 if page % 2 == 1 else -b
+        return (x, -b, self._pw + b, self._ph + 2 * b)
 
     def _draw_cover(self, canv, doc):
         if canv.getPageNumber() != 1:
@@ -2855,8 +2870,22 @@ class BookDoc(BaseDocTemplate):
         path = cv.get('path')
         if not path or not os.path.exists(path):
             return
-        canv.drawImage(path, 0, 0, width=self._pw, height=self._ph,
-                       preserveAspectRatio=False, mask=None)
+        if self._bleed:
+            # out to the edge of the paper: scaled to cover the bleed, cropped
+            bx, by, bw, bh = self._bleed_rect(1)
+            from reportlab.lib.utils import ImageReader
+            iw, ih = ImageReader(path).getSize()
+            s = max(bw / iw, bh / ih)
+            canv.saveState()
+            clip = canv.beginPath()
+            clip.rect(bx, by, bw, bh)
+            canv.clipPath(clip, stroke=0, fill=0)
+            canv.drawImage(path, bx + (bw - iw * s) / 2, by + (bh - ih * s) / 2,
+                           width=iw * s, height=ih * s, mask=None)
+            canv.restoreState()
+        else:
+            canv.drawImage(path, 0, 0, width=self._pw, height=self._ph,
+                           preserveAspectRatio=False, mask=None)
         if not cv.get('overlay'):
             return
         # the same painter the wrap's front panel uses, so the cover in the
@@ -2873,9 +2902,10 @@ class BookDoc(BaseDocTemplate):
         tpl = cv.get('template', {})
         cf  = cv.get('fonts', {'display': self.head_font,
                                'serif': self.head_font, 'italic': self.head_font})
-        _paint_gradient(canv, tpl.get('palette', {}), 0, 0, self._pw, self._ph)
-        _paint_background(canv, tpl, 0, 0, self._pw, self._ph)
-        _paint_cover_front(canv, tpl, cf, self.meta, 0, 0, self._pw, self._ph)
+        bleed = self._bleed_rect(1) if self._bleed else None
+        _paint_gradient(canv, tpl.get('palette', {}), *(bleed or (0, 0, self._pw, self._ph)))
+        _paint_background(canv, tpl, 0, 0, self._pw, self._ph, bleed=bleed)
+        _paint_cover_front(canv, tpl, cf, self.meta, 0, 0, self._pw, self._ph, bleed=bleed)
 
     def handle_pageBegin(self):
         """Reset the page's markers, then shrink the frame if notes go at the foot.
@@ -2887,7 +2917,18 @@ class BookDoc(BaseDocTemplate):
         """
         self.canv._is_opener = False
         self.canv._is_blank = False
+        self.canv._is_plate = False
         self._rh_top, self._rh_first = self._rh_section, None
+        b = self._bleed
+        if b:
+            # the page about to begin: its trim sits in from the bleed at the
+            # top and bottom and on its outer edge, so the origin moves there
+            # (a new page starts with a fresh graphics state, so this is all
+            # it takes) and the page says where its trim is
+            dx = b if (self.page + 1) % 2 == 0 else 0
+            self.canv.translate(dx, b)
+            self.canv.setTrimBox((dx, b, dx + self._pw, b + self._ph))
+            self.canv.setBleedBox((0, 0, self._pw + b, self._ph + 2 * b))
         self._handle_pageBegin()
         f = self.frame
         if '_fullHeight' not in f.__dict__:
@@ -3025,6 +3066,10 @@ class BookDoc(BaseDocTemplate):
         black (the palette's text colour) as the ink, for anything drawn
         without setting one."""
         if self._screen is None:
+            # a print book with bleed carries the style's page background too,
+            # out to the paper's edge (#74 Phase 6a)
+            if self._background:
+                self._paint_background(canv, self._background)
             return
         canv._ts_ink_off = True
         canv.setFillColor(self._screen['page'])
@@ -3037,19 +3082,21 @@ class BookDoc(BaseDocTemplate):
 
     def _paint_background(self, canv, bg):
         """The style's page background: its colour, then its picture at its
-        opacity, scaled to cover the page (the page edge crops the overflow)."""
+        opacity, scaled to cover the page and its bleed (the page edge crops
+        the overflow)."""
+        x, y, pw, ph = self._bleed_rect(canv.getPageNumber())
         canv.saveState()
         if bg['color'] is not None:
             canv.setFillColor(bg['color'])
-            canv.rect(0, 0, self._pw, self._ph, stroke=0, fill=1)
+            canv.rect(x, y, pw, ph, stroke=0, fill=1)
         if bg['path']:
             try:
                 from reportlab.lib.utils import ImageReader
                 iw, ih = ImageReader(bg['path']).getSize()
-                s = max(self._pw / iw, self._ph / ih)
+                s = max(pw / iw, ph / ih)
                 w, h = iw * s, ih * s
                 canv.setFillAlpha(bg['opacity'])
-                canv.drawImage(bg['path'], (self._pw - w) / 2, (self._ph - h) / 2,
+                canv.drawImage(bg['path'], x + (pw - w) / 2, y + (ph - h) / 2,
                                width=w, height=h, mask=None)
             except Exception:
                 pass        # an unreadable picture: the page colour alone
@@ -3117,7 +3164,7 @@ class BookDoc(BaseDocTemplate):
     def _furniture(self, canv, doc):
         p = self.preset
         page = canv.getPageNumber()
-        if getattr(canv, '_is_blank', False):
+        if getattr(canv, '_is_blank', False) or getattr(canv, '_is_plate', False):
             return
         # the first chapter opener defines folio 1; everything before it is front matter
         if getattr(canv, '_is_opener', False) and self._body_start is None:
@@ -3722,6 +3769,96 @@ class FigureImage(Flowable):
                             f'missing image: {self.label}'[:90])
 
 
+# Full-bleed interiors (#74 Phase 6a): how far a book's pages run past the
+# trim on the outer edge, the top and the bottom when its `bleed` switch is on
+# (KDP and IngramSpark both ask for 0.125").
+BLEED_IN = 0.125
+_FULL_YES = ('1', 'yes', 'true', 'page')
+
+
+def figure_full(attrs):
+    """A figure's page of its own: '' (none, it sits in the text), 'page'
+    (inside the margins) or 'bleed' (the picture out to the paper's edge)."""
+    v = str((attrs or {}).get('full', '')).strip().lower()
+    return 'bleed' if v == 'bleed' else 'page' if v in _FULL_YES else ''
+
+
+def bleed_figures(ms):
+    """The `full="bleed"` figures in a book, by src, in order."""
+    out = []
+    for ch in ms.get('chapters', []):
+        for block in ch.get('blocks', []):
+            if block[0] == 'doc_block' and len(block) >= 3 \
+                    and block[2].get('_type') == 'figure' \
+                    and figure_full(block[2]) == 'bleed':
+                out.append((block[2].get('src') or '').strip() or '(no src)')
+    return out
+
+
+class BleedPlate(Flowable):
+    """A figure filling its page to the paper's edge (`full="bleed"`): the
+    picture scaled to cover the bleed (the page itself on a screen build, which
+    has no bleed), cropped by it, and its caption, if any, on a band of the page
+    colour at the foot of the text area. The page gets no running head, folio
+    or furniture.
+
+    It takes the whole frame, so it is drawn at the frame's corner, and draws
+    from there out to the page's bleed rectangle in trim coordinates."""
+    def __init__(self, path, caption, label=''):
+        super().__init__()
+        self.path, self.caption, self.label = path, caption, label
+
+    def wrap(self, availWidth, availHeight):
+        self.width, self.height = availWidth, availHeight
+        return (availWidth, availHeight)
+
+    def draw(self):
+        c = self.canv
+        doc = c._doctemplate
+        c._is_plate = True
+        x1, y1 = doc.frame._x1, doc.frame._y1
+        bx, by, bw, bh = doc._bleed_rect(c.getPageNumber())
+        c.saveState()
+        c.translate(-x1, -y1)
+        clip = c.beginPath()
+        clip.rect(bx, by, bw, bh)
+        c.clipPath(clip, stroke=0, fill=0)
+        drawn = False
+        if self.path:
+            try:
+                from reportlab.lib.utils import ImageReader
+                ir = ImageReader(_upright(self.path))
+                iw, ih = ir.getSize()
+                s = max(bw / iw, bh / ih)
+                w, h = iw * s, ih * s
+                c.drawImage(ir, bx + (bw - w) / 2, by + (bh - h) / 2,
+                            width=w, height=h, mask='auto')
+                drawn = True
+            except Exception:
+                pass
+        if not drawn:
+            c.setFillColor(_colors.Color(.94, .94, .94))
+            c.rect(bx, by, bw, bh, stroke=0, fill=1)
+            c.setFillColor(_colors.Color(.35, .35, .35))
+            c.setFont('Helvetica', 8)
+            c.drawCentredString(bx + bw / 2.0, by + bh / 2.0,
+                                f'missing image: {self.label}'[:90])
+        c.restoreState()
+        if not self.caption:
+            return
+        sizes = [p.wrap(self.width, self.height) for p in self.caption]
+        total = sum(h + p.style.spaceBefore for p, (_, h) in zip(self.caption, sizes))
+        pad = 6
+        c.saveState()
+        c.setFillColor(_colors.white)
+        c.rect(-pad, -pad, self.width + 2 * pad, total + 2 * pad, stroke=0, fill=1)
+        c.restoreState()
+        y = total
+        for p, (_, h) in zip(self.caption, sizes):
+            y -= p.style.spaceBefore + h
+            p.drawOn(c, 0, y)
+
+
 def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
     """Flowables for a ~~~ figure src="…" … ~~~ block: the image + its caption.
 
@@ -3734,7 +3871,11 @@ def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
     src     = (attrs.get('src', '') or '').strip()
     path    = _figure_asset_path(src)
     align   = (attrs.get('align', '') or fg.get('align', 'center')).lower()
-    full    = str(attrs.get('full', '')).strip().lower() in ('1', 'yes', 'true', 'page')
+    mode    = figure_full(attrs)
+    # to the edge where the page has one to give: a book built with bleed,
+    # or the screen PDF; anywhere else it is a page inside the margins
+    edge    = mode == 'bleed' and bool(preset.get('_bleed') or preset.get('_screen'))
+    full    = mode != ''
     space   = fg.get('space_around', 12.0)
 
     # the text area, so a figure can never be taller than the page it sits on
@@ -3758,6 +3899,9 @@ def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
     cap_h = sum(p.wrap(avail_w, text_h)[1] + cap_style.spaceBefore
                 for p in caption) if caption else 0.0
 
+    if edge:
+        # a page to itself, which the plate fills: what follows starts the next
+        return [PageBreak(), BleedPlate(path, caption, src or '(no src)')]
     if full:
         box_w = avail_w
         max_h = text_h - cap_h
@@ -5283,8 +5427,7 @@ def _spans(block):
     meta = block[2] if len(block) > 2 else {}
     yes = ('1', 'yes', 'true', 'page')
     return (str(meta.get('span', '')).strip().lower() in yes
-            or (meta.get('_type') == 'figure'
-                and str(meta.get('full', '')).strip().lower() in yes))
+            or (meta.get('_type') == 'figure' and figure_full(meta) != ''))
 
 
 def _page_open(story):
@@ -5850,8 +5993,9 @@ def _screen_preset(preset):
 
 # A page background for the screen PDF (#74 Phase 3b): a picture from the
 # figure library laid under every body page, over the page colour (or `color`,
-# when set) at `opacity`. Screen-only: a print interior without bleed would show
-# a white edge round it, so the print and press builds never draw it.
+# when set) at `opacity`. A print interior without bleed would show a white
+# edge round it, so print and press draw it only in a book with bleed (#74
+# Phase 6a), out to the paper's edge.
 PAGE_BACKGROUND_DEFAULTS = {'image': '', 'color': '', 'opacity': 1.0}
 # Page furniture (#74 Phase 3b): `ornaments.FURNITURE` ids for the header bar,
 # footer band and corner pieces of every body page ('' = none), and their
@@ -6009,6 +6153,8 @@ def _press_canvasmaker(pw, ph):
       chromatic colour raises rather than being silently converted.
     * `TrimBox`/`BleedBox` — declared equal to the page, which is the truth for
       an interior with no bleed, and is what a prepress check looks for first.
+      A book with bleed sets both again on every page (`BookDoc.handle_pageBegin`),
+      the trim in from the outer edge, top and bottom.
 
     Links are dropped: PDF/X forbids annotations inside the trim box, and a URL
     you cannot click is nothing on paper. The words survive, the annotation
@@ -6191,6 +6337,12 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
                      'color': meta.get('cover_color', 'light'),
                      'title_font': fonts.get('bold', fonts['regular'])}
 
+    # full-bleed pages (#74 Phase 6a): print only; a screen PDF is read on a
+    # screen, where the page edge is the edge and nothing is trimmed off
+    bleed_on = bool(meta.get('bleed')) and not screen
+    if bleed_on:
+        preset = dict(preset, _bleed=True)
+
     m       = preset['margins']
     avail_w = (preset['trim']['w'] - m['inside'] - m['outside']) * inch
     hyph    = _pyphen.Pyphen(lang='en_US') if (preset['body'].get('hyphenate') and _HAVE_PYPHEN) else None
@@ -6203,12 +6355,14 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
 
     def _make_doc(path):
         doc = BookDoc(path, preset, meta, head_font, cover=cover,
+                      bleed=BLEED_IN * inch if bleed_on else 0,
                       title=meta.get('title', ''), author=meta.get('author', ''))
         doc._fn_reserve, doc._fn_assign, doc._fn_flow = fn_reserve, fn_assign, fn_flow
         if press:
-            doc._press_canvas = _press_canvasmaker(doc._pw, doc._ph)
+            doc._press_canvas = _press_canvasmaker(*doc.pagesize)
         elif screen:
             doc._screen = preset['_screen']
+        if screen or bleed_on:
             doc._background = page_background(preset)
         return doc
 
@@ -6371,4 +6525,8 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         'press':          bool(press),
         'screen':         bool(screen),
         'has_cover':      cover is not None,
+        'bleed':          bleed_on,
+        # figures asking for the paper's edge in a print book without bleed,
+        # set inside the margins instead
+        'bleed_wanted':   [] if (bleed_on or screen) else bleed_figures(manuscript),
     }

@@ -59,13 +59,14 @@ Start here in a new session. Each item points at its full entry below.
    references after (5b); index entries from `{index: …}` markers plus the stat blocks
    (by name, and an optional list by challenge rating), the automatic parts set per book.
    **Phase 5a (the index) is released as 1.5.0 (2026-11-12).**
-   **Phase 5b (page references) is merged to master, not pushed, not released** (its plan
-   agreed with the user the same day; see "Phase 5b as built" in the Phase 5 entry;
-   CHANGELOG's Unreleased has it; `test_pagerefs.py` is new; all 40 test files pass).
-   **START HERE:** ask the user about a 1.6.0 release, and confirm three choices of mine:
-   the ebook's `{page: x}` reads the place's name ("see page The Guard Room"), a
-   reference to nothing prints `??`, and `##` subheads are link targets too. Then Phase 6
-   (the special-pages designer), whose plan must be checked with the user first.
+   **Phase 5b (page references) is released as 1.6.0 (2026-11-12)**, fixtures frozen; the
+   user confirmed its three open choices (the ebook's `{page: x}` reads the place's name,
+   a reference to nothing prints `??`, `##` subheads are link targets).
+   **Phase 6 was planned with the user the same day** (see "Phase 6 plan" in the #74
+   entry): 6a full-bleed interiors first, a release of its own; 6b the page designer.
+   **6a is BUILT on branch `ttrpg-phase6a`, UNCOMMITTED** ("Phase 6a as built"; all 41
+   test files pass). **START HERE:** ask the user about commit, merge and a 1.7.0
+   release, and confirm three choices listed under "Phase 6a as built"; then 6b.
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
@@ -3086,6 +3087,43 @@ doc_model / WYSIWYG round-trip:
     as an image page, as covers do (#43).
   - Uses: maps, handouts, character sheets, chapter title spreads, adverts. Fillable PDF
     form fields on character sheets are a possible follow-up, not in this phase.
+
+  **Phase 6 plan, agreed with the user 2026-11-12 (all as recommended):**
+  - **6a: full-bleed interiors, a release of its own.** A per-book switch "pages print
+    to the edge (bleed)", **off by default**, so existing books don't change (and the
+    switch must not be written into books that never set it). With it on, the PDF is
+    built at trim + 0.125" on the outer edges, and full-page figures and Phase 3's page
+    backgrounds bleed in print too. The build warns when something wants bleed and the
+    switch is off.
+  - **6b: the page designer.** It reuses the wrap designer (#72), opened on one interior
+    page with bleed and safe-zone guides. Designs are listed per book and placed with
+    `~~~ page src="name"`, left or right page as asked. **Single pages only**: two-page
+    spreads (maps, title spreads) are a later, smaller step.
+
+  **Phase 6a as built (2026-11-12, branch `ttrpg-phase6a`):** `BookDoc(bleed=pts)` makes
+  each page `trim + b` wide and `trim + 2b` tall, and `handle_pageBegin` translates the
+  canvas by `(b on a verso else 0, b)` before ReportLab's own page begin, then sets that
+  page's TrimBox and BleedBox (`canv.setTrimBox`, which lasts until set again). A new
+  page starts from a fresh graphics state, so that one translate is the whole imposition:
+  every margin, frame, folio, running head, footnote, ornament, link and bookmark stays
+  in trim coordinates, untouched. What reaches the paper's edge asks
+  `BookDoc._bleed_rect(page)`: the page background (`_paint_page` now draws it in print
+  when the book has bleed), the cover page of a non-press build, and the new
+  `BleedPlate` flowable. `full="bleed"` (`engine.figure_full`) makes a `BleedPlate` when
+  `preset['_bleed']` or `preset['_screen']` is set (the screen PDF has no bleed; its
+  page edge is the edge), else it falls back to `full="yes"` and the build result's
+  `bleed_wanted` lists it for a preflight row. The plate takes the whole frame, draws
+  from the frame's corner out to the bleed rectangle, sets `canv._is_plate` (no
+  furniture, folio or running head) and puts a caption on a page-colour band at the
+  foot of the text area. Book flag `bleed` (off when missing; written only once used,
+  like `screen_pdf`); a "Bleed" preflight row; a Bleed line in the print package and
+  its spec sheet. `test_bleed.py` (40 checks: boxes, every word's place measured from
+  the trim, press, screen, plates on both sides, two columns, background, the app).
+  The TTRPG baseline is identical to master's with the switch off.
+  **Decisions of mine to confirm with the user:** the background prints whenever bleed
+  is on (no separate switch); a bleed plate's caption sits on a white band over the
+  picture; a plate page has no folio. **Next:** commit/merge/release (1.7.0) on the
+  user's word, then 6b.
 
   **Order and why.** 1 and 2 are cheap and pay off in single column (and 2 helps every
   nonfiction book). 3 comes before columns because the author's own books are single
