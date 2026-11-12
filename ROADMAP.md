@@ -3009,8 +3009,10 @@ doc_model / WYSIWYG round-trip:
     `_markup_to_html` and `_md_emph_to_html`).
   - **Stat blocks:** book flags `index_statblocks` (each by name) and `index_cr` (a "By
     Challenge Rating" list after the index, from `cr="…"` or the block's Challenge line),
-    both **off by default** and written into a book only once set, so no existing book
-    gains a page. Either makes an index on its own, without a marker in the book.
+    both **on by default** (the user's call at release, 2026-11-12; `bookindex.on`), so a
+    book with stat blocks gains an Index page when rebuilt. A save writes a flag into a
+    book only once it differs from on. Either makes an index on its own, without a
+    marker in the book.
   - **EPUB:** markers become empty `<span id="ix-N">` anchors, `bookindex.xhtml` is last
     in the spine and in the nav; an entry links to each chapter it is marked in, by the
     chapter's name (no page numbers in an ebook).

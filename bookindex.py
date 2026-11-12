@@ -7,8 +7,9 @@ write its own anchor in the marker's place, and turns "where each key landed"
 into the index as data. The PDF's "where" is a page number, the ebook's a
 chapter, so each sets its own page from the same tree.
 
-A book's stat blocks join in when the book asks: `index_statblocks` lists each
-by name, `index_cr` adds a list by challenge rating.
+A book's stat blocks join in unless the book turns them off: `index_statblocks`
+lists each by name, `index_cr` adds a list by challenge rating. Both are on when
+a book doesn't say (`on`).
 
 Stdlib-only, like `matter.py`, so the ebook can use it without ReportLab.
 """
@@ -23,6 +24,11 @@ CR_HEADING = 'By Challenge Rating'
 
 _TAG_RE = re.compile(r'<[^>]+>')
 _CR_RE = re.compile(r'\d+(?:\s*/\s*\d+)?')
+
+
+def on(meta, key):
+    """A stat-block index option: on unless the book turns it off."""
+    return bool(meta.get(key, True))
 
 
 def _words(markup):
@@ -64,7 +70,7 @@ def assign(chapters, meta, tag):
     the neutral tag's place. `marks[key]` is `{'path': (main, sub, …),
     'chapter': n}` for a marker, and `{'path': (name,), 'chapter': n,
     'stat': True, 'cr': '5'}` for a stat block. A stat block is keyed only
-    when the book lists them (`index_statblocks`, `index_cr`); its key is left
+    when the book lists them (`index_statblocks`, `index_cr`, see `on`); its key is left
     on the block as `_ix` for the builder to anchor its name with. The
     chapters come back as a copy; `chapter` counts from 1.
     """
@@ -84,7 +90,7 @@ def assign(chapters, meta, tag):
         return INDEX_TAG_RE.sub(one, text)
 
     out = map_block_texts(chapters, render)
-    if meta.get('index_statblocks') or meta.get('index_cr'):
+    if on(meta, 'index_statblocks') or on(meta, 'index_cr'):
         for n, ch in enumerate(out):
             blocks = None
             for i, block in enumerate(ch.get('blocks', [])):
@@ -108,8 +114,8 @@ def assign(chapters, meta, tag):
 
 def wanted(marks, meta):
     """Whether the book gets an Index page: it has something to list."""
-    return any(not m.get('stat') or meta.get('index_statblocks')
-               or (meta.get('index_cr') and m.get('cr')) for m in marks)
+    return any(not m.get('stat') or on(meta, 'index_statblocks')
+               or (on(meta, 'index_cr') and m.get('cr')) for m in marks)
 
 
 def sort_key(text):
@@ -144,10 +150,10 @@ def tree(marks, found, meta):
         if not hits:
             continue
         if mark.get('stat'):
-            if meta.get('index_cr') and mark.get('cr'):
+            if on(meta, 'index_cr') and mark.get('cr'):
                 (ratings.setdefault(mark['cr'], {})
                         .setdefault(mark['path'][0], []).extend(hits))
-            if not meta.get('index_statblocks'):
+            if not on(meta, 'index_statblocks'):
                 continue
         path = mark['path']
         node = mains.setdefault(path[0], {'hits': [], 'subs': {}})

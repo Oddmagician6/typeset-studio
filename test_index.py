@@ -272,9 +272,14 @@ def test_print():
 def test_statblocks():
     print('\n3. Stat blocks')
     md = book(stat=True)
-    pdf, _ = build(md, preset(2), 'stat-off')
+    pdf, _ = build(md, preset(2), 'stat-default')
     lines = read_pdf(pdf)[1]
-    check('off: no stat block is listed', not any(l.startswith('Owlbear Elder') for l in lines))
+    check('by default: the stat blocks are listed, with the challenge list',
+          any(l.startswith('Owlbear Elder') for l in lines) and bookindex.CR_HEADING in lines)
+    pdf, _ = build(md, preset(2), 'stat-off', index_statblocks=False, index_cr=False)
+    lines = read_pdf(pdf)[1]
+    check('off: no stat block is listed', not any(l.startswith('Owlbear Elder') for l in lines)
+          and bookindex.CR_HEADING not in lines)
     pdf, _ = build(md, preset(2), 'stat-on', index_statblocks=True, index_cr=True)
     folio, lines, links, pages, texts, _ = read_pdf(pdf)
     got = parse_index(lines)
@@ -293,7 +298,7 @@ def test_statblocks():
           heads == ['CR 0', 'CR 1/8', 'CR 1/4', 'CR 1/2', 'CR 3', 'CR 5', 'CR 12'], heads)
     check('a Challenge line counts as its rating',
           cr[cr.index('CR 3') + 1].startswith('Bell Keeper,'), cr[cr.index('CR 3'):][:3])
-    pdf, _ = build(md, preset(1), 'stat-cr-only', index_cr=True)
+    pdf, _ = build(md, preset(1), 'stat-cr-only', index_statblocks=False, index_cr=True)
     lines = read_pdf(pdf)[1]
     check('the challenge list alone leaves the names out of the index',
           bookindex.CR_HEADING in lines
@@ -310,14 +315,16 @@ def test_statblocks():
 # ------------------------------------------------------------------ 4
 def test_unchanged():
     print('\n4. A book with no markers')
+    off = dict(index_statblocks=False, index_cr=False)
     plain = re.sub(r'\{index: [^}]+\}', '', book(stat=True))
-    a, ra = build(plain, preset(1), 'plain')
-    b, rb = build(plain, preset(1), 'plain-opts', index_statblocks=False, index_cr=False)
+    a, ra = build(plain, preset(1), 'plain', **off)
+    b, rb = build(plain, preset(1), 'plain-default')
     with fitz.open(a) as d:
         text = '\n'.join(pg.get_text() for pg in d)
-    check('no Index page', not re.search(r'^\s*Index\s*$', text, re.M))
-    check('the options off change nothing', ra['page_count'] == rb['page_count'])
-    marked, rm = build(book(stat=True), preset(1), 'plain-marked')
+    check('no Index page with the stat-block options off', not re.search(r'^\s*Index\s*$', text, re.M))
+    check('by default its stat blocks alone add the index', rb['page_count'] > ra['page_count'],
+          (ra['page_count'], rb['page_count']))
+    marked, rm = build(book(stat=True), preset(1), 'plain-marked', **off)
     with fitz.open(marked) as d:
         body = [pg.get_text() for pg in d][:ra['page_count']]
     with fitz.open(a) as d:
@@ -326,7 +333,7 @@ def test_unchanged():
           rm['page_count'] > ra['page_count'] and body == base,
           (ra['page_count'], rm['page_count']))
     front = {'afterword': 'An afterword {index: Ignored} here.', 'dedication': 'For {index: X} you.'}
-    pdf, _ = build(plain, preset(1), 'plain-matter', **front)
+    pdf, _ = build(plain, preset(1), 'plain-matter', **front, **off)
     with fitz.open(pdf) as d:
         text = '\n'.join(pg.get_text() for pg in d)
     check('a marker on a matter page prints nothing and makes no index',
@@ -383,8 +390,15 @@ def test_forms():
     check('the editor cheat sheet names the marker',
           '{index: Owlbear}' in open(os.path.join(REPO, 'templates', 'manuscript_editor.html'),
                                      encoding='utf-8').read())
-    check('a save writes an option only once it is used',
-          "if k in form or k in proj" in src)
+    check('a save writes an option only once it differs from on',
+          "if (k in form) != proj.get(k, True) or k in proj" in src)
+    gen = open(os.path.join(REPO, 'templates', 'generate.html'), encoding='utf-8').read()
+    edit = open(os.path.join(REPO, 'templates', 'project_edit.html'), encoding='utf-8').read()
+    check('both options start ticked',
+          all(f"not form or form.get('{k}')" in gen and f"proj.get('{k}', True)" in edit
+              for k in ('index_statblocks', 'index_cr')))
+    check('a book that never said has both on',
+          bookindex.on({}, 'index_statblocks') and not bookindex.on({'index_cr': False}, 'index_cr'))
     for name in ('doc_model.js', 'wysiwyg.js'):
         js = open(os.path.join(REPO, 'static', name), encoding='utf-8').read()
         check(f'{name} knows an index run', 'index: true' in js)

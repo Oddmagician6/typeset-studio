@@ -20,10 +20,13 @@ line here.
   ebook, which has no page numbers, an entry links to each chapter it is
   marked in. In the manuscript editor's rich view a marker shows as a small
   tag, and typing its closing `}` makes one.
-- **Stat blocks in the index.** Two new options on a book: **List every stat
-  block in the index** adds each stat block by its name without a marker, and
-  **Add a list of the stat blocks by challenge rating** puts that list after
-  the index, lowest rating first. A bestiary gets its index from these alone.
+- **Stat blocks in the index.** A book with stat blocks lists each one in the
+  index by its name, no marker needed, and adds a list of them by challenge
+  rating after the index, lowest rating first. A bestiary gets its index from
+  these alone. Both are on for every book, so a book with stat blocks now
+  gains an Index page when rebuilt; untick **List every stat block in the
+  index** or **Add a list of the stat blocks by challenge rating** on the
+  book's page to leave them out.
 
 ### Changed
 

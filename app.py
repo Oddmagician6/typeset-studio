@@ -4264,9 +4264,8 @@ def project_create():
         'smartquotes': form.get('smartquotes') == '1',
         'press': form.get('press') == '1',
         'screen_pdf': form.get('screen_pdf') == '1',
-        # the index options (#74 Phase 5a) are kept only when set, as a book
-        # from before them has neither
-        **{k: True for k in ('index_statblocks', 'index_cr') if form.get(k) == '1'},
+        # the index options (#74 Phase 5a), on unless turned off
+        **{k: form.get(k) == '1' for k in ('index_statblocks', 'index_cr') if k in form},
         **{k: form.get(k, '').strip() for k in matter.KEYS},
         'manuscript_file': ms_file,
         'manuscript_type': ms_type,
@@ -4457,8 +4456,9 @@ def project_edit(pid):
             # option changes nothing in it
             **({'screen_pdf': 'screen_pdf' in form}
                if 'screen_pdf' in form or 'screen_pdf' in proj else {}),
+            # on when a book doesn't say: written once it differs from that
             **{k: k in form for k in ('index_statblocks', 'index_cr')
-               if k in form or k in proj},
+               if (k in form) != proj.get(k, True) or k in proj},
             **{k: form.get(k, '').strip() for k in matter.KEYS},
             'title':            form.get('title', '').strip(),
             'subtitle':         form.get('subtitle', '').strip(),
@@ -4906,8 +4906,8 @@ def project_write_preview(pid):
         'right_hand_starts': proj.get('right_hand_starts', True),
         'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
         'include_toc': False, 'smartquotes': proj.get('smartquotes', True),
-        'index_statblocks': proj.get('index_statblocks', False),
-        'index_cr': proj.get('index_cr', False),
+        'index_statblocks': proj.get('index_statblocks', True),
+        'index_cr': proj.get('index_cr', True),
         **{k: proj.get(k, '') for k in matter.KEYS},
     }
     ms = manuscript.parse_markdown(text, smartquotes=meta['smartquotes'])
@@ -5178,8 +5178,8 @@ def _project_meta(proj):
         'include_toc':   proj.get('include_toc', False),
         'smartquotes':   proj.get('smartquotes', True),
         'screen_pdf':    proj.get('screen_pdf', False),
-        'index_statblocks': proj.get('index_statblocks', False),
-        'index_cr':      proj.get('index_cr', False),
+        'index_statblocks': proj.get('index_statblocks', True),
+        'index_cr':      proj.get('index_cr', True),
         'press':         proj.get('press', False),
         **{k: proj.get(k, '') for k in matter.KEYS},
     }

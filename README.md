@@ -315,9 +315,10 @@ grouped by letter, with each entry's page numbers (pages in a row become a range
 marker shows as a small tag, and typing its closing `}` makes one; a line that
 should print the braces is written `\{index: …}`.
 
-A book of monsters need not mark each one. On a book's page, **List every stat
-block in the index** adds each stat block by its name, and **Add a list of the stat
-blocks by challenge rating** adds that list after the index. In the PDF each number
+A book of monsters need not mark each one: every stat block is listed in the index
+by its name, and a list of them by challenge rating follows the index. Both are on
+unless you untick **List every stat block in the index** or **Add a list of the stat
+blocks by challenge rating** on the book's page. In the PDF each number
 links to its page. The **ebook** has no page numbers, so an entry links to each
 chapter it is marked in, by the chapter's name. A marker on a front- or back-matter
 page, or inside a note, is ignored.

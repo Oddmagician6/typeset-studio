@@ -54,7 +54,10 @@ def preset(cols=2, **sections):
 
 
 META = {'title': 'The Drowned Bell', 'author': 'Test Fixture', 'year': '2026',
-        'front_matter': 'none', 'include_toc': False, 'smartquotes': True}
+        'front_matter': 'none', 'include_toc': False, 'smartquotes': True,
+        # these tests read the body's pages; the stat-block index (on by
+        # default since 1.5.0) would add an Index page to every game book
+        'index_statblocks': False, 'index_cr': False}
 
 
 def build(md, p, name, **meta):
