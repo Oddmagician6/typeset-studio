@@ -2380,9 +2380,224 @@ def _outline_text(markup):
 def _heading_para(text, style, level):
     """A heading inside a chapter, tagged for the contents, the bookmarks and
     the running heads (`BookDoc.afterFlowable` reads the tag once it is set)."""
-    para = Paragraph(text, style)
+    para = HeadingPara(text, style)
     para._ts_heading = (level, _outline_text(text))
     return para
+
+
+class HeadingPara(Paragraph):
+    """A heading that can report itself. In one column `BookDoc.afterFlowable`
+    reads its tag; inside a column run the document never sees it (the run
+    draws its own content), so there it reports as it is drawn."""
+    _ts_in_columns = False
+
+    def draw(self):
+        Paragraph.draw(self)
+        if self._ts_in_columns and getattr(self, '_ts_heading', None):
+            doc = getattr(self.canv, '_doctemplate', None)
+            if isinstance(doc, BookDoc):
+                doc._note_heading(self._ts_heading)
+                self._ts_heading = None
+
+
+def columns_of(preset):
+    """(count, gap in points) for the style's `columns` section; 1 column when
+    the style has none."""
+    c = preset.get('columns') or {}
+    try:
+        n = int(c.get('count', 1) or 1)
+    except (TypeError, ValueError):
+        n = 1
+    return (2 if n == 2 else 1), _num(c.get('gap', 0.25), 0.25) * inch
+
+
+def _column_run(flowables, preset):
+    """One run of in-column flowables as a single flowable for the page frame."""
+    _, gap = columns_of(preset)
+    for f in flowables:
+        if isinstance(f, HeadingPara):
+            f._ts_in_columns = True
+    return ColumnRun(flowables, gap, rule=(preset.get('columns') or {}).get('rule'))
+
+
+_COL_EPS = 0.01
+
+
+def _heads(f):
+    """Whether a flowable heads what follows it, and so can't end a column."""
+    return isinstance(f, HeadingPara) or bool(f.getKeepWithNext())
+
+
+class _Kept(Flowable):
+    """Flowables that stay in one column: a picture and its caption."""
+
+    def __init__(self, content):
+        super().__init__()
+        self._content = list(content)
+        self._lay = []
+
+    def wrap(self, aW, aH):
+        self._lay, y, prev = [], 0.0, 0.0
+        for f in self._content:
+            _, h = f.wrapOn(self.canv, aW, 0xfffffff)
+            gap = max(f.getSpaceBefore(), prev) if self._lay else 0.0
+            self._lay.append((f, y + gap, h))
+            y += gap + h
+            prev = f.getSpaceAfter()
+        self.width, self.height = aW, y
+        return aW, y
+
+    def split(self, aW, aH):
+        return []
+
+    def draw(self):
+        for f, top, h in self._lay:
+            f.drawOn(self.canv, 0, self.height - top - h)
+
+
+class ColumnRun(Flowable):
+    """A run of flowables set in two columns inside the page's one frame.
+
+    It lays its content out itself: down the first column, then the second,
+    splitting what can split where a column ends. A run that ends on this page
+    is balanced (the shortest pair of columns that still holds everything); one
+    that doesn't hands the rest back as another run for the next page. The page
+    frame is all it needs, so mirrored margins and the room kept for footnotes
+    apply to it as to any flowable.
+    """
+
+    def __init__(self, content, gap, rule=None, laid=None):
+        super().__init__()
+        self._content = [_Kept(f._content) if isinstance(f, KeepTogether) else f
+                         for f in content]
+        self._gap, self._rule = gap, rule
+        self._laid = laid              # (columns, height, width) once it is set
+        self._memo = None
+
+    def identity(self, maxLen=None):
+        first = self._content[0] if self._content else self
+        name = 'KeepTogether' if isinstance(first, _Kept) else type(first).__name__
+        return '<%s at 0x%x in a column>' % (name, id(self))
+
+    # ---- layout
+    def _fill(self, canv, queue, cw, H):
+        """Set one column from the head of `queue`: (placed, used, rest)."""
+        placed, y, prev = [], 0.0, 0.0
+        queue = list(queue)
+        while queue:
+            f = queue[0]
+            _, h = f.wrapOn(canv, cw, 0xfffffff)
+            gap = max(f.getSpaceBefore(), prev) if placed else 0.0
+            if y + gap + h <= H + _COL_EPS:
+                placed.append((f, y + gap, h))
+                y += gap + h
+                prev = f.getSpaceAfter()
+                queue.pop(0)
+                continue
+            room = H - y - gap
+            if room > 0 and not isinstance(f, _Kept):
+                try:
+                    parts = f.splitOn(canv, cw, room)
+                except Exception:
+                    parts = []
+                if len(parts) >= 2:
+                    _, h0 = parts[0].wrapOn(canv, cw, 0xfffffff)
+                    if h0 <= room + _COL_EPS:
+                        placed.append((parts[0], y + gap, h0))
+                        queue[0:1] = parts[1:]
+            break
+        if queue:
+            # a heading never ends a column: it goes over with what it heads
+            # (nor does the space a boxed block opens with, under a heading)
+            keep = len(placed)
+            while keep and (_heads(placed[keep - 1][0])
+                            or placed[keep - 1][2] <= _COL_EPS
+                            or isinstance(placed[keep - 1][0], Spacer)):
+                keep -= 1
+            while keep < len(placed) and not _heads(placed[keep][0]):
+                keep += 1
+            # A column of nothing but headings waits for the next page too,
+            # unless that has been tried: then what it heads is as tall as a
+            # column, and the heading may stand alone rather than fail the book.
+            if keep < len(placed) and (keep > 0 or not self._lone_heading_ok()):
+                queue[0:0] = [it[0] for it in placed[keep:]]
+                placed = placed[:keep]
+        used = (placed[-1][1] + placed[-1][2]) if placed else 0.0
+        return placed, used, queue
+
+    def _lone_heading_ok(self):
+        return getattr(self, '_postponed', 0)       # set by the document
+
+    def _layout(self, canv, aW, H):
+        cw = (aW - self._gap) / 2.0
+        queue, cols = list(self._content), []
+        for i in range(2):
+            placed, used, queue = self._fill(canv, queue, cw, H)
+            if not placed and queue and isinstance(queue[0], _Kept) and i == 0:
+                # too tall to keep together: let its parts go their own way
+                queue[0:1] = queue[0]._content
+                placed, used, queue = self._fill(canv, queue, cw, H)
+            cols.append((placed, used))
+        return cols, queue
+
+    def _plan(self, aW, aH):
+        if self._memo and self._memo[0] == (aW, aH):
+            return self._memo[1]
+        canv = self.canv
+        cols, rest = self._layout(canv, aW, aH)
+        if not rest and any(c[0] for c in cols):
+            # it ends here: balance. The shortest height that still holds it all.
+            lo, hi, best = 0.0, max(c[1] for c in cols), None
+            for _ in range(14):
+                mid = (lo + hi) / 2.0
+                c2, r2 = self._layout(canv, aW, mid)
+                if r2:
+                    lo = mid
+                else:
+                    hi, best = mid, mid
+                if hi - lo < 0.5:
+                    break
+            cols, rest = self._layout(canv, aW, best if best is not None else aH)
+            if rest:                                   # never trade words for balance
+                cols, rest = self._layout(canv, aW, aH)
+        self._memo = ((aW, aH), (cols, rest))
+        return cols, rest
+
+    def wrap(self, aW, aH):
+        if self._laid:
+            return self._laid[2], self._laid[1]
+        cols, rest = self._plan(aW, aH)
+        if rest or not any(c[0] for c in cols):
+            return aW, aH + 0xffff                     # doesn't all fit: split me
+        self._laid = (cols, max(c[1] for c in cols), aW)
+        return aW, self._laid[1]
+
+    def split(self, aW, aH):
+        if self._laid:
+            return []
+        cols, rest = self._plan(aW, aH)
+        if not any(c[0] for c in cols):
+            return []
+        # A run that goes on takes the rest of the page: anything set under it
+        # would be read before its second column.
+        height = aH if rest else max(c[1] for c in cols)
+        head = ColumnRun([], self._gap, self._rule, laid=(cols, height, aW))
+        return [head, ColumnRun(rest, self._gap, self._rule)] if rest else [head]
+
+    def draw(self):
+        cols, height, aW = self._laid
+        cw = (aW - self._gap) / 2.0
+        for i, (placed, _used) in enumerate(cols):
+            x = i * (cw + self._gap)
+            for f, top, h in placed:
+                f.drawOn(self.canv, x, height - top - h)
+        if self._rule:
+            c = self.canv
+            c.saveState()
+            c.setStrokeGray(0.55)
+            c.setLineWidth(0.5)
+            c.line(aW / 2.0, 0, aW / 2.0, height)
+            c.restoreState()
 
 
 class HRule(Flowable):
@@ -2459,6 +2674,8 @@ class FnProbe(Flowable):
     else. This rides just before that paragraph and reports the page it starts
     on — which is where a chapter's first paragraph is, split or not.
     """
+    _ZEROSIZE = True      # so a container (a column run) still draws it
+
     def __init__(self, sink, chapter_idx, numbers):
         super().__init__()
         self._sink, self._ch, self._numbers = sink, chapter_idx, numbers
@@ -2673,8 +2890,11 @@ class BookDoc(BaseDocTemplate):
         """A heading inside a chapter has been set: record its page for the
         contents, bookmark `##` and `###`, and follow `##` for running heads."""
         tag = getattr(flowable, '_ts_heading', None)
-        if not tag:
+        if not tag or getattr(flowable, '_ts_in_columns', False):
             return
+        self._note_heading(tag)
+
+    def _note_heading(self, tag):
         level, text = tag
         self._toc_entries.append({'heading': level, 'title': text,
                                   'page': self.canv.getPageNumber()})
@@ -4729,6 +4949,16 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body', unlink=Non
     return out
 
 
+def _spans(block):
+    """A block set across both columns: one marked `span="yes"`, or a figure on
+    a page of its own."""
+    meta = block[2] if len(block) > 2 else {}
+    yes = ('1', 'yes', 'true', 'page')
+    return (str(meta.get('span', '')).strip().lower() in yes
+            or (meta.get('_type') == 'figure'
+                and str(meta.get('full', '')).strip().lower() in yes))
+
+
 def _build_story(manuscript, preset, meta, fonts, st, head_font,
                  has_cover=False, avail_w=0, hyph=None, toc_flowables=None,
                  fn_measure=False, fn_probe=None, matter_unlink=None):
@@ -4893,9 +5123,30 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         story.append(Spacer(1, c['after_title'] * inch))
         opened = False
         flush_next = False  # paragraph right after scene/subhead: no indent
+        # two columns (#74 Phase 4): the chapter's blocks gather into `story`
+        # as before, under another name; a spanning block, or the chapter's
+        # end, sets what has gathered as one balanced run
+        ncols, col_gap = columns_of(preset)
+        page_story, page_w = story, avail_w
+        if ncols == 2:
+            story, avail_w = [], (page_w - col_gap) / 2.0
+
+        def _flush_run():
+            nonlocal story
+            if ncols == 2 and story:
+                page_story.append(_column_run(story, preset))
+                story = []
+
         for block in ch['blocks']:
             kind = block[0]
             val  = block[1]
+            if ncols == 2 and kind == 'doc_block' and _spans(block):
+                _flush_run()
+                blk_meta = block[2] if len(block) > 2 else {}
+                page_story.extend(_render_doc_block(val, preset, fonts, st, page_w,
+                                                    hyph=hyph, block_meta=blk_meta))
+                flush_next = True
+                continue
             if kind == 'scene':
                 sb = preset['scene_break']
                 img_path = scene_image_path(preset)
@@ -4933,6 +5184,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                     val_h = _hyphenate_markup(val, hyph) if hyph else val
                     story.append(Paragraph(val_h, st['body']))
                 flush_next = False
+        _flush_run()
+        story, avail_w = page_story, page_w
 
     # ---- back matter (order comes from matter.SECTIONS) ----
     _author = meta.get('author', '')

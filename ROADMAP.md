@@ -44,8 +44,12 @@ Start here in a new session. Each item points at its full entry below.
    **State (2026-11-12):** `ttrpg-phase1` is merged to master and released as 1.3.3. All 37
    test files pass; run them with `PYTHONIOENCODING=utf-8` (a Windows console can't print a
    stat block's `−`).
-   **Next: Phase 4 (two columns)**, gated on its spike in the real engine; the user
-   approved the plan as written on 2026-11-12 (the plan is the Phase 4 entry).
+   **Phase 4 (two columns): the spike passed all six gates on 2026-11-12** (branch
+   `ttrpg-phase4`, unmerged; see "The spike as run" in the Phase 4 entry). The column engine
+   is in and inert; **next is the feature around it** (style editor, presets, `span` in the
+   editor, the leftovers listed there). Unreleased beside it: the verso-margin fix the
+   spike found, which moves the text on every left-hand page of every book whose inside
+   and outside margins differ — ask the user before releasing it (1.3.4).
    Watch-outs: write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
    style editor's round trip, and a new book option must not be written into books that
@@ -2863,6 +2867,56 @@ doc_model / WYSIWYG round-trip:
     preview shows the real columns because it renders the PDF.
   - **Tests:** a `test_columns.py` built on the spike's checks, plus the word-count and
     loop guards.
+
+  **The spike as run (2026-11-12): all six gates pass, with our own column flowable, not
+  `BalancedColumns`.** The spike is `test_columns.py` (38th test file; gate 6 and the long
+  stat block skip without `make_long_book.py`'s output). What is in the engine now, inert
+  unless a style has `columns.count == 2` (nothing in the app sets it yet):
+  - **`ColumnRun`** (engine.py): one flowable in the page's one frame that lays its content
+    down two columns itself, splits what can split at a column's end, balances a run that
+    ends on the page (a binary search for the shortest height that holds everything) and
+    hands the rest back as another run. No page-template changes, so mirrored margins and
+    the footnote reservation apply to it like any flowable. A run that continues claims the
+    whole remaining page (anything set under it would be read before its second column).
+  - **Why not `BalancedColumns`** (tried first, same gates): it crashed on any
+    `KeepTogether` that had to move to the next column (`_FrameBreak.wrap should never be
+    called`, so every figure near a column's end); it draws through `KeepInFrame`, which
+    skips zero-size flowables (the `FnProbe` was lost: gate 4 failed until it got
+    `_ZEROSIZE`) and can shrink content silently; it ignores keep-with-next (16 headings
+    stranded at a column's foot in the long book); and it took 2.2× one column's time
+    against `ColumnRun`'s 1.2× (long book: 1.6 s one column, 1.9 s two, 3.5 s balanced).
+  - **`_build_story`** gathers a chapter's blocks into a run at column width (`avail_w` is
+    the column) and flushes it at a spanning block and at the chapter's end; `_spans`:
+    `span="yes"` on any doc block, and a `full` figure. The opener is outside the run.
+  - **`HeadingPara`**: the document never sees flowables inside a run, so `afterFlowable`
+    doesn't fire for them; a heading in a run reports itself as it is drawn
+    (`BookDoc._note_heading`: contents, bookmarks, running heads). `_Kept` stands in for
+    `KeepTogether` in a run (a picture and its caption), let go only if taller than a column.
+  - **Keep-with-next in a run**: any heading, and the space a boxed block opens with under
+    one, goes over with what it heads; a heading stands alone only when what follows is as
+    tall as a column (the document's `_postponed` retry). `##` subheads have no
+    `keepWithNext` in one column (only `###`/`####` do), so they can still end a page there.
+  - **Gate 4 decided: footnotes stay footnotes.** References are found by their link
+    annotations, which work inside a run; the notes are set full measure at the foot, and
+    the columns stop above them. No endnote fallback needed.
+  - **Gate 5:** something unsplittable and taller than a column fails cleanly as
+    `DoesNotFit` after one retry on a fresh page (`ColumnRun.identity` names the inner
+    flowable for `_does_not_fit`); a 120-entry stat block, a page-long boxed text and a
+    300-line poem cross columns and pages with every word kept.
+  - **A bug the spike found in the released app: verso pages never mirrored their
+    margins.** One frame was used for every page, so a verso's text kept the inside margin
+    on its outer edge while the running head, folio and footnotes were drawn mirrored
+    (since at least 1.2.0; the "Mirrored margins / parity" gotcha above was never true).
+    Fixed in `handle_pageBegin` (the frame's x follows parity), in CHANGELOG's Unreleased;
+    one-column output is otherwise word-for-word and y-for-y what 1.3.3 sets.
+  - **Leftovers for the feature:** the style editor's Columns section (count, gap, rule,
+    `balance_end`) and the presets; `span` in the editor's figure and table dialogs; a boxed
+    block's title bar can part from its body at a column's end (a table row split, as at a
+    page's end in one column); `PageBreak`s inside a run are not expected and not handled;
+    more than two columns; the EPUB and the rich editor need nothing.
+  - **Also seen, not fixed (one column too):** with a style whose chapters start on any
+    page (the three game styles) and a contents page, the first part divider is set on the
+    contents page itself (`need_break` starts False after the front matter).
 
   **Phase 5 — Index and page references** *(medium–large)*.
   - Inline markers `{index: Owlbear}` and `{index: Monsters > Owlbear}` (invisible in
