@@ -8,7 +8,11 @@ line here.
 
 ---
 
-## Unreleased
+## 1.7.0 — 12 November 2026
+
+Full-bleed pages. A book can now print to the edge of the paper: tick its
+bleed switch, and pictures marked `full="bleed"` and the style's page
+background run out past the trim, with every page marked for the printer.
 
 ### New
 
