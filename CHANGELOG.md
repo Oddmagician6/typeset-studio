@@ -8,7 +8,11 @@ line here.
 
 ---
 
-## Unreleased
+## 1.14.0 — 13 November 2026
+
+Picture books, last step: a picture book's ebook now keeps its pages. Every
+designed page shows as it does in print, with the words as real text a reader
+can enlarge.
 
 ### New
 
