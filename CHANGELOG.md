@@ -8,7 +8,11 @@ line here.
 
 ---
 
-## Unreleased
+## 1.10.0 — 12 November 2026
+
+Fillable character sheets. A designed page can carry boxes a reader types
+into or ticks in the PDF, and a page can be saved alone as a fillable
+handout.
 
 ### New
 
