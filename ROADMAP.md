@@ -77,8 +77,11 @@ Start here in a new session. Each item points at its full entry below.
    (2026-11-12)**, fixtures frozen (see "Follow-up: fillable character sheets" in the #74
    entry). Worth a hand check the tests can't make: open a fillable sheet in Acrobat or
    Chrome and confirm two boxes of one name fill together. **Children's books (#75)
-   come next** (user, 2026-11-12): early readers first (75a), its plan agreed and
-   being built on branch `early-readers` (see "75a plan" in the #75 entry).
+   come next** (user, 2026-11-12): early readers first (75a), **released as 1.11.0
+   (2026-11-12)**, fixtures frozen (see "75a as built" in the #75 entry); the user
+   hasn't yet tried the two styles in the app. **START HERE:** ask the user how the
+   styles look, then plan 75b, picture books (typed text in the page designer, square
+   and landscape trims, colour interiors in Send to print; fixed-layout EPUB later).
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
