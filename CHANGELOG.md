@@ -8,6 +8,29 @@ line here.
 
 ---
 
+## Unreleased
+
+### New
+
+- **Page-by-page ebooks for picture books.** A picture book's ebook is now a
+  fixed-layout EPUB: every designed page keeps the size and layout it has in
+  print, two pages side by side when the reader is turned sideways, with a
+  spread across both. The words are real text set over the art in the page's
+  own fonts, line for line where the printed page has them. Shops ask for this
+  in a children's ebook: KDP wants words a reader can enlarge, not words baked
+  into a picture. The file carries the settings Apple Books, Kobo and Kindle
+  each look for.
+- **Ebook layout**, on a book's settings: *Automatic* (page by page for a
+  picture book, flowing text for anything else), *Page by page* or *Flowing
+  text*, so any book with designed pages can choose.
+- **Ebook checks for a page-by-page book:** the fixed-layout settings, a size
+  on every page and every typeface in the file. Two more rows name anything
+  that won't look as it does in print. Text typed between pages has no place
+  on a page, so it is left out and quoted. A shape or picture drawn over words
+  is flagged, because the ebook always sets the words on top.
+
+---
+
 ## 1.13.0 — 13 November 2026
 
 Picture books, second step: a page plan to lay the whole book out in order,

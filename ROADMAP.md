@@ -86,8 +86,11 @@ Start here in a new session. Each item points at its full entry below.
    (2026-11-13)**, fixtures frozen (see "75b-1 as built"). **75b-2 (the page plan) is released as
    1.13.0 (2026-11-13)**, fixtures frozen (see "75b-2 as built"), so #75b is done. **START
    HERE (hand-off after 1.13.0):** master is released as 1.13.0, pushed and clean, every
-   test file passes. #75 has one piece left, agreed for later: a fixed-layout EPUB for
-   picture books. Ask the user what comes next. Hand checks the tests can't make: a
+   test file passes. #75 has one piece left: a fixed-layout EPUB for picture books,
+   **chosen as next by the user on 2026-11-13 and planned as 75c** (see "75c plan" in
+   the #75 entry). **75c is built on branch `fixed-layout-epub`** (spike passed; see
+   "75c as built"), and all 48 test files pass. Not yet merged or released: next is
+   the user's look, then 1.14.0. Hand checks the tests can't make: a
    colour interior through KDP's previewer, and real drag-and-drop by mouse on the page
    plan in the desktop window (the test sends synthetic drag events).
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
@@ -3410,6 +3413,92 @@ doc_model / WYSIWYG round-trip:
   throwaway folders and covers the model, the layout against real builds, the
   checks, the app routes, a new picture book built end to end to 24 pages, and
   a headless-Chrome run (drag, take out, put back, + Page).
+
+  **75c plan (fixed-layout ebook), agreed with the user 2026-11-13 (all as
+  recommended):** branch `fixed-layout-epub`, target 1.14.0. Why now: picture-book
+  ebooks must be fixed-layout, and per the KDP guides (2026) their words must be live
+  text, not baked into the picture, which today's image pages are.
+  - **Each designed page is an XHTML page** at the trim (viewport ~150 px/in). The
+    art is one JPG of the design without its text elements (pictures, shapes,
+    vectors, barcodes and fields). The words are live text over it: each line placed
+    absolutely from `wrap_design.text_layout` (the PDF's own breaks and offsets,
+    tracking, justified word positions, rotation, colour, opacity), fonts embedded,
+    `font-kerning: none` and ligatures off so widths match ReportLab's.
+  - **Spreads** are a left and a right page (`page-spread-left/right`). Each shows the
+    whole spread, clipped at the fold, so a line across the fold reads across it.
+    Blanks follow `page_plan.layout()` so spreads stay paired. The cover comes first.
+  - **Metadata:** `rendition:layout pre-paginated`, `rendition:spread`, orientation,
+    plus Kindle's `fixed-layout`, `original-resolution` and `book-type` children.
+  - **Which books:** a picture book by default. A new book option "Ebook layout: page
+    by page / flowing text" lets any book choose; it's written only once used.
+  - **Text between page fences is left out, with a warning** naming each piece. A
+    shape or picture over words (the ebook draws text on top) is warned too.
+  - `epub.check` gains fixed-layout rows (the metadata, a viewport on every page,
+    fonts present); the device preview shows whole pages scaled, not reflowed.
+  - **Spike first (go/no-go):** one design with justified, tracked and rotated text
+    rendered in headless Chrome and diffed against the PDF render. If the text
+    doesn't land where the print puts it, stop and check with the user.
+  - `test_fixed_layout.py` in throwaway folders: metadata, pages and pairing, the
+    same line breaks as the PDF, fonts, the warnings, the Chrome diff, and a new
+    picture book end to end.
+
+  **The spike as run (2026-11-13, `spikes/fixed_layout/spike.py`): PASSED.** An 8.5×8.5
+  page at 150 px/in with centred, justified + tracked, rotated, right-aligned and
+  translucent text in Andika, EB Garamond and Cinzel. Every text box lands within 1 px
+  of the PDF render (best shift −1,−1 on all four boxes, the same way each time, so
+  it's raster sampling), and the diff is glyph outlines only, with the same breaks and
+  word positions. What makes it metric-proof: each `@font-face` sets
+  `ascent-override` / `descent-override` to ReportLab's `face.ascent` / `face.descent`
+  with `line-gap-override: 0%`, and the line-height is size × (ascent + descent), so
+  the baseline sits at top + ascent × size in any engine that honours the overrides
+  (Blink, WebKit 17+, Gecko). Each run is a `white-space: pre` span with kerning and
+  ligatures off.
+
+  **75c as built (branch `fixed-layout-epub`, 2026-11-13):** `fixed_epub.py`;
+  `epub.build_epub` hands over to `fixed_epub.build` when `fixed_epub.wanted(meta)`
+  (`meta['ebook_layout'] == 'fixed'`), so every build path (Generate, Rebuild all,
+  Send to publish) gets it with no changes. `sequence(ms, designs)` walks the
+  parsed chapters. Page blocks become pages, numbered as `page_plan.layout` numbers
+  them (a spread opens on a left page, `side=` honoured, blanks put in), and the
+  test holds the two together. Every other block, and a chapter's title, byline,
+  tagline or part title, goes on the left-out list, and so does a design the book
+  doesn't have. Pages are `pageNNN.xhtml` with a 150 px/in viewport. The art is
+  `render_page` of the design minus its text elements, at `art_dpi` (225, less
+  for a trim whose art would pass 4 MP, Apple's ceiling). A spread's art is
+  rendered once and cut into `-l` / `-r` halves. The words come from `words_html`,
+  which puts every run of `text_layout` in a `.t` box (a rotated box turns about
+  its corner); a right page moves the whole spread's words one trim to the left,
+  and `overflow: hidden` clips them. Fonts go in as `fonts/<file>` (`font/ttf`),
+  one `@font-face` each, named `ts0`, `ts1` and so on. The art's alt text is the
+  fence's own words, otherwise `role="presentation"` (the words are live). The
+  spine is `page-progression-direction="ltr"`: the cover first (`rendition:page-spread-center`,
+  its own viewport from the image), then pages alternate right/left. The OPF
+  carries `rendition:layout/orientation/spread` plus Kindle's `fixed-layout`,
+  `original-resolution`, `book-type` children, `orientation-lock` and
+  `primary-writing-mode`; its accessibility block is fixed-layout specific. The
+  nav has a toc (Cover, Beginning) and a hidden `page-list`.
+  **Checks:** `epub.check` reads the file. When the OPF is pre-paginated it adds
+  Fixed layout (Kindle's two keys), Page size (a viewport on every spine document)
+  and Fonts (every CSS `url()` in the zip and the manifest). What the file can't
+  show comes from `fixed_epub.notes(ms, meta, preset)`, which `app._epub_checks` /
+  `_epub_preflight` append when they're given the parsed manuscript and meta (the
+  four call sites pass them). Its rows are Text between pages, Missing page
+  designs, Words under art (`covered_words`: a later non-text element overlapping
+  a text box) and Designed pages (none at all).
+  **App:** `EBOOK_LAYOUTS = ('', 'fixed', 'flow')`. `ebook_layout(proj)` gives a
+  chosen value, otherwise 'fixed' for a picture book and 'flow' for anything else
+  (an unknown value is treated as no choice). The Edit page's "Ebook layout"
+  select sits beside Format and is written only once used.
+  `_project_meta['ebook_layout']`. Send to publish's page and spec sheet say "fixed
+  layout" (`info['ebook_fixed']`).
+  **Not done:** the device preview (#53) lives on the Generate page, which has no
+  page designs, so a page-by-page book never reaches it. Nothing here was tried
+  on a real device or in KDP's previewer; that's a hand check.
+  `test_fixed_layout.py` (throwaway folders) covers the pages against the plan's
+  layout, the file and its checks, the words against the PDF (runs, lines, word
+  positions, tracking, no words in the art, spreads, rotation), the notes, the
+  app (the setting, a build, Send to publish) and a headless-Chrome page diffed
+  against the PDF render.
 
 These grow *what* the app does; per the strategy note below, **packaging still grows *who* uses
 it**, and remains the bigger lever for a free+donate app. Rank poetry ≈ anthologies (cheap,

@@ -1334,6 +1334,41 @@ def check(path):
             'Access modes, features and summary declared' if a11y >= 3 else
             'Missing — shops increasingly require it (EAA)')
 
+        # --- a page-by-page book (#75c): what makes a reader keep its pages ---
+        if re.search(rb'property="rendition:layout">\s*pre-paginated', opf_raw):
+            kindle = (b'name="fixed-layout" content="true"' in opf_raw
+                      and b'name="original-resolution"' in opf_raw)
+            add('Fixed layout', kindle,
+                'Declared page by page, for EPUB 3 readers and for Kindle' if kindle else
+                'Declared for EPUB 3 readers but not for Kindle (fixed-layout and '
+                'original-resolution) — KDP turns such a picture book away')
+            no_size = []
+            for s in spine:
+                d = items.get(s)
+                if not d or d['type'] != 'application/xhtml+xml' \
+                        or full(d['href']) not in names:
+                    continue
+                head = zf.read(full(d['href'])).decode('utf-8', 'replace')
+                if not re.search(r'<meta\s+name="viewport"\s+content="width=\d+,\s*'
+                                 r'height=\d+"', head):
+                    no_size.append(d['href'])
+            add('Page size', not no_size,
+                f'Every one of the {len(spine)} pages states its size' if not no_size else
+                'No size (viewport) on: ' + ', '.join(no_size[:4]))
+            lost = []
+            for d in items.values():
+                if d['type'] != 'text/css' or full(d['href']) not in names:
+                    continue
+                css = zf.read(full(d['href'])).decode('utf-8', 'replace')
+                for url in re.findall(r"url\(['\"]?([^'\")]+)['\"]?\)", css):
+                    target = posixpath.normpath(posixpath.join(
+                        posixpath.dirname(full(d['href'])), url))
+                    if target not in names or target not in manifested:
+                        lost.append(url)
+            add('Fonts', not lost,
+                'Every typeface the pages use is in the book' if not lost else
+                'Not in the book: ' + ', '.join(sorted(set(lost))[:4]))
+
     return out
 
 
@@ -1554,6 +1589,9 @@ def _collect_figures(chapters, extra=()):
 # ---------------------------------------------------------------- public API
 def build_epub(manuscript, preset, out_path, meta):
     """Write an EPUB 3 file to out_path. Returns out_path."""
+    import fixed_epub
+    if fixed_epub.wanted(meta):        # a picture book, page by page (#75c)
+        return fixed_epub.build(manuscript, preset, out_path, meta)
     uid      = 'urn:uuid:' + str(uuid.uuid4())
     modified = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     chapters = _apply_note_markers(manuscript['chapters'])

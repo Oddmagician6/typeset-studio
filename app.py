@@ -38,6 +38,7 @@ from werkzeug.utils import secure_filename
 
 import engine
 import epub
+import fixed_epub
 import manuscript
 import checker
 import matter
@@ -1024,32 +1025,40 @@ def _press_report(pdf_name, build_result):
         return None
 
 
-def _epub_checks(path):
+def _epub_checks(path, ms=None, meta=None, preset=None):
     """Our EPUB checks for a file anywhere on disk, plus epubcheck if installed.
 
     Takes a path rather than a name in `OUT_DIR` because the publish package
     (#67) builds its ebook in a temp folder and zips it — the same rows have to
     reach the package page and `PUBLISH-SPEC.txt`.
+
+    A page-by-page ebook (#75c) adds what it left out of the book, which the
+    file alone can't show: given the parsed manuscript and the build's meta.
     """
     try:
         checks = epub.check(path)
     except Exception:
         logging.exception('EPUB preflight failed')
         return None
+    if ms is not None and fixed_epub.wanted(meta):
+        try:
+            checks += fixed_epub.notes(ms, meta, preset)
+        except Exception:
+            logging.exception('page-by-page ebook notes failed')
     extra = _run_epubcheck(path)
     if extra:
         checks.append(extra)
     return checks
 
 
-def _epub_preflight(epub_name):
+def _epub_preflight(epub_name, ms=None, meta=None, preset=None):
     """Checks for a just-built EPUB, or None if this book didn't make one."""
     if not epub_name:
         return None
     path = os.path.join(OUT_DIR, epub_name)
     if not os.path.exists(path):
         return None
-    return _epub_checks(path)
+    return _epub_checks(path, ms, meta, preset)
 
 
 def _cover_jpeg_size(path):
@@ -4441,7 +4450,7 @@ def generate():
                            chapters=chapters, ms_path=ms_path, ms_type=ms_type,
                            cover_path=cover_path, from_project=None, fmt=fmt,
                            spec=spec, preflight=preflight, press=press,
-                           epub_preflight=_epub_preflight(epub_name))
+                           epub_preflight=_epub_preflight(epub_name, ms, meta, preset))
 
 
 # ----------------------------------------------------------------- preview
@@ -4991,6 +5000,8 @@ def project_edit(pid):
                if 'bleed' in form or 'bleed' in proj else {}),
             **({'picture_book': 'picture_book' in form}
                if 'picture_book' in form or 'picture_book' in proj else {}),
+            **({'ebook_layout': choice('ebook_layout', EBOOK_LAYOUTS, '')}
+               if form.get('ebook_layout') or 'ebook_layout' in proj else {}),
             # on when a book doesn't say: written once it differs from that
             **{k: k in form for k in ON_FLAGS
                if (k in form) != proj.get(k, True) or k in proj},
@@ -5615,7 +5626,8 @@ def project_generate(pid):
                            ms_type=proj.get('manuscript_type', 'file'),
                            cover_path=res['cover_path'], from_project=pid, fmt=res['fmt'],
                            spec=spec, preflight=preflight, press=press,
-                           epub_preflight=_epub_preflight(epub_name))
+                           epub_preflight=_epub_preflight(epub_name, res['ms_parsed'],
+                                                          res['meta'], preset))
 
 
 @app.route('/project/<pid>/rebuild', methods=['POST'])
@@ -5641,7 +5653,8 @@ def project_rebuild(pid):
     if res['build_result']:
         issues += issue_rows(_preflight(res['build_result'], res['preset'], res['page_count']))
     if res['epub_name']:
-        issues += issue_rows(_epub_checks(os.path.join(OUT_DIR, res['epub_name'])))
+        issues += issue_rows(_epub_checks(os.path.join(OUT_DIR, res['epub_name']),
+                                          res['ms_parsed'], res['meta'], res['preset']))
     return jsonify(
         ok=True, pages=res['page_count'], warnings=res['warnings'],
         issues=[f"{c['label'].strip()}: {c['detail']}" for c in issues],
@@ -5728,9 +5741,23 @@ def _project_meta(proj):
         # across the fold of a paperback's spreads
         'picture_book':  bool(proj.get('picture_book')),
         'print_binding': proj.get('print_binding') or PRINT_DEFAULTS['print_binding'],
+        'ebook_layout':  ebook_layout(proj),
         **{k: proj.get(k, '') for k in matter.KEYS},
     }
     return meta, cover_path
+
+
+# How a book's ebook is laid out (#75c): 'fixed' is page by page (a picture
+# book's), 'flow' the reflowable text every other book has. A book that never
+# chose ('' or no key) follows its picture-book flag.
+EBOOK_LAYOUTS = ('', 'fixed', 'flow')
+
+
+def ebook_layout(proj):
+    chosen = proj.get('ebook_layout', '')
+    if chosen in ('fixed', 'flow'):
+        return chosen
+    return 'fixed' if proj.get('picture_book') else 'flow'
 
 
 # ------------------------------------------------------------ send to print
@@ -5962,7 +5989,7 @@ def build_print_package(proj, scope='print'):
                 epub.build_epub(ms, preset, ebook, emeta)
                 files[edir + os.path.basename(ebook)] = ebook
                 ebook_built = True
-                epub_checks = _epub_checks(ebook)
+                epub_checks = _epub_checks(ebook, ms, emeta, preset)
                 if epub_checks is None:
                     # The ebook ships either way; what it must not do is ship with
                     # the checks card simply missing, as if nothing were outstanding.
@@ -5993,6 +6020,7 @@ def build_print_package(proj, scope='print'):
             'epub': (sorted(epub_checks, key=lambda c: c['ok']) if epub_checks
                      else epub_checks),
             'cover_px': cover_px,
+            'ebook_fixed': fixed_epub.wanted(meta),
             'title': meta['title'] or proj.get('name', ''), 'author': meta['author'],
             'retailer': retailer, 'retailer_label': WRAP_RETAILERS[retailer]['label'],
             'binding': binding, 'paper_label': _PAPER[paper]['label'],
@@ -6117,7 +6145,9 @@ def _print_spec_text(info, names):
     ]
     if info.get('ebook'):
         px = info.get('cover_px')
-        lines.append('  Ebook        EPUB 3, reflowable — one file for every shop')
+        lines.append('  Ebook        EPUB 3, fixed layout (page by page, words as live '
+                     'text) — one file for every shop' if info.get('ebook_fixed') else
+                     '  Ebook        EPUB 3, reflowable — one file for every shop')
         lines.append(f'  Ebook cover  {px[0]}x{px[1]} px JPEG' if px else
                      '  Ebook cover  not rendered — see checks')
     lines += ['', 'FILES']
