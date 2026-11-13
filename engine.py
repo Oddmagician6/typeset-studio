@@ -5752,14 +5752,27 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             c.get('number_format', 'Chapter {n}').format(n=_numbers[idx - 1])
             if _numbers[idx - 1] is not None else '')
         story.append(TocMarker(idx, ch.get('title'), ch.get('part'), label=_label))
-        story.append(Spacer(1, c['sink'] * inch))
         # chapter-opening art: over the number, or under the title/byline
         art = _chapter_art(preset, avail_w, text_h)
         art_pos = chapter_art_position(preset)
+        # a chapter with no heading at all that opens on a designed page (a
+        # picture book, #75b): no opener space, so the page can start right
+        # here rather than after a blank one (the frame is still at its top)
+        _blocks = ch.get('blocks') or []
+        bare = (not ch['title'] and not ch.get('byline') and not ch.get('tagline')
+                and not art
+                and not (c.get('show_number', True) and _numbers[idx - 1] is not None)
+                and bool(_blocks) and _blocks[0][0] == 'doc_block'
+                and len(_blocks[0]) >= 3 and _blocks[0][2].get('_type') == 'page')
+        if bare:
+            if _anchors[idx - 1]:
+                story.append(AnchorMark(_anchors[idx - 1]))
+        else:
+            story.append(Spacer(1, c['sink'] * inch))
         if art and art_pos == 'above':
             story.extend(art)
         # Destinations for in-book links: `[see](#chapter-2)` or the title's slug.
-        anchors = ''.join(_anchor_tag(a) for a in _anchors[idx - 1])
+        anchors = '' if bare else ''.join(_anchor_tag(a) for a in _anchors[idx - 1])
         heading_names = targets['headings'][idx - 1]
         if c.get('show_number', True) and _numbers[idx - 1] is not None:
             label = c.get('number_format', 'Chapter {n}').format(n=_numbers[idx - 1])
@@ -5779,7 +5792,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             story.append(Paragraph(_ms_inline(ch['tagline'], sq), st['chap_tagline']))
         if art and art_pos == 'below':
             story.extend(art)
-        story.append(Spacer(1, c['after_title'] * inch))
+        if not bare:
+            story.append(Spacer(1, c['after_title'] * inch))
         opened = False
         flush_next = False  # paragraph right after scene/subhead: no indent
         # two columns (#74 Phase 4): the chapter's blocks gather into `story`
@@ -6771,7 +6785,25 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         'pages_missing':  pages_missing(manuscript, meta),
         'pages_bleed_wanted': [] if (bleed_on or screen) else
                               pages_to_edge(manuscript, meta, preset),
+        # a picture book (#75b-2): its own page-count check, and the spreads
+        # whose pictures cross the fold (what a paperback's binding swallows)
+        'picture_book':   bool(meta.get('picture_book')),
+        'binding':        meta.get('print_binding') or '',
+        'fold_art':       spreads_across_fold(manuscript, meta, preset)
+                          if meta.get('picture_book') else [],
     }
+
+
+def spreads_across_fold(ms, meta, preset):
+    """The spreads a book places with a picture or drawing across the fold."""
+    import wrap_design, page_plan
+    tw, th = preset['trim']['w'], preset['trim']['h']
+    out = []
+    for name in page_blocks(ms):
+        d = wrap_design.find_page(meta.get('page_designs') or [], name)
+        if d is not None and name not in out and page_plan.art_across_fold(d, tw, th):
+            out.append(name)
+    return out
 
 
 def pages_to_edge(ms, meta, preset):

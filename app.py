@@ -42,6 +42,7 @@ import manuscript
 import checker
 import matter
 import ornaments
+import page_plan
 import wrap_convert
 import wrap_design
 
@@ -278,7 +279,8 @@ BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'preset
              'created', 'updated', 'last_pdf', 'last_epub', 'last_print_package',
              'last_package_scope', 'last_screen_pdf')
 BOOK_FLAGS = ('include_toc', 'smartquotes', 'right_hand_starts', 'cover_overlay', 'press',
-              'screen_pdf', 'index_statblocks', 'index_cr', 'link_pages', 'bleed')
+              'screen_pdf', 'index_statblocks', 'index_cr', 'link_pages', 'bleed',
+              'picture_book')
 # the book flags that are on when a book doesn't say: the index options (#74
 # Phase 5a) and the page after an in-book link (Phase 5b)
 ON_FLAGS = ('index_statblocks', 'index_cr', 'link_pages')
@@ -929,6 +931,24 @@ def _preflight(build_result, preset, page_count):
                        'trim, because this book has no bleed: colour that reaches the edge may '
                        'show a white sliver where the cut wanders. Tick "Pages print to the '
                        'edge (bleed)" on the book\'s page')})
+    # a picture book (#75b-2)
+    if build_result.get('picture_book') and page_count:
+        problem = page_plan.count_problem(page_count)
+        checks.append({'label': 'Picture book pages', 'ok': not problem,
+                       'detail': problem or (f'{page_count} pages — a picture book\'s length, '
+                                             'in fours as printers fold them')})
+    folded = build_result.get('fold_art') or []
+    if folded:
+        hard = build_result.get('binding') in ('hardcover', 'jacket')
+        checks.append({
+            'label': 'Art across the fold', 'ok': hard,
+            'detail': (f'{len(folded)} spread(s) ({", ".join(folded[:3])}) run a picture across '
+                       'the fold. ' + (
+                           'A hardcover opens flatter, so little is lost — still keep faces '
+                           'and words a little way from the middle' if hard else
+                           'A paperback\'s binding swallows about 3/8" each side of the '
+                           'middle: keep faces, eyes and anything important out of it, or '
+                           'choose a hardcover under Send to print'))})
 
     missing = build_result.get('notes_unplaced', 0)
     if missing:
@@ -3406,6 +3426,15 @@ def page_designer_save(pid):
     proj['page_designs'] = designs
     proj['updated'] = saved
     save_project_file(pid, proj)
+    # renamed: the manuscript places it by its new name too (#75b-2), so the
+    # page plan and the build keep it where it was
+    # (a Word file or the sample is left as it is: rewriting would replace it)
+    if old is not None and name != was and proj.get('manuscript_type') != 'sample' \
+            and not proj.get('manuscript_file', '').lower().endswith('.docx'):
+        text = _project_manuscript_text(proj, report_import=False)
+        moved = page_plan.rename(text, was, name, key=wrap_design.page_name)
+        if moved != text and page_plan.readable(text):
+            _store_manuscript(pid, proj, moved)
     return jsonify(ok=True, name=name, saved=saved, designs=_page_info(proj)['designs'])
 
 
@@ -3476,6 +3505,300 @@ def page_designer_sheet(pid):
         return jsonify(ok=False, error=f'The sheet could not be built: {exc}')
     return jsonify(ok=True, fields=wrap_design.field_count(design),
                    pdf=url_for('download', fn=fn))
+
+
+# ------------------------------------------------------------ page plan (#75b-2)
+# A storyboard of a book's designed pages, in page order. It reads the order
+# from the manuscript's `~~~ page` fences and writes it back there (page_plan.py),
+# so a build, the EPUB and the editor's page picker see exactly what they saw.
+PLAN_THUMBS = '_plan_thumbs'       # under OUT_DIR
+PLAN_THUMB_DPI = 36
+
+
+def _plan_numbered(proj):
+    """Whether the plan can number pages: nothing generated comes before the
+    first design (front matter, contents)."""
+    return proj.get('front_matter', 'full') == 'none' and not proj.get('include_toc')
+
+
+def _plan_data(pid, proj, text=None):
+    text = _project_manuscript_text(proj, report_import=False) if text is None else text
+    items = page_plan.split(text)
+    designs = _page_designs(proj)
+    numbered = _plan_numbered(proj)
+    slots, pages = page_plan.layout(items, designs, wrap_design.find_page, wrap_design.is_spread)
+    if not numbered:
+        slots = [{'item': i, 'pages': []} for i in range(len(items))]
+        pages = None
+    placed = set()
+    out = []
+    for i, it in enumerate(items):
+        if it['kind'] == 'page':
+            d = wrap_design.find_page(designs, it['src'])
+            placed.add(wrap_design.page_name(it['src']))
+            out.append({'kind': 'page', 'i': i, 'src': it['src'], 'side': it['side'],
+                        'exists': d is not None, 'spread': wrap_design.is_spread(d),
+                        'saved': (d or {}).get('saved', ''),
+                        'words': wrap_design.page_words(d)[:160] if d else ''})
+        else:
+            lines = [ln for ln in it['text'].split('\n') if ln.strip()]
+            out.append({'kind': 'text', 'i': i, 'lines': len(lines),
+                        'preview': ' '.join(' '.join(lines[:3]).split())[:140]})
+    unplaced = [{'name': d['name'], 'spread': wrap_design.is_spread(d), 'saved': d.get('saved', '')}
+                for d in designs if wrap_design.page_name(d['name']) not in placed]
+    problem = page_plan.count_problem(pages) if proj.get('picture_book') else ''
+    return {'ok': True, 'rev': _ms_rev(text), 'readable': page_plan.readable(text, items),
+            'picture_book': bool(proj.get('picture_book')), 'numbered': numbered,
+            'pages': pages, 'problem': problem, 'trim': _page_trim(proj),
+            'items': out, 'slots': slots, 'unplaced': unplaced,
+            'bleed': bool(proj.get('bleed'))}
+
+
+@app.route('/project/<pid>/plan', endpoint='page_plan')
+def page_plan_view(pid):
+    proj = load_project(pid)
+    return render_template('page_plan.html', pid=pid, proj=proj,
+                           data=_plan_data(pid, proj))
+
+
+@app.route('/project/<pid>/plan/data')
+def page_plan_data(pid):
+    return jsonify(_plan_data(pid, load_project(pid)))
+
+
+def _plan_write(pid, proj, rev, build):
+    """Rewrite the manuscript from the plan: `build(items)` returns the new
+    pieces, or a refusal string. Refused when the manuscript changed since
+    the plan was read, or when the plan can't read it as the book does."""
+    current = _project_manuscript_text(proj, report_import=False)
+    if rev != _ms_rev(current):
+        return jsonify(ok=False, conflict=True,
+                       error='The manuscript changed since this plan was opened '
+                             '(in the editor, or another tab). The plan has been '
+                             'brought up to date: try that again.',
+                       data=_plan_data(pid, proj, current)), 409
+    items = page_plan.split(current)
+    if not page_plan.readable(current, items):
+        return jsonify(ok=False, error='The plan can\'t safely rearrange this manuscript: its '
+                                       'page blocks are written in a way it doesn\'t read as the '
+                                       'book does. Move them in the manuscript editor instead.')
+    new = build(items)
+    if isinstance(new, str):
+        return jsonify(ok=False, error=new)
+    text = page_plan.join(new)
+    if text != _norm_newlines(current):
+        if not text.strip():
+            return jsonify(ok=False, error='That would leave the manuscript empty.')
+        _store_manuscript(pid, proj, text)
+    return jsonify(_plan_data(pid, proj, text))
+
+
+@app.route('/project/<pid>/plan/save', methods=['POST'])
+def page_plan_save(pid):
+    """The plan in its new order: [{"text": i} | {"page": i} | {"src": name}],
+    `i` the piece's place in the plan as read. Every piece of text has to come
+    back once; a page left out is taken off the plan (its design is kept)."""
+    proj = load_project(pid)
+    body = request.get_json(silent=True) or {}
+    order = body.get('order')
+    designs = _page_designs(proj)
+
+    def build(items):
+        if not isinstance(order, list):
+            return 'That plan could not be read.'
+        new, used = [], set()
+        for o in order:
+            if not isinstance(o, dict):
+                return 'That plan could not be read.'
+            if 'src' in o:
+                d = wrap_design.find_page(designs, o.get('src'))
+                if d is None:
+                    return f'This book has no page called "{o.get("src")}".'
+                new.append({'kind': 'page', 'src': d['name'],
+                            'text': page_plan.fence(d['name'])})
+                continue
+            key = 'text' if 'text' in o else 'page'
+            i = o.get(key)
+            if not isinstance(i, int) or isinstance(i, bool) or not 0 <= i < len(items) \
+                    or items[i]['kind'] != key or i in used:
+                return 'That plan could not be read.'
+            used.add(i)
+            new.append(items[i])
+        if any(it['kind'] == 'text' and i not in used for i, it in enumerate(items)):
+            return 'The plan left out some of the manuscript\'s text, so nothing was changed.'
+        return new
+
+    return _plan_write(pid, proj, body.get('rev'), build)
+
+
+def _next_page_name(designs, stem):
+    n = 1
+    while wrap_design.find_page(designs, f'{stem}-{n}') is not None:
+        n += 1
+    return f'{stem}-{n}'
+
+
+def _blank_page_design(spread):
+    """A new page: a plain white page (or spread) ready for its art."""
+    return [{'id': 'page-bg', 'type': 'rect', 'fill': 'sheet' if spread else 'front',
+             'color': '#ffffff'}]
+
+
+@app.route('/project/<pid>/plan/add', methods=['POST'])
+def page_plan_add(pid):
+    """A new blank page or spread, saved with the book and placed in the plan
+    before piece `at` (at the end without one). Returns the plan and its name."""
+    proj = load_project(pid)
+    body = request.get_json(silent=True) or {}
+    spread = body.get('kind') == 'spread'
+    designs = _page_designs(proj)
+    name = _next_page_name(designs, 'spread' if spread else 'page')
+    at = body.get('at')
+    made = {}
+
+    def build(items):
+        pos = at if isinstance(at, int) and not isinstance(at, bool) and 0 <= at <= len(items) \
+            else len(items)
+        entry = {'name': name, 'elements': _blank_page_design(spread),
+                 'saved': datetime.now().isoformat(timespec='seconds')}
+        if spread:
+            entry['spread'] = True
+        proj['page_designs'] = designs + [entry]
+        made['yes'] = True
+        return items[:pos] + [{'kind': 'page', 'src': name, 'text': page_plan.fence(name)}] \
+            + items[pos:]
+
+    res = _plan_write(pid, proj, body.get('rev'), build)
+    resp = res[0] if isinstance(res, tuple) else res
+    data = resp.get_json()
+    if made and data.get('ok'):
+        save_project_file(pid, proj)    # the design, when the text was already written
+        data = _plan_data(pid, proj)
+        data['name'] = name
+        data['designer'] = url_for('wrap_designer', page=pid, design=name)
+        return jsonify(data)
+    return res
+
+
+@app.route('/project/<pid>/plan/thumb/<name>')
+def page_plan_thumb(pid, name):
+    """A page design's picture for the plan (a spread both pages wide), kept
+    until the design or the trim changes."""
+    proj = load_project(pid)
+    d = wrap_design.find_page(_page_designs(proj), name)
+    if d is None:
+        abort(404)
+    trim = _page_trim(proj)
+    key = hashlib.sha1(json.dumps([d.get('elements'), wrap_design.is_spread(d), trim],
+                                  sort_keys=True, default=str).encode('utf-8')).hexdigest()[:12]
+    folder = os.path.join(OUT_DIR, PLAN_THUMBS)
+    os.makedirs(folder, exist_ok=True)
+    fn = f'{secure_filename(pid) or "book"}-{wrap_design.page_name(name)}-{key}.jpg'
+    path = os.path.join(folder, fn)
+    if not os.path.exists(path):
+        try:
+            wrap_design.render_page(d, trim['w'], trim['h'], path, dpi=PLAN_THUMB_DPI)
+        except Exception:
+            logging.exception('Page plan picture failed')
+            abort(404)
+    resp = send_from_directory(folder, fn, mimetype='image/jpeg')
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+
+# ---- a new picture book (#75b-2) ----------------------------------------------------
+PICTURE_BOOK_STYLE = 'picture-book'
+
+
+def _pb_font(name):
+    """A font for a starter page: Andika as the Picture Book style sets it,
+    or the library's first face if it is gone."""
+    if wrap_design.font_file(name):
+        return name
+    ttf = [f for f in list_fonts() if f.lower().endswith('.ttf')]
+    return ttf[0] if ttf else name
+
+
+def picture_book_starters(title, subtitle, author, year, publisher, trim_w):
+    """The title, copyright and dedication pages of a new picture book, as
+    page designs, with the book's details in them."""
+    s = wrap_design.PAGE_SAFE + 0.25
+    w = round(trim_w - 2 * s, 3)
+    reg, bold, ital = (_pb_font('Andika-Regular.ttf'), _pb_font('Andika-Bold.ttf'),
+                       _pb_font('Andika-Italic.ttf'))
+    ink = '#2a2622'
+
+    def text(id_, y, words, font, size, leading=1.25, align='center', color=ink):
+        return {'id': id_, 'type': 'text', 'anchor': 'front', 'x': s, 'y': y, 'w': w,
+                'text': words, 'font': font, 'size': size, 'leading': leading,
+                'color': color, 'align': align, 'tracking': 0}
+
+    bg = {'id': 'page-bg', 'type': 'rect', 'fill': 'front', 'color': '#ffffff'}
+    title_els = [bg, text('title', 1.6, title or 'Title', bold, 40, 1.1)]
+    if subtitle:
+        title_els.append(text('subtitle', 3.1, subtitle, reg, 20))
+    title_els.append(text('author', 4.4, f'by {author}' if author else 'by Author', reg, 20))
+    if publisher:
+        title_els.append(text('publisher', 6.6, publisher, reg, 12))
+    who = author or 'Author'
+    lines = [f'Text copyright © {year} {who}',
+             f'Illustrations copyright © {year} {who}',
+             '',
+             'All rights reserved. No part of this book may be reproduced in any form '
+             'without written permission from the publisher, except for brief quotations '
+             'in a review.',
+             '',
+             'ISBN: (add yours)']
+    if publisher:
+        lines += ['', publisher]
+    copyright_els = [bg, text('copyright', 4.4, '\n'.join(lines), reg, 10, 1.35, 'left')]
+    dedication_els = [bg, text('dedication', 2.6, 'For …', ital, 20, 1.4)]
+    return [{'name': 'title-page', 'elements': title_els},
+            {'name': 'copyright', 'elements': copyright_els},
+            {'name': 'dedication', 'elements': dedication_els}]
+
+
+@app.route('/project/new-picture-book', methods=['POST'])
+def project_new_picture_book():
+    """A new book set up as a picture book: the Picture Book style, bleed, no
+    generated front matter, a colour paper, and starter title, copyright and
+    dedication pages in its plan."""
+    title = request.form.get('title', '').strip() or request.form.get('name', '').strip() \
+        or 'Untitled picture book'
+    author = request.form.get('author', '').strip()
+    pid = unique_project_id(_slug_or_blank(title) or 'picture-book')
+    presets = list_presets()
+    ids = [p['id'] for p in presets]
+    style = PICTURE_BOOK_STYLE if PICTURE_BOOK_STYLE in ids else (ids[0] if ids else '')
+    try:
+        trim_w = load_preset(style)['trim']['w']
+    except Exception:
+        trim_w = 8.5
+    now = datetime.now().isoformat(timespec='seconds')
+    year = str(datetime.now().year)
+    starters = picture_book_starters(title, '', author, year, '', trim_w)
+    for d in starters:
+        d['saved'] = now
+    ms_file = pid + '.md'
+    text = page_plan.join([{'text': page_plan.fence(d['name'])} for d in starters])
+    with open(os.path.join(PROJECT_MS_DIR, ms_file), 'w', encoding='utf-8', newline='') as f:
+        f.write(text)
+    data = {
+        'name': title, 'preset': style,
+        'title': title, 'subtitle': '', 'author': author, 'year': year, 'publisher': '',
+        'front_matter': 'none', 'right_hand_starts': False,
+        'cover_overlay': False, 'cover_color': 'light',
+        'format': 'pdf', 'include_toc': False, 'smartquotes': True,
+        'bleed': True, 'press': True, 'picture_book': True,
+        'print_paper': 'color',
+        'page_designs': starters,
+        **matter.blank(),
+        'manuscript_file': ms_file, 'manuscript_type': 'markdown',
+        'cover_file': '', 'last_pdf': '', 'last_epub': '',
+        'created': now, 'updated': now,
+    }
+    save_project_file(pid, data)
+    return redirect(url_for('page_plan', pid=pid))
 
 
 @app.route('/cover/wrap', methods=['POST'])
@@ -4666,6 +4989,8 @@ def project_edit(pid):
                if 'screen_pdf' in form or 'screen_pdf' in proj else {}),
             **({'bleed': 'bleed' in form}
                if 'bleed' in form or 'bleed' in proj else {}),
+            **({'picture_book': 'picture_book' in form}
+               if 'picture_book' in form or 'picture_book' in proj else {}),
             # on when a book doesn't say: written once it differs from that
             **{k: k in form for k in ON_FLAGS
                if (k in form) != proj.get(k, True) or k in proj},
@@ -5007,6 +5332,26 @@ def _ms_rev(text):
     return hashlib.sha1(_norm_newlines(text).encode('utf-8')).hexdigest()[:16]
 
 
+def _store_manuscript(pid, proj, text):
+    """Write a book's manuscript as its own Markdown file (an imported Word
+    file or the sample becomes one), keep a History snapshot, save the book."""
+    new_file = pid + '.md'
+    _atomic_write_text(os.path.join(PROJECT_MS_DIR, new_file), text)
+    snapshot_manuscript(pid, text)
+    old = proj.get('manuscript_file', '')
+    if old and old != new_file:
+        old_path = os.path.join(PROJECT_MS_DIR, old)
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
+    proj['manuscript_file'] = new_file
+    proj['manuscript_type'] = 'markdown'
+    proj['updated'] = datetime.now().isoformat(timespec='seconds')
+    save_project_file(pid, proj)
+
+
 @app.route('/project/<pid>/write/save', methods=['POST'])
 def project_write_save(pid):
     proj = load_project(pid)
@@ -5032,21 +5377,7 @@ def project_write_save(pid):
             return jsonify({'ok': False, 'conflict': True,
                             'snapshots': list_snapshots(pid)}), 409
         snapshot_manuscript(pid, current, reason='overwritten', force=True)
-    new_file = pid + '.md'
-    _atomic_write_text(os.path.join(PROJECT_MS_DIR, new_file), text)
-    snapshot_manuscript(pid, text)
-    old = proj.get('manuscript_file', '')
-    if old and old != new_file:
-        old_path = os.path.join(PROJECT_MS_DIR, old)
-        if os.path.exists(old_path):
-            try:
-                os.remove(old_path)
-            except OSError:
-                pass
-    proj['manuscript_file'] = new_file
-    proj['manuscript_type'] = 'markdown'
-    proj['updated'] = datetime.now().isoformat(timespec='seconds')
-    save_project_file(pid, proj)
+    _store_manuscript(pid, proj, text)
     parsed = manuscript.parse_markdown(text, smartquotes=False)
     return jsonify({'ok': True, 'saved_at': datetime.now().strftime('%H:%M:%S'),
                     'rev': _ms_rev(text),
@@ -5393,6 +5724,10 @@ def _project_meta(proj):
         'press':         proj.get('press', False),
         # a colour paper under Send to print makes the press PDF a colour one
         'colour_interior': _colour_paper(proj.get('print_paper')),
+        # a picture book's own checks (#75b-2): its page count, and pictures
+        # across the fold of a paperback's spreads
+        'picture_book':  bool(proj.get('picture_book')),
+        'print_binding': proj.get('print_binding') or PRINT_DEFAULTS['print_binding'],
         **{k: proj.get(k, '') for k in matter.KEYS},
     }
     return meta, cover_path

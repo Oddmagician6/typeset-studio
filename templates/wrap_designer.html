@@ -94,6 +94,8 @@
     <span id="wd-page-status"></span>
     <button class="btn" id="wd-page-save" type="button">Save to book</button>
     <button class="btn btn-sm btn-ghost" id="wd-page-delete" type="button">Delete</button>
+    {% if page_project %}<a class="btn btn-sm btn-ghost" id="wd-page-plan"
+       href="{{ url_for('page_plan', pid=page_project) }}" title="The book's pages in order">▦ Page plan</a>{% endif %}
   </div>
   {% else %}
   <div class="pagehead">

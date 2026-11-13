@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+{% set active = 'projects' %}
+{% block title %}Page plan · {{ proj.title or proj.name }} · Typeset Studio{% endblock %}
+
+{% block style %}
+  .pp-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+  .pp-bar .grow{flex:1}
+  .pp-count{font-size:14px}
+  .pp-count b{font-family:var(--serif);font-size:18px}
+  .pp-problem{color:var(--accent,#b0472a)}
+  .pp-ok{color:var(--muted)}
+  .pp-msg{min-height:20px;font-size:13px;color:var(--muted);margin:0 0 10px}
+  .pp-msg.err{color:var(--accent,#b0472a)}
+  .pp-note{color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5}
+
+  .pp-board{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:22px 26px}
+  .pp-opening{display:flex;flex-direction:column;gap:4px}
+  .pp-pair{display:grid;grid-template-columns:1fr 1fr;gap:0;box-shadow:var(--shadow)}
+  .pp-cap{display:grid;grid-template-columns:1fr 1fr;font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+  .pp-cap span:last-child{text-align:right}
+  .pp-cell{position:relative;aspect-ratio:var(--ar,1);background:var(--surface);border:1px solid var(--rule);
+           overflow:hidden;display:flex;align-items:center;justify-content:center}
+  .pp-cell.none{background:transparent;border-color:transparent;box-shadow:none}
+  .pp-cell.blank{background:repeating-linear-gradient(45deg,var(--surface) 0 6px,var(--surface-2) 6px 12px);
+                 border-style:dashed}
+  .pp-cell.blank small{font-size:10.5px;color:var(--muted);text-align:center;padding:6px;line-height:1.35}
+  .pp-cell img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none;flex:none}
+  /* a spread's picture is both pages wide: each half shows its own page of it */
+  .pp-cell.spread-left,.pp-cell.spread-right{background-size:200% 100%;background-repeat:no-repeat}
+  .pp-cell.spread-left{background-position:left center}
+  .pp-cell.spread-right{background-position:right center}
+  .pp-cell.spread-left{border-right:0}
+  .pp-cell.spread-right{border-left:1px dashed rgba(127,127,127,.5)}
+  .pp-cell.page{cursor:grab}
+  .pp-cell.missing{background:var(--surface-2)}
+  .pp-cell.missing small{color:var(--accent,#b0472a);font-size:11px;padding:6px;text-align:center}
+  .pp-cell.drop-before{box-shadow:inset 4px 0 0 var(--accent,#b0472a)}
+  .pp-cell .lbl{position:absolute;left:0;right:0;bottom:0;padding:3px 6px;font-family:var(--mono);font-size:10.5px;
+                background:rgba(0,0,0,.55);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pp-cell .x{position:absolute;top:3px;right:3px;border:0;border-radius:2px;background:rgba(0,0,0,.55);color:#fff;
+              font-size:12px;line-height:1;padding:3px 5px;cursor:pointer;display:none}
+  .pp-cell:hover .x{display:block}
+  .pp-cell.spread-left .x{display:none!important}
+
+  .pp-text{grid-column:1/-1;border:1px dashed var(--rule-strong);border-radius:3px;padding:10px 14px;
+           background:var(--surface-2);font-size:13px;color:var(--muted)}
+  .pp-text b{color:var(--ink);font-weight:600}
+  .pp-text .pv{font-family:var(--serif);font-style:italic;margin-top:3px;color:var(--ink)}
+  .pp-end{grid-column:1/-1;border:2px dashed var(--rule);border-radius:3px;padding:14px;text-align:center;
+          color:var(--faint);font-size:13px}
+  .pp-end.over{border-color:var(--accent,#b0472a);color:var(--ink)}
+
+  .pp-tray{margin-top:30px}
+  .pp-tray h2{font-family:var(--serif);font-size:18px;margin:0 0 4px}
+  .pp-tray p{color:var(--muted);font-size:13px;margin:0 0 10px}
+  .pp-tray .row{display:flex;flex-wrap:wrap;gap:14px}
+  .pp-un{width:150px;cursor:grab}
+  .pp-un .pp-cell{width:100%}
+  .pp-un .acts{display:flex;justify-content:space-between;font-size:12px;margin-top:4px}
+  .pp-un.wide{width:300px}
+{% endblock %}
+
+{% block body %}
+  <div class="pagehead">
+    <div class="eyebrow">{{ proj.title or proj.name }}</div>
+    <h1>Page plan</h1>
+    <p>The book's designed pages in printed order, two to an opening as a reader sees them.
+       Drag a page to move it, click one to open it in the page designer. The order is kept in
+       the manuscript as <code>~~~ page</code> blocks, so the build and the manuscript editor
+       follow it too.</p>
+  </div>
+
+  <div class="pp-bar">
+    <button class="btn btn-sm" id="pp-add-page" type="button">+ Page</button>
+    <button class="btn btn-sm" id="pp-add-spread" type="button">+ Spread</button>
+    <span class="grow"></span>
+    <span class="pp-count" id="pp-count"></span>
+    <a class="btn btn-sm btn-ghost" href="{{ url_for('project_write', pid=pid) }}">✍ Manuscript</a>
+    <a class="btn btn-sm btn-ghost" href="{{ url_for('project_edit', pid=pid) }}">Book settings</a>
+  </div>
+  <p class="pp-msg" id="pp-msg" role="status"></p>
+  <p class="pp-note" id="pp-note" hidden></p>
+
+  <div class="pp-board" id="pp-board"></div>
+
+  <div class="pp-tray" id="pp-tray" hidden>
+    <h2>Not in the plan</h2>
+    <p>Pages this book keeps that the manuscript doesn't place. Drag one into the plan, or put it at the end.</p>
+    <div class="row" id="pp-unplaced"></div>
+  </div>
+
+  <script id="pp-data" type="application/json">{{ data | tojson }}</script>
+  <script>
+  (function () {
+    var PID = {{ pid | tojson }};
+    var BASE = '/project/' + encodeURIComponent(PID) + '/plan';
+    var DESIGNER = {{ url_for('wrap_designer', page=pid) | tojson }};
+    var D = JSON.parse(document.getElementById('pp-data').textContent);
+    var board = document.getElementById('pp-board');
+    var msgEl = document.getElementById('pp-msg');
+    var busy = false, dragging = null;
+
+    function $(id) { return document.getElementById(id); }
+    function el(tag, cls, text) {
+      var e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    function msg(text, err) { msgEl.textContent = text || ''; msgEl.className = 'pp-msg' + (err ? ' err' : ''); }
+    function post(url, body) {
+      return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                         body: JSON.stringify(body)}).then(function (r) { return r.json(); });
+    }
+    function designerUrl(name) { return DESIGNER + '&design=' + encodeURIComponent(name); }
+    function thumb(name, saved) {
+      return BASE + '/thumb/' + encodeURIComponent(name) + '?v=' + encodeURIComponent(saved || '');
+    }
+
+    // ---- the order, and changing it ----------------------------------------------------
+    function order() {
+      return D.items.map(function (it) { return it.kind === 'text' ? {text: it.i} : {page: it.i}; });
+    }
+    function send(newOrder, done) {
+      if (busy) return;
+      busy = true; msg('Saving…');
+      post(BASE + '/save', {rev: D.rev, order: newOrder}).then(function (res) {
+        busy = false;
+        if (res.data) D = res.data;              // a conflict brings the plan up to date
+        else if (res.ok) D = res;
+        msg(res.ok ? 'Saved to the manuscript.' : res.error, !res.ok);
+        draw();
+        if (res.ok && done) done();
+      }).catch(function () { busy = false; msg('The plan could not be saved.', true); });
+    }
+    function move(from, before) {               // piece `from` to just before piece `before` (-1: the end)
+      var o = order(), piece = o[from];
+      var rest = o.filter(function (_, k) { return k !== from; });
+      var at = before < 0 ? rest.length : rest.indexOf(o[before]);
+      if (at < 0) at = rest.length;
+      rest.splice(at, 0, piece);
+      send(rest);
+    }
+    function place(name, before) {               // an unplaced design into the plan
+      var o = order(), at = before < 0 ? o.length : before;
+      o.splice(at, 0, {src: name});
+      send(o);
+    }
+    function remove(i) {
+      send(order().filter(function (_, k) { return k !== i; }));
+    }
+    function add(kind) {
+      if (busy) return;
+      busy = true; msg('Adding a ' + kind + '…');
+      post(BASE + '/add', {rev: D.rev, kind: kind}).then(function (res) {
+        busy = false;
+        if (res.data) D = res.data; else if (res.ok) D = res;
+        draw();
+        if (res.ok && res.designer) { window.location.href = res.designer; return; }
+        msg(res.error || '', !res.ok);
+      }).catch(function () { busy = false; msg('The page could not be added.', true); });
+    }
+    $('pp-add-page').onclick = function () { add('page'); };
+    $('pp-add-spread').onclick = function () { add('spread'); };
+
+    // ---- drawing ----------------------------------------------------------------------
+    function dropTarget(node, before) {
+      node.addEventListener('dragover', function (e) {
+        if (!dragging) return;
+        e.preventDefault(); node.classList.add(node.classList.contains('pp-end') ? 'over' : 'drop-before');
+      });
+      node.addEventListener('dragleave', function () { node.classList.remove('over', 'drop-before'); });
+      node.addEventListener('drop', function (e) {
+        e.preventDefault(); node.classList.remove('over', 'drop-before');
+        var d = dragging; dragging = null;
+        if (!d) return;
+        if (d.name) place(d.name, before);
+        else if (d.i !== before) move(d.i, before);
+      });
+    }
+    function pageCell(it, half) {
+      var c = el('div', 'pp-cell page' + (half ? ' spread-' + half : ''));
+      if (!it.exists) {
+        c.classList.add('missing');
+        c.appendChild(el('small', '', 'No design called “' + (it.src || '?') + '” — a grey page prints here'));
+      } else if (half) {
+        c.style.backgroundImage = 'url("' + thumb(it.src, it.saved) + '")';
+        c.setAttribute('role', 'img'); c.setAttribute('aria-label', it.words || it.src);
+      } else {
+        var img = new Image(); img.alt = it.words || it.src; img.loading = 'lazy';
+        img.src = thumb(it.src, it.saved); c.appendChild(img);
+      }
+      if (half !== 'right') {
+        var side = it.side !== 'any' && !it.spread ? ' · ' + it.side + '-hand' : '';
+        c.appendChild(el('div', 'lbl', (it.src || '(no name)') + side));
+      }
+      c.title = it.exists ? 'Open “' + it.src + '” in the page designer (drag to move)' : '';
+      c.draggable = true;
+      c.addEventListener('dragstart', function () { dragging = {i: it.i}; });
+      c.addEventListener('dragend', function () { dragging = null; });
+      c.addEventListener('click', function () { if (it.exists) window.location.href = designerUrl(it.src); });
+      if (half !== 'left') {
+        var x = el('button', 'x', '✕'); x.type = 'button';
+        x.title = 'Take this page out of the plan (its design is kept, below)';
+        x.addEventListener('click', function (e) { e.stopPropagation(); remove(it.i); });
+        c.appendChild(x);
+      }
+      dropTarget(c, it.i);
+      return c;
+    }
+    function blankCell(why) {
+      var c = el('div', 'pp-cell blank');
+      c.appendChild(el('small', '', 'blank page — ' + why));
+      return c;
+    }
+    function opening(left, right, nums) {
+      var o = el('div', 'pp-opening'), pair = el('div', 'pp-pair'), cap = el('div', 'pp-cap');
+      pair.appendChild(left || el('div', 'pp-cell none'));
+      pair.appendChild(right || el('div', 'pp-cell none'));
+      o.appendChild(pair);
+      cap.appendChild(el('span', '', nums[0] ? 'p. ' + nums[0] : ''));
+      cap.appendChild(el('span', '', nums[1] ? 'p. ' + nums[1] : ''));
+      o.appendChild(cap);
+      return o;
+    }
+    function textPiece(it) {
+      var t = el('div', 'pp-text');
+      var b = el('b', '', 'Text in the manuscript'); t.appendChild(b);
+      t.appendChild(document.createTextNode(' · ' + it.lines + ' line' + (it.lines === 1 ? '' : 's') +
+        ', kept where it is (edit it in the manuscript). Page numbers after it depend on how it sets.'));
+      t.appendChild(el('div', 'pv', it.preview));
+      dropTarget(t, it.i);
+      return t;
+    }
+
+    function draw() {
+      board.innerHTML = '';
+      board.style.setProperty('--ar', D.trim.w + ' / ' + D.trim.h);
+      document.documentElement.style.setProperty('--ar', D.trim.w + ' / ' + D.trim.h);
+      // the count
+      var count = $('pp-count');
+      count.innerHTML = '';
+      if (D.pages != null) {
+        count.appendChild(el('b', '', String(D.pages)));
+        count.appendChild(document.createTextNode(' page' + (D.pages === 1 ? '' : 's') + ' '));
+        if (D.picture_book) count.appendChild(el('span', D.problem ? 'pp-problem' : 'pp-ok',
+          D.problem ? '— ' + D.problem.replace(/^\d+ pages: /, '') : '— a picture book\'s length'));
+      }
+      var note = $('pp-note'), notes = [];
+      if (!D.readable) notes.push('This manuscript places its pages in a way the plan can\'t safely rearrange, ' +
+        'so moving pages here is refused: move them in the manuscript editor.');
+      if (!D.numbered) notes.push('Page numbers show once the book has no generated front matter or contents ' +
+        '(its settings), as a picture book doesn\'t.');
+      if (!D.bleed && D.items.some(function (it) { return it.kind === 'page'; }))
+        notes.push('This book isn\'t set to print to the edge: art that reaches the trim may show a white sliver. ' +
+          'Tick “Pages print to the edge (bleed)” in its settings.');
+      note.hidden = !notes.length; note.textContent = notes.join(' ');
+
+      var byItem = {};
+      D.items.forEach(function (it) { byItem[it.i] = it; });
+      if (D.numbered) {
+        // openings: page 1 alone on the right, then 2-3, 4-5, …
+        var cells = {}, last = 0, tail = [];
+        D.slots.forEach(function (s) {
+          if (s.blank) { cells[s.blank] = blankCell(s.why); last = Math.max(last, s.blank); return; }
+          var it = byItem[s.item];
+          if (!s.pages.length) { tail.push(it); return; }
+          if (s.pages.length === 2) {
+            cells[s.pages[0]] = pageCell(it, 'left'); cells[s.pages[1]] = pageCell(it, 'right');
+          } else cells[s.pages[0]] = pageCell(it);
+          last = Math.max(last, s.pages[s.pages.length - 1]);
+        });
+        if (last) board.appendChild(opening(null, cells[1], [0, 1]));
+        for (var p = 2; p <= last; p += 2)
+          board.appendChild(opening(cells[p], cells[p + 1], [p, p + 1 <= last ? p + 1 : 0]));
+        tail.forEach(function (it) {
+          if (it.kind === 'text') board.appendChild(textPiece(it));
+          else board.appendChild(opening(it.spread ? pageCell(it, 'left') : null,
+                                         it.spread ? pageCell(it, 'right') : pageCell(it), [0, 0]));
+        });
+      } else {
+        D.items.forEach(function (it) {
+          if (it.kind === 'text') board.appendChild(textPiece(it));
+          else board.appendChild(opening(it.spread ? pageCell(it, 'left') : null,
+                                         it.spread ? pageCell(it, 'right') : pageCell(it), [0, 0]));
+        });
+      }
+      var end = el('div', 'pp-end', D.items.length ? 'Drop here to put a page at the end'
+        : 'No pages yet: add a page or a spread above');
+      dropTarget(end, -1);
+      board.appendChild(end);
+
+      // the tray
+      var tray = $('pp-unplaced');
+      tray.innerHTML = '';
+      $('pp-tray').hidden = !D.unplaced.length;
+      D.unplaced.forEach(function (u) {
+        var w = el('div', 'pp-un' + (u.spread ? ' wide' : ''));
+        var c = el('div', 'pp-cell');
+        if (u.spread) c.style.aspectRatio = (2 * D.trim.w) + ' / ' + D.trim.h;
+        var img = new Image(); img.alt = u.name; img.loading = 'lazy'; img.src = thumb(u.name, u.saved);
+        c.appendChild(img); c.appendChild(el('div', 'lbl', u.name));
+        w.appendChild(c);
+        var acts = el('div', 'acts');
+        var put = el('a', '', 'Put at the end'); put.href = '#';
+        put.onclick = function (e) { e.preventDefault(); place(u.name, -1); };
+        var open = el('a', '', 'Open'); open.href = designerUrl(u.name);
+        acts.appendChild(put); acts.appendChild(open);
+        w.appendChild(acts);
+        w.draggable = true;
+        w.addEventListener('dragstart', function () { dragging = {name: u.name}; });
+        w.addEventListener('dragend', function () { dragging = null; });
+        tray.appendChild(w);
+      });
+    }
+    draw();
+  })();
+  </script>
+{% endblock %}
