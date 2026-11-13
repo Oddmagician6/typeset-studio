@@ -84,13 +84,13 @@ Start here in a new session. Each item points at its full entry below.
    entry): **75b-1** colour print and picture-book trims first, a release of its own,
    then **75b-2** the page plan with starter designs. **75b-1 is released as 1.12.0
    (2026-11-13)**, fixtures frozen (see "75b-1 as built"). **75b-2 (the page plan) is released as
-   1.13.0 (2026-11-13)**, fixtures frozen (see "75b-2 as built"), so #75b is done. **START
-   HERE (hand-off after 1.13.0):** master is released as 1.13.0, pushed and clean, every
-   test file passes. #75 has one piece left: a fixed-layout EPUB for picture books,
-   **chosen as next by the user on 2026-11-13 and planned as 75c** (see "75c plan" in
-   the #75 entry). **75c is built on branch `fixed-layout-epub`** (spike passed; see
-   "75c as built"), and all 48 test files pass. Not yet merged or released: next is
-   the user's look, then 1.14.0. Hand checks the tests can't make: a
+   1.13.0 (2026-11-13)**, fixtures frozen (see "75b-2 as built"), so #75b is done. **75c
+   (the fixed-layout EPUB) is released as 1.14.0 (2026-11-13)** after the user tried it
+   ("looks good"), fixtures frozen (see "75c as built"), so **#75 is done**. **START
+   HERE (hand-off after 1.14.0):** master is released as 1.14.0, pushed and clean, every
+   test file passes. Nothing is chosen as next: ask the user. Candidates: the ebook
+   device preview (#53) for page-by-page books, which it doesn't show yet; checking a
+   page-by-page ebook in a real reader's WebKit. Hand checks the tests can't make: a
    colour interior through KDP's previewer, and real drag-and-drop by mouse on the page
    plan in the desktop window (the test sends synthetic drag events).
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
