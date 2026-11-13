@@ -8,7 +8,11 @@ line here.
 
 ---
 
-## Unreleased
+## 1.8.0 — 12 November 2026
+
+Designed pages. Lay out a whole page of the book by hand in the new Page
+designer (a handout, a map, a character sheet), save it to the book and
+place it anywhere in the text, on a right-hand or left-hand page if you like.
 
 ### New
 
