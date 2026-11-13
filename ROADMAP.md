@@ -3440,6 +3440,18 @@ doc_model / WYSIWYG round-trip:
     same line breaks as the PDF, fonts, the warnings, the Chrome diff, and a new
     picture book end to end.
 
+  **The spike as run (2026-11-13, `spikes/fixed_layout/spike.py`): PASSED.** An 8.5×8.5
+  page at 150 px/in with centred, justified + tracked, rotated, right-aligned and
+  translucent text in Andika, EB Garamond and Cinzel. Every text box lands within 1 px
+  of the PDF render (best shift −1,−1 on all four boxes, the same way each time, so
+  it's raster sampling), and the diff is glyph outlines only, with the same breaks and
+  word positions. What makes it metric-proof: each `@font-face` sets
+  `ascent-override` / `descent-override` to ReportLab's `face.ascent` / `face.descent`
+  with `line-gap-override: 0%`, and the line-height is size × (ascent + descent), so
+  the baseline sits at top + ascent × size in any engine that honours the overrides
+  (Blink, WebKit 17+, Gecko). Each run is a `white-space: pre` span with kerning and
+  ligatures off.
+
 These grow *what* the app does; per the strategy note below, **packaging still grows *who* uses
 it**, and remains the bigger lever for a free+donate app. Rank poetry ≈ anthologies (cheap,
 on-philosophy) above nonfiction (heavier), and all below distribution.
