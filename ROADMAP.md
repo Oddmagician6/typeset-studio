@@ -86,8 +86,9 @@ Start here in a new session. Each item points at its full entry below.
    (2026-11-13)**, fixtures frozen (see "75b-1 as built"). **75b-2 (the page plan) is released as
    1.13.0 (2026-11-13)**, fixtures frozen (see "75b-2 as built"), so #75b is done. **START
    HERE (hand-off after 1.13.0):** master is released as 1.13.0, pushed and clean, every
-   test file passes. #75 has one piece left, agreed for later: a fixed-layout EPUB for
-   picture books. Ask the user what comes next. Hand checks the tests can't make: a
+   test file passes. #75 has one piece left: a fixed-layout EPUB for picture books,
+   **chosen as next by the user on 2026-11-13 and planned as 75c** (see "75c plan" in
+   the #75 entry; spike first). Hand checks the tests can't make: a
    colour interior through KDP's previewer, and real drag-and-drop by mouse on the page
    plan in the desktop window (the test sends synthetic drag events).
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
@@ -3410,6 +3411,34 @@ doc_model / WYSIWYG round-trip:
   throwaway folders and covers the model, the layout against real builds, the
   checks, the app routes, a new picture book built end to end to 24 pages, and
   a headless-Chrome run (drag, take out, put back, + Page).
+
+  **75c plan (fixed-layout ebook), agreed with the user 2026-11-13 (all as
+  recommended):** branch `fixed-layout-epub`, target 1.14.0. Why now: picture-book
+  ebooks must be fixed-layout, and per the KDP guides (2026) their words must be live
+  text, not baked into the picture, which today's image pages are.
+  - **Each designed page is an XHTML page** at the trim (viewport ~150 px/in). The
+    art is one JPG of the design without its text elements (pictures, shapes,
+    vectors, barcodes and fields). The words are live text over it: each line placed
+    absolutely from `wrap_design.text_layout` (the PDF's own breaks and offsets,
+    tracking, justified word positions, rotation, colour, opacity), fonts embedded,
+    `font-kerning: none` and ligatures off so widths match ReportLab's.
+  - **Spreads** are a left and a right page (`page-spread-left/right`). Each shows the
+    whole spread, clipped at the fold, so a line across the fold reads across it.
+    Blanks follow `page_plan.layout()` so spreads stay paired. The cover comes first.
+  - **Metadata:** `rendition:layout pre-paginated`, `rendition:spread`, orientation,
+    plus Kindle's `fixed-layout`, `original-resolution` and `book-type` children.
+  - **Which books:** a picture book by default. A new book option "Ebook layout: page
+    by page / flowing text" lets any book choose; it's written only once used.
+  - **Text between page fences is left out, with a warning** naming each piece. A
+    shape or picture over words (the ebook draws text on top) is warned too.
+  - `epub.check` gains fixed-layout rows (the metadata, a viewport on every page,
+    fonts present); the device preview shows whole pages scaled, not reflowed.
+  - **Spike first (go/no-go):** one design with justified, tracked and rotated text
+    rendered in headless Chrome and diffed against the PDF render. If the text
+    doesn't land where the print puts it, stop and check with the user.
+  - `test_fixed_layout.py` in throwaway folders: metadata, pages and pairing, the
+    same line breaks as the PDF, fonts, the warnings, the Chrome diff, and a new
+    picture book end to end.
 
 These grow *what* the app does; per the strategy note below, **packaging still grows *who* uses
 it**, and remains the bigger lever for a free+donate app. Rank poetry ≈ anthologies (cheap,
