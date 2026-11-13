@@ -83,26 +83,13 @@ Start here in a new session. Each item points at its full entry below.
    planned with the user on 2026-11-13** (all as recommended; see "75b plan" in the #75
    entry): **75b-1** colour print and picture-book trims first, a release of its own,
    then **75b-2** the page plan with starter designs. **75b-1 is released as 1.12.0
-   (2026-11-13)**, fixtures frozen (see "75b-1 as built"). **START HERE (hand-off after
-   1.12.0, 2026-11-13):** master is released as 1.12.0, pushed and clean, every test
-   file passes. Next is **75b-2, the page plan** (see "75b plan" in the #75 entry; its
-   three questions are answered). Write a detailed plan and show it to the user before
-   building (they want a plan checked first), on a new branch, e.g. `picture-books-plan`.
-   Touch points: designs live in the book as `page_designs` (`app._page_designs`, routes
-   `/page-designer/<pid>` + `/save` `/delete` `/proof` `/sheet`; the designer opens at
-   `/wrap-designer?page=<pid>&design=<name>`); placement is the manuscript's
-   `~~~ page src="name" side="…"` fences (`engine._render_page_block`; a spread always
-   starts on a left page); thumbnails can come from `wrap_design.render_page` (a spread
-   renders one wide JPG; `is_spread`, `design_geometry`, `page_words`, `page_name`).
-   The page plan should read and rewrite those fences, so builds, the EPUB and the
-   manuscript editor's picker keep working unchanged. New books are made by
-   `/project/create` and `/project/new-draft`; a new picture book should set `bleed`,
-   `front_matter: 'none'`, `include_toc: False` and the `picture-book` style, plus three
-   starter designs (title, copyright, dedication) filled from the book's details. The
-   page-count check (24-48, a multiple of 4) and the art-across-the-fold warning
-   (paperback only; the designer already warns about *words* in the gutter) belong in
-   the preflight rows beside "Designed pages". A hand check the tests can't make: a
-   colour interior through KDP's previewer.
+   (2026-11-13)**, fixtures frozen (see "75b-1 as built"). **75b-2 (the page plan) is built on branch `picture-books-plan`**
+   (2026-11-13, see "75b-2 as built"), not yet merged or released. **START HERE:** let the
+   user try it (Projects, then "New picture book"; the plan; drag, + Page, + Spread; build
+   to 24 pages), then merge and release as 1.13.0 when they say so. That finishes #75b.
+   Left for later, as agreed: a fixed-layout EPUB. Hand checks the tests can't make: a
+   colour interior through KDP's previewer, and real drag-and-drop by mouse in the
+   desktop window (the test sends synthetic drag events).
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
@@ -3374,6 +3361,55 @@ doc_model / WYSIWYG round-trip:
   `test_picture_books.py` (self-contained throwaway folders: the canvas rule, colour
   and black-and-white press, every new trim with and without bleed, the wrap, Send to
   print end to end, the style editor's round trip).
+
+  **75b-2 as built (branch `picture-books-plan`, 2026-11-13):** `page_plan.py` is the
+  model. `split(text)` gives the manuscript as pieces: each `~~~ page` fence
+  (`src`, `side`, its text) and the text between, word for word; `join` puts them
+  back, with one blank line between pieces. It reads fences as the parser does (any
+  `~~~` line opens a block or closes the open one), and `readable()` compares its
+  page list with `engine.page_blocks(parse_markdown(...))`. When they disagree (a
+  fence swallowed by a note, say), the app refuses to rewrite. `layout()` mirrors
+  `BookDoc.handle_flowable`'s SideBreak: page 1 is a right page, a spread opens on
+  a left page, `side=` is honoured, and a blank goes in where needed. Numbering
+  stops at the first text piece, whose length is unknown. `rename()` changes only
+  the `src` of matching page fences, line by line. `count_problem` gives 24–48 in
+  fours, and `art_across_fold` flags an image or vector element crossing the fold
+  (flat colour is fine).
+  **Engine fix:** an untitled chapter that opens with a page block (no title,
+  visible number, byline, tagline or chapter art) is now "bare". It gets no opener
+  sink or after-title space, and its anchors go in an `AnchorMark`, so the frame is
+  still at the top and the first design lands on page 1. Before this, a
+  fences-only book started with an empty page. Prose in an untitled chapter keeps
+  its opening space. The build result gains `picture_book`, `binding` (from
+  `_project_meta`'s new `picture_book` and `print_binding`) and `fold_art`
+  (`spreads_across_fold`). `_preflight` adds the rows "Picture book pages" and
+  "Art across the fold": a warning on a paperback, a note (ok) on a hardcover or
+  jacket.
+  **App:** the routes are `/project/<pid>/plan` (endpoint `page_plan`, template
+  `page_plan.html`), `/plan/data`, `/plan/save` (an order of `{text:i}`,
+  `{page:i}` or `{src:name}`; every text piece must come back exactly once; a
+  page left out is taken off the plan but its design is kept), `/plan/add`
+  (a blank `page-N` or `spread-N` design plus its fence at `at`, returning the
+  designer URL) and `/plan/thumb/<name>` (a JPG at 36 dpi, cached in
+  `OUT_DIR/_plan_thumbs` by a hash of the elements and trim). Every write
+  carries the `_ms_rev` it was read at, and a stale one gets a 409 with fresh
+  data. Writes go through `_store_manuscript` (split out of the editor's save,
+  so History snapshots are kept). `/project/new-picture-book` (a button on
+  Projects that shares the New draft name field) sets the picture-book style,
+  `bleed`, `press`, `front_matter: 'none'`, no TOC, no right-hand starts,
+  `print_paper: 'color'` and `picture_book: True`. It also adds
+  `picture_book_starters()` (title-page, copyright and dedication in Andika)
+  with a manuscript of their three fences, then opens on the plan. The new book
+  flag `picture_book` (in `BOOK_FLAGS`) gets an Edit-page checkbox, written only
+  once used. The Page plan link appears on the Edit page (always in the bleed
+  hint, and as a button when the book is a picture book or has designs), in the
+  manuscript editor and in the designer's page bar. Renaming a design in the
+  designer now renames its fences in a Markdown manuscript, but not a Word or
+  sample one. The plan's spread halves draw the one wide thumbnail as a
+  `background-size: 200%` background. `test_page_plan.py` uses self-contained
+  throwaway folders and covers the model, the layout against real builds, the
+  checks, the app routes, a new picture book built end to end to 24 pages, and
+  a headless-Chrome run (drag, take out, put back, + Page).
 
 These grow *what* the app does; per the strategy note below, **packaging still grows *who* uses
 it**, and remains the bigger lever for a free+donate app. Rank poetry ≈ anthologies (cheap,

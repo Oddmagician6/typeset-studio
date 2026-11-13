@@ -74,6 +74,9 @@
              style="font-family:var(--sans);font-size:14px;padding:8px 10px;
                     border:1px solid var(--rule-strong);border-radius:2px;background:var(--surface-2);color:var(--ink)">
       <button class="btn btn-primary btn-sm" type="submit">Start writing</button>
+      <button class="btn btn-sm" type="submit" formaction="{{ url_for('project_new_picture_book') }}"
+              title="A square, full-colour book laid out page by page: starts with title, copyright and dedication pages">
+        New picture book</button>
     </form>
   </div>
 

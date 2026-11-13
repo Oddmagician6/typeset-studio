@@ -74,6 +74,9 @@
         <div class="row" style="align-items:center;gap:12px">
           <a class="btn btn-primary btn-sm" data-save-first href="{{ url_for('project_write', pid=pid) }}">✍ Write / edit manuscript text</a>
           <span class="hint">Open the writing editor to add or change your chapters and prose.</span>
+          {% if proj.get('picture_book') or proj.get('page_designs') %}
+          <a class="btn btn-sm" data-save-first href="{{ url_for('page_plan', pid=pid) }}">▦ Page plan</a>
+          {% endif %}
         </div>
         <div class="row">
           <div class="field wide"><label>Or replace the manuscript with a file</label>
@@ -298,7 +301,12 @@
         <p class="hint" style="margin:6px 0 0">Lay out handouts, maps and character sheets as
           pages of this book in the <a data-save-first href="{{ url_for('wrap_designer', page=pid) }}">Page
           designer</a>{% if proj.get('page_designs') %} ({{ proj['page_designs']|length }} saved){% endif %},
-          then place each with <code>~~~ page src="its-name"</code>.</p>
+          then place each with <code>~~~ page src="its-name"</code>, or put them in order on the
+          <a data-save-first href="{{ url_for('page_plan', pid=pid) }}">Page plan</a>.</p>
+        <div class="check" style="margin-top:6px">
+          <input type="checkbox" id="picture_book" name="picture_book" {{ 'checked' if proj.get('picture_book') }}>
+          <label for="picture_book">This is a picture book — the build checks its page count
+            (24–48, in fours) and warns about pictures across the fold of a paperback spread</label></div>
         <div class="check" style="margin-top:6px">
           <input type="checkbox" id="index_statblocks" name="index_statblocks" {{ 'checked' if proj.get('index_statblocks', True) }}>
           <label for="index_statblocks">List every stat block in the index, by name — an Index

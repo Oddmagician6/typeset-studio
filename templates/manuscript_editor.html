@@ -244,6 +244,9 @@
     <div class="savebar">
       <button type="button" id="save-btn" class="btn btn-sm">Save</button>
       <a class="btn btn-sm" data-save-first href="{{ url_for('project_edit', pid=pid) }}">Book settings</a>
+      {% if proj.get('picture_book') or proj.get('page_designs') %}
+      <a class="btn btn-sm" data-save-first href="{{ url_for('page_plan', pid=pid) }}">▦ Page plan</a>
+      {% endif %}
       <form class="inline-form" id="typeset-form" method="post" action="{{ url_for('project_generate', pid=pid) }}">
         <button class="btn btn-primary btn-sm" type="submit">Typeset</button>
       </form>

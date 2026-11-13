@@ -8,6 +8,38 @@ line here.
 
 ---
 
+## Unreleased
+
+### New
+
+- **Page plan.** A storyboard of a book's designed pages in printed order, two
+  to an opening as a reader sees them, with page numbers. Drag a page to move
+  it, click one to open it in the page designer, and add a new page or
+  two-page spread with one click. It shows where a blank page will go (a
+  spread always opens on a left-hand page) and keeps any typed text where it
+  is. A page taken out of the plan keeps its design in a "Not in the plan"
+  tray, ready to drag back. Open it from the book's settings, the manuscript
+  editor or the page designer. The order is saved in the manuscript, so
+  everything else follows it.
+- **New picture book**, on the Projects page: a book set up for a picture book
+  in one click. You get the Picture Book style, full bleed, no generated front
+  matter, press-ready colour, and title, copyright and dedication pages
+  already filled in with the book's details. It opens on its page plan.
+- **Picture-book checks.** Tick "This is a picture book" in a book's settings
+  (a new picture book already has it). The build then checks the page count:
+  at least 24 (KDP's minimum), no more than about 48, in fours as printers
+  fold them. It also warns when a picture runs across the fold of a spread
+  in a paperback, where the binding hides the middle.
+
+### Fixed
+
+- A book that opens with a designed page and no chapter heading no longer
+  gets an empty page in front of it.
+- Renaming a page in the page designer now renames it in the manuscript too,
+  so it stays where it was placed rather than printing as "missing".
+
+---
+
 ## 1.12.0 — 13 November 2026
 
 Picture books, first step: colour interiors for print, square and landscape
