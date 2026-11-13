@@ -494,6 +494,7 @@ figure.figure { margin: 1.4em 0; padding: 0; text-align: center; page-break-insi
 figure.figure img { max-width: 100%; height: auto; }
 figure.figure-full { page-break-before: always; page-break-after: always; margin: 0; }
 figure.figure-full img { max-height: 92vh; }
+figure.designed-page img { max-height: 100vh; width: auto; max-width: 100%; }
 figure.figure figcaption { font-size: 0.85em; font-style: italic; color: #555; text-indent: 0; margin-top: 0.5em; }
 p.figure-missing { text-indent: 0; color: #777; font-size: 0.85em; }
 sup.noteref { font-size: 0.7em; line-height: 0; vertical-align: super; }
@@ -731,6 +732,53 @@ def _figure_html(caption_paras, attrs, figures):
     return out
 
 
+def _page_html(paras, attrs):
+    """A `~~~ page src=` designed page (#74 Phase 6b): the page as one picture
+    on a screen of its own, as the cover is. Its alt text is what the fence
+    holds, else the words on the design. A design the book doesn't have
+    leaves a note, as a missing figure does."""
+    import wrap_design
+    name = wrap_design.page_name(attrs.get('src', ''))
+    href, words = (getattr(_BUILD, 'pages', None) or {}).get(name, ('', ''))
+    if not href:
+        src = (attrs.get('src', '') or '').strip()
+        return [f'  <p class="figure-missing">[missing page design: {html.escape(src)}]</p>']
+    own = ' '.join(t for _, t in paras if t)
+    alt = html.escape(_strip_tags(own) if own else (words or f'Page: {name}'), quote=True)
+    return ['  <figure class="figure figure-full designed-page">',
+            f'    <img src="{href}" alt="{alt}"/>',
+            '  </figure>']
+
+
+def _strip_tags(markup):
+    return html.unescape(re.sub(r'<[^>]+>', '', markup)).strip()
+
+
+def _render_pages(chapters, meta, preset, tmpdir):
+    """Render each page design the book places, once, to a JPG in `tmpdir`.
+    Returns {name: {'href', 'path', 'id', 'words'}}."""
+    import wrap_design
+    designs, found = meta.get('page_designs') or [], {}
+    trim = preset.get('trim') or {'w': 6.0, 'h': 9.0}
+    for ch in chapters:
+        for block in ch.get('blocks', []):
+            if block[0] != 'doc_block' or len(block) < 3 or block[2].get('_type') != 'page':
+                continue
+            name = wrap_design.page_name(block[2].get('src', ''))
+            d = wrap_design.find_page(designs, name)
+            if not d or name in found:
+                continue
+            n = len(found) + 1
+            path = os.path.join(tmpdir, f'page{n:03d}.jpg')
+            try:
+                wrap_design.render_page(d, trim['w'], trim['h'], path, dpi=200)
+            except Exception:
+                continue                     # left out, with a note where it stood
+            found[name] = {'href': f'images/page{n:03d}.jpg', 'path': path,
+                           'id': f'page{n:03d}', 'words': wrap_design.page_words(d)}
+    return found
+
+
 _TABLE_RULES = ('all', 'horizontal', 'header', 'none')
 
 
@@ -906,6 +954,10 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
             attrs  = {k: v for k, v in meta.items() if k != '_type'}
             if btype == 'figure':
                 lines.extend(_figure_html(val, attrs, figures))
+                no_indent_next = True
+                continue
+            if btype == 'page':
+                lines.extend(_page_html(val, attrs))
                 no_indent_next = True
                 continue
             if btype == 'list':
@@ -1534,6 +1586,14 @@ def build_epub(manuscript, preset, out_path, meta):
     for f in figures.values():
         manifest_items.append({'id': f['id'], 'href': f['href'], 'type': f['mime']})
 
+    # designed pages (#74 Phase 6b), each rendered once to a picture
+    import tempfile, shutil
+    page_tmp = tempfile.mkdtemp(prefix='ts-epub-pages-')
+    pages = _render_pages(chapters, meta, preset, page_tmp)
+    _BUILD.pages = {n: (p['href'], p['words']) for n, p in pages.items()}
+    for p in pages.values():
+        manifest_items.append({'id': p['id'], 'href': p['href'], 'type': 'image/jpeg'})
+
     # one SVG serves every scene break in the book; only ship it if the style
     # asks for an ornament *and* the manuscript actually breaks a scene
     scene_orn = scene_ornament(preset)
@@ -1612,6 +1672,9 @@ def build_epub(manuscript, preset, out_path, meta):
 
         for f in figures.values():
             zf.write(f['path'], f'OEBPS/{f["href"]}')
+        for p in pages.values():
+            zf.write(p['path'], f'OEBPS/{p["href"]}')
+        shutil.rmtree(page_tmp, ignore_errors=True)
 
         if has_front:
             zf.writestr('OEBPS/front.xhtml', _front_xhtml(meta))

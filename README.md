@@ -61,7 +61,8 @@ It runs on your own machine and sends nothing anywhere.
   [Checking the ebook](#checking-the-ebook)
 - [Handing off to print](#handing-off-to-print) —
   [press-ready interiors](#press-ready-interiors), [the colour screen PDF](#the-colour-screen-pdf),
-  [full-bleed pages](#full-bleed-pages), [the wrap](#the-print-wrap--paperback-or-hardcover)
+  [full-bleed pages](#full-bleed-pages), [designed pages](#designed-pages),
+  [the wrap](#the-print-wrap--paperback-or-hardcover)
 - [Contributing](#contributing) · [Licence](#licence) · [Folder map](#folder-map)
 
 ---
@@ -691,6 +692,28 @@ to cut. Two things then run out to the edge: `full="bleed"` figures, and the sty
 When you upload the interior to KDP or IngramSpark, choose **bleed** (the print package's
 spec sheet says which to choose). The switch is off unless you tick it, and the screen PDF
 never has bleed: a screen has nothing to cut off.
+
+### Designed pages
+
+A handout, a map, a character sheet or an advert can be laid out by hand as a page of the
+book. Open the **Page designer** from a book's Edit page (or the **Designed page** button in
+the writing editor): it is the wrap designer on one page at the book's trim, with the cut
+(red), the edge of the paper past it, and a dashed safe zone for text. Give the page a name
+and **Save to book**: the design is kept inside the book. Then place it in the manuscript:
+
+```
+~~~ page src="handout-1" side="right"
+~~~
+```
+
+It gets a page of its own, drawn out to the paper's edge with no page number or running
+head. `side="right"` or `side="left"` puts it on that side, with a blank page before it when
+needed; without it, it goes on the next page. In a book with bleed it runs out past the
+trim; without, it is cut at the trim and the result page says so. The press-ready PDF prints
+its colours as greys, as it prints everything else; the screen PDF keeps them. In the ebook
+it is a picture on a screen of its own, read out by the words on the design, or by any
+words you write inside the block. A name the book has no design for prints a grey
+"missing page design" page, and the result page names it.
 
 After a press build the result page adds a **Press check** card, measured off the finished
 file: colour, illustrations, transparency, annotations, trim box.

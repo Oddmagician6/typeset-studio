@@ -110,7 +110,8 @@
   }
 
   // the game blocks (#74) read better by their names than by their fence words
-  var DOC_LABELS = { readaloud: 'read aloud', sidebar: 'sidebar', statblock: 'stat block' };
+  var DOC_LABELS = { readaloud: 'read aloud', sidebar: 'sidebar', statblock: 'stat block',
+                     page: 'designed page' };
 
   function docHeadLabel(blockType, attrs) {
     var parts = [DOC_LABELS[blockType] || blockType || 'block'];

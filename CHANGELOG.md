@@ -8,6 +8,25 @@ line here.
 
 ---
 
+## Unreleased
+
+### New
+
+- **Designed pages.** Lay out a page of the book by hand (a handout, a map, a
+  character sheet, an advert) in the new **Page designer**: the wrap designer
+  on one page at the book's trim, opened from the book's Edit page. Name the
+  page and save it to the book, then place it with `~~~ page src="handout-1"`;
+  add `side="right"` or `side="left"` to choose the page it lands on (a blank
+  page goes before it when needed). It fills its page out to the paper's edge
+  with no page number or running head, and runs past the trim in a book with
+  bleed. The writing editor's **Designed page** button lists the book's pages
+  to insert. In the ebook it is a picture on a screen of its own, with the
+  design's words as its description. The press-ready PDF prints its colours
+  as greys; the screen PDF keeps them. The result page names a page the book
+  has no design for, and one that reaches the edge in a book without bleed.
+
+---
+
 ## 1.7.0 — 12 November 2026
 
 Full-bleed pages. A book can now print to the edge of the paper: tick its

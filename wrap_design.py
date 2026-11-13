@@ -35,6 +35,7 @@ breaks it - measured identical over 17,640 cases in the spike.
 """
 
 import os
+import re
 
 import engine
 from reportlab.lib.colors import HexColor
@@ -130,6 +131,8 @@ def panel_width(g, anchor):
 def fill_rect(g, which):
     """A panel's rectangle out to the bleed, in inches (x, y, w, h; y down)."""
     H = g['wrap_h']
+    if g.get('page'):
+        return 0.0, 0.0, g['wrap_w'], H        # a page design: the page is the sheet
     if which == 'front':
         return g['front_x'], 0.0, g['wrap_w'] - g['front_x'], H
     if which == 'back':
@@ -264,6 +267,17 @@ def build_pdf(design, dims, out_path):
     g = engine.wrap_geometry(dims)
     W, H = g['wrap_w'] * inch, g['wrap_h'] * inch
     c = rl_canvas.Canvas(out_path, pagesize=(W, H))
+    lines = draw_elements(c, design, g, H)
+    c.showPage()
+    c.save()
+    return lines
+
+
+def draw_elements(c, design, g, H):
+    """Draw a design's elements onto canvas `c`, whose origin is the sheet's
+    bottom-left and `H` the sheet's height in points. Returns {element id:
+    lines}. The wrap's PDF and a book page drawing a page design (#74 Phase
+    6b, `engine.DesignedPage`) both come here, so the two can't differ."""
     lines = {}
     for el in design.get('elements', []):
         kind = el.get('type')
@@ -331,8 +345,6 @@ def build_pdf(design, dims, out_path):
                     t.textOut(run)
                     c.drawText(t)
         c.restoreState()
-    c.showPage()
-    c.save()
     return lines
 
 
@@ -797,3 +809,114 @@ def render_front(design, dims, out_path, dpi=300):
         except OSError:
             pass
     return out_path
+
+
+# ---- a design as a page inside the book (#74 Phase 6b) ----------------------------
+# A page design is the same document laid out on one interior page: a sheet the
+# book's trim plus 0.125" all round. Its elements anchor to `front`, which on a
+# page geometry is the trimmed page (so the designer's own tools, which place
+# things on the front panel, work unchanged), and a `fill` covers the whole
+# sheet. All four edges carry bleed because a design can land on either side:
+# on a right-hand page its left bleed falls into the spine and isn't printed, on
+# a left-hand page its right. The book stores its designs as `page_designs`:
+# [{"name": "handout-1", "elements": [...], "saved": "..."}].
+
+PAGE_BLEED = 0.125
+PAGE_SAFE = 0.375          # in from the trim: clear of the cut and of the gutter
+PAGE_NAME_MAX = 40
+
+
+def page_geometry(trim_w, trim_h, bleed=PAGE_BLEED):
+    """A page design's sheet in the keys the designer and `el_rect` read: one
+    panel (the page) with nothing beside it."""
+    b = float(bleed)
+    return {'page': True, 'bleed': b, 'edge': b, 'trim_w': trim_w, 'trim_h': trim_h,
+            'panel_w': trim_w, 'panel_h': trim_h, 'front_x': b, 'back_x': b,
+            'spine_x': b, 'spine_w': 0.0, 'wrap_w': trim_w + 2 * b, 'wrap_h': trim_h + 2 * b,
+            'hinge': 0.0, 'flap': 0.0, 'board_ext': 0.0, 'wrap': 0.0,
+            'spine_text': False, 'binding': 'page'}
+
+
+def page_name(raw):
+    """A page design's name as the manuscript writes it (`~~~ page src="…"`):
+    lower case letters, digits and hyphens; '' when nothing usable is left."""
+    s = re.sub(r'[^a-z0-9]+', '-', str(raw or '').strip().lower()).strip('-')
+    return s[:PAGE_NAME_MAX].strip('-')
+
+
+def find_page(designs, name):
+    """The design called `name` in a book's `page_designs`, or None."""
+    key = page_name(name)
+    for d in designs or []:
+        if isinstance(d, dict) and key and page_name(d.get('name')) == key:
+            return d
+    return None
+
+
+def build_page_pdf(design, trim_w, trim_h, out_path):
+    """A page design alone, as a one-page PDF with its bleed: the designer's
+    proof. Returns {element id: lines}, as `build_pdf` does."""
+    g = page_geometry(trim_w, trim_h)
+    W, H = g['wrap_w'] * inch, g['wrap_h'] * inch
+    b = g['bleed'] * inch
+    c = rl_canvas.Canvas(out_path, pagesize=(W, H))
+    c.setTrimBox((b, b, W - b, H - b))
+    c.setBleedBox((0, 0, W, H))
+    lines = draw_elements(c, design, g, H)
+    c.showPage()
+    c.save()
+    return lines
+
+
+def render_page(design, trim_w, trim_h, out_path, dpi=200):
+    """A page design's trimmed page as a JPG: the ebook's image page and the
+    designer's proof picture."""
+    import tempfile
+    import fitz
+    from PIL import Image
+    g = page_geometry(trim_w, trim_h)
+    fd, tmp = tempfile.mkstemp(suffix='.pdf')
+    os.close(fd)
+    try:
+        build_page_pdf(design, trim_w, trim_h, tmp)
+        b = g['bleed']
+        with fitz.open(tmp) as doc:
+            pix = doc[0].get_pixmap(dpi=dpi, alpha=False, clip=fitz.Rect(
+                b * 72, b * 72, (b + trim_w) * 72, (b + trim_h) * 72))
+            im = Image.frombytes('RGB', (pix.width, pix.height), pix.samples)
+            im.crop((0, 0, min(im.width, round(trim_w * dpi)),
+                     min(im.height, round(trim_h * dpi)))).save(out_path, 'JPEG', quality=90)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return out_path
+
+
+def reaches_edge(design, g):
+    """Whether anything drawn on a page design (a colour, a picture, a shape)
+    reaches the trim: what a book printed without bleed may show a white
+    sliver beside."""
+    e, near = g['edge'], 0.02
+    W, H = g['wrap_w'], g['wrap_h']
+    for el in (design or {}).get('elements', []):
+        if not isinstance(el, dict) or el.get('hidden') \
+                or el.get('type') not in ('rect', 'ellipse', 'image', 'vector'):
+            continue
+        if el.get('fill'):
+            return True
+        x, y, w, h = el_rect(g, el)
+        if w > 0 and h > 0 and (x < e + near or y < e + near
+                                or x + w > W - e - near or y + h > H - e - near):
+            return True
+    return False
+
+
+def page_words(design):
+    """The words on a page design, top to bottom, for the ebook's alt text."""
+    texts = [el for el in (design or {}).get('elements', [])
+             if isinstance(el, dict) and el.get('type') == 'text' and not el.get('hidden')
+             and str(el.get('text', '')).strip()]
+    texts.sort(key=lambda el: (el.get('y', 0), el.get('x', el.get('cx', 0))))
+    return ' '.join(' '.join(str(el['text']).split()) for el in texts)
