@@ -25,8 +25,9 @@ shading, from "Customise this design" (wrap_convert.py); see `draw_vector`.
 Shapes are `rect`, `ellipse` and `rule` (a line `w` long, `weight` points
 thick), with an optional `stroke` colour and `stroke_w` in points. A picture
 can be turned by quarters (`turn`: 0, 90, 180, 270, clockwise). A `barcode`
-is the ISBN box (see `barcode_parts`). Any element with `hidden` is left out
-of the PDF as it is left off the screen.
+is the ISBN box (see `barcode_parts`). A `field` is a fillable box on a page
+design (see `draw_field`). Any element with `hidden` is left out of the PDF as
+it is left off the screen.
 
 Text is broken into lines by `engine._wrap_tracked`, measured with ReportLab's
 TTF advance widths. The editor (static/wrap_text.js) is sent those same tables
@@ -273,11 +274,15 @@ def build_pdf(design, dims, out_path):
     return lines
 
 
-def draw_elements(c, design, g, H):
+def draw_elements(c, design, g, H, live=None):
     """Draw a design's elements onto canvas `c`, whose origin is the sheet's
     bottom-left and `H` the sheet's height in points. Returns {element id:
     lines}. The wrap's PDF and a book page drawing a page design (#74 Phase
-    6b, `engine.DesignedPage`) both come here, so the two can't differ."""
+    6b, `engine.DesignedPage`) both come here, so the two can't differ.
+
+    `live`, when given, is asked of each fillable box (`field`) with its
+    sheet rectangle in inches (x, y, w, h; y down) whether to make it a real
+    form field on this page; without it a box only prints its look."""
     lines = {}
     for el in design.get('elements', []):
         kind = el.get('type')
@@ -330,6 +335,9 @@ def draw_elements(c, design, g, H):
                 c.drawImage(img, X + ox, Ytop - oy - dh, dw, dh)
         elif kind == 'vector' and w > 0 and h > 0:
             draw_vector(c, el, X, Ytop, w * inch, h * inch)
+        elif kind == 'field' and w > 0 and h > 0:
+            draw_field(c, el, X, Ytop, w * inch, h * inch,
+                       bool(live and live(x, y, w, h)), alpha)
         elif kind == 'text' and font_file(el.get('font')):
             layout = text_layout(el)
             lines[el.get('id', '')] = [ln for ln, _, _, _ in layout]
@@ -368,6 +376,149 @@ def rule_weight(el):
         return min(max(float(el.get('weight', 1.0)), 0.1), 36.0)
     except (TypeError, ValueError):
         return 1.0
+
+
+# ---- fillable boxes ---------------------------------------------------------------
+# A `field` on a page design is a box a reader can type into or tick in the PDF
+# (a character sheet): `kind` 'line' (one line of text), 'area' (several lines)
+# or 'check' (a checkbox, a square of the smaller side). Every output prints its
+# `look` ('underline', 'box' or 'none', in `color` at `stroke_w` points); the
+# screen PDF, the plain print PDF and the designer's fillable sheet also make it
+# a live form field (`live` in `draw_elements`), the press-ready PDF never does
+# (PDF/X forbids them). Boxes with the same `name` are one field shown in
+# several places, so a value typed into one shows in all. What a reader types is
+# set in `face` ('sans', 'serif', 'mono': the fonts every PDF viewer has, as a
+# form's own fonts can't be relied on) at `size` points in `ink`.
+
+FIELD_KINDS = ('line', 'area', 'check')
+FIELD_LOOKS = ('underline', 'box', 'none')
+FIELD_FACES = {'sans': 'Helvetica', 'serif': 'Times-Roman', 'mono': 'Courier'}
+FIELD_NAME_MAX = 60
+
+
+def field_kind(el):
+    k = el.get('kind')
+    return k if k in FIELD_KINDS else 'line'
+
+
+def field_look(el):
+    look = el.get('look')
+    if look in FIELD_LOOKS:
+        return 'box' if look == 'underline' and field_kind(el) == 'check' else look
+    return 'underline' if field_kind(el) == 'line' else 'box'
+
+
+def field_size(el):
+    """The typed text's size in points."""
+    try:
+        return min(max(float(el.get('size', 10)), 4.0), 48.0)
+    except (TypeError, ValueError):
+        return 10.0
+
+
+def field_name(el):
+    """A box's form-field name: its `name`, tidied (a dot would make it a
+    child of another field in the PDF), or its id when it has none."""
+    raw = ' '.join(str(el.get('name') or '').replace('.', ' ').split())[:FIELD_NAME_MAX].strip()
+    return raw or str(el.get('id') or 'field')
+
+
+def _hex(col, dflt):
+    try:
+        return HexColor(col or dflt)
+    except (TypeError, ValueError):
+        return HexColor(dflt)
+
+
+def draw_field(c, el, X, Ytop, bw, bh, live, alpha=1.0):
+    """A fillable box at (X, Ytop) in points, `bw` by `bh`: its printed look,
+    then, when `live`, the form field over it."""
+    kind = field_kind(el)
+    if kind == 'check':
+        bw = bh = min(bw, bh)
+    look = field_look(el)
+    try:
+        sw = min(max(float(el.get('stroke_w', 0.75)), 0.0), 12.0)
+    except (TypeError, ValueError):
+        sw = 0.75
+    if look != 'none' and sw > 0:
+        c.setStrokeColor(_hex(el.get('color'), '#000000'), alpha=alpha)
+        c.setLineWidth(sw)
+        if look == 'underline':
+            c.line(X, Ytop - bh + sw / 2.0, X + bw, Ytop - bh + sw / 2.0)
+        else:
+            c.rect(X + sw / 2.0, Ytop - bh + sw / 2.0, bw - sw, bh - sw, stroke=1, fill=0)
+    if live:
+        add_live_field(c, el, X, Ytop - bh, bw, bh)
+
+
+def add_live_field(c, el, x, y, w, h):
+    """Make a form field at (x, y) (its lower left in the canvas's current
+    coordinates) `w` by `h` points. Every box of one name becomes a widget of
+    one field (a parent with kids), so they share a value; a name used for a
+    checkbox and for text keeps the two apart."""
+    from reportlab.pdfbase.pdfdoc import PDFArray, PDFDictionary, PDFName, PDFString
+    kind = field_kind(el)
+    name = field_name(el)
+    reg = c.__dict__.setdefault('_ts_fields', {})
+    if name in reg and reg[name]['check'] != (kind == 'check'):
+        name = f'{name} ({"tick" if kind == "check" else "text"})'[:FIELD_NAME_MAX + 8]
+    form = c.acroForm
+    got = []
+    add_annot = c._addAnnotation
+    c._addAnnotation = lambda a, *k, **kw: (got.append(a), add_annot(a, *k, **kw))[1]
+    try:
+        ink = _hex(el.get('ink'), '#000000')
+        if kind == 'check':
+            form.checkbox(name=name, x=x, y=y, size=min(w, h), relative=True, borderWidth=0,
+                          fillColor=None, borderColor=None, textColor=ink,
+                          buttonStyle='check', fieldFlags='', tooltip=name)
+        else:
+            form.textfield(name=name, x=x, y=y, width=w, height=h, relative=True,
+                           borderWidth=0, fillColor=None, borderColor=None, textColor=ink,
+                           fontName=FIELD_FACES.get(el.get('face'), 'Helvetica'),
+                           fontSize=field_size(el), maxlen=0, tooltip=name,
+                           fieldFlags='multiline' if kind == 'area' else '')
+    finally:
+        del c._addAnnotation                    # back to the class's own
+    ref = form.fields.pop()
+    widget = got[-1].dict
+    entry = reg.get(name)
+    if entry is None:
+        kids = PDFArray([])
+        pd = {'T': PDFString(name), 'Kids': kids}
+        for k in ('FT', 'V', 'DV', 'Ff', 'TU', 'DA'):
+            if k in widget:
+                pd[k] = widget[k]
+        if kind == 'check':
+            pd['V'] = PDFName('Off')
+        pref = c._doc.Reference(PDFDictionary(pd))
+        form.fields.append(pref)
+        entry = reg[name] = {'kids': kids, 'ref': pref, 'check': kind == 'check'}
+    for k in ('T', 'FT', 'V', 'DV', 'Ff', 'TU', 'MaxLen'):
+        widget.pop(k, None)
+    widget['Parent'] = entry['ref']
+    entry['kids'].sequence.append(ref)
+
+
+def has_fields(design):
+    """Whether a design has a fillable box that prints."""
+    return any(isinstance(el, dict) and el.get('type') == 'field' and not el.get('hidden')
+               for el in (design or {}).get('elements', []))
+
+
+def field_names(design):
+    """The names of a design's fillable boxes, in the order they appear."""
+    return [field_name(el) for el in (design or {}).get('elements', [])
+            if isinstance(el, dict) and el.get('type') == 'field' and not el.get('hidden')]
+
+
+def field_count(design):
+    """How many form fields a design makes: boxes sharing a name are one (a
+    checkbox and a text box of one name are two)."""
+    return len({(field_name(el), field_kind(el) == 'check')
+                for el in (design or {}).get('elements', [])
+                if isinstance(el, dict) and el.get('type') == 'field' and not el.get('hidden')})
 
 
 # ---- the ISBN barcode -----------------------------------------------------------
@@ -893,6 +1044,40 @@ def build_page_pdf(design, trim_w, trim_h, out_path):
     c.showPage()
     c.save()
     return lines
+
+
+def on_half(g, half):
+    """`draw_elements`' `live` for one page of a sheet: a fillable box belongs
+    to the page its middle is on (a spread's `half` 'left' or 'right'; any box
+    on a single page)."""
+    if not half:
+        return lambda x, y, w, h: True
+    fold = g['spine_x']
+    if half == 'left':
+        return lambda x, y, w, h: x + w / 2.0 < fold
+    return lambda x, y, w, h: x + w / 2.0 >= fold
+
+
+def build_sheet_pdf(design, trim_w, trim_h, out_path, title=''):
+    """A page design as a fillable sheet: trim size, no bleed, its boxes live
+    form fields; a spread as its left page then its right."""
+    g = design_geometry(design, trim_w, trim_h)
+    W, H = trim_w * inch, trim_h * inch
+    b = g['bleed'] * inch
+    c = rl_canvas.Canvas(out_path, pagesize=(W, H))
+    if title:
+        c.setTitle(title)
+    for half in (('left', 'right') if is_spread(design) else (None,)):
+        c.saveState()
+        clip = c.beginPath()
+        clip.rect(0, 0, W, H)
+        c.clipPath(clip, stroke=0, fill=0)
+        c.translate(-b - (W if half == 'right' else 0), -b)
+        draw_elements(c, design, g, g['wrap_h'] * inch, live=on_half(g, half))
+        c.restoreState()
+        c.showPage()
+    c.save()
+    return out_path
 
 
 def render_page(design, trim_w, trim_h, out_path, dpi=200):

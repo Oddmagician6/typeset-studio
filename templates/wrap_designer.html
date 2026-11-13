@@ -138,6 +138,7 @@
     <button class="btn btn-sm" id="wd-add-ellipse" type="button">+ Ellipse</button>
     <button class="btn btn-sm" id="wd-add-rule" type="button">+ Rule</button>
     <button class="btn btn-sm cover-only" id="wd-add-barcode" type="button" title="The ISBN barcode box">+ Barcode</button>
+    <button class="btn btn-sm page-only" id="wd-add-field" type="button" title="A box readers can type into or tick in the PDF (a character sheet)">+ Fillable box</button>
     <button class="btn btn-sm" id="wd-undo" type="button" title="Undo (Ctrl+Z)" disabled>Undo</button>
     <button class="btn btn-sm" id="wd-redo" type="button" title="Redo (Ctrl+Y)" disabled>Redo</button>
     <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:13px;color:var(--muted)">
@@ -184,7 +185,12 @@
       <div class="wd-card"><h3>Checks</h3><ul class="wd-checks" id="wd-checks"></ul></div>
       <div class="wd-card"><h3>Proof</h3>
         <div id="wd-proof-msg"><p>Press <b>Proof</b> to build the PDF the printer gets.</p></div>
-        <div id="wd-proof"></div></div>
+        <div id="wd-proof"></div>
+        <div class="page-only" style="margin-top:10px">
+          <button class="btn btn-sm" id="wd-sheet-btn" type="button"
+                  title="This page alone at trim size, its fillable boxes ready to type into: a handout readers can download">Fillable sheet</button>
+          <div id="wd-sheet-msg" class="wd-note" aria-live="polite"></div>
+        </div></div>
       <div class="wd-card"><h3>Layers</h3><ul class="wd-layers" id="wd-layers"></ul></div>
       <div class="wd-card"><h3>Art</h3>
         <p>Choose a picture, then place it or make it {{ 'the whole page' if page_project else 'the front cover' }}.</p>

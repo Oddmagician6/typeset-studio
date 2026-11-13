@@ -724,6 +724,18 @@ can go back to one page, keeping either side. Placed with the same `~~~ page src
 spread always opens on a left-hand page (a blank page before it when needed) and goes on
 over the right one. In the ebook it is one wide picture.
 
+A character sheet can be filled in on screen: **+ Fillable box** adds a box a reader can
+type into or tick. Its **Kind** is a text line (a name, a score), a text area (notes over
+several lines) or a checkbox; its **Look** is an underline, a box, or nothing when the art
+already shows where to write. Boxes with the same **Name** are one field, so a name typed
+on one page shows on every page that has a box of that name. The screen PDF and the print
+PDF make them real form fields; the press-ready PDF prints only the line or box, because
+the print standard forbids interactive content and printers reject files that have it.
+What a reader types is set in Helvetica, Times or Courier, which every PDF viewer has.
+**Fillable sheet** in the Proof card saves the page alone at trim size, fields ready, as a
+handout readers can download from a store page (a spread gives two pages). The blue tint
+and the name on a box show only in the designer, with the guides on.
+
 After a press build the result page adds a **Press check** card, measured off the finished
 file: colour, illustrations, transparency, annotations, trim box.
 

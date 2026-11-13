@@ -8,6 +8,22 @@ line here.
 
 ---
 
+## Unreleased
+
+### New
+
+- **Fillable character sheets.** **+ Fillable box** in the Page designer adds a
+  box a reader can type into or tick: a text line, a text area over several
+  lines, or a checkbox, printed as an underline, a box or nothing. In the
+  screen PDF and the print PDF they are real form fields; boxes with the same
+  name are one field, so a name typed once shows everywhere it appears. The
+  press-ready PDF prints only their line or box (the print standard forbids
+  form fields). **Fillable sheet** saves a designed page alone at trim size,
+  fields ready, as a handout to give away. Typed text uses Helvetica, Times or
+  Courier, the fonts every PDF viewer has.
+
+---
+
 ## 1.9.0 — 12 November 2026
 
 Two-page spreads. A designed page can now run across two facing pages, for a

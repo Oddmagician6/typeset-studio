@@ -186,6 +186,10 @@
   function bbox(el) {                   // on the sheet, inches: [x, y, w, h]
     var r = elRect(el);
     if (el.type === 'rule') return [r[0], r[1], r[2], ruleWeight(el) / 72];
+    if (el.type === 'field' && el.kind === 'check') {      // a checkbox is a square of the smaller side
+      var s = Math.min(r[2], r[3]);
+      return [r[0], r[1], s, s];
+    }
     if (el.type !== 'text') return r;
     var lay = layout(el), m = metrics[el.font];
     var h = textHeight(el, lay);
@@ -284,6 +288,7 @@
       if (el.type === 'rect' || el.type === 'ellipse') drawShape(el, r, grp);
       else if (el.type === 'rule') drawRule(el, r, grp);
       else if (el.type === 'barcode') drawBarcode(el, r, grp);
+      else if (el.type === 'field') drawField(el, grp);
       else if (el.type === 'image') {
         var href = '/wrap-designer/art/' + encodeURIComponent(el.src), sz = imgSize(el.src);
         var op = el.opacity == null ? 1 : el.opacity;
@@ -356,6 +361,38 @@
                   fill:'transparent'}, grp);
     node('line', {x1:r[0], y1:mid, x2:r[0] + r[2], y2:mid, stroke:el.color || '#000000', 'stroke-width':wt,
                   opacity:el.opacity == null ? 1 : el.opacity, 'pointer-events':'none'}, grp);
+  }
+
+  // A fillable box: its printed look (an underline, a box or nothing), as
+  // wrap_design.draw_field draws it, and - with the guides on, never printed -
+  // a blue tint and its name, so a box with no look can still be found.
+  function fieldLook(el) {
+    var look = el.look;
+    if (['underline', 'box', 'none'].indexOf(look) !== -1)
+      return look === 'underline' && el.kind === 'check' ? 'box' : look;
+    return (el.kind || 'line') === 'line' ? 'underline' : 'box';
+  }
+  function drawField(el, grp) {
+    var b = bbox(el), sw = clamp(el.stroke_w == null ? 0.75 : el.stroke_w, 0, 12, 0.75) / 72;
+    var look = fieldLook(el), col = el.color || '#000000', op = el.opacity == null ? 1 : el.opacity;
+    node('rect', {x:b[0], y:b[1], width:Math.max(b[2], 0), height:Math.max(b[3], 0),
+                  fill:$('wd-guides').checked ? 'rgba(30,136,229,0.14)' : 'transparent'}, grp);
+    if (look !== 'none' && sw > 0) {
+      if (look === 'underline')
+        node('line', {x1:b[0], y1:b[1] + b[3] - sw / 2, x2:b[0] + b[2], y2:b[1] + b[3] - sw / 2, stroke:col,
+                      'stroke-width':sw, opacity:op, 'pointer-events':'none'}, grp);
+      else node('rect', {x:b[0] + sw / 2, y:b[1] + sw / 2, width:Math.max(b[2] - sw, 0), height:Math.max(b[3] - sw, 0),
+                         fill:'none', stroke:col, 'stroke-width':sw, opacity:op, 'pointer-events':'none'}, grp);
+    }
+    if ($('wd-guides').checked && el.kind !== 'check' && b[3] > 0.08)
+      node('text', {x:b[0] + 0.03, y:b[1] + Math.min(b[3] - 0.03, 0.13), 'font-family':'sans-serif',
+                    'font-size':Math.min(0.1, b[3] * 0.6), fill:'#1565c0', 'pointer-events':'none'},
+           grp).textContent = fieldName(el);
+  }
+  // what wrap_design.field_name makes of it: the form field's name in the PDF
+  function fieldName(el) {
+    var n = String(el.name || '').replace(/\./g, ' ').split(/\s+/).filter(Boolean).join(' ').slice(0, 60).trim();
+    return n || String(el.id || 'field');
   }
 
   // The barcode box: its bars and digits worked out on the server by the code
@@ -552,6 +589,7 @@
     if (el.type === 'image') return (el.fill ? 'Picture (' + where + ')' : 'Picture') + ': ' + el.src;
     if (el.type === 'vector') return 'Shapes';
     if (el.type === 'barcode') return 'Barcode area';
+    if (el.type === 'field') return ({check:'Checkbox', area:'Text area'}[el.kind] || 'Text line') + ': ' + fieldName(el);
     if (el.type === 'rule') return 'Rule';
     if (el.type === 'ellipse') return 'Ellipse';
     return el.fill ? 'Colour (' + (PAGE ? pageWhere(el.fill) : el.fill) + ')' : 'Shape';
@@ -625,13 +663,13 @@
     var outside = [], missing = [], gutter = [];
     design.elements.forEach(function (el) {
       if (el.hidden) return;
-      if (g.spread && el.type === 'text' && String(el.text || '').trim()) {
+      if (g.spread && ((el.type === 'text' && String(el.text || '').trim()) || el.type === 'field')) {
         var gb = bbox(el);
         if (gb[0] < g.spine_x + geo.safe - 0.005 && gb[0] + gb[2] > g.spine_x - geo.safe + 0.005) {
           gutter.push(label(el)); return;
         }
       }
-      if (el.type === 'barcode') {
+      if (el.type === 'barcode' || el.type === 'field') {
         var zb = safeBox(el), bb0 = bbox(el);
         if (bb0[0] < zb[0] - 0.005 || bb0[0] + bb0[2] > zb[2] + 0.005 || bb0[1] < zb[1] - 0.005 ||
             bb0[1] + bb0[3] > zb[3] + 0.005) outside.push(label(el));
@@ -660,6 +698,7 @@
     fontChecks(out);
     pictureChecks(out);
     if (!PAGE) barcodeChecks(out);
+    else fieldChecks(out);
     var ul = $('wd-checks');
     ul.innerHTML = '';
     out.forEach(function (c) { var li = document.createElement('li'); li.className = c[0]; li.textContent = c[1]; ul.appendChild(li); });
@@ -696,6 +735,23 @@
                                        'what is underneath may show where it is cut: ' + short.join(', ')]);
     if (soft.length) out.push(['bad', 'Pictures under the 300 dpi print wants at the size they are placed: ' +
                                       soft.join('; ')]);
+  }
+  // Fillable boxes: where they are live, and the names shared by more than
+  // one (one field in the PDF, so what is typed in one shows in all of them).
+  function fieldChecks(out) {
+    var fields = design.elements.filter(function (e) { return e.type === 'field' && !e.hidden; });
+    if (!fields.length) return;
+    var seen = {}, shared = [];
+    fields.forEach(function (f) {
+      var n = fieldName(f);
+      if (seen[n] === 1) shared.push('"' + n + '"');
+      seen[n] = (seen[n] || 0) + 1;
+    });
+    out.push(['ok', fields.length + ' fillable box' + (fields.length > 1 ? 'es' : '') + ': readers can fill ' +
+                    (fields.length > 1 ? 'them' : 'it') + ' in the screen PDF, the print PDF and the fillable ' +
+                    'sheet. The press-ready PDF prints only the line or box.']);
+    if (shared.length) out.push(['ok', 'Shared names, so what is typed in one shows in all of them: ' +
+                                       shared.join(', ') + '.']);
   }
   // The barcode box: nothing printed over it, a usable ISBN, and what this
   // printer expects to find there.
@@ -764,7 +820,11 @@
     var p = toInches(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, el = drag.el;    // el: a resize
     if (drag.mode === 'resize') {
       el.w = Math.max(0.2, round(drag.w + (el.rotate === 90 ? dy : dx)));
-      if (el.type !== 'text' && el.type !== 'rule') el.h = Math.max(0.2, round(drag.h + dy));   // a rule's is its weight
+      if (el.type === 'field' && el.kind === 'check') {
+        el.w = Math.max(0.1, round(Math.min(drag.w, drag.h) + Math.max(dx, dy)));   // stays square
+        el.h = el.w;
+      }
+      else if (el.type !== 'text' && el.type !== 'rule') el.h = Math.max(0.2, round(drag.h + dy));   // a rule's is its weight
     } else {
       // the distance rounded once, so everything dragged moves by the same amount
       var rdx = round(dx), rdy = round(dy);
@@ -918,6 +978,7 @@
         row.appendChild(wrap);
         if (row.children.length === 2) row = null;
       } else { row = null; box.appendChild(wrap); }
+      return inp;
     };
     var check = function (text, get, set) {
       var wrap = document.createElement('label'); wrap.className = 'tick';
@@ -961,6 +1022,31 @@
       box.appendChild(note);
       if (!(el.isbn || '').trim()) check('Say "ISBN / barcode area" in the box', function () { return el.caption !== false; },
                                          function (on) { el.caption = on; });
+    } else if (el.type === 'field') {
+      add('Name (boxes with one name share what is typed)', 'name', 'text');
+      var kindSel = add('Kind', 'kind', 'select', [['line', 'Text line'], ['area', 'Text area (several lines)'],
+                                                   ['check', 'Checkbox']], true);
+      kindSel.addEventListener('change', function () {
+        commit();
+        if (el.kind === 'check') { el.w = el.h = round(Math.min(el.w || 0.2, el.h || 0.2)); }
+        else if ((el.w || 0) < 0.6) el.w = 2;
+        showProps(); render(); commit();
+      });
+      add('Look', 'look', 'select', (el.kind === 'check' ? [] : [['underline', 'Underline']])
+        .concat([['box', 'Box'], ['none', 'Nothing (the art shows where)']]), true).value = fieldLook(el);
+      add('Line colour', 'color', 'color', null, true); add('Line (pt)', 'stroke_w', 'number', null, true);
+      if (el.kind !== 'check') {
+        add('Typed in', 'face', 'select', [['sans', 'Helvetica'], ['serif', 'Times'], ['mono', 'Courier']], true);
+        add('Typed size (pt)', 'size', 'number', null, true);
+      }
+      add(el.kind === 'check' ? 'Tick colour' : 'Typed colour', 'ink', 'color', null, true);
+      if (el.kind === 'check')
+        add('Size (in)', 'w', 'number', null, true).addEventListener('input', function () { el.h = el.w; render(); });
+      else { add('Width (in)', 'w', 'number', null, true); add('Height (in)', 'h', 'number', null, true); }
+      var fnote = document.createElement('p'); fnote.className = 'note';
+      fnote.textContent = 'What a reader types shows in a font every PDF viewer has. The blue tint and the ' +
+                          'name show only here, with the guides on.';
+      box.appendChild(fnote);
     } else if (el.type === 'image') {
       add('Zoom', 'zoom', 'range', {min:1, max:4, step:0.01, dflt:1});
       add('Show more of the left ' + String.fromCharCode(8596) + ' right', 'fx', 'range',
@@ -1033,6 +1119,12 @@
   });
   $('wd-add-rule').addEventListener('click', function () {
     addEl({type:'rule', anchor:'front', x:2, y:5, w:2, weight:1, color:'#ffffff'});
+    render();
+  });
+  $('wd-add-field').addEventListener('click', function () {
+    var n = design.elements.filter(function (e) { return e.type === 'field'; }).length + 1;
+    addEl({type:'field', kind:'line', name:'Field ' + n, anchor:'front', x:1, y:1 + 0.5 * ((n - 1) % 12),
+           w:2.5, h:0.3, look:'underline', color:'#000000', stroke_w:0.75, face:'sans', size:10, ink:'#000000'});
     render();
   });
   $('wd-add-barcode').addEventListener('click', function () {
@@ -1461,6 +1553,18 @@
         fillPicker(); persist();
         st.textContent = 'Saved ' + res.saved.replace('T', ' ') + ' · place it with ~~~ page src="' + res.name + '"';
       }).catch(function () { st.textContent = 'Not saved: no answer from the app.'; });
+    });
+    // the page alone at trim size, its boxes live: a handout to download
+    $('wd-sheet-btn').addEventListener('click', function () {
+      var m = $('wd-sheet-msg');
+      m.textContent = 'Building the sheet…';
+      post(pageBase + '/sheet', {design: design, name: $('wd-page-name').value || 'page'}).then(function (res) {
+        if (!res.ok) { m.textContent = res.error; return; }
+        m.textContent = res.fields ? res.fields + ' fillable field' + (res.fields > 1 ? 's' : '') + '. '
+                                   : 'No fillable boxes on this page: it prints as it is. ';
+        var a = document.createElement('a'); a.href = res.pdf; a.textContent = 'Download the sheet';
+        a.id = 'wd-sheet-link'; m.appendChild(a);
+      }).catch(function () { m.textContent = 'No answer from the app. Is it still running?'; });
     });
     $('wd-page-delete').addEventListener('click', function () {
       if (!PAGE.name || !confirm('Delete the page "' + PAGE.name + '" from this book? A manuscript that places it ' +
