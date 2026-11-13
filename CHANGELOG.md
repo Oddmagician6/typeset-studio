@@ -8,6 +8,27 @@ line here.
 
 ---
 
+## Unreleased
+
+### New
+
+- **Colour interiors.** Under Send to print, the Paper list now has **Standard
+  colour** and **Premium colour**. On either one, the press-ready interior
+  keeps its colour: designed pages, coloured boxes and pictures print as you
+  made them, where before they came out grey. Black text and rules still print
+  in black ink only, so small type stays sharp. The press check, the package
+  page and the spec sheet all say it is a colour interior. A book that already
+  chose "Color" is now on Premium colour, with the same spine width.
+- **Picture-book page sizes.** New trims: 8×8 square, and landscape 8.25×6
+  (KDP), 10×8 and 11×8.5 (IngramSpark). They join the 8.25 and 8.5 squares.
+  Every one builds with or without bleed, and the cover wrap is sized for it.
+- **Picture Book (8.5×8.5)**, a new style for books laid out page by page in
+  the page designer: square, no running heads or page numbers, and Andika for
+  any typed pages. Pair it with full-bleed pages and no generated front matter
+  in the book's settings.
+
+---
+
 ## 1.11.0 — 12 November 2026
 
 Children's books, first step: two styles for early readers and chapter books,

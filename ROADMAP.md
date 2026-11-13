@@ -79,9 +79,10 @@ Start here in a new session. Each item points at its full entry below.
    Chrome and confirm two boxes of one name fill together. **Children's books (#75)
    come next** (user, 2026-11-12): early readers first (75a), **released as 1.11.0
    (2026-11-12)**, fixtures frozen (see "75a as built" in the #75 entry); the user
-   hasn't yet tried the two styles in the app. **START HERE:** ask the user how the
-   styles look, then plan 75b, picture books (typed text in the page designer, square
-   and landscape trims, colour interiors in Send to print; fixed-layout EPUB later).
+   tried the Early Reader style on 2026-11-13 ("looks good"). **75b (picture books) was
+   planned with the user on 2026-11-13** (all as recommended; see "75b plan" in the #75
+   entry): **75b-1** colour print and picture-book trims first, a release of its own,
+   then **75b-2** the page plan with starter designs.
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
@@ -3316,6 +3317,44 @@ doc_model / WYSIWYG round-trip:
   as `fonts/licenses/Andika-OFL.txt`) is in `BUILTIN_FAMILIES`. Presets
   `early-reader.json` and `chapter-book.json` both set `chapter.start: any`.
   `test_outputs`' sweeps pick up the two styles by themselves.
+  The user tried the Early Reader style on 2026-11-13: "looks good".
+
+  **75b plan (picture books), agreed with the user 2026-11-13 (all as recommended):**
+  two releases.
+  - **75b-1, colour print and picture-book trims (small):** trims 8×8, 8.25×6 (KDP
+    landscape), 10×8 and 11×8.5 (IngramSpark), checked end to end in landscape (folios,
+    margins, bleed, the cover wrap). A **colour interior**: when the book's paper is a
+    colour one, the press-ready PDF keeps colour (designed pages and figures no longer
+    turn grey) while black text and rules stay **K-only** (one ink, no mis-registration);
+    the press check reads accordingly. `_PAPER`'s `color` splits into standard and
+    premium colour, each with its own caliper (an old book's `color` keeps working). A
+    bundled **Picture Book** style: no running heads, folios, contents or generated
+    front matter; bleed on.
+  - **75b-2, the page plan:** a storyboard screen (thumbnails in page order, spreads as
+    pairs; add a page or spread, drag to reorder, click to open the designer) that writes
+    the `~~~ page` fences, so every existing path keeps working. A new picture book gets
+    **starter designs** for the title, copyright and dedication pages, filled from the
+    book's details. A page-count check (24-48, a multiple of 4; KDP's minimum is 24) and a
+    warning for art across the fold on a paperback. The EPUB keeps image pages;
+    fixed-layout later.
+
+  **75b-1 as built (branch `picture-books-color`, 2026-11-13):** `app._PAPER` gains
+  `color_standard` (0.002252) beside `color`, now labelled Premium colour (0.002347,
+  unchanged, so old books keep their spine); entries carry `colour: True` and
+  `_colour_paper(paper)` reads it. `_project_meta` sets `meta['colour_interior']` from
+  `print_paper`. `engine._build_pdf` passes `colour` to `_press_canvasmaker(pw, ph,
+  colour)`: no `enforceColorSpace='cmyk'`, instead `_enforceColorSpace = _neutral_to_k`
+  (a neutral RGB/hex/tuple becomes K-only CMYK, chromatic and any CMYK left as set; the
+  grey setters routed through it), with `_ts_colour` on the canvas class so
+  `DesignedPage` skips its `_k_only` swap. Result key `colour`. `press_check(path,
+  colour=True)` counts only RGB *black* ops (`_RGB_BLACK_RE`) and makes the
+  Illustrations row a note. The package page, `PRINT-SPEC.txt` (`info['colour']`) and
+  the Edit page's hints say so. Trims 8×8, 8.25×6, 10×8, 11×8.5 in `TRIM_PRESETS`;
+  `presets/picture-book.json` (8.5×8.5, Andika 20pt, no folios or running heads; bleed
+  and front matter are book settings, so 75b-2's new-picture-book path sets them).
+  `test_picture_books.py` (self-contained throwaway folders: the canvas rule, colour
+  and black-and-white press, every new trim with and without bleed, the wrap, Send to
+  print end to end, the style editor's round trip).
 
 These grow *what* the app does; per the strategy note below, **packaging still grows *who* uses
 it**, and remains the bigger lever for a free+donate app. Rank poetry ≈ anthologies (cheap,

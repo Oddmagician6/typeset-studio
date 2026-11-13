@@ -3942,7 +3942,8 @@ class DesignedPage(Flowable):
     plus 0.125" all round) with its trim on the page's trim; the page's own
     bleed rectangle crops what lies past the paper (the spine side, and the
     bleed itself in a book built without it). A design keeps its colours on a
-    screen build; a press build prints them as greys. A spread (#74 Phase 6c)
+    screen build; a press build prints them as greys, unless the book is a
+    colour interior (#75b). A spread (#74 Phase 6c)
     is two of these, `half` 'left' then 'right', each drawing its own page of
     the one wide sheet."""
     def __init__(self, design, label='', half=None):
@@ -3974,7 +3975,9 @@ class DesignedPage(Flowable):
             was_ink = getattr(c, '_ts_ink_off', False)
             was_enforce = c._enforceColorSpace
             c._ts_ink_off = True                       # a screen build: its own colours
-            if doc._press_canvas is not None:
+            # a black-and-white press build prints the design in greys; a
+            # colour interior's canvas (#75b) keeps its colours as they are
+            if doc._press_canvas is not None and not getattr(c, '_ts_colour', False):
                 c._enforceColorSpace = _k_only
             c.saveState()
             # fillable boxes are live form fields, except in a press-ready
@@ -6052,8 +6055,15 @@ def _resolve_footnotes(build, chapters, preset, fonts, st, avail_w, text_h,
 _RGB_OP_RE = re.compile(r'(?<![A-Za-z/])(rg|RG)(?![A-Za-z])')
 
 
-def press_check(path):
+_RGB_BLACK_RE = re.compile(r'(?<![\d.])0 0 0 (rg|RG)(?![A-Za-z])')
+
+
+def press_check(path, colour=False):
     """Read a built PDF back and report how close it is to press standard.
+
+    `colour=True` reads a colour interior (#75b): colour and RGB pictures are
+    what it is for, so only an RGB *black* counts against it (the four-ink
+    black that mis-registers under text).
 
     Measured off the file, not inferred from the build: the point of a press
     check is to describe the artefact that will actually be uploaded. Returns
@@ -6073,9 +6083,10 @@ def press_check(path):
 
     rgb_ops = links = rgb_imgs = 0
     transparency = False
+    op_re = _RGB_BLACK_RE if colour else _RGB_OP_RE
     with fitz.open(path) as doc:
         for page in doc:
-            rgb_ops += len(_RGB_OP_RE.findall(page.read_contents().decode('latin-1')))
+            rgb_ops += len(op_re.findall(page.read_contents().decode('latin-1')))
             links += len(page.get_links())
         for xref in range(1, doc.xref_length()):
             try:
@@ -6090,16 +6101,32 @@ def press_check(path):
     with open(path, 'rb') as fh:
         trimbox = b'/TrimBox' in fh.read()
 
-    out = [
-        {'label': 'Colour', 'ok': rgb_ops == 0,
-         'detail': ('Text and rules are K-only black — one ink under body type'
-                    if rgb_ops == 0 else
-                    f'{rgb_ops} RGB colour operations — a printer converts these, and '
-                    'RGB black usually becomes a four-ink black that mis-registers')},
-        {'label': 'Illustrations', 'ok': rgb_imgs == 0,
-         'detail': ('No RGB images' if rgb_imgs == 0 else
-                    f'{rgb_imgs} image(s) are RGB — POD printers convert them for you, '
-                    'but a press wants CMYK done deliberately')},
+    if colour:
+        head = [
+            {'label': 'Colour', 'ok': rgb_ops == 0,
+             'detail': ('A colour interior: black text and rules are K-only (one ink), '
+                        'the colour is kept for the printer to convert'
+                        if rgb_ops == 0 else
+                        f'{rgb_ops} RGB black colour operations — these print as a '
+                        'four-ink black that can mis-register under text')},
+            {'label': 'Illustrations', 'ok': True, 'note': True,
+             'detail': ('No RGB images' if rgb_imgs == 0 else
+                        f'{rgb_imgs} RGB image(s) — expected in a colour interior; '
+                        'KDP and IngramSpark convert them to the press’s inks')},
+        ]
+    else:
+        head = [
+            {'label': 'Colour', 'ok': rgb_ops == 0,
+             'detail': ('Text and rules are K-only black — one ink under body type'
+                        if rgb_ops == 0 else
+                        f'{rgb_ops} RGB colour operations — a printer converts these, and '
+                        'RGB black usually becomes a four-ink black that mis-registers')},
+            {'label': 'Illustrations', 'ok': rgb_imgs == 0,
+             'detail': ('No RGB images' if rgb_imgs == 0 else
+                        f'{rgb_imgs} image(s) are RGB — POD printers convert them for you, '
+                        'but a press wants CMYK done deliberately')},
+        ]
+    out = head + [
         {'label': 'Transparency', 'ok': not transparency,
          'detail': ('None — nothing to flatten' if not transparency else
                     'Transparency present — PDF/X-1a requires it flattened')},
@@ -6306,8 +6333,32 @@ def _screen_canvasmaker(theme):
     return ScreenCanvas
 
 
-def _press_canvasmaker(pw, ph):
+def _neutral_to_k(color):
+    """The colour interior's rule (#75b): a neutral colour - black, a grey,
+    white - becomes K-only CMYK, so body text and rules lie down in one ink and
+    can't mis-register; anything chromatic is left as it was set, for the
+    printer's own colour management to convert (a naive RGB-to-CMYK here would
+    only shift the art's colours)."""
+    if isinstance(color, (tuple, list)):        # the canvas passes these raw
+        color = (_colors.CMYKColor(*color) if len(color) == 4
+                 else _colors.Color(*color))
+    elif not isinstance(color, _colors.Color):
+        color = _colors.toColor(color)
+    if isinstance(color, _colors.CMYKColor):
+        return color                  # set as inks already (a rich black is meant)
+    r, g, b = color.red, color.green, color.blue
+    if max(r, g, b) - min(r, g, b) > 0.004:
+        return color
+    lum = (r + g + b) / 3.0
+    return _colors.CMYKColor(0, 0, 0, round(1 - lum, 4), alpha=getattr(color, 'alpha', 1))
+
+
+def _press_canvasmaker(pw, ph, colour=False):
     """A canvas that emits what a printer wants, and refuses what it doesn't.
+
+    `colour=True` is the colour interior's canvas (#75b, a book printed on a
+    colour paper): it keeps colour rather than refusing it, and still turns
+    every neutral into K-only (`_neutral_to_k`), so black text stays one ink.
 
     Two things happen here that can't be done after the fact:
 
@@ -6330,11 +6381,23 @@ def _press_canvasmaker(pw, ph):
     from reportlab.pdfgen import canvas as _canvas
 
     class PressCanvas(_canvas.Canvas):
+        _ts_colour = colour
+
         def __init__(self, *a, **kw):
-            kw['enforceColorSpace'] = 'cmyk'
+            kw['enforceColorSpace'] = None if colour else 'cmyk'
             kw['trimBox'] = (0, 0, pw, ph)
             kw['bleedBox'] = (0, 0, pw, ph)
             _canvas.Canvas.__init__(self, *a, **kw)
+            if colour:
+                self._enforceColorSpace = _neutral_to_k
+
+        if colour:
+            # the grey setters skip `_enforceColorSpace`; route them through it
+            def setFillGray(self, gray, alpha=None):
+                self.setFillColor((gray, gray, gray), alpha=alpha)
+
+            def setStrokeGray(self, gray, alpha=None):
+                self.setStrokeColor((gray, gray, gray), alpha=alpha)
 
         def linkURL(self, *a, **kw):
             pass
@@ -6507,6 +6570,8 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
     # full-bleed pages (#74 Phase 6a): print only; a screen PDF is read on a
     # screen, where the page edge is the edge and nothing is trimmed off
     bleed_on = bool(meta.get('bleed')) and not screen
+    # a colour interior (#75b): the press PDF keeps colour, black stays K-only
+    colour = bool(press and meta.get('colour_interior'))
     if bleed_on:
         preset = dict(preset, _bleed=True)
     # the book's page designs (#74 Phase 6b), for `~~~ page src=` to find
@@ -6529,7 +6594,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
                       title=meta.get('title', ''), author=meta.get('author', ''))
         doc._fn_reserve, doc._fn_assign, doc._fn_flow = fn_reserve, fn_assign, fn_flow
         if press:
-            doc._press_canvas = _press_canvasmaker(*doc.pagesize)
+            doc._press_canvas = _press_canvasmaker(*doc.pagesize, colour=colour)
         elif screen:
             doc._screen = preset['_screen']
         if screen or bleed_on:
@@ -6693,6 +6758,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         'cover_art_missing': cover_art_missing(cover['template'])
                              if cover and cover.get('mode') == 'designed' else [],
         'press':          bool(press),
+        'colour':         colour,              # a colour interior's press PDF (#75b)
         'screen':         bool(screen),
         'has_cover':      cover is not None,
         'bleed':          bleed_on,

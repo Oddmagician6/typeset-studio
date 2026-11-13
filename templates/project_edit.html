@@ -285,7 +285,7 @@
         <div class="check" style="margin-top:6px">
           <input type="checkbox" id="press" name="press" {{ 'checked' if proj.get('press') }}>
           <label for="press">Press-ready interior — single-ink black, trim box declared,
-            no links or cover page</label></div>
+            no links or cover page (in colour when Send to print's paper is a colour one)</label></div>
         <div class="check" style="margin-top:6px">
           <input type="checkbox" id="screen_pdf" name="screen_pdf" {{ 'checked' if proj.get('screen_pdf') }}>
           <label for="screen_pdf">Also make a colour screen PDF — the style's screen colours
@@ -338,7 +338,7 @@
               <option value="jacket"    {{ 'selected' if pb=='jacket' }}>Dust jacket — over a hardcover</option>
             </select></div>
           <div class="field"><label>Paper</label>
-            <span class="hint">sets spine thickness</span>
+            <span class="hint">sets spine thickness · a colour paper prints the inside in colour</span>
             <select name="print_paper">
               {{ keep(proj.get('print_paper'), papers|list, proj.get('print_paper') ~ ' (not known to this version)') }}
               {% for key, pp in papers.items() %}
