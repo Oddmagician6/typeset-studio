@@ -284,6 +284,16 @@
               <option value="epub" {{ 'selected' if proj.get('format','pdf')=='epub' }}>EPUB only</option>
               <option value="both" {{ 'selected' if proj.get('format','pdf')=='both' }}>PDF + EPUB</option>
             </select></div>
+        <div class="field"><label>Ebook layout</label>
+            <select name="ebook_layout">
+              {{ keep(proj.get('ebook_layout'), ['', 'fixed', 'flow'], proj.get('ebook_layout') ~ ' (not known to this version)') }}
+              <option value=""      {{ 'selected' if not proj.get('ebook_layout') }}>Automatic — page by page for a picture book</option>
+              <option value="fixed" {{ 'selected' if proj.get('ebook_layout')=='fixed' }}>Page by page (fixed layout)</option>
+              <option value="flow"  {{ 'selected' if proj.get('ebook_layout')=='flow' }}>Flowing text</option>
+            </select>
+            <span class="hint">Page by page keeps each designed page as it prints, words
+              as real text over the art (what KDP wants for a picture book). Only designed
+              pages go in it.</span></div>
         </div>
         <div class="check" style="margin-top:6px">
           <input type="checkbox" id="press" name="press" {{ 'checked' if proj.get('press') }}>
