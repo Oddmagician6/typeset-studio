@@ -7,7 +7,7 @@ sections before changing the engine.
 
 ---
 
-## Next up — priority order (as of 2026-11-13, after 1.12.0)
+## Next up — priority order (as of 2026-11-13, after 1.13.0)
 
 Start here in a new session. Each item points at its full entry below.
 
@@ -83,13 +83,13 @@ Start here in a new session. Each item points at its full entry below.
    planned with the user on 2026-11-13** (all as recommended; see "75b plan" in the #75
    entry): **75b-1** colour print and picture-book trims first, a release of its own,
    then **75b-2** the page plan with starter designs. **75b-1 is released as 1.12.0
-   (2026-11-13)**, fixtures frozen (see "75b-1 as built"). **75b-2 (the page plan) is built on branch `picture-books-plan`**
-   (2026-11-13, see "75b-2 as built"), not yet merged or released. **START HERE:** let the
-   user try it (Projects, then "New picture book"; the plan; drag, + Page, + Spread; build
-   to 24 pages), then merge and release as 1.13.0 when they say so. That finishes #75b.
-   Left for later, as agreed: a fixed-layout EPUB. Hand checks the tests can't make: a
-   colour interior through KDP's previewer, and real drag-and-drop by mouse in the
-   desktop window (the test sends synthetic drag events).
+   (2026-11-13)**, fixtures frozen (see "75b-1 as built"). **75b-2 (the page plan) is released as
+   1.13.0 (2026-11-13)**, fixtures frozen (see "75b-2 as built"), so #75b is done. **START
+   HERE (hand-off after 1.13.0):** master is released as 1.13.0, pushed and clean, every
+   test file passes. #75 has one piece left, agreed for later: a fixed-layout EPUB for
+   picture books. Ask the user what comes next. Hand checks the tests can't make: a
+   colour interior through KDP's previewer, and real drag-and-drop by mouse on the page
+   plan in the desktop window (the test sends synthetic drag events).
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
