@@ -8,7 +8,10 @@ line here.
 
 ---
 
-## Unreleased
+## 1.9.0 — 12 November 2026
+
+Two-page spreads. A designed page can now run across two facing pages, for a
+map or a chapter title, with the fold and its gutter shown in the Page designer.
 
 ### New
 
