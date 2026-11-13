@@ -82,7 +82,10 @@ Start here in a new session. Each item points at its full entry below.
    tried the Early Reader style on 2026-11-13 ("looks good"). **75b (picture books) was
    planned with the user on 2026-11-13** (all as recommended; see "75b plan" in the #75
    entry): **75b-1** colour print and picture-book trims first, a release of its own,
-   then **75b-2** the page plan with starter designs.
+   then **75b-2** the page plan with starter designs. **75b-1 is released as 1.12.0
+   (2026-11-13)**, fixtures frozen (see "75b-1 as built"). **START HERE:** 75b-2, the
+   page plan, per the agreed plan (no open questions left); the new-picture-book path
+   should set `bleed`, `front_matter: none`, no contents and the Picture Book style.
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
