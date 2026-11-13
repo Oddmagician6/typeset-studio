@@ -7,7 +7,7 @@ sections before changing the engine.
 
 ---
 
-## Next up — priority order (as of 2026-11-12, after 1.3.3)
+## Next up — priority order (as of 2026-11-13, after 1.12.0)
 
 Start here in a new session. Each item points at its full entry below.
 
@@ -83,17 +83,33 @@ Start here in a new session. Each item points at its full entry below.
    planned with the user on 2026-11-13** (all as recommended; see "75b plan" in the #75
    entry): **75b-1** colour print and picture-book trims first, a release of its own,
    then **75b-2** the page plan with starter designs. **75b-1 is released as 1.12.0
-   (2026-11-13)**, fixtures frozen (see "75b-1 as built"). **START HERE:** 75b-2, the
-   page plan, per the agreed plan (no open questions left); the new-picture-book path
-   should set `bleed`, `front_matter: none`, no contents and the Picture Book style.
+   (2026-11-13)**, fixtures frozen (see "75b-1 as built"). **START HERE (hand-off after
+   1.12.0, 2026-11-13):** master is released as 1.12.0, pushed and clean, every test
+   file passes. Next is **75b-2, the page plan** (see "75b plan" in the #75 entry; its
+   three questions are answered). Write a detailed plan and show it to the user before
+   building (they want a plan checked first), on a new branch, e.g. `picture-books-plan`.
+   Touch points: designs live in the book as `page_designs` (`app._page_designs`, routes
+   `/page-designer/<pid>` + `/save` `/delete` `/proof` `/sheet`; the designer opens at
+   `/wrap-designer?page=<pid>&design=<name>`); placement is the manuscript's
+   `~~~ page src="name" side="…"` fences (`engine._render_page_block`; a spread always
+   starts on a left page); thumbnails can come from `wrap_design.render_page` (a spread
+   renders one wide JPG; `is_spread`, `design_geometry`, `page_words`, `page_name`).
+   The page plan should read and rewrite those fences, so builds, the EPUB and the
+   manuscript editor's picker keep working unchanged. New books are made by
+   `/project/create` and `/project/new-draft`; a new picture book should set `bleed`,
+   `front_matter: 'none'`, `include_toc: False` and the `picture-book` style, plus three
+   starter designs (title, copyright, dedication) filled from the book's details. The
+   page-count check (24-48, a multiple of 4) and the art-across-the-fold warning
+   (paperback only; the designer already warns about *words* in the gutter) belong in
+   the preflight rows beside "Designed pages". A hand check the tests can't make: a
+   colour interior through KDP's previewer.
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
    style editor's round trip, and a new book option must not be written into books that
    never set it (`test_project_edit`'s "the same book"). A literal `{#` in a template
-   opens a Jinja comment and breaks the page: write it as `{{ '{#a3}' }}`.
-   **Children's books (#75)** sit beside it: early-reader presets are cheap and could come
-   first; picture books wait on full-bleed interior pages (Tier 5E) and a per-page designer.
+   opens a Jinja comment and breaks the page: write it as `{{ '{#a3}' }}`. Commits keep
+   the Co-Authored-By line and never a Claude-Session link (the repo is public).
 5. **Reach (needs other machines):** a Linux build (WSL isn't installed on the dev machine;
    enabling it needs admin and a reboot) and a macOS build (needs a Mac). The code is already
    audited as portable; see the cross-platform notes in the strategy section. Deferred until
