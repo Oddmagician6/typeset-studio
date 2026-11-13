@@ -3971,9 +3971,12 @@ class DesignedPage(Flowable):
             if doc._press_canvas is not None:
                 c._enforceColorSpace = _k_only
             c.saveState()
+            # fillable boxes are live form fields, except in a press-ready
+            # build: PDF/X forbids them, so there they only print their look
+            live = None if doc._press_canvas is not None else wrap_design.on_half(g, self.half)
             try:
                 c.translate(-dx, -b)
-                wrap_design.draw_elements(c, self.design, g, g['wrap_h'] * inch)
+                wrap_design.draw_elements(c, self.design, g, g['wrap_h'] * inch, live=live)
                 drawn = True
             except Exception:
                 logging.exception('Drawing page design %s failed', self.label)

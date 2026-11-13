@@ -3429,6 +3429,31 @@ def page_designer_proof(pid):
     return jsonify(ok=True, lines=lines, png=png, warnings=[], pdf=url_for('download', fn=fn))
 
 
+@app.route('/page-designer/<pid>/sheet', methods=['POST'])
+def page_designer_sheet(pid):
+    """A page design as a fillable sheet: the page alone at trim size, no
+    bleed, its fillable boxes live form fields (a spread is two pages)."""
+    proj = load_project(pid)
+    body = request.get_json(silent=True) or {}
+    design = _clean_design(body.get('design'))
+    if design is None:
+        return jsonify(ok=False, error='That design could not be read.')
+    if wrap_design.is_spread(body.get('design')):
+        design['spread'] = True
+    trim = _page_trim(proj)
+    slug = wrap_design.page_name(body.get('name')) or 'page-design'
+    fn = _claim_out(f'{slug}-sheet-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pdf')
+    try:
+        wrap_design.build_sheet_pdf(design, trim['w'], trim['h'], os.path.join(OUT_DIR, fn),
+                                    title=slug)
+    except Exception as exc:
+        logging.error('Fillable sheet build failed: %s', traceback.format_exc())
+        _drop_out(fn)
+        return jsonify(ok=False, error=f'The sheet could not be built: {exc}')
+    return jsonify(ok=True, fields=wrap_design.field_count(design),
+                   pdf=url_for('download', fn=fn))
+
+
 @app.route('/cover/wrap', methods=['POST'])
 def cover_wrap():
     fd, tmp = tempfile.mkstemp(suffix='.pdf')

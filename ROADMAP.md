@@ -72,9 +72,11 @@ Start here in a new session. Each item points at its full entry below.
    (2026-11-12)**; the user kept its three choices (see "Phase 6b as built").
    **6c (two-page spreads) was planned with the user the same day (all as recommended)
    and is released as 1.9.0 (2026-11-12)**, fixtures frozen (see "Phase 6c as built").
-   That completes #74's six phases. **START HERE:** ask the user what comes next (a
-   possible follow-up from the plan: fillable form fields on character sheets; or
-   another roadmap item such as children's books #75, whose three questions come first).
+   That completes #74's six phases. **Fillable character sheets** (the follow-up) were
+   planned with the user on 2026-11-12 (all as recommended) and built on branch
+   `fillable-fields`, uncommitted (see "Follow-up: fillable character sheets" in the #74
+   entry). **START HERE:** ask the user about commit, merge and a 1.10.0 release; then
+   ask what comes next (children's books #75, whose three questions come first).
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
@@ -3198,6 +3200,34 @@ doc_model / WYSIWYG round-trip:
   gutter, an "In the gutter" check, Left page / Whole spread art buttons. Manuscript
   picker marks spreads and hides the side choice. `test_spreads.py` (51 checks, a
   browser half included).
+
+  **Follow-up: fillable character sheets, planned with the user 2026-11-12 (all as
+  recommended):** live form fields in the **screen PDF and the plain print PDF**; the
+  press-ready PDF (PDF/X forbids interactive annotations) and the EPUB image page print
+  only the box's look. Kinds: **text line, text area, checkbox**, each with a printed look
+  (underline, box, none). Boxes with **the same name share one value** (one field with
+  several widgets), the designer pointing out shared names. Plus a **"Fillable sheet"**
+  download of one design at trim size, no bleed.
+
+  **As built (2026-11-12, branch `fillable-fields`):** a `field` element (`kind`, `name`,
+  `look`, `color`, `stroke_w`, `face` sans/serif/mono, `size`, `ink`). `wrap_design.
+  draw_field` prints the look and, when `draw_elements(live=…)` says so, calls
+  `add_live_field`: ReportLab's `acroForm.textfield`/`checkbox` with `relative=True` (so
+  every canvas translate, bleed and spread half included, is honoured), the widget caught
+  through a temporary `c._addAnnotation` and reparented under one parent field per name
+  (`c._ts_fields`; the parent holds T/FT/V/DV/Ff/DA and a `Kids` array filled as boxes
+  come); a checkbox and a text box of one name are kept apart (`"Name (tick)"`). No
+  AcroForm is written unless a live box exists. `engine.DesignedPage` passes
+  `live=wrap_design.on_half(g, half)` unless `doc._press_canvas` (a box belongs to the
+  page its middle is on). `build_sheet_pdf` (trim size, a spread as two pages) behind
+  `POST /page-designer/<pid>/sheet`; the designer's proof (`build_page_pdf`) and the EPUB
+  picture stay field-free. Designer: `+ Fillable box` (page-only), `drawField` (look +
+  a blue tint and the name with the guides on), the props panel, a square checkbox on
+  resize, safe-zone and gutter checks for boxes, `fieldChecks`, the Fillable sheet button
+  in the Proof card. `test_fields.py` (47 checks, a browser half included). Not checked
+  in a real viewer by the tests: that shared fields fill together (the structure is the
+  PDF spec's parent/kids; fitz reads it back). Typed text is limited to the PDF base-14
+  fonts.
 
   **Order and why.** 1 and 2 are cheap and pay off in single column (and 2 helps every
   nonfiction book). 3 comes before columns because the author's own books are single
