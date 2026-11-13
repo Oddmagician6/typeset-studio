@@ -741,11 +741,22 @@ typography, and the opening-paragraph treatment all in one place.
 
 # ----------------------------------------------------------------- print spec
 # Pages-per-inch factors for spine width calculation (source: KDP / IngramSpark docs)
+#
+# The two colour papers make a colour interior (#75b): the press-ready PDF keeps
+# its colour (`engine._press_canvasmaker(colour=True)`) instead of refusing it.
+# `color` is the premium one, the only colour paper before 1.12, so a book that
+# chose it keeps its spine width; standard colour is KDP's thinner stock.
 _PAPER = {
     'white': {'label': 'White (60 lb)',  'ppi': 0.002252},
     'cream': {'label': 'Cream (60 lb)',  'ppi': 0.0025},
-    'color': {'label': 'Color',          'ppi': 0.002347},
+    'color_standard': {'label': 'Standard colour', 'ppi': 0.002252, 'colour': True},
+    'color': {'label': 'Premium colour', 'ppi': 0.002347, 'colour': True},
 }
+
+
+def _colour_paper(paper):
+    """Whether a book's print paper makes it a colour interior."""
+    return bool(_PAPER.get(paper or '', {}).get('colour'))
 
 # (min_pages, max_pages, min_inside_inches)
 _KDP_MARGINS    = [(24,150,.375),(151,300,.5),(301,500,.625),(501,700,.75),(701,828,.875)]
@@ -987,7 +998,7 @@ def _press_report(pdf_name, build_result):
     if not os.path.exists(path):
         return None
     try:
-        return engine.press_check(path)
+        return engine.press_check(path, colour=bool(build_result.get('colour')))
     except Exception:
         logging.exception('press check failed')
         return None
@@ -2368,8 +2379,12 @@ TRIM_PRESETS = [
     (7.44, 9.69, 'Textbook'),
     (7.5,  9.25, 'Textbook (wide)'),
     (8.0,  10.0, 'Illustrated'),
+    (8.0,  8.0,  'Square (small) — picture books; IngramSpark'),
     (8.25, 8.25, 'Square — children’s books'),
     (8.5,  8.5,  'Square (large) — picture books'),
+    (8.25, 6.0,  'Landscape — picture books (KDP)'),
+    (10.0, 8.0,  'Landscape — picture books; IngramSpark'),
+    (11.0, 8.5,  'Landscape (large) — picture books; IngramSpark'),
     (8.25, 11.0, 'Large workbook'),
     (8.27, 11.69, 'A4 — rulebooks outside the US'),
     (8.5,  11.0, 'US Letter — rulebooks, manuals'),
@@ -5376,6 +5391,8 @@ def _project_meta(proj):
         'page_designs':  _page_designs(proj),
         **{k: proj.get(k, True) for k in ON_FLAGS},
         'press':         proj.get('press', False),
+        # a colour paper under Send to print makes the press PDF a colour one
+        'colour_interior': _colour_paper(proj.get('print_paper')),
         **{k: proj.get(k, '') for k in matter.KEYS},
     }
     return meta, cover_path
@@ -5517,7 +5534,8 @@ def build_print_package(proj, scope='print'):
                 'label': 'Press-ready', 'ok': False,
                 'detail': ('This book has colour in it, so the interior was built as an '
                            'ordinary RGB PDF: ' + built['press_error'])})
-        press = engine.press_check(interior) if built.get('press') else None
+        press = (engine.press_check(interior, colour=bool(built.get('colour')))
+                 if built.get('press') else None)
 
         dims = _wrap_dims({'wrap_retailer': retailer, 'wrap_binding': binding,
                            'wrap_paper': paper,
@@ -5646,6 +5664,7 @@ def build_print_package(proj, scope='print'):
             'trim_w': preset['trim']['w'], 'trim_h': preset['trim']['h'],
             'pages': pages, 'wrap': wres, 'bleed': dims['bleed'],
             'press_ready': bool(built.get('press')),
+            'colour': bool(built.get('colour')),
             'interior_bleed': bool(built.get('bleed')),
             'checks': sorted(checks, key=lambda c: c['ok']), 'press': press,
         }
@@ -5752,7 +5771,10 @@ def _print_spec_text(info, names):
         + (f' ({info["cover_art"]["px"][0]}x{info["cover_art"]["px"][1]} px, '
            f'{info["cover_art"]["dpi"]} dpi on the front panel)'
            if info.get('cover_art') else ''),
-        f'  Interior     {"press-ready (single-ink black, no cover)" if info["press_ready"] else "ordinary RGB — see checks"}',
+        f'  Interior     ' + ('ordinary RGB — see checks' if not info['press_ready'] else
+                              'press-ready colour (black text single-ink, no cover; choose '
+                              'the colour ink when you upload)' if info.get('colour') else
+                              'press-ready (single-ink black, no cover)'),
         f'  Bleed        ' + ('yes, 0.125 in on the outer edge, top and bottom (choose '
                               '"bleed" when you upload the interior)'
                               if info.get('interior_bleed') else 'no (choose "no bleed" when '
