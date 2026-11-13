@@ -8,7 +8,10 @@ line here.
 
 ---
 
-## Unreleased
+## 1.12.0 — 13 November 2026
+
+Picture books, first step: colour interiors for print, square and landscape
+picture-book sizes, and a Picture Book style.
 
 ### New
 
