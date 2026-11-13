@@ -8,6 +8,27 @@ line here.
 
 ---
 
+## Unreleased
+
+### New
+
+- **Early readers and chapter books.** Two new styles for children's books.
+  **Early Reader (6×9)**, for children learning to read (about 5-7), sets the
+  text at 18pt with space between short paragraphs. No paragraph is broken by a
+  page turn, so nobody turns over mid-sentence. **Chapter Book (5.5×8.5)**, for
+  readers of about 7-10, sets it at 14pt with open leading and roomy chapter
+  openings that have space for chapter art. Both use **Andika**, a typeface made
+  for new readers: its *a* and *g* are the shapes children learn to write, and
+  *I*, *l* and *1* are easy to tell apart. Both are ragged right with no
+  hyphens.
+- **Space between paragraphs** and **Keep each paragraph on one page**, two new
+  Body text settings any style can use. The ebook follows the first: its
+  paragraphs have no indent and a gap between them.
+- **Square trims**: 8.25×8.25 and 8.5×8.5, the sizes children's books are
+  printed at.
+
+---
+
 ## 1.10.0 — 12 November 2026
 
 Fillable character sheets. A designed page can carry boxes a reader types

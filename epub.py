@@ -528,7 +528,25 @@ sup.noteref a { text-decoration: none; }
 .matter-alsoby p { text-indent: 0; margin: 0.3em 0; }
 .matter-contributors .matter-head { font-size: 1.4em; font-weight: bold; text-align: center; margin: 2em 0 1em; }
 .matter-contributors p { text-indent: 0; margin: 0.8em 0; }
-"""
+""" + _body_css(preset)
+
+
+def _body_css(preset):
+    """The style's paragraph options that carry into the ebook (#75a), after
+    the static rules so they win: block paragraphs for `para_space` (the gap
+    in ems of the style's body size) and no break inside one for `keep_whole`.
+    Only the manuscript's own paragraphs, never a chapter-art or block's."""
+    b = (preset or {}).get('body', {}) or {}
+    gap = float(b.get('para_space') or 0)
+    decl = []
+    if gap > 0:
+        em = gap / float(b.get('size') or 11.0)
+        decl.append('text-indent: 0; margin-top: %.2fem;' % em)
+    if b.get('keep_whole'):
+        decl.append('page-break-inside: avoid; break-inside: avoid;')
+    if not decl:
+        return ''
+    return '.chapter > p:not([class]), .chapter > p.no-indent { %s }\n' % ' '.join(decl)
 
 
 # ---------------------------------------------------------------- XHTML helpers

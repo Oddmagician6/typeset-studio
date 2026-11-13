@@ -1363,7 +1363,8 @@ def unique_cover_id(base):
 # manager — deleting one would silently drop a preset back to Times.
 BUILTIN_FAMILIES = ('Book',          # Libre Baskerville
                     'EBGaramond', 'Vollkorn', 'Alegreya',
-                    'CrimsonPro', 'Lora', 'Spectral')
+                    'CrimsonPro', 'Lora', 'Spectral',
+                    'Andika')        # SIL's face for new readers (#75a)
 # Display faces for titles and headings (a style's `display` font, #74 Phase
 # 3): capitals-only designs with no italic, so they ship as Regular and Bold.
 BUILTIN_DISPLAY = ('Cinzel', 'CinzelDecorative')
@@ -1576,6 +1577,7 @@ STYLE_RANGES = {
     'trim_w': (2.0, 20.0), 'trim_h': (2.0, 20.0),
     'm_top': _IN, 'm_bottom': _IN, 'm_inside': _IN, 'm_outside': _IN,
     'b_size': (4.0, 72.0), 'b_leading': (2.0, 144.0), 'b_indent': (0.0, 3.0),
+    'b_para_space': (0.0, 72.0),
     'c_sink': (0.0, 10.0), 'c_number_size': (1.0, 144.0), 'c_title_size': (1.0, 144.0),
     'c_after_title': _IN, 'c_leadin_words': (0.0, 40.0), 'c_dropcap_lines': (1.0, 10.0),
     'ca_width': (0.05, 1.0), 'ca_gap': _IN, 'ca_max_height': (0.1, 20.0),
@@ -1768,7 +1770,12 @@ def _preset_fields(form):
         },
         'body': {'size': _fs(form, 'b_size', 11.0), 'leading': _fs(form, 'b_leading', 15.5),
                  'indent': _fs(form, 'b_indent', 0.3),
-                 'justify': 'b_justify' in form, 'hyphenate': 'b_hyphenate' in form},
+                 'justify': 'b_justify' in form, 'hyphenate': 'b_hyphenate' in form,
+                 # early readers (#75a): kept only when set, so a style that
+                 # never had them is saved as it was
+                 **({'para_space': _fs(form, 'b_para_space', 0.0)}
+                    if _fs(form, 'b_para_space', 0.0) > 0 else {}),
+                 **({'keep_whole': True} if 'b_keep_whole' in form else {})},
         'chapter': {
             'start': form.get('c_start', 'recto'),
             'sink': _fs(form, 'c_sink', 1.1),
@@ -2361,6 +2368,8 @@ TRIM_PRESETS = [
     (7.44, 9.69, 'Textbook'),
     (7.5,  9.25, 'Textbook (wide)'),
     (8.0,  10.0, 'Illustrated'),
+    (8.25, 8.25, 'Square — children’s books'),
+    (8.5,  8.5,  'Square (large) — picture books'),
     (8.25, 11.0, 'Large workbook'),
     (8.27, 11.69, 'A4 — rulebooks outside the US'),
     (8.5,  11.0, 'US Letter — rulebooks, manuals'),

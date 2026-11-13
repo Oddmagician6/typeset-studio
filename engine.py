@@ -3237,6 +3237,12 @@ def _styles(preset, fonts):
                           linkUnderline=1 if preset.get('link', {}).get('underline') else 0,
                           allowWidows=0, allowOrphans=0)
     first = ParagraphStyle('first', parent=body, firstLineIndent=0)
+    # The manuscript's own paragraphs (#75a): `para_space` opens a gap between
+    # them (an early reader's block paragraphs). A style of its own, so the
+    # letters, poems and lists made from `body` don't take the gap too; the
+    # first paragraph after a heading or break has its gap already.
+    para = ParagraphStyle('para', parent=body,
+                          spaceBefore=float(b.get('para_space') or 0))
     c = preset['chapter']
     # a display face, when the style has one, sets titles and headings
     disp = fonts.get('display')
@@ -3295,7 +3301,7 @@ def _styles(preset, fonts):
     if theme.get('accent'):
         for sty in (chap_num, part_num_style, chap_tagline, section):
             sty.textColor = theme['accent']
-    return dict(body=body, first=first, chap_title=chap_title, chap_num=chap_num,
+    return dict(body=body, first=first, para=para, chap_title=chap_title, chap_num=chap_num,
                 chap_byline=chap_byline, chap_tagline=chap_tagline,
                 section=section, subsection=subsection,
                 subhead=subhead, part_num=part_num_style, part_title=part_title_style)
@@ -5787,6 +5793,15 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 page_story.append(_column_run(story, preset, last=last))
                 story = []
 
+        # `keep_whole` (#75a): no page turn inside a paragraph, so a young
+        # reader never turns over mid-sentence. KeepTogether moves it whole to
+        # the next page, and still splits one taller than a page, so a build
+        # can't loop. Single column only: a column's kept block never splits.
+        whole = bool(preset['body'].get('keep_whole')) and ncols != 2
+
+        def keep(flows):
+            return [KeepTogether(flows)] if whole and flows else flows
+
         for bi, block in enumerate(ch['blocks']):
             kind = block[0]
             val  = block[1]
@@ -5827,14 +5842,14 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                         nums = [n[-1] if isinstance(n, tuple) else n for n in nums]
                         if nums:
                             story.append(FnProbe(fn_probe, idx, [int(n) for n in nums]))
-                    story.extend(_opening_para(val, st, preset, fonts, hyph=hyph))
+                    story.extend(keep(_opening_para(val, st, preset, fonts, hyph=hyph)))
                     opened = True
                 elif flush_next:
                     val_h = _hyphenate_markup(val, hyph) if hyph else val
-                    story.append(Paragraph(val_h, st['first']))
+                    story.extend(keep([Paragraph(val_h, st['first'])]))
                 else:
                     val_h = _hyphenate_markup(val, hyph) if hyph else val
-                    story.append(Paragraph(val_h, st['body']))
+                    story.extend(keep([Paragraph(val_h, st['para'])]))
                 flush_next = False
         _flush_run(last=True)
         story, avail_w = page_story, page_w

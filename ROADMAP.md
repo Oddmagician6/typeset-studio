@@ -76,9 +76,9 @@ Start here in a new session. Each item points at its full entry below.
    planned with the user on 2026-11-12 (all as recommended) and **released as 1.10.0
    (2026-11-12)**, fixtures frozen (see "Follow-up: fillable character sheets" in the #74
    entry). Worth a hand check the tests can't make: open a fillable sheet in Acrobat or
-   Chrome and confirm two boxes of one name fill together. **START HERE:** ask the user
-   what comes next (children's books #75, whose three questions come first; or a small
-   item from 3 above).
+   Chrome and confirm two boxes of one name fill together. **Children's books (#75)
+   come next** (user, 2026-11-12): early readers first (75a), its plan agreed and
+   being built on branch `early-readers` (see "75a plan" in the #75 entry).
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
@@ -3282,6 +3282,37 @@ doc_model / WYSIWYG round-trip:
   picture-book text is typed in the page designer or drawn into the art by the illustrator
   (many self-published books do the latter, which makes the designer mostly a placement and
   checking tool); and whether a fixed-layout ebook is wanted at all.
+  *Answered by the user 2026-11-12 (all as recommended):* early readers first; picture-book
+  text typed in the page designer (6b's, now built, with 6a's bleed and 6c's spreads);
+  a fixed-layout ebook not now but later.
+
+  **75a plan, agreed with the user 2026-11-12 (all as recommended):**
+  - Two new body options, off by default and never written into a style that doesn't
+    set them: `para_space` (points between paragraphs; block paragraphs, no indent) and
+    `keep_whole` (a paragraph is never split by a page turn; one taller than the page
+    breaks as before, so a build can't loop). Both in the style editor's Body fieldset.
+  - **Andika** (SIL, OFL) bundled as a book family: single-storey a and g, I/l/1 apart.
+  - Two bundled styles: **Early Reader (6×9)** (ages 5-7: 18pt, ~1.6 leading, block
+    paragraphs kept whole, ragged right, no running heads) and **Chapter Book (5.5×8.5)**
+    (ages 7-10: 14pt, ~1.5 leading, indented, ragged right, roomy openers for chapter art).
+  - Square trims 8.25×8.25 and 8.5×8.5 in `TRIM_PRESETS` (KDP sizes; picture books need them).
+  - `test_early_readers.py`. No reading-level check (the user: not now).
+
+  **75a as built (branch `early-readers`, 2026-11-12):** `engine._styles` has a `para`
+  style (body + `spaceBefore=para_space`) used only for the chapter loop's ordinary
+  paragraphs, so letters, poems, lists and boxes made from `body` take no gap. A local
+  `keep()` in the chapter loop wraps the opening paragraph, the first after a break and
+  every other paragraph in `KeepTogether` when `keep_whole` is set and the style is
+  single-column (a column's `_Kept` never splits, so two-column text is left alone).
+  ReportLab's KeepTogether still splits a paragraph taller than the frame, so there's
+  no loop. `epub._body_css` appends `.chapter > p:not([class]), .chapter > p.no-indent`
+  after the static rules (indent 0, the gap in ems of the body size, break-inside avoid).
+  The ebook's indent never followed the style, so the gap means no indent there. App:
+  `b_para_space` in `STYLE_RANGES`, both keys written only when set, controls in the
+  Body text fieldset. Andika 6.200 (SIL's release zip: Regular/Bold/Italic plus OFL.txt
+  as `fonts/licenses/Andika-OFL.txt`) is in `BUILTIN_FAMILIES`. Presets
+  `early-reader.json` and `chapter-book.json` both set `chapter.start: any`.
+  `test_outputs`' sweeps pick up the two styles by themselves.
 
 These grow *what* the app does; per the strategy note below, **packaging still grows *who* uses
 it**, and remains the bigger lever for a free+donate app. Rank poetry ≈ anthologies (cheap,
