@@ -901,6 +901,23 @@ def _preflight(build_result, preset, page_count):
                        'were set inside the margins, because this book has no bleed. '
                        'To print them to the edge of the paper, tick "Pages print to the '
                        'edge (bleed)" on the book\'s page')})
+    # designed pages (#74 Phase 6b)
+    gone = build_result.get('pages_missing') or []
+    if gone:
+        checks.append({
+            'label': 'Designed pages', 'ok': False,
+            'detail': (f'The manuscript places {len(gone)} page design(s) this book doesn\'t '
+                       f'have ({", ".join(gone[:3])}), so a grey "missing page design" page '
+                       'stands in. Check the name in ~~~ page src="…", or save the page '
+                       'under that name in the page designer')})
+    unbled = sorted(set(build_result.get('pages_bleed_wanted') or []))
+    if unbled:
+        checks.append({
+            'label': 'Designed pages', 'ok': False,
+            'detail': (f'{len(unbled)} designed page(s) ({", ".join(unbled[:3])}) are cut at the '
+                       'trim, because this book has no bleed: colour that reaches the edge may '
+                       'show a white sliver where the cut wanders. Tick "Pages print to the '
+                       'edge (bleed)" on the book\'s page')})
 
     missing = build_result.get('notes_unplaced', 0)
     if missing:
@@ -3035,6 +3052,9 @@ def wrap_designer():
     return render_template('wrap_designer.html', active='wrap', projects=projects,
                            start_project=request.args.get('project', ''),
                            start_from=request.args.get('from', ''),
+                           # page mode (#74 Phase 6b): one interior page of a book
+                           page_project=request.args.get('page', ''),
+                           page_design=wrap_design.page_name(request.args.get('design', '')),
                            templates=[{'id': c['id'], 'name': c['data'].get('name') or c['id']}
                                       for c in list_cover_templates()],
                            fonts=[f for f in list_fonts() if f.lower().endswith('.ttf')],
@@ -3286,6 +3306,122 @@ def wrap_designer_build():
         logging.exception('Wrap design preview failed')
     return jsonify(ok=True, lines=lines, png=png, warnings=warnings,
                    pdf=url_for('download', fn=fn))
+
+
+# ------------------------------------------------------------ page designs (#74 6b)
+# The wrap designer opened on one interior page of a book. A book keeps its
+# designs as `page_designs` ([{name, elements, saved}], see wrap_design.py) and
+# places them with `~~~ page src="name" side="right|left|any"`.
+
+def _page_designs(proj):
+    """A book's page designs, each a dict with a usable name; [] when none."""
+    out = []
+    for d in proj.get('page_designs') or []:
+        if isinstance(d, dict) and wrap_design.page_name(d.get('name')) \
+                and isinstance(d.get('elements'), list):
+            out.append(d)
+    return out
+
+
+def _page_trim(proj):
+    try:
+        return load_preset(proj['preset'])['trim']
+    except Exception:
+        return {'w': 6.0, 'h': 9.0}
+
+
+def _page_info(proj):
+    trim = _page_trim(proj)
+    return {'title': proj.get('title') or proj.get('name', ''),
+            'trim': trim,
+            'geometry': wrap_design.page_geometry(trim['w'], trim['h']),
+            'safe': wrap_design.PAGE_SAFE,
+            'designs': [{'name': d['name'], 'elements': d['elements'],
+                         'saved': d.get('saved', '')} for d in _page_designs(proj)]}
+
+
+@app.route('/page-designer/<pid>')
+def page_designer_project(pid):
+    """What the designer's page mode needs: the book's trim, the page geometry
+    and the book's designs."""
+    return jsonify(_page_info(load_project(pid)))
+
+
+@app.route('/page-designer/<pid>/save', methods=['POST'])
+def page_designer_save(pid):
+    """Keep a page design with the book, under its name (renamed from `was`
+    when it had another). Returns the book's designs."""
+    proj = load_project(pid)
+    body = request.get_json(silent=True) or {}
+    name = wrap_design.page_name(body.get('name'))
+    if not name:
+        return jsonify(ok=False, error='Give the page a name (letters, numbers and hyphens): '
+                                       'the manuscript places it by that name.')
+    design = _clean_design(body.get('design'))
+    if design is None:
+        els = (body.get('design') or {}).get('elements') if isinstance(body.get('design'), dict) else None
+        big = _design_too_big([e for e in els if isinstance(e, dict)]) if isinstance(els, list) else ''
+        return jsonify(ok=False, error=big or 'That design could not be read.')
+    was = wrap_design.page_name(body.get('was')) or name
+    designs = _page_designs(proj)
+    if name != was and wrap_design.find_page(designs, name):
+        return jsonify(ok=False, error=f'This book already has a page called "{name}". '
+                                       'Pick another name.')
+    saved = datetime.now().isoformat(timespec='seconds')
+    entry = {'name': name, 'elements': design['elements'], 'saved': saved}
+    old = wrap_design.find_page(designs, was)
+    if old is not None:
+        designs[designs.index(old)] = entry
+    else:
+        designs.append(entry)
+    proj['page_designs'] = designs
+    proj['updated'] = saved
+    save_project_file(pid, proj)
+    return jsonify(ok=True, name=name, saved=saved, designs=_page_info(proj)['designs'])
+
+
+@app.route('/page-designer/<pid>/delete', methods=['POST'])
+def page_designer_delete(pid):
+    proj = load_project(pid)
+    name = wrap_design.page_name((request.get_json(silent=True) or {}).get('name'))
+    designs = _page_designs(proj)
+    gone = wrap_design.find_page(designs, name)
+    if gone is not None:
+        designs.remove(gone)
+        if designs:
+            proj['page_designs'] = designs
+        else:
+            proj.pop('page_designs', None)
+        proj['updated'] = datetime.now().isoformat(timespec='seconds')
+        save_project_file(pid, proj)
+    return jsonify(ok=True, designs=_page_info(proj)['designs'])
+
+
+@app.route('/page-designer/<pid>/proof', methods=['POST'])
+def page_designer_proof(pid):
+    """Build a page design as its own one-page PDF, with bleed; return a picture
+    of it, its line breaks and a download link, as the wrap's proof does."""
+    proj = load_project(pid)
+    body = request.get_json(silent=True) or {}
+    trim = _page_trim(proj)
+    slug = wrap_design.page_name(body.get('name')) or 'page-design'
+    fn = _claim_out(f'{slug}-page-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pdf')
+    path = os.path.join(OUT_DIR, fn)
+    try:
+        lines = wrap_design.build_page_pdf(body.get('design') or {}, trim['w'], trim['h'], path)
+    except Exception as exc:
+        logging.error('Page design build failed: %s', traceback.format_exc())
+        _drop_out(fn)
+        return jsonify(ok=False, error=f'The PDF could not be built: {exc}')
+    png = ''
+    try:
+        import fitz
+        with fitz.open(path) as doc:
+            png = ('data:image/png;base64,'
+                   + base64.b64encode(doc[0].get_pixmap(dpi=50).tobytes('png')).decode())
+    except Exception:
+        logging.exception('Page design preview failed')
+    return jsonify(ok=True, lines=lines, png=png, warnings=[], pdf=url_for('download', fn=fn))
 
 
 @app.route('/cover/wrap', methods=['POST'])
@@ -5198,6 +5334,7 @@ def _project_meta(proj):
         'smartquotes':   proj.get('smartquotes', True),
         'screen_pdf':    proj.get('screen_pdf', False),
         'bleed':         proj.get('bleed', False),
+        'page_designs':  _page_designs(proj),
         **{k: proj.get(k, True) for k in ON_FLAGS},
         'press':         proj.get('press', False),
         **{k: proj.get(k, '') for k in matter.KEYS},

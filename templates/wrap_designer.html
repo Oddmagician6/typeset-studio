@@ -66,9 +66,33 @@
   .wd-props .tools .btn{padding:3px 8px}
   .beta{font-family:var(--mono);font-size:10px;letter-spacing:.12em;border:1px solid var(--red);
     color:var(--red);border-radius:2px;padding:1px 5px;vertical-align:middle;margin-left:8px}
+  #wd-page-status{font-size:12.5px;color:var(--muted)}
+  {% if page_project %}.cover-only{display:none!important}{% else %}.page-only{display:none!important}{% endif %}
 {% endblock %}
 
 {% block body %}
+  {% if page_project %}
+  <div class="pagehead">
+    <div class="eyebrow">Design a page of your book</div>
+    <h1>Page designer <span class="beta">BETA</span></h1>
+    <p>Lay out one page of the book (a handout, a map, a character sheet, an advert) at the
+       book's own trim. The red line is where the page is cut: colour and pictures that should
+       reach the paper's edge go past it, out to the edge of the sheet. Keep text inside the
+       dashed safe zone, clear of the cut and the spine.
+       Give the page a name and press <b>Save to book</b>, then place it in the manuscript
+       with <code>~~~ page src="its-name"</code> (add <code>side="right"</code> or
+       <code>side="left"</code> to choose the page it lands on).</p>
+  </div>
+  <div class="wd-bar page-only" id="wd-page-bar">
+    <label>Book<input id="wd-page-book" type="text" readonly style="min-width:180px"></label>
+    <label>Page design<select id="wd-page-pick"><option value="">New page…</option></select></label>
+    <label class="grow">Name (the manuscript places it by this)<input id="wd-page-name" type="text"
+           placeholder="handout-1" maxlength="40"></label>
+    <span id="wd-page-status"></span>
+    <button class="btn" id="wd-page-save" type="button">Save to book</button>
+    <button class="btn btn-sm btn-ghost" id="wd-page-delete" type="button">Delete</button>
+  </div>
+  {% else %}
   <div class="pagehead">
     <div class="eyebrow">Design your own cover</div>
     <h1>Wrap designer <span class="beta">BETA</span></h1>
@@ -80,8 +104,9 @@
        layout, pick any cover under <b>Start from a cover</b> and press <b>Customise</b>: its
        frame, type and pictures become layers you can move, edit and recolour.</p>
   </div>
+  {% endif %}
 
-  <div class="wd-bar">
+  <div class="wd-bar cover-only">
     <label>Book<select id="wd-project">
       <option value="">Not linked to a book</option>
       {% for p in projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
@@ -102,14 +127,14 @@
     </select></label>
     <label>Pages<input id="wd-pages" type="number" value="320" min="24" max="1000" step="2" style="width:90px"></label>
   </div>
-  <p class="wd-note" id="wd-book-note" hidden></p>
+  <p class="wd-note cover-only" id="wd-book-note" hidden></p>
   <p class="wd-note" id="wd-from-msg" aria-live="polite"></p>
   <div class="wd-bar">
     <button class="btn btn-sm" id="wd-add-text" type="button">+ Text</button>
     <button class="btn btn-sm" id="wd-add-rect" type="button">+ Box</button>
     <button class="btn btn-sm" id="wd-add-ellipse" type="button">+ Ellipse</button>
     <button class="btn btn-sm" id="wd-add-rule" type="button">+ Rule</button>
-    <button class="btn btn-sm" id="wd-add-barcode" type="button" title="The ISBN barcode box">+ Barcode</button>
+    <button class="btn btn-sm cover-only" id="wd-add-barcode" type="button" title="The ISBN barcode box">+ Barcode</button>
     <button class="btn btn-sm" id="wd-undo" type="button" title="Undo (Ctrl+Z)" disabled>Undo</button>
     <button class="btn btn-sm" id="wd-redo" type="button" title="Redo (Ctrl+Y)" disabled>Redo</button>
     <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:13px;color:var(--muted)">
@@ -121,7 +146,7 @@
     </span>
     <span class="grow"></span>
     <span id="wd-save-status"></span>
-    <span class="wd-from">
+    <span class="wd-from cover-only">
       <select id="wd-from" aria-label="Start from a cover">
         <option value="">Start from a cover…</option>
         <option value="@book">This book’s own cover</option>
@@ -131,7 +156,7 @@
               title="Turn this cover into layers you can move, edit and recolour">Customise</button>
     </span>
     <button class="btn btn-sm btn-ghost" id="wd-reset" type="button">Start over</button>
-    <span id="wd-save-group" style="display:none;gap:10px;align-items:center">
+    <span id="wd-save-group" class="cover-only" style="display:none;gap:10px;align-items:center">
       <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:13px;color:var(--muted)">
         <input id="wd-use-cover" type="checkbox" checked> Use as this book's cover</label>
       <button class="btn" id="wd-save" type="button">Save to book</button>
@@ -141,10 +166,11 @@
 
   <div class="wd-grid">
     <div>
-      <div class="wd-stage"><svg id="wd-svg" xmlns="http://www.w3.org/2000/svg" aria-label="The cover wrap"></svg>
+      <div class="wd-stage"><svg id="wd-svg" xmlns="http://www.w3.org/2000/svg"
+           aria-label="{{ 'The page' if page_project else 'The cover wrap' }}"></svg>
         <div class="wd-legend">
           <span><i style="border-color:#e53935"></i>Trim (where it's cut)</span>
-          <span><i style="border-color:#1e88e5"></i>Spine folds</span>
+          <span class="cover-only"><i style="border-color:#1e88e5"></i>Spine folds</span>
           <span><i style="border-color:#00897b;border-top-style:dashed"></i>Safe zone: keep text inside</span>
         </div>
       </div>
@@ -157,7 +183,7 @@
         <div id="wd-proof"></div></div>
       <div class="wd-card"><h3>Layers</h3><ul class="wd-layers" id="wd-layers"></ul></div>
       <div class="wd-card"><h3>Art</h3>
-        <p>Choose a picture, then place it or make it the front cover.</p>
+        <p>Choose a picture, then place it or make it {{ 'the whole page' if page_project else 'the front cover' }}.</p>
         <div class="wd-art">
           <select id="wd-art-pick" style="flex:1;min-width:0">
             <option value="{{ stand_in }}">Placeholder (dusk)</option>
@@ -167,12 +193,12 @@
           <input id="wd-art-file" type="file" accept=".jpg,.jpeg,.png" hidden>
         </div>
         <div class="wd-art">
-          <button class="btn btn-sm" id="wd-art-front" type="button">Front cover</button>
-          <button class="btn btn-sm" id="wd-art-back" type="button">Back cover</button>
+          <button class="btn btn-sm" id="wd-art-front" type="button">{{ 'Whole page' if page_project else 'Front cover' }}</button>
+          <button class="btn btn-sm cover-only" id="wd-art-back" type="button">Back cover</button>
           <button class="btn btn-sm" id="wd-art-place" type="button">Place</button>
         </div>
       </div>
-      <div class="wd-card"><h3>Review quotes</h3>
+      <div class="wd-card cover-only"><h3>Review quotes</h3>
         <p>Add praise to the back cover, set in your design's own faces. Change the words
            and the names to your reviews'.</p>
         <div class="wd-art">
@@ -180,7 +206,7 @@
           <button class="btn btn-sm" id="wd-quote-praise" type="button">"Praise for…" and three</button>
         </div>
       </div>
-      <div class="wd-card" id="wd-flaps" hidden><h3>Jacket flaps</h3>
+      <div class="wd-card cover-only" id="wd-flaps" hidden><h3>Jacket flaps</h3>
         <p>Fill a flap with what a jacket carries there, set in your design's own faces and
            colours, in place of what is on it now. The words come from the book's Send to
            print settings.</p>
@@ -192,7 +218,7 @@
     </aside>
   </div>
 
-  <script id="wd-config" type="application/json">{{ {'fonts': fonts, 'standIn': stand_in, 'retailers': retailers, 'startProject': start_project, 'startFrom': start_from, 'barcode': barcode, 'safe': safe, 'maxElements': max_elements} | tojson }}</script>
+  <script id="wd-config" type="application/json">{{ {'fonts': fonts, 'standIn': stand_in, 'retailers': retailers, 'startProject': start_project, 'startFrom': start_from, 'barcode': barcode, 'safe': safe, 'maxElements': max_elements, 'pageProject': page_project, 'pageDesign': page_design} | tojson }}</script>
   <script src="{{ url_for('static', filename='wrap_text.js') }}"></script>
   <script src="{{ url_for('static', filename='wrap_designer.js') }}"></script>
 {% endblock %}

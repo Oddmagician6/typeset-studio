@@ -65,10 +65,12 @@ Start here in a new session. Each item points at its full entry below.
    **Phase 6 was planned with the user the same day** (see "Phase 6 plan" in the #74
    entry): 6a full-bleed interiors first, a release of its own; 6b the page designer.
    **6a (full-bleed pages) is released as 1.7.0 (2026-11-12)**, fixtures frozen.
-   **START HERE:** confirm with the user the three choices listed under "Phase 6a as
-   built" (not yet answered), then plan 6b's details with them before any work: the
-   page-design document and where it lives (per book), how `~~~ page src=` reads, the
-   designer's interior-page mode (bleed and safe-zone guides), the ebook's image page.
+   The user confirmed 6a's three open choices on 2026-11-12 (all kept).
+   **6b's details were agreed the same day** (see "Phase 6b plan" in the #74 entry):
+   designs stored inside the book, placed with `~~~ page src= side=` plus an editor
+   picker, an image page in the EPUB. **6b (the page designer) is released as 1.8.0
+   (2026-11-12)**; the user kept its three choices (see "Phase 6b as built").
+   **START HERE:** two-page spreads are the next step; plan them with the user first.
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
@@ -3122,9 +3124,47 @@ doc_model / WYSIWYG round-trip:
   its spec sheet. `test_bleed.py` (40 checks: boxes, every word's place measured from
   the trim, press, screen, plates on both sides, two columns, background, the app).
   The TTRPG baseline is identical to master's with the switch off.
-  **Decisions of mine to confirm with the user:** the background prints whenever bleed
-  is on (no separate switch); a bleed plate's caption sits on a white band over the
-  picture; a plate page has no folio. **Released as 1.7.0 (2026-11-12).** Next: 6b.
+  **Confirmed by the user (2026-11-12):** the background prints whenever bleed is on (no
+  separate switch); a bleed plate's caption sits on a page-colour band over the picture;
+  a plate page has no folio. **Released as 1.7.0 (2026-11-12).**
+
+  **Phase 6b plan, agreed with the user 2026-11-12 (all as recommended):**
+  - Designs are stored **inside the book** (`page_designs`, a list beside `wrap_design`),
+    so they travel, back up and upgrade with it; copying one to another book comes later.
+  - Placed with `~~~ page src="handout-1" side="right"` (right, left or any; any by
+    default), which starts a new page and adds a blank before it when the side needs one;
+    plus an "Insert designed page" picker in the manuscript editor listing the book's
+    designs.
+  - The EPUB gets each designed page as a **full-screen image page**, rendered once at
+    high resolution as covers are, with alt text taken from the design's words.
+  - Single pages only; spreads later.
+
+  **Phase 6b as built (2026-11-12, branch `ttrpg-phase6b`):** `wrap_design.page_geometry`
+  is a wrap with one panel: the sheet is trim + 0.125" on all four sides, `front` anchors
+  to the trimmed page and any `fill` covers the sheet (Python `fill_rect` and JS
+  `fillRect`), so the designer's tools work unchanged. `build_pdf`'s loop became
+  `draw_elements(c, design, g, H)`, which `engine.DesignedPage` calls on a book page: like
+  `BleedPlate` it takes the frame, clips to `_bleed_rect`, and draws the sheet with its
+  trim on the page's trim (the spine side and, without bleed, the bleed fall off the
+  paper). `SideBreak` in `handle_flowable` gives right/left/any with a blank page before
+  it when needed. Colours: `_ts_ink_off` on the screen canvas; on the press canvas
+  `_enforceColorSpace` is swapped for `_k_only` (greys of the same lightness) while it
+  draws. Designs reach the engine as `meta['page_designs']` -> `preset['_page_designs']`;
+  `~~~ page` spans two columns. Results `pages_missing` and `pages_bleed_wanted` (only
+  designs whose colour reaches the trim, `wrap_design.reaches_edge`) feed two
+  "Designed pages" preflight rows. EPUB: `_render_pages` renders each placed design
+  once (200 dpi JPG), `_page_html` sets it as a full-width `figure.designed-page` with
+  page breaks, alt = the fence's words or `page_words`. App: `/page-designer/<pid>`
+  (info, `/save` with rename via `was`, `/delete`, `/proof`); the designer opens in page
+  mode at `/wrap-designer?page=<pid>&design=<name>` (`cover-only`/`page-only` classes,
+  its own localStorage key); the book's Edit page links to it; the manuscript editor's
+  "Designed page" button opens a picker (plain and rich mode). `page_designs` is only
+  written once a design is saved and removed with the last one. `test_page_designs.py`
+  (63 checks, a browser half included).
+  **Choices, confirmed by the user 2026-11-12 (all kept):** the press-ready PDF prints a
+  design's colours as greys rather than refusing (a colour interior would need a colour
+  press path); the safe zone is 0.375" on all four sides (either side can be the spine);
+  a page design's elements anchor to `front` internally. Released as 1.8.0.
 
   **Order and why.** 1 and 2 are cheap and pay off in single column (and 2 helps every
   nonfiction book). 3 comes before columns because the author's own books are single

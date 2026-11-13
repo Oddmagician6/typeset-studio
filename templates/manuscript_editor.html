@@ -286,9 +286,23 @@
         <button type="button" data-act="readaloud" title="Boxed text to read aloud at the table">Read aloud</button>
         <button type="button" data-act="sidebar" title="A titled callout box">Sidebar</button>
         <button type="button" data-act="statblock" title="A game stat block, in any common format">Stat block</button>
+        <button type="button" data-act="page" title="A page you laid out in the page designer: a handout, a map, a character sheet">Designed page</button>
         <button type="button" data-act="find">Find</button>
       </div>
       <input type="file" id="fig-file" accept=".jpg,.jpeg,.png,.gif" hidden>
+
+      <div class="findbar" id="pagepick" hidden>
+        <span class="fb-count">Place a designed page:</span>
+        <select id="pp-name" aria-label="Which page design"></select>
+        <select id="pp-side" aria-label="Which page it lands on">
+          <option value="">on the next page</option>
+          <option value="right">on a right-hand page</option>
+          <option value="left">on a left-hand page</option>
+        </select>
+        <button type="button" id="pp-insert">Insert</button>
+        <a id="pp-design" href="{{ url_for('wrap_designer', page=pid) }}" target="_blank" rel="noopener">Open the page designer</a>
+        <button type="button" id="pp-close" title="Close (Esc)">✕</button>
+      </div>
 
       <div class="findbar" id="findbar" hidden>
         <input type="text" id="f-find" placeholder="Find" spellcheck="false">
@@ -331,6 +345,7 @@
           <tr><td><code>~~~ readaloud title="…"</code> … <code>~~~</code></td><td>boxed text to read aloud to the players; the title is optional</td></tr>
           <tr><td><code>~~~ sidebar title="…"</code> … <code>~~~</code></td><td>a callout box with a title bar. <code>style="note"</code> sets a label and a line, no box</td></tr>
           <tr><td><code>~~~ statblock name="…" meta="…"</code> … <code>~~~</code></td><td>a stat block, one line per line: <code>Label: value</code> fields, a score row <code>STR 18 | DEX 12 | …</code> (modifiers worked out), <code>--- Actions</code> sections and <code>***Name.***</code> entries. Paste one from Word, a PDF or the Homebrewery as it is; <code>cr="…"</code> and <code>count="2"</code> go on the name line</td></tr>
+          <tr><td><code>~~~ page src="handout-1"</code> <code>~~~</code></td><td>a page you laid out in the page designer (a handout, a map, a character sheet), on a page of its own, out to the paper's edge. <code>side="right"</code> or <code>side="left"</code> chooses the page it lands on (a blank page goes before it when needed). Any words inside the block are what the ebook reads out for it</td></tr>
           <tr><td><code>~~~ center</code> · <code>~~~ right</code> · <code>~~~ left</code></td><td>an aligned block — one line per line</td></tr>
           <tr><td><code>[text](https://…)</code></td><td>a link — also <code>mailto:</code> and <code>#chapter-2</code> inside the book, or a heading by its words: <code>#the-guard-room</code>. In print an in-book link is followed by its page, “(page 42)”, unless the book turns that off</td></tr>
           <tr><td><code>the vault{{ '{#a3}' }}</code> + <code>see page {page: a3}</code></td><td>name a place, then print the page it is on. The name prints nothing; <code>{page: the-guard-room}</code> works for a heading too. In the ebook it reads as a link to the place. In rich mode typing the closing <code>}</code> makes either</td></tr>
@@ -727,8 +742,45 @@
         readaloud: function(){ insertBlock('\n~~~ readaloud\n\n~~~\n\n'); },
         sidebar: function(){ insertBlock('\n~~~ sidebar title=""\n\n~~~\n\n'); },
         statblock: function(){ insertBlock('\n~~~ statblock\n' + STATBLOCK_SEED.join('\n') + '\n~~~\n\n'); },
+        page:    function(){
+          openPagePick(function(name, side){
+            insertBlock('\n~~~ page src="' + name + '"' + (side ? ' side="' + side + '"' : '') + '\n~~~\n\n');
+          });
+        },
         find:    function(){ openFind(); },
       };
+
+      // Designed pages (#74 Phase 6b): the book's page designs, fetched fresh
+      // each time (one may have just been saved in the designer's own tab),
+      // then placed as `~~~ page src="name" side="…"`.
+      var pagePick = document.getElementById('pagepick'), pageThen = null;
+      function openPagePick(then){
+        pageThen = then;
+        var sel = document.getElementById('pp-name');
+        sel.innerHTML = '<option value="">Loading…</option>';
+        document.getElementById('pp-insert').disabled = true;
+        pagePick.hidden = false;
+        fetch('{{ url_for("page_designer_project", pid=pid) }}').then(function(r){ return r.json(); })
+          .then(function(info){
+            sel.innerHTML = '';
+            (info.designs || []).forEach(function(d){
+              var o = document.createElement('option'); o.value = o.textContent = d.name; sel.appendChild(o);
+            });
+            if (!sel.options.length){
+              var o = document.createElement('option'); o.value = '';
+              o.textContent = 'no page designs yet: open the page designer'; sel.appendChild(o);
+            }
+            document.getElementById('pp-insert').disabled = !sel.value;
+          }).catch(function(){ sel.innerHTML = '<option value="">could not load the designs</option>'; });
+      }
+      document.getElementById('pp-insert').addEventListener('click', function(){
+        var name = document.getElementById('pp-name').value;
+        if (!name || !pageThen) return;
+        pagePick.hidden = true;
+        pageThen(name, document.getElementById('pp-side').value);
+      });
+      document.getElementById('pp-close').addEventListener('click', function(){ pagePick.hidden = true; });
+      pagePick.addEventListener('keydown', function(e){ if (e.key === 'Escape') pagePick.hidden = true; });
       document.querySelectorAll('.toolbar button').forEach(function(b){
         b.addEventListener('click', function(){
           var act = b.dataset.act;
@@ -1160,6 +1212,17 @@
         readaloud: function(){ insertDocBlock('readaloud'); },
         sidebar: function(){ insertDocBlock('sidebar', null, {title: 'Title'}); },
         statblock: function(){ insertDocBlock('statblock', STATBLOCK_SEED); },
+        page:    function(){
+          openPagePick(function(name, side){
+            var attrs = {src: name};
+            if (side) attrs.side = side;
+            var blk = WYS.renderBlock({type:'docblock', block_type:'page', attrs:attrs, children:[]});
+            var p = WYS.renderBlock({type:'para', runs:[]});
+            var el = currentRichBlock();
+            if (el){ el.after(blk); blk.after(p); } else { rich.appendChild(blk); rich.appendChild(p); }
+            placeCaret(p); syncFromRich();
+          });
+        },
         find:    function(){ exitRich(); openFind(); },
       };
 

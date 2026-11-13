@@ -11,7 +11,11 @@
   var NS = 'http://www.w3.org/2000/svg';
   var CFG = JSON.parse(document.getElementById('wd-config').textContent);
   var svg = document.getElementById('wd-svg');
-  var STORE = 'ts-wrap-design-v1';
+  // Page mode (#74 Phase 6b): the same editor over one interior page of a book,
+  // whose geometry is a wrap with nothing but a front panel (wrap_design.page_geometry).
+  var PAGE = CFG.pageProject ? {pid: CFG.pageProject, name: CFG.pageDesign || '', info: null} : null;
+  var WHAT = PAGE ? 'page' : 'cover';
+  var STORE = PAGE ? 'ts-page-design-v1' : 'ts-wrap-design-v1';
   var $ = function (id) { return document.getElementById(id); };
 
   var BLURB = 'Write the back-cover copy here. This box wraps its lines exactly where the ' +
@@ -22,6 +26,7 @@
   // ran off a smaller trim, and a new design shouldn't open covered in warnings.
   // Spine text is only added where the printer allows it (geo.spine_text).
   function starter(book, geom) {
+    if (PAGE) return pageStarter(geom);
     book = book || {};
     var title = book.title || 'My Book', author = book.author || 'Author Name';
     var pw = geom ? geom.panel_w : 6, ph = geom ? geom.panel_h : 9, k = pw / 6;
@@ -45,6 +50,22 @@
         size:12, leading:1.2, color:'#fbf3e2', align:'center', tracking:1.5});
     return {elements: els};
   }
+  // A page's example: a paper-coloured page out to the bleed, a heading and a
+  // block of text inside the safe zone, laid out for the book's trim.
+  var PAGE_TEXT = 'Write the page\'s words here: a letter the players find, a list of rumours, ' +
+    'the rules for a minigame. This box breaks its lines exactly where the printed page will.';
+  function pageStarter(geom) {
+    var pw = geom ? geom.panel_w : 6, s = PAGE && PAGE.info ? PAGE.info.safe : 0.375;
+    return {elements: [
+      {id:'page-bg', type:'rect', fill:'front', color:'#f3ead7'},
+      {id:'heading', type:'text', anchor:'front', x:round(s), y:round(s + 0.4), w:round(pw - 2 * s),
+       text:'Handout', font:pick('EBGaramond-Bold.ttf'), size:28, leading:1.1, color:'#2b2118',
+       align:'center', tracking:1},
+      {id:'body', type:'text', anchor:'front', x:round(s + 0.25), y:round(s + 1.3), w:round(pw - 2 * s - 0.5),
+       text:PAGE_TEXT, font:pick('EBGaramond-Regular.ttf'), size:12, leading:1.4, color:'#2b2118',
+       align:'left', tracking:0}
+    ]};
+  }
   function pick(f) { return CFG.fonts.indexOf(f) !== -1 ? f : CFG.fonts[0]; }
   // The ISBN barcode box, where every printer expects it: the lower right of
   // the back cover, inside the safe margin. Locked so it isn't nudged by accident.
@@ -58,17 +79,21 @@
   // ---- state ----------------------------------------------------------------
   var saved = null;
   try { saved = JSON.parse(localStorage.getItem(STORE) || 'null'); } catch (e) { saved = null; }
+  // a page's working copy is only picked up again for the same page of the same book
+  if (PAGE && saved && !(saved.page && saved.page.pid === PAGE.pid && saved.page.name === PAGE.name)) saved = null;
   var design = (saved && saved.design && saved.design.elements) ? saved.design : starter();
   var g = null, geo = null, sel = null, metrics = {}, drag = null, seq = Date.now() % 100000;
   var also = [];                        // further selected ids, shift-clicked alongside `sel`
   var SETTINGS = ['wd-project', 'wd-name', 'wd-retailer', 'wd-paper', 'wd-binding', 'wd-trim', 'wd-pages'];
-  if (saved && saved.settings) SETTINGS.forEach(function (id) {
+  if (saved && saved.settings && !PAGE) SETTINGS.forEach(function (id) {
     if (saved.settings[id] != null && $(id)) $(id).value = saved.settings[id];
   });
   function persist() {
     var s = {};
     SETTINGS.forEach(function (id) { s[id] = $(id).value; });
-    try { localStorage.setItem(STORE, JSON.stringify({design: design, settings: s})); } catch (e) {}
+    var keep = {design: design, settings: s};
+    if (PAGE) keep.page = {pid: PAGE.pid, name: PAGE.name};
+    try { localStorage.setItem(STORE, JSON.stringify(keep)); } catch (e) {}
   }
   function settings() {
     var t = ($('wd-trim').value || '6x9').split('x');
@@ -99,6 +124,7 @@
   }
   function panelW(a) { return a === 'spine' ? g.spine_w : (a === 'front' || a === 'back') ? g.panel_w : g.wrap_w; }
   function fillRect(w) {
+    if (g.page) return [0, 0, g.wrap_w, g.wrap_h];      // a page design: the page is the sheet
     if (w === 'front') return [g.front_x, 0, g.wrap_w - g.front_x, g.wrap_h];
     if (w === 'back') return [0, 0, g.back_x + g.panel_w, g.wrap_h];
     if (w === 'spine') return [g.spine_x, 0, g.spine_w, g.wrap_h];
@@ -481,6 +507,10 @@
     };
     var e = g.edge;
     box(e, e, g.wrap_w - 2 * e, g.wrap_h - 2 * e, '#e53935');                       // trim
+    if (g.page) {                         // one page: its trim, its safe zone, nothing else
+      box(e + s, e + s, g.panel_w - 2 * s, g.panel_h - 2 * s, '#00897b', '0.06 0.04');
+      return;
+    }
     [g.spine_x, g.spine_x + g.spine_w].forEach(function (x) { line(x, 0, x, g.wrap_h, '#1e88e5'); });
     if (g.hinge) [g.spine_x - g.hinge, g.spine_x + g.spine_w + g.hinge].forEach(function (x) { line(x, 0, x, g.wrap_h, '#1e88e5', '0.05 0.05'); });
     if (g.flap) [g.back_x, g.front_x + g.panel_w].forEach(function (x) { line(x, 0, x, g.wrap_h, '#8e24aa', '0.08 0.04'); });
@@ -508,12 +538,13 @@
   function label(el) {
     if (el.label) return el.label;
     if (el.type === 'text') return '"' + String(el.text).slice(0, 28) + '"';
-    if (el.type === 'image') return (el.fill ? 'Picture (' + el.fill + ' cover)' : 'Picture') + ': ' + el.src;
+    var where = PAGE ? 'whole page' : el.fill + ' cover';
+    if (el.type === 'image') return (el.fill ? 'Picture (' + where + ')' : 'Picture') + ': ' + el.src;
     if (el.type === 'vector') return 'Shapes';
     if (el.type === 'barcode') return 'Barcode area';
     if (el.type === 'rule') return 'Rule';
     if (el.type === 'ellipse') return 'Ellipse';
-    return el.fill ? 'Colour (' + el.fill + ')' : 'Shape';
+    return el.fill ? 'Colour (' + (PAGE ? 'whole page' : el.fill) + ')' : 'Shape';
   }
   function renderLayers() {
     var ul = $('wd-layers');
@@ -611,7 +642,7 @@
                        CFG.maxElements + ', so it cannot be saved to a book: delete some.']);
     fontChecks(out);
     pictureChecks(out);
-    barcodeChecks(out);
+    if (!PAGE) barcodeChecks(out);
     var ul = $('wd-checks');
     ul.innerHTML = '';
     out.forEach(function (c) { var li = document.createElement('li'); li.className = c[0]; li.textContent = c[1]; ul.appendChild(li); });
@@ -624,7 +655,7 @@
              CFG.fonts.indexOf(el.font) === -1;
     });
     if (gone.length) out.push(['bad', 'Its font is not in the font library, so this text would be ' +
-                                      'left off the cover - pick another: ' + gone.map(function (el) {
+                                      'left off the ' + WHAT + ' - pick another: ' + gone.map(function (el) {
                                         return label(el) + ' (' + (el.font || 'no font') + ')'; }).join(', ')]);
   }
   // Pictures and shapes you place that reach the trim but stop short of the
@@ -834,7 +865,7 @@
     var box = $('wd-props'), el = sel && find(sel), n = chosen().length;
     box.innerHTML = '<h3>Selected</h3>';
     if (!el) {
-      box.insertAdjacentHTML('beforeend', '<p>Click something on the cover. Shift+click to pick more than one.</p>');
+      box.insertAdjacentHTML('beforeend', '<p>Click something on the ' + WHAT + '. Shift+click to pick more than one.</p>');
       return;
     }
     if (n > 1) {
@@ -846,7 +877,7 @@
       return;
     }
     var id = document.createElement('div'); id.className = 'id';
-    id.textContent = label(el) + (el.anchor ? ' · on the ' + el.anchor : '');
+    id.textContent = label(el) + (el.anchor ? ' · on the ' + (PAGE ? 'page' : el.anchor) : '');
     box.appendChild(id);
     var row = null;
     var add = function (text, key, kind, opts, half) {
@@ -942,7 +973,7 @@
     }
     if (!el.fill && !el.locked) alignTools(box, 1);
     if (el.locked) box.insertAdjacentHTML('beforeend', '<p class="note">Locked: unlock it in the layers ' +
-                                          'list (□) to move it on the cover.</p>');
+                                          'list (□) to move it on the ' + WHAT + '.</p>');
     if (el.group) groupTools(box);
   }
   // Group the selected things, so a click on any picks up all of them; or
@@ -1168,6 +1199,10 @@
   var savedJSON = null;                 // the design as last saved to (or loaded from) the book
   var currentBook = null;
   function markDirty() {
+    if (PAGE) {
+      if (savedJSON !== null && JSON.stringify(design) !== savedJSON) $('wd-page-status').textContent = 'Unsaved changes';
+      return;
+    }
     var pid = $('wd-project').value, st = $('wd-save-status');
     if (!pid || savedJSON === null) return;
     if (JSON.stringify(design) !== savedJSON) st.textContent = 'Unsaved changes';
@@ -1232,6 +1267,11 @@
       .then(function (r) { return r.json(); });
   }
   function fetchGeometry() {
+    if (PAGE) {                           // the book's trim, from the page's own info
+      g = PAGE.info.geometry;
+      geo = {geometry: g, safe: PAGE.info.safe, spine_safe: 0, warnings: []};
+      return Promise.resolve();
+    }
     return post('/wrap-designer/geometry', settings()).then(function (res) {
       geo = res; g = res.geometry;
       $('wd-flaps').hidden = !g.flap;      // flap presets only where there are flaps
@@ -1244,7 +1284,10 @@
   $('wd-proof-btn').addEventListener('click', function () {
     var msg = $('wd-proof-msg');
     msg.className = ''; msg.textContent = 'Building the PDF…';
-    post('/wrap-designer/build', {design:design, settings:settings(), name:$('wd-name').value}).then(function (res) {
+    var proof = PAGE ? post('/page-designer/' + encodeURIComponent(PAGE.pid) + '/proof',
+                            {design:design, name:$('wd-page-name').value || 'page'})
+                     : post('/wrap-designer/build', {design:design, settings:settings(), name:$('wd-name').value});
+    proof.then(function (res) {
       if (!res.ok) { msg.className = 'bad'; msg.textContent = res.error; return; }
       var bad = [], count = 0;
       design.elements.forEach(function (el) {
@@ -1258,7 +1301,7 @@
         ? 'These break into lines differently in the PDF than on screen: ' + bad.join(', ')
         : 'Built. All ' + count + ' text boxes break into lines exactly as they do here.';
       $('wd-proof').innerHTML = '';
-      if (res.png) { var img = new Image(); img.alt = 'The wrap as printed'; img.src = res.png; $('wd-proof').appendChild(img); }
+      if (res.png) { var img = new Image(); img.alt = 'The ' + (PAGE ? 'page' : 'wrap') + ' as printed'; img.src = res.png; $('wd-proof').appendChild(img); }
       var a = document.createElement('a'); a.className = 'btn btn-sm'; a.href = res.pdf;
       a.textContent = 'Download the PDF'; a.style.marginTop = '8px';
       $('wd-proof').appendChild(a);
@@ -1274,6 +1317,60 @@
     var used = design.elements.filter(function (e) { return e.font; }).map(function (e) { return e.font; });
     return Promise.all(used.filter(function (f, i) { return used.indexOf(f) === i; }).map(ensureFont));
   }
+  // ---- a page of a book (page mode) ----------------------------------------------
+  // The book's designs are listed in the picker; Save keeps the one open with
+  // the book under its name, which is how the manuscript places it.
+  var pageBase = PAGE ? '/page-designer/' + encodeURIComponent(PAGE.pid) : '';
+  function fillPicker() {
+    var pickEl = $('wd-page-pick');
+    pickEl.innerHTML = '';
+    var op = document.createElement('option'); op.value = ''; op.textContent = 'New page…'; pickEl.appendChild(op);
+    PAGE.info.designs.forEach(function (d) {
+      var o = document.createElement('option'); o.value = o.textContent = d.name; pickEl.appendChild(o);
+    });
+    pickEl.value = PAGE.name;
+    $('wd-page-delete').disabled = !PAGE.name;
+  }
+  function openPage(name, keepLocal) {
+    var d = PAGE.info.designs.find(function (x) { return x.name === name; });
+    PAGE.name = d ? name : '';
+    $('wd-page-name').value = PAGE.name;
+    savedJSON = d ? JSON.stringify({elements: d.elements}) : null;
+    if (!keepLocal) design = d ? {elements: JSON.parse(JSON.stringify(d.elements))} : pageStarter(g);
+    $('wd-page-status').textContent = d ? (d.saved ? 'Saved ' + d.saved.replace('T', ' ') : '')
+                                        : 'Not saved to this book yet';
+    fillPicker(); choose(null); showProps();
+    return loadFonts().then(function () { render(); resetHistory(); });
+  }
+  function pageDirty() { return savedJSON === null ? past.length > 0 : JSON.stringify(design) !== savedJSON; }
+  if (PAGE) {
+    $('wd-page-pick').addEventListener('change', function () {
+      var to = this.value;
+      if (pageDirty() && !confirm('Leave this page? Its unsaved changes will be lost.')) { this.value = PAGE.name; return; }
+      openPage(to, false);
+    });
+    $('wd-page-save').addEventListener('click', function () {
+      var st = $('wd-page-status');
+      st.textContent = 'Saving…';
+      post(pageBase + '/save', {name: $('wd-page-name').value, was: PAGE.name, design: design}).then(function (res) {
+        if (!res.ok) { st.textContent = res.error; return; }
+        PAGE.info.designs = res.designs; PAGE.name = res.name;
+        $('wd-page-name').value = res.name;
+        savedJSON = JSON.stringify({elements: design.elements});
+        fillPicker(); persist();
+        st.textContent = 'Saved ' + res.saved.replace('T', ' ') + ' · place it with ~~~ page src="' + res.name + '"';
+      }).catch(function () { st.textContent = 'Not saved: no answer from the app.'; });
+    });
+    $('wd-page-delete').addEventListener('click', function () {
+      if (!PAGE.name || !confirm('Delete the page "' + PAGE.name + '" from this book? A manuscript that places it ' +
+                                 'will show a "missing page design" box until you place another.')) return;
+      post(pageBase + '/delete', {name: PAGE.name}).then(function (res) {
+        PAGE.info.designs = res.designs;
+        openPage('', false);
+      });
+    });
+  }
+
   var start = CFG.startProject || '';
   // a working copy kept by an older version (its barcode box was a plain rect)
   // is brought up to date by the server first, as a book's design is
@@ -1282,6 +1379,17 @@
         .then(function (res) { if (res.ok) design = res.design; }).catch(function () {})
     : Promise.resolve();
   var startPromise = upgraded.then(function () {
+    if (PAGE) {
+      return fetch(pageBase).then(function (r) { return r.json(); }).then(function (info) {
+        PAGE.info = info;
+        $('wd-page-book').value = info.title || '';
+        return fetchGeometry().then(function () {
+          var known = info.designs.some(function (x) { return x.name === PAGE.name; });
+          if (!known) PAGE.name = '';
+          return openPage(PAGE.name, !!saved);
+        });
+      });
+    }
     if (start && Array.prototype.some.call($('wd-project').options, function (o) { return o.value === start; })) {
       $('wd-project').value = start;
       return openBook(start, saved && saved.settings && saved.settings['wd-project'] === start);
@@ -1293,7 +1401,7 @@
   startPromise.then(function () {
     resetHistory();
     var from = CFG.startFrom;             // arrived from a template's "Customise"
-    if (from && Array.prototype.some.call($('wd-from').options, function (o) { return o.value === from; })) {
+    if (from && !PAGE &&Array.prototype.some.call($('wd-from').options, function (o) { return o.value === from; })) {
       $('wd-from').value = from;
       return customise(from);
     }

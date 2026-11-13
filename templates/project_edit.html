@@ -293,8 +293,12 @@
         <div class="check" style="margin-top:6px">
           <input type="checkbox" id="bleed" name="bleed" {{ 'checked' if proj.get('bleed') }}>
           <label for="bleed">Pages print to the edge (bleed) — each page 0.125" bigger on its
-            outer edge, top and bottom, for <code>full="bleed"</code> figures and the style's
-            page background</label></div>
+            outer edge, top and bottom, for <code>full="bleed"</code> figures, designed pages and
+            the style's page background</label></div>
+        <p class="hint" style="margin:6px 0 0">Lay out handouts, maps and character sheets as
+          pages of this book in the <a data-save-first href="{{ url_for('wrap_designer', page=pid) }}">Page
+          designer</a>{% if proj.get('page_designs') %} ({{ proj['page_designs']|length }} saved){% endif %},
+          then place each with <code>~~~ page src="its-name"</code>.</p>
         <div class="check" style="margin-top:6px">
           <input type="checkbox" id="index_statblocks" name="index_statblocks" {{ 'checked' if proj.get('index_statblocks', True) }}>
           <label for="index_statblocks">List every stat block in the index, by name — an Index

@@ -15,6 +15,7 @@ Imposition produced:
 """
 
 import hashlib
+import logging
 import os
 import re
 import math
@@ -3123,6 +3124,23 @@ class BookDoc(BaseDocTemplate):
             for item in reversed(seq):
                 flowables.insert(0, item)
             return
+        if isinstance(f, SideBreak):
+            # a designed page (#74 Phase 6b): a page of its own, on the side
+            # asked for, with a blank page before it when that takes one
+            flowables.pop(0)
+            at_top = getattr(self.frame, '_atTop', False)
+            odd = self.page % 2 == 1
+            want = {'right': True, 'left': False}.get(f.side)
+            blank = [NextPageTemplate('blank'), PageBreak(), BlankMarker(),
+                     NextPageTemplate('recto'), PageBreak()]
+            if at_top:
+                seq = ([] if want is None or odd == want
+                       else [BlankMarker(), NextPageTemplate('recto'), PageBreak()])
+            else:
+                seq = ([PageBreak()] if want is None or (not odd) == want else blank)
+            for item in reversed(seq):
+                flowables.insert(0, item)
+            return
         BaseDocTemplate.handle_flowable(self, flowables)
 
     def _draw_page_ornaments(self, canv, opener, text_left, tw):
@@ -3857,6 +3875,124 @@ class BleedPlate(Flowable):
         for p, (_, h) in zip(self.caption, sizes):
             y -= p.style.spaceBefore + h
             p.drawOn(c, 0, y)
+
+
+# Designed pages (#74 Phase 6b): `~~~ page src="handout-1" side="right"` puts
+# one of the book's page designs (wrap_design.py, made in the designer) on a
+# page of its own: on a right-hand page, a left-hand one, or the next page
+# ('any', the default). The design is drawn edge to edge like a bleed plate,
+# with no running head or folio.
+_SIDE_WORDS = {'right': 'right', 'recto': 'right', 'left': 'left', 'verso': 'left'}
+
+
+def page_side(attrs):
+    """Which page a designed page goes on: 'right', 'left' or 'any'."""
+    return _SIDE_WORDS.get(str((attrs or {}).get('side', '')).strip().lower(), 'any')
+
+
+def page_blocks(ms):
+    """The page designs a book places, by name as written, in order."""
+    out = []
+    for ch in ms.get('chapters', []):
+        for block in ch.get('blocks', []):
+            if block[0] == 'doc_block' and len(block) >= 3 \
+                    and block[2].get('_type') == 'page':
+                out.append((block[2].get('src') or '').strip())
+    return out
+
+
+class SideBreak(Flowable):
+    """Start a new page on the side asked for (see `BookDoc.handle_flowable`)."""
+    width = height = 0
+
+    def __init__(self, side='any'):
+        super().__init__()
+        self.side = side
+
+    def wrap(self, w, h):
+        return (0, 0)
+
+    def draw(self):
+        pass
+
+
+def _k_only(color):
+    """A colour as K-only grey, for a designed page on the press canvas, which
+    refuses colour (`_press_canvasmaker`): black-and-white printing is what that
+    interior gets, so the design prints in greys of the same lightness."""
+    if isinstance(color, _colors.CMYKColor):
+        if not (color.cyan or color.magenta or color.yellow):
+            return color
+        r, g, b = color.rgb()
+    else:
+        r, g, b = color.red, color.green, color.blue
+    lum = 0.299 * r + 0.587 * g + 0.114 * b
+    return _colors.CMYKColor(0, 0, 0, round(1 - lum, 4), alpha=getattr(color, 'alpha', 1))
+
+
+class DesignedPage(Flowable):
+    """A page design filling its page out to the paper's edge. It takes the
+    whole frame, as `BleedPlate` does, and draws the design's sheet (the trim
+    plus 0.125" all round) with its trim on the page's trim; the page's own
+    bleed rectangle crops what lies past the paper (the spine side, and the
+    bleed itself in a book built without it). A design keeps its colours on a
+    screen build; a press build prints them as greys."""
+    def __init__(self, design, label=''):
+        super().__init__()
+        self.design, self.label = design, label
+
+    def wrap(self, availWidth, availHeight):
+        self.width, self.height = availWidth, availHeight
+        return (availWidth, availHeight)
+
+    def draw(self):
+        c = self.canv
+        doc = c._doctemplate
+        c._is_plate = True
+        x1, y1 = doc.frame._x1, doc.frame._y1
+        bx, by, bw, bh = doc._bleed_rect(c.getPageNumber())
+        c.saveState()
+        c.translate(-x1, -y1)
+        clip = c.beginPath()
+        clip.rect(bx, by, bw, bh)
+        c.clipPath(clip, stroke=0, fill=0)
+        drawn = False
+        if self.design is not None:
+            import wrap_design
+            g = wrap_design.page_geometry(doc._pw / inch, doc._ph / inch)
+            b = g['bleed'] * inch
+            was_ink = getattr(c, '_ts_ink_off', False)
+            was_enforce = c._enforceColorSpace
+            c._ts_ink_off = True                       # a screen build: its own colours
+            if doc._press_canvas is not None:
+                c._enforceColorSpace = _k_only
+            c.saveState()
+            try:
+                c.translate(-b, -b)
+                wrap_design.draw_elements(c, self.design, g, g['wrap_h'] * inch)
+                drawn = True
+            except Exception:
+                logging.exception('Drawing page design %s failed', self.label)
+            finally:
+                c.restoreState()
+                c._ts_ink_off = was_ink
+                c._enforceColorSpace = was_enforce
+        if not drawn:
+            c.setFillColor(_colors.Color(.94, .94, .94))
+            c.rect(bx, by, bw, bh, stroke=0, fill=1)
+            c.setFillColor(_colors.Color(.35, .35, .35))
+            c.setFont('Helvetica', 8)
+            c.drawCentredString(bx + bw / 2.0, by + bh / 2.0,
+                                f'missing page design: {self.label}'[:90])
+        c.restoreState()
+
+
+def _render_page_block(attrs, preset):
+    """`~~~ page src="name" side="…"`: the side break, then the design."""
+    import wrap_design
+    name = (attrs.get('src') or '').strip()
+    design = wrap_design.find_page(preset.get('_page_designs'), name)
+    return [SideBreak(page_side(attrs)), DesignedPage(design, name or '(no src)')]
 
 
 def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
@@ -4787,6 +4923,8 @@ def _render_doc_block(block_paras, preset, fonts, st, avail_w, hyph=None, block_
             return _render_poem_block(block_paras, attrs, preset, fonts, st, avail_w)
         if btype == 'figure':
             return _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w)
+        if btype == 'page':
+            return _render_page_block(attrs, preset)
         if btype == 'list':
             return _render_list_block(block_paras, attrs, preset, fonts, st, avail_w, hyph)
         if btype == 'quote':
@@ -5427,7 +5565,8 @@ def _spans(block):
     meta = block[2] if len(block) > 2 else {}
     yes = ('1', 'yes', 'true', 'page')
     return (str(meta.get('span', '')).strip().lower() in yes
-            or (meta.get('_type') == 'figure' and figure_full(meta) != ''))
+            or (meta.get('_type') == 'figure' and figure_full(meta) != '')
+            or meta.get('_type') == 'page')
 
 
 def _page_open(story):
@@ -6342,6 +6481,9 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
     bleed_on = bool(meta.get('bleed')) and not screen
     if bleed_on:
         preset = dict(preset, _bleed=True)
+    # the book's page designs (#74 Phase 6b), for `~~~ page src=` to find
+    if meta.get('page_designs'):
+        preset = dict(preset, _page_designs=meta['page_designs'])
 
     m       = preset['margins']
     avail_w = (preset['trim']['w'] - m['inside'] - m['outside']) * inch
@@ -6529,4 +6671,34 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         # figures asking for the paper's edge in a print book without bleed,
         # set inside the margins instead
         'bleed_wanted':   [] if (bleed_on or screen) else bleed_figures(manuscript),
+        # designed pages (#74 Phase 6b): ones placed that the book has no
+        # design for, and, in a print book without bleed, the ones placed
+        # (each printed to the trim, so a cut that wanders shows white)
+        'pages_missing':  pages_missing(manuscript, meta),
+        'pages_bleed_wanted': [] if (bleed_on or screen) else
+                              pages_to_edge(manuscript, meta, preset),
     }
+
+
+def pages_to_edge(ms, meta, preset):
+    """The page designs a book places whose colour or pictures reach the trim."""
+    import wrap_design
+    g = wrap_design.page_geometry(preset['trim']['w'], preset['trim']['h'])
+    out = []
+    for name in page_blocks(ms):
+        d = wrap_design.find_page(meta.get('page_designs') or [], name)
+        if d is not None and name not in out and wrap_design.reaches_edge(d, g):
+            out.append(name)
+    return out
+
+
+def pages_missing(ms, meta):
+    """The names `~~~ page src=` uses that the book has no page design for."""
+    import wrap_design
+    designs = meta.get('page_designs') or []
+    out = []
+    for name in page_blocks(ms):
+        label = name or '(no src)'
+        if wrap_design.find_page(designs, name) is None and label not in out:
+            out.append(label)
+    return out
