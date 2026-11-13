@@ -8,7 +8,11 @@ line here.
 
 ---
 
-## Unreleased
+## 1.11.0 — 12 November 2026
+
+Children's books, first step: two styles for early readers and chapter books,
+set in a typeface made for new readers, plus paragraph settings any style can
+use and square trims.
 
 ### New
 
