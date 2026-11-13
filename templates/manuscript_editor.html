@@ -764,8 +764,12 @@
           .then(function(info){
             sel.innerHTML = '';
             (info.designs || []).forEach(function(d){
-              var o = document.createElement('option'); o.value = o.textContent = d.name; sel.appendChild(o);
+              var o = document.createElement('option'); o.value = d.name;
+              o.textContent = d.name + (d.spread ? ' (two-page spread)' : '');
+              if (d.spread) o.dataset.spread = '1';
+              sel.appendChild(o);
             });
+            sidePick();
             if (!sel.options.length){
               var o = document.createElement('option'); o.value = '';
               o.textContent = 'no page designs yet: open the page designer'; sel.appendChild(o);
@@ -773,11 +777,18 @@
             document.getElementById('pp-insert').disabled = !sel.value;
           }).catch(function(){ sel.innerHTML = '<option value="">could not load the designs</option>'; });
       }
+      // a spread (#74 Phase 6c) always opens on a left-hand page: no side to pick
+      function sidePick(){
+        var sel = document.getElementById('pp-name'), o = sel.options[sel.selectedIndex];
+        document.getElementById('pp-side').hidden = !!(o && o.dataset.spread);
+      }
+      document.getElementById('pp-name').addEventListener('change', sidePick);
       document.getElementById('pp-insert').addEventListener('click', function(){
-        var name = document.getElementById('pp-name').value;
+        var sel = document.getElementById('pp-name'), name = sel.value;
         if (!name || !pageThen) return;
         pagePick.hidden = true;
-        pageThen(name, document.getElementById('pp-side').value);
+        var o = sel.options[sel.selectedIndex];
+        pageThen(name, o && o.dataset.spread ? '' : document.getElementById('pp-side').value);
       });
       document.getElementById('pp-close').addEventListener('click', function(){ pagePick.hidden = true; });
       pagePick.addEventListener('keydown', function(e){ if (e.key === 'Escape') pagePick.hidden = true; });

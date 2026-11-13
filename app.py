@@ -3310,8 +3310,9 @@ def wrap_designer_build():
 
 # ------------------------------------------------------------ page designs (#74 6b)
 # The wrap designer opened on one interior page of a book. A book keeps its
-# designs as `page_designs` ([{name, elements, saved}], see wrap_design.py) and
-# places them with `~~~ page src="name" side="right|left|any"`.
+# designs as `page_designs` ([{name, elements, saved}, plus `spread: true` for
+# a two-page spread], see wrap_design.py) and places them with
+# `~~~ page src="name" side="right|left|any"` (a spread always opens on a left page).
 
 def _page_designs(proj):
     """A book's page designs, each a dict with a usable name; [] when none."""
@@ -3335,8 +3336,10 @@ def _page_info(proj):
     return {'title': proj.get('title') or proj.get('name', ''),
             'trim': trim,
             'geometry': wrap_design.page_geometry(trim['w'], trim['h']),
+            'spread_geometry': wrap_design.page_geometry(trim['w'], trim['h'], spread=True),
             'safe': wrap_design.PAGE_SAFE,
             'designs': [{'name': d['name'], 'elements': d['elements'],
+                         'spread': wrap_design.is_spread(d),
                          'saved': d.get('saved', '')} for d in _page_designs(proj)]}
 
 
@@ -3369,6 +3372,8 @@ def page_designer_save(pid):
                                        'Pick another name.')
     saved = datetime.now().isoformat(timespec='seconds')
     entry = {'name': name, 'elements': design['elements'], 'saved': saved}
+    if wrap_design.is_spread(body.get('design')):
+        entry['spread'] = True
     old = wrap_design.find_page(designs, was)
     if old is not None:
         designs[designs.index(old)] = entry

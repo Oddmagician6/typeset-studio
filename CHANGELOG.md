@@ -8,6 +8,22 @@ line here.
 
 ---
 
+## Unreleased
+
+### New
+
+- **Two-page spreads.** A designed page can now run across two facing pages,
+  for a map or a chapter title: set **Layout** to **Two-page spread** in the
+  Page designer. Pictures and colour may cross the fold; a shaded gutter
+  each side of it shows where the binding can swallow words, and the checks
+  name any text sitting there. An existing page becomes the right or left
+  half of the spread, and a spread can go back to one page. Placed with the
+  same `~~~ page src="…"`, a spread always opens on a left-hand page (a blank
+  page goes before it when needed) and fills the right one beside it. In the
+  ebook it is one wide picture. The writing editor's picker marks spreads.
+
+---
+
 ## 1.8.0 — 12 November 2026
 
 Designed pages. Lay out a whole page of the book by hand in the new Page
