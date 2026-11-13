@@ -73,10 +73,12 @@ Start here in a new session. Each item points at its full entry below.
    **6c (two-page spreads) was planned with the user the same day (all as recommended)
    and is released as 1.9.0 (2026-11-12)**, fixtures frozen (see "Phase 6c as built").
    That completes #74's six phases. **Fillable character sheets** (the follow-up) were
-   planned with the user on 2026-11-12 (all as recommended) and built on branch
-   `fillable-fields`, uncommitted (see "Follow-up: fillable character sheets" in the #74
-   entry). **START HERE:** ask the user about commit, merge and a 1.10.0 release; then
-   ask what comes next (children's books #75, whose three questions come first).
+   planned with the user on 2026-11-12 (all as recommended) and **released as 1.10.0
+   (2026-11-12)**, fixtures frozen (see "Follow-up: fillable character sheets" in the #74
+   entry). Worth a hand check the tests can't make: open a fillable sheet in Acrobat or
+   Chrome and confirm two boxes of one name fill together. **START HERE:** ask the user
+   what comes next (children's books #75, whose three questions come first; or a small
+   item from 3 above).
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
@@ -3209,7 +3211,7 @@ doc_model / WYSIWYG round-trip:
   several widgets), the designer pointing out shared names. Plus a **"Fillable sheet"**
   download of one design at trim size, no bleed.
 
-  **As built (2026-11-12, branch `fillable-fields`):** a `field` element (`kind`, `name`,
+  **As built (2026-11-12, branch `fillable-fields`; released as 1.10.0):** a `field` element (`kind`, `name`,
   `look`, `color`, `stroke_w`, `face` sans/serif/mono, `size`, `ink`). `wrap_design.
   draw_field` prints the look and, when `draw_elements(live=…)` says so, calls
   `add_live_field`: ReportLab's `acroForm.textfield`/`checkbox` with `relative=True` (so
