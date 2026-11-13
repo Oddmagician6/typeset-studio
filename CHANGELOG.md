@@ -8,7 +8,11 @@ line here.
 
 ---
 
-## Unreleased
+## 1.13.0 — 13 November 2026
+
+Picture books, second step: a page plan to lay the whole book out in order,
+a one-click way to start a picture book, and checks for its page count and
+for pictures across the fold.
 
 ### New
 
