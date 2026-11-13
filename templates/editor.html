@@ -172,12 +172,17 @@
             <div class="field num"><label>Smallest text</label><span class="hint">points · 0 for none</span>
               <input type="number" step="0.5" min="0" name="min_text_size" value="{{ p.min_text_size or 0 }}"
                      title="Nothing in the book is set smaller - title and copyright pages, letters, notes. Large print uses 16."></div>
+            <div class="field num"><label>Space between paragraphs</label><span class="hint">points · 0 for none</span>
+              <input type="number" step="0.5" min="0" name="b_para_space" value="{{ p.body.para_space or 0 }}"
+                     title="Block paragraphs, as early readers use: set the indent to 0 and open a gap instead. The ebook follows."></div>
           </div>
           <div class="row">
             <div class="check"><input type="checkbox" id="f-just" name="b_justify" {{ 'checked' if p.body.justify }}>
               <label for="f-just">Justify text (flush both edges)</label></div>
             <div class="check"><input type="checkbox" name="b_hyphenate" {{ 'checked' if p.body.hyphenate }}>
               <label>Allow hyphenation</label></div>
+            <div class="check"><input type="checkbox" id="f-keepwhole" name="b_keep_whole" {{ 'checked' if p.body.keep_whole }}>
+              <label for="f-keepwhole" title="A paragraph moves whole to the next page rather than break across a page turn - so a young reader never turns over mid-sentence. One longer than a page still breaks. Not in two-column text.">Keep each paragraph on one page</label></div>
           </div>
         </div>
       </fieldset>

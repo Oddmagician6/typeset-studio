@@ -549,12 +549,21 @@ Some of the bundled styles:
 - **Game Zine — A5 (5.83×8.27)** — an old-school adventure zine: compact Spectral text,
   plain bold headings, tight stat blocks, black and white with a red spot colour on screen
   and wedge corners on every page.
+- **Early Reader (6×9)** — for children learning to read (about 5-7): 18pt Andika,
+  ragged right, block paragraphs with space between them, and no paragraph broken by a
+  page turn, so nobody turns over mid-sentence.
+- **Chapter Book (5.5×8.5)** — for readers of about 7-10: 14pt Andika with open leading,
+  ragged right, short indented paragraphs and roomy chapter openings for chapter art.
+
+Any style can have the two early-reader settings: **Space between paragraphs** and
+**Keep each paragraph on one page**, under Body text.
 
 ---
 
 ## Fonts
 
-The tool ships with **seven book serifs**, each with a regular, bold and italic:
+The tool ships with **seven book serifs and a face for new readers**, each with a
+regular, bold and italic:
 
 | Family | Registered as | Used by |
 |--------|---------------|---------|
@@ -565,6 +574,7 @@ The tool ships with **seven book serifs**, each with a regular, bold and italic:
 | Crimson Pro | `Crimson Pro` | Mass Market Paperback |
 | Lora | `Lora` | Romance / Women's Fiction |
 | Spectral | `Spectral` | Thriller / Crime, Science Fiction (Clean) |
+| Andika (SIL) | `Andika` | Early Reader, Chapter Book: single-storey *a* and *g*, and *I*, *l* and *1* easy to tell apart |
 
 It also ships two **display faces** for titles and headings, **Cinzel** and **Cinzel
 Decorative** (capitals designs, in regular and bold), used by the Game Book — Dark Screen
