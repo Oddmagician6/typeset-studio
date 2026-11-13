@@ -71,8 +71,10 @@ Start here in a new session. Each item points at its full entry below.
    picker, an image page in the EPUB. **6b (the page designer) is released as 1.8.0
    (2026-11-12)**; the user kept its three choices (see "Phase 6b as built").
    **6c (two-page spreads) was planned with the user the same day (all as recommended)
-   and is BUILT on branch `ttrpg-phase6c`** (see "Phase 6c as built").
-   **START HERE:** ask the user about committing, merging and a 1.9.0 release.
+   and is released as 1.9.0 (2026-11-12)**, fixtures frozen (see "Phase 6c as built").
+   That completes #74's six phases. **START HERE:** ask the user what comes next (a
+   possible follow-up from the plan: fillable form fields on character sheets; or
+   another roadmap item such as children's books #75, whose three questions come first).
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
