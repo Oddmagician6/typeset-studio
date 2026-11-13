@@ -70,7 +70,9 @@ Start here in a new session. Each item points at its full entry below.
    designs stored inside the book, placed with `~~~ page src= side=` plus an editor
    picker, an image page in the EPUB. **6b (the page designer) is released as 1.8.0
    (2026-11-12)**; the user kept its three choices (see "Phase 6b as built").
-   **START HERE:** two-page spreads are the next step; plan them with the user first.
+   **6c (two-page spreads) was planned with the user the same day (all as recommended)
+   and is BUILT on branch `ttrpg-phase6c`** (see "Phase 6c as built").
+   **START HERE:** ask the user about committing, merging and a 1.9.0 release.
    Watch-outs: `sed -i` in Git Bash rewrites a CRLF file as LF (every file here is CRLF),
    so use the Edit tool; write patch scripts with the Write tool, never `python - <<EOF`, whenever
    they hold a backslash (a heredoc collapses them); a new bundled style must survive the
@@ -3165,6 +3167,35 @@ doc_model / WYSIWYG round-trip:
   design's colours as greys rather than refusing (a colour interior would need a colour
   press path); the safe zone is 0.375" on all four sides (either side can be the spine);
   a page design's elements anchor to `front` internally. Released as 1.8.0.
+
+  **Phase 6c plan (two-page spreads), agreed with the user 2026-11-12 (all as recommended):**
+  - A spread is **one wide design**: a sheet two trims wide plus 0.125" bleed all round,
+    with the fold down the middle; art and words may cross it. Stored in `page_designs`
+    with `"spread": true`.
+  - `~~~ page src="map"` naming a spread **always starts on a left page** (a blank page
+    before it when needed) and fills that page and the next right page. The designer
+    shades a **gutter zone** (0.375" each side of the fold) and warns when words sit in it;
+    the art is not shifted.
+  - The EPUB gets **one wide image page** with alt text.
+  - The designer can turn a page design into a spread and back: the elements keep their
+    place on the side chosen; going back warns about elements left off the page.
+
+  **Phase 6c as built (2026-11-12, branch `ttrpg-phase6c`):** `page_geometry(spread=True)`
+  is a wrap with no spine: `back_x = b` (left page), `front_x = spine_x = b + trim_w`
+  (right page and the fold), `wrap_w = 2 trim + 2b`. `fill_rect` (and JS `fillRect`)
+  only covers the whole sheet for a single page, so a spread's `back`/`front` fill runs
+  to the fold and `sheet` covers both. `is_spread`, `design_geometry` pick the sheet;
+  `build_page_pdf`, `render_page` (one wide JPG), `page_words` (left page first) and
+  `engine.pages_to_edge` use it. `_render_page_block` makes `SideBreak('left')`, a
+  `DesignedPage(half='left')`, a `PageBreak` (a full frame otherwise wraps the next
+  flowable at 0pt and puts it on the same page) and `DesignedPage(half='right')`, which
+  translates by another trim width; each page's `_bleed_rect` cuts at the fold. App:
+  `spread: true` kept on save, `designs[].spread` and `spread_geometry` in the page info.
+  Designer: a Layout select (`wd-page-kind`; `setKind`, `toSpread`, `toPage`), the
+  geometry chosen in `render` and `restore` from `design.spread`, a fold line and shaded
+  gutter, an "In the gutter" check, Left page / Whole spread art buttons. Manuscript
+  picker marks spreads and hides the side choice. `test_spreads.py` (51 checks, a
+  browser half included).
 
   **Order and why.** 1 and 2 are cheap and pay off in single column (and 2 helps every
   nonfiction book). 3 comes before columns because the author's own books are single

@@ -131,7 +131,7 @@ def panel_width(g, anchor):
 def fill_rect(g, which):
     """A panel's rectangle out to the bleed, in inches (x, y, w, h; y down)."""
     H = g['wrap_h']
-    if g.get('page'):
+    if g.get('page') and not g.get('spread'):
         return 0.0, 0.0, g['wrap_w'], H        # a page design: the page is the sheet
     if which == 'front':
         return g['front_x'], 0.0, g['wrap_w'] - g['front_x'], H
@@ -821,20 +821,46 @@ def render_front(design, dims, out_path, dpi=300):
 # a left-hand page its right. The book stores its designs as `page_designs`:
 # [{"name": "handout-1", "elements": [...], "saved": "..."}].
 
+#
+# A two-page spread (#74 Phase 6c) is one design `"spread": true` over a left
+# and a right page: the sheet is two trims wide plus the bleed all round, the
+# fold down its middle. It is a wrap with no spine: `back` is the left page,
+# `front` the right one, so a page design turned into a spread keeps its
+# elements on the right page; a `fill` covers its own page out to the bleed
+# (and to the fold), `sheet` the whole spread.
+
 PAGE_BLEED = 0.125
 PAGE_SAFE = 0.375          # in from the trim: clear of the cut and of the gutter
 PAGE_NAME_MAX = 40
 
 
-def page_geometry(trim_w, trim_h, bleed=PAGE_BLEED):
+def page_geometry(trim_w, trim_h, bleed=PAGE_BLEED, spread=False):
     """A page design's sheet in the keys the designer and `el_rect` read: one
-    panel (the page) with nothing beside it."""
+    panel (the page) with nothing beside it; with `spread`, two panels meeting
+    at the fold (`spine_x`, no spine width)."""
     b = float(bleed)
+    if spread:
+        return {'page': True, 'spread': True, 'bleed': b, 'edge': b,
+                'trim_w': trim_w, 'trim_h': trim_h, 'panel_w': trim_w, 'panel_h': trim_h,
+                'back_x': b, 'front_x': b + trim_w, 'spine_x': b + trim_w, 'spine_w': 0.0,
+                'wrap_w': 2 * trim_w + 2 * b, 'wrap_h': trim_h + 2 * b,
+                'hinge': 0.0, 'flap': 0.0, 'board_ext': 0.0, 'wrap': 0.0,
+                'spine_text': False, 'binding': 'page'}
     return {'page': True, 'bleed': b, 'edge': b, 'trim_w': trim_w, 'trim_h': trim_h,
             'panel_w': trim_w, 'panel_h': trim_h, 'front_x': b, 'back_x': b,
             'spine_x': b, 'spine_w': 0.0, 'wrap_w': trim_w + 2 * b, 'wrap_h': trim_h + 2 * b,
             'hinge': 0.0, 'flap': 0.0, 'board_ext': 0.0, 'wrap': 0.0,
             'spine_text': False, 'binding': 'page'}
+
+
+def is_spread(design):
+    """Whether a page design is a two-page spread."""
+    return bool(isinstance(design, dict) and design.get('spread'))
+
+
+def design_geometry(design, trim_w, trim_h):
+    """The sheet a page design is drawn on: one page, or a spread."""
+    return page_geometry(trim_w, trim_h, spread=is_spread(design))
 
 
 def page_name(raw):
@@ -855,8 +881,9 @@ def find_page(designs, name):
 
 def build_page_pdf(design, trim_w, trim_h, out_path):
     """A page design alone, as a one-page PDF with its bleed: the designer's
-    proof. Returns {element id: lines}, as `build_pdf` does."""
-    g = page_geometry(trim_w, trim_h)
+    proof (a spread on one sheet, both pages side by side). Returns
+    {element id: lines}, as `build_pdf` does."""
+    g = design_geometry(design, trim_w, trim_h)
     W, H = g['wrap_w'] * inch, g['wrap_h'] * inch
     b = g['bleed'] * inch
     c = rl_canvas.Canvas(out_path, pagesize=(W, H))
@@ -870,11 +897,12 @@ def build_page_pdf(design, trim_w, trim_h, out_path):
 
 def render_page(design, trim_w, trim_h, out_path, dpi=200):
     """A page design's trimmed page as a JPG: the ebook's image page and the
-    designer's proof picture."""
+    designer's proof picture. A spread is one picture of both pages."""
     import tempfile
     import fitz
     from PIL import Image
-    g = page_geometry(trim_w, trim_h)
+    g = design_geometry(design, trim_w, trim_h)
+    tw = g['wrap_w'] - 2 * g['bleed']
     fd, tmp = tempfile.mkstemp(suffix='.pdf')
     os.close(fd)
     try:
@@ -882,9 +910,9 @@ def render_page(design, trim_w, trim_h, out_path, dpi=200):
         b = g['bleed']
         with fitz.open(tmp) as doc:
             pix = doc[0].get_pixmap(dpi=dpi, alpha=False, clip=fitz.Rect(
-                b * 72, b * 72, (b + trim_w) * 72, (b + trim_h) * 72))
+                b * 72, b * 72, (b + tw) * 72, (b + trim_h) * 72))
             im = Image.frombytes('RGB', (pix.width, pix.height), pix.samples)
-            im.crop((0, 0, min(im.width, round(trim_w * dpi)),
+            im.crop((0, 0, min(im.width, round(tw * dpi)),
                      min(im.height, round(trim_h * dpi)))).save(out_path, 'JPEG', quality=90)
     finally:
         try:
@@ -914,9 +942,12 @@ def reaches_edge(design, g):
 
 
 def page_words(design):
-    """The words on a page design, top to bottom, for the ebook's alt text."""
+    """The words on a page design, top to bottom, for the ebook's alt text (a
+    spread's left page before its right)."""
     texts = [el for el in (design or {}).get('elements', [])
              if isinstance(el, dict) and el.get('type') == 'text' and not el.get('hidden')
              and str(el.get('text', '')).strip()]
-    texts.sort(key=lambda el: (el.get('y', 0), el.get('x', el.get('cx', 0))))
+    side = (lambda el: 0 if el.get('anchor') == 'back' else 1) if is_spread(design) \
+        else (lambda el: 0)
+    texts.sort(key=lambda el: (side(el), el.get('y', 0), el.get('x', el.get('cx', 0))))
     return ' '.join(' '.join(str(el['text']).split()) for el in texts)

@@ -715,6 +715,15 @@ it is a picture on a screen of its own, read out by the words on the design, or 
 words you write inside the block. A name the book has no design for prints a grey
 "missing page design" page, and the result page names it.
 
+A map or a chapter title can run across two facing pages: set **Layout** to **Two-page
+spread** in the Page designer. The sheet becomes both pages side by side with the fold
+down the middle; pictures and colour may cross it, and the shaded strip each side of the
+fold is the gutter, where the binding can swallow words (the checks say when text sits
+in it). An existing page becomes the right or the left half of the spread, and a spread
+can go back to one page, keeping either side. Placed with the same `~~~ page src="…"`, a
+spread always opens on a left-hand page (a blank page before it when needed) and goes on
+over the right one. In the ebook it is one wide picture.
+
 After a press build the result page adds a **Press check** card, measured off the finished
 file: colour, illustrations, transparency, annotations, trim box.
 

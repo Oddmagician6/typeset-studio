@@ -3936,10 +3936,12 @@ class DesignedPage(Flowable):
     plus 0.125" all round) with its trim on the page's trim; the page's own
     bleed rectangle crops what lies past the paper (the spine side, and the
     bleed itself in a book built without it). A design keeps its colours on a
-    screen build; a press build prints them as greys."""
-    def __init__(self, design, label=''):
+    screen build; a press build prints them as greys. A spread (#74 Phase 6c)
+    is two of these, `half` 'left' then 'right', each drawing its own page of
+    the one wide sheet."""
+    def __init__(self, design, label='', half=None):
         super().__init__()
-        self.design, self.label = design, label
+        self.design, self.label, self.half = design, label, half
 
     def wrap(self, availWidth, availHeight):
         self.width, self.height = availWidth, availHeight
@@ -3959,8 +3961,10 @@ class DesignedPage(Flowable):
         drawn = False
         if self.design is not None:
             import wrap_design
-            g = wrap_design.page_geometry(doc._pw / inch, doc._ph / inch)
+            g = wrap_design.page_geometry(doc._pw / inch, doc._ph / inch,
+                                          spread=self.half is not None)
             b = g['bleed'] * inch
+            dx = b + (doc._pw if self.half == 'right' else 0)
             was_ink = getattr(c, '_ts_ink_off', False)
             was_enforce = c._enforceColorSpace
             c._ts_ink_off = True                       # a screen build: its own colours
@@ -3968,7 +3972,7 @@ class DesignedPage(Flowable):
                 c._enforceColorSpace = _k_only
             c.saveState()
             try:
-                c.translate(-b, -b)
+                c.translate(-dx, -b)
                 wrap_design.draw_elements(c, self.design, g, g['wrap_h'] * inch)
                 drawn = True
             except Exception:
@@ -3988,11 +3992,17 @@ class DesignedPage(Flowable):
 
 
 def _render_page_block(attrs, preset):
-    """`~~~ page src="name" side="…"`: the side break, then the design."""
+    """`~~~ page src="name" side="…"`: the side break, then the design. A
+    spread always opens on a left page and goes on over the right one."""
     import wrap_design
     name = (attrs.get('src') or '').strip()
     design = wrap_design.find_page(preset.get('_page_designs'), name)
-    return [SideBreak(page_side(attrs)), DesignedPage(design, name or '(no src)')]
+    label = name or '(no src)'
+    if wrap_design.is_spread(design):
+        # the break: a full frame would otherwise wrap the right half at 0pt high
+        return [SideBreak('left'), DesignedPage(design, label, 'left'), PageBreak(),
+                DesignedPage(design, label, 'right')]
+    return [SideBreak(page_side(attrs)), DesignedPage(design, label)]
 
 
 def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
@@ -6683,11 +6693,11 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
 def pages_to_edge(ms, meta, preset):
     """The page designs a book places whose colour or pictures reach the trim."""
     import wrap_design
-    g = wrap_design.page_geometry(preset['trim']['w'], preset['trim']['h'])
+    tw, th = preset['trim']['w'], preset['trim']['h']
     out = []
     for name in page_blocks(ms):
         d = wrap_design.find_page(meta.get('page_designs') or [], name)
-        if d is not None and name not in out and wrap_design.reaches_edge(d, g):
+        if d is not None and name not in out                 and wrap_design.reaches_edge(d, wrap_design.design_geometry(d, tw, th)):
             out.append(name)
     return out
 

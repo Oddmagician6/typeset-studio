@@ -124,7 +124,7 @@
   }
   function panelW(a) { return a === 'spine' ? g.spine_w : (a === 'front' || a === 'back') ? g.panel_w : g.wrap_w; }
   function fillRect(w) {
-    if (g.page) return [0, 0, g.wrap_w, g.wrap_h];      // a page design: the page is the sheet
+    if (g.page && !g.spread) return [0, 0, g.wrap_w, g.wrap_h];   // a page design: the page is the sheet
     if (w === 'front') return [g.front_x, 0, g.wrap_w - g.front_x, g.wrap_h];
     if (w === 'back') return [0, 0, g.back_x + g.panel_w, g.wrap_h];
     if (w === 'spine') return [g.spine_x, 0, g.spine_w, g.wrap_h];
@@ -249,6 +249,7 @@
   }
   function restore(snap) {
     lastSnap = snap; design = JSON.parse(snap);
+    if (PAGE && PAGE.info) { pageGeometry(); kindUi(); }   // undo may cross a page/spread switch
     also = also.filter(find);
     if (sel && !find(sel)) sel = also.shift() || null;
     showProps(); loadFonts().then(render); undoButtons();
@@ -272,6 +273,7 @@
     return n;
   }
   function render() {
+    if (PAGE && PAGE.info) pageGeometry();
     if (!g) return;
     svg.setAttribute('viewBox', '0 0 ' + g.wrap_w + ' ' + g.wrap_h);
     svg.innerHTML = '';
@@ -507,6 +509,14 @@
     };
     var e = g.edge;
     box(e, e, g.wrap_w - 2 * e, g.wrap_h - 2 * e, '#e53935');                       // trim
+    if (g.spread) {                       // two pages: the fold, the gutter, each page's safe zone
+      node('rect', {x:g.spine_x - s, y:e, width:2 * s, height:g.panel_h, fill:'#1e88e5', 'fill-opacity':0.1}, gl);
+      line(g.spine_x, 0, g.spine_x, g.wrap_h, '#1e88e5');
+      ['back', 'front'].forEach(function (a) {
+        var o = origin(a); box(o[0] + s, o[1] + s, g.panel_w - 2 * s, g.panel_h - 2 * s, '#00897b', '0.06 0.04');
+      });
+      return;
+    }
     if (g.page) {                         // one page: its trim, its safe zone, nothing else
       box(e + s, e + s, g.panel_w - 2 * s, g.panel_h - 2 * s, '#00897b', '0.06 0.04');
       return;
@@ -538,13 +548,13 @@
   function label(el) {
     if (el.label) return el.label;
     if (el.type === 'text') return '"' + String(el.text).slice(0, 28) + '"';
-    var where = PAGE ? 'whole page' : el.fill + ' cover';
+    var where = PAGE ? pageWhere(el.fill) : el.fill + ' cover';
     if (el.type === 'image') return (el.fill ? 'Picture (' + where + ')' : 'Picture') + ': ' + el.src;
     if (el.type === 'vector') return 'Shapes';
     if (el.type === 'barcode') return 'Barcode area';
     if (el.type === 'rule') return 'Rule';
     if (el.type === 'ellipse') return 'Ellipse';
-    return el.fill ? 'Colour (' + (PAGE ? 'whole page' : el.fill) + ')' : 'Shape';
+    return el.fill ? 'Colour (' + (PAGE ? pageWhere(el.fill) : el.fill) + ')' : 'Shape';
   }
   function renderLayers() {
     var ul = $('wd-layers');
@@ -612,9 +622,15 @@
       out.push(['bad', 'This printer doesn\'t allow spine text on a book this thin' +
                        (min ? ' (from ' + min + ' pages).' : '.')]);
     }
-    var outside = [], missing = [];
+    var outside = [], missing = [], gutter = [];
     design.elements.forEach(function (el) {
       if (el.hidden) return;
+      if (g.spread && el.type === 'text' && String(el.text || '').trim()) {
+        var gb = bbox(el);
+        if (gb[0] < g.spine_x + geo.safe - 0.005 && gb[0] + gb[2] > g.spine_x - geo.safe + 0.005) {
+          gutter.push(label(el)); return;
+        }
+      }
       if (el.type === 'barcode') {
         var zb = safeBox(el), bb0 = bbox(el);
         if (bb0[0] < zb[0] - 0.005 || bb0[0] + bb0[2] > zb[2] + 0.005 || bb0[1] < zb[1] - 0.005 ||
@@ -635,6 +651,7 @@
     });
     if (outside.length) out.push(['bad', 'Outside the safe zone, may be trimmed: ' + outside.join(', ')]);
     else out.push(['ok', 'All text is inside the safe zones.']);
+    if (gutter.length) out.push(['bad', 'In the gutter, where the binding may swallow it: ' + gutter.join(', ')]);
     if (missing.length) out.push(['bad', 'Characters the font doesn\'t have, which would print blank: ' + missing.join('; ')]);
     if (spineText && g.spine_text) out.push(['ok', 'The spine is wide enough for text.']);
     if (design.elements.length > CFG.maxElements)
@@ -877,7 +894,7 @@
       return;
     }
     var id = document.createElement('div'); id.className = 'id';
-    id.textContent = label(el) + (el.anchor ? ' · on the ' + (PAGE ? 'page' : el.anchor) : '');
+    id.textContent = label(el) + (el.anchor ? ' · on the ' + (PAGE ? pageWhere(el.anchor, true) : el.anchor) : '');
     box.appendChild(id);
     var row = null;
     var add = function (text, key, kind, opts, half) {
@@ -1109,8 +1126,10 @@
   $('wd-reset').addEventListener('click', function () {
     if (!confirm('Start over with the example design? Your current design will be replaced.')) return;
     commit();
-    design = starter($('wd-project').value ? currentBook : null, g); choose(null); showProps();
+    design = starter($('wd-project').value ? currentBook : null, PAGE ? PAGE.info.geometry : g);
+    choose(null); showProps();
     loadFonts().then(render);
+    if (PAGE) kindUi();
   });
   $('wd-guides').addEventListener('change', render);
 
@@ -1200,7 +1219,7 @@
   var currentBook = null;
   function markDirty() {
     if (PAGE) {
-      if (savedJSON !== null && JSON.stringify(design) !== savedJSON) $('wd-page-status').textContent = 'Unsaved changes';
+      if (savedJSON !== null && JSON.stringify(pageDoc(design)) !== savedJSON) $('wd-page-status').textContent = 'Unsaved changes';
       return;
     }
     var pid = $('wd-project').value, st = $('wd-save-status');
@@ -1268,8 +1287,8 @@
   }
   function fetchGeometry() {
     if (PAGE) {                           // the book's trim, from the page's own info
-      g = PAGE.info.geometry;
-      geo = {geometry: g, safe: PAGE.info.safe, spine_safe: 0, warnings: []};
+      geo = {geometry: null, safe: PAGE.info.safe, spine_safe: 0, warnings: []};
+      pageGeometry();
       return Promise.resolve();
     }
     return post('/wrap-designer/geometry', settings()).then(function (res) {
@@ -1317,6 +1336,84 @@
     var used = design.elements.filter(function (e) { return e.font; }).map(function (e) { return e.font; });
     return Promise.all(used.filter(function (f, i) { return used.indexOf(f) === i; }).map(ensureFont));
   }
+  // ---- two-page spreads (#74 Phase 6c) ----------------------------------------------
+  // A spread is a page design with `spread: true`, on a sheet two pages wide
+  // (wrap_design.page_geometry spread=True): `back` is the left page, `front`
+  // the right. Turning a page into a spread keeps its elements on the side
+  // chosen; turning a spread back into a page keeps one side and says what
+  // falls off.
+  function pageDoc(d) {
+    return d.spread ? {elements: d.elements, spread: true} : {elements: d.elements};
+  }
+  function pageGeometry() {
+    g = design.spread ? PAGE.info.spread_geometry : PAGE.info.geometry;
+    if (geo) geo.geometry = g;
+  }
+  function pageWhere(a, isAnchor) {
+    if (!g || !g.spread) return isAnchor ? 'page' : 'whole page';
+    return a === 'back' ? 'left page' : a === 'front' ? 'right page' : (isAnchor ? 'spread' : 'whole spread');
+  }
+  function toSpread(side) {
+    var a = side === 'left' ? 'back' : 'front', pg = PAGE.info.geometry;
+    design.elements.forEach(function (el) {
+      if (el.fill) { el.fill = a; return; }   // on one page every fill covered the page
+      if (!el.anchor || el.anchor === 'sheet') {
+        if ('x' in el) el.x = round(el.x - pg.edge);
+        el.y = round((el.y || 0) - pg.edge);
+      }
+      el.anchor = a;
+    });
+    design.spread = true;
+  }
+  function toPage(side) {
+    var a = side === 'left' ? 'back' : 'front', sg = PAGE.info.spread_geometry, keep = [], gone = [];
+    design.elements.forEach(function (el) {
+      var on = el.fill || el.anchor || 'sheet';
+      if (el.fill) {
+        if (on !== 'sheet' && on !== a) { gone.push(label(el)); return; }
+        el = Object.assign({}, el, {fill: 'front'});
+      } else if (on === 'sheet') {
+        var bb = bbox(el), mid = bb[0] + bb[2] / 2;
+        if ((mid < sg.spine_x) !== (a === 'back')) { gone.push(label(el)); return; }
+        el = Object.assign({}, el, {anchor: 'front', y: round((el.y || 0) - sg.edge)});
+        if ('x' in el) el.x = round(el.x - origin(a)[0]);
+      } else if (on === a) {
+        el = Object.assign({}, el, {anchor: 'front'});
+      } else { gone.push(label(el)); return; }
+      keep.push(el);
+    });
+    return {elements: keep, gone: gone};
+  }
+  function kindUi() {
+    var k = $('wd-page-kind');
+    if (!k) return;
+    k.innerHTML = '';
+    (design.spread
+      ? [['spread', 'Two-page spread'], ['page-left', 'One page: keep the left page'],
+         ['page-right', 'One page: keep the right page']]
+      : [['page', 'One page'], ['spread-right', 'Two-page spread: this page on the right'],
+         ['spread-left', 'Two-page spread: this page on the left']]).forEach(function (o) {
+      var op = document.createElement('option'); op.value = o[0]; op.textContent = o[1]; k.appendChild(op);
+    });
+    k.value = design.spread ? 'spread' : 'page';
+    $('wd-art-front').textContent = design.spread ? 'Right page' : 'Whole page';
+    $('wd-art-left').style.display = $('wd-art-sheet').style.display = design.spread ? '' : 'none';
+  }
+  function setKind(v) {
+    if (v === 'spread-right' || v === 'spread-left') {
+      commit(); toSpread(v === 'spread-left' ? 'left' : 'right');
+    } else if (v === 'page-right' || v === 'page-left') {
+      var side = v === 'page-left' ? 'left' : 'right', res = toPage(side);
+      if (res.gone.length && !confirm('A single page keeps only the ' + side + ' page. These would be left off: ' +
+                                      res.gone.join(', ') + '. Go on?')) { kindUi(); return false; }
+      commit(); design.elements = res.elements; delete design.spread;
+    } else return false;
+    also = also.filter(find);
+    if (sel && !find(sel)) sel = null;
+    showProps(); render(); commit(); kindUi(); markDirty(); persist();
+    return true;
+  }
+
   // ---- a page of a book (page mode) ----------------------------------------------
   // The book's designs are listed in the picker; Save keeps the one open with
   // the book under its name, which is how the manuscript places it.
@@ -1326,7 +1423,8 @@
     pickEl.innerHTML = '';
     var op = document.createElement('option'); op.value = ''; op.textContent = 'New page…'; pickEl.appendChild(op);
     PAGE.info.designs.forEach(function (d) {
-      var o = document.createElement('option'); o.value = o.textContent = d.name; pickEl.appendChild(o);
+      var o = document.createElement('option'); o.value = d.name;
+      o.textContent = d.name + (d.spread ? ' (spread)' : ''); pickEl.appendChild(o);
     });
     pickEl.value = PAGE.name;
     $('wd-page-delete').disabled = !PAGE.name;
@@ -1335,15 +1433,18 @@
     var d = PAGE.info.designs.find(function (x) { return x.name === name; });
     PAGE.name = d ? name : '';
     $('wd-page-name').value = PAGE.name;
-    savedJSON = d ? JSON.stringify({elements: d.elements}) : null;
-    if (!keepLocal) design = d ? {elements: JSON.parse(JSON.stringify(d.elements))} : pageStarter(g);
+    savedJSON = d ? JSON.stringify(pageDoc(d)) : null;
+    if (!keepLocal) design = d ? JSON.parse(JSON.stringify(pageDoc(d))) : pageStarter(PAGE.info.geometry);
     $('wd-page-status').textContent = d ? (d.saved ? 'Saved ' + d.saved.replace('T', ' ') : '')
                                         : 'Not saved to this book yet';
     fillPicker(); choose(null); showProps();
-    return loadFonts().then(function () { render(); resetHistory(); });
+    return loadFonts().then(function () { render(); resetHistory(); kindUi(); });
   }
-  function pageDirty() { return savedJSON === null ? past.length > 0 : JSON.stringify(design) !== savedJSON; }
+  function pageDirty() { return savedJSON === null ? past.length > 0 : JSON.stringify(pageDoc(design)) !== savedJSON; }
   if (PAGE) {
+    $('wd-page-kind').addEventListener('change', function () { setKind(this.value); });
+    $('wd-art-left').addEventListener('click', function () { useArt('back'); });
+    $('wd-art-sheet').addEventListener('click', function () { useArt('sheet'); });
     $('wd-page-pick').addEventListener('change', function () {
       var to = this.value;
       if (pageDirty() && !confirm('Leave this page? Its unsaved changes will be lost.')) { this.value = PAGE.name; return; }
@@ -1356,7 +1457,7 @@
         if (!res.ok) { st.textContent = res.error; return; }
         PAGE.info.designs = res.designs; PAGE.name = res.name;
         $('wd-page-name').value = res.name;
-        savedJSON = JSON.stringify({elements: design.elements});
+        savedJSON = JSON.stringify(pageDoc(design));
         fillPicker(); persist();
         st.textContent = 'Saved ' + res.saved.replace('T', ' ') + ' · place it with ~~~ page src="' + res.name + '"';
       }).catch(function () { st.textContent = 'Not saved: no answer from the app.'; });
@@ -1414,6 +1515,6 @@
                        layout: layout, regeometry: regeometry, commit: commit, imageFit: imageFit,
                        undo: undo, redo: redo, customise: customise, bbox: bbox, safeBox: safeBox,
                        align: align, distribute: distribute, flapPreset: flapPreset,
-                       quotePreset: quotePreset, setZoom: setZoom, snapMove: snapMove,
+                       quotePreset: quotePreset, setZoom: setZoom, snapMove: snapMove, setKind: setKind,
                        select: function (ids) { choose(ids[0] || null); also = ids.slice(1); showProps(); render(); } };
 })();

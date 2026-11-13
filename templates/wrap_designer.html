@@ -81,11 +81,14 @@
        dashed safe zone, clear of the cut and the spine.
        Give the page a name and press <b>Save to book</b>, then place it in the manuscript
        with <code>~~~ page src="its-name"</code> (add <code>side="right"</code> or
-       <code>side="left"</code> to choose the page it lands on).</p>
+       <code>side="left"</code> to choose the page it lands on). For a map or a title across
+       two facing pages, pick <b>Two-page spread</b> under Layout: it always lands on a left
+       page and the right one beside it; keep text out of the shaded gutter by the fold.</p>
   </div>
   <div class="wd-bar page-only" id="wd-page-bar">
     <label>Book<input id="wd-page-book" type="text" readonly style="min-width:180px"></label>
     <label>Page design<select id="wd-page-pick"><option value="">New page…</option></select></label>
+    <label>Layout<select id="wd-page-kind"><option value="page">One page</option></select></label>
     <label class="grow">Name (the manuscript places it by this)<input id="wd-page-name" type="text"
            placeholder="handout-1" maxlength="40"></label>
     <span id="wd-page-status"></span>
@@ -171,6 +174,7 @@
         <div class="wd-legend">
           <span><i style="border-color:#e53935"></i>Trim (where it's cut)</span>
           <span class="cover-only"><i style="border-color:#1e88e5"></i>Spine folds</span>
+          <span class="page-only"><i style="border-color:#1e88e5"></i>Fold of a spread (shaded: the gutter)</span>
           <span><i style="border-color:#00897b;border-top-style:dashed"></i>Safe zone: keep text inside</span>
         </div>
       </div>
@@ -195,6 +199,8 @@
         <div class="wd-art">
           <button class="btn btn-sm" id="wd-art-front" type="button">{{ 'Whole page' if page_project else 'Front cover' }}</button>
           <button class="btn btn-sm cover-only" id="wd-art-back" type="button">Back cover</button>
+          <button class="btn btn-sm page-only" id="wd-art-left" type="button" style="display:none">Left page</button>
+          <button class="btn btn-sm page-only" id="wd-art-sheet" type="button" style="display:none">Whole spread</button>
           <button class="btn btn-sm" id="wd-art-place" type="button">Place</button>
         </div>
       </div>
