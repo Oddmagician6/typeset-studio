@@ -2480,6 +2480,29 @@ class _Kept(Flowable):
             f.drawOn(self.canv, 0, self.height - top - h)
 
 
+class _HeadCell(_P):
+    """A table header cell holding index entries or link targets. A header
+    that repeats on the next page draws this very cell again, so after its
+    first drawing it draws a copy without them: one marker, one place."""
+
+    def __init__(self, text, style):
+        super().__init__(text, style)
+        bare = _ANCHOR_DRAW_RE.sub('', _INDEX_DRAW_RE.sub('', text))
+        self._again = _P(re.sub(r'<a name="[^"]*"/>', '', bare), style)
+        self._done = False
+
+    def wrap(self, aW, aH):
+        self._ts_wrap = (aW, aH)
+        return super().wrap(aW, aH)
+
+    def drawOn(self, canv, x, y, _sW=0):
+        if self._done:
+            self._again.wrap(*self._ts_wrap)
+            return self._again.drawOn(canv, x, y, _sW)
+        self._done = True
+        return super().drawOn(canv, x, y, _sW)
+
+
 class ColumnRun(Flowable):
     """A run of flowables set in two columns inside the page's one frame.
 
@@ -4387,7 +4410,8 @@ def _render_table_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=Non
             body = cell_text(text, is_head)
             if hyph and not is_head:
                 body = _hyphenate_markup(body, hyph)
-            line.append(Paragraph(body, cell_style(c, is_head)))
+            cls = _HeadCell if is_head and '<onDraw name="_ts_' in body else Paragraph
+            line.append(cls(body, cell_style(c, is_head)))
         data.append(line)
 
     tbl = Table(data, colWidths=widths, repeatRows=1 if header else 0,
