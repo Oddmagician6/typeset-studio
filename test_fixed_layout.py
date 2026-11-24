@@ -242,6 +242,21 @@ def test_words():
         check('the art at its resolution', im.size == (round(8.5 * F.art_dpi(8.5, 8.5)),) * 2
               and im.size[0] * im.size[1] <= F.ART_PIXELS, im.size)
 
+    # the style's page background is under the art, as print lays it: white
+    # words on a design with no ground of its own stay readable
+    night = words('night', 'The owl', color='#ffffff')
+    night['elements'] = night['elements'][1:]            # no ground: the page shows
+    dark = os.path.join(tmp, 'dark.epub')
+    epub.build_epub(manuscript.parse_markdown(fence('night') + '\n'),
+                    dict(PRESET, page_background={'color': '#102040', 'image': ''}), dark,
+                    {'title': 'T', 'author': 'A', 'page_designs': [night],
+                     'ebook_layout': 'fixed'})
+    zd = zipfile.ZipFile(dark)
+    art = next(n for n in zd.namelist() if n.startswith('OEBPS/images/art'))
+    with Image.open(zd.open(art)) as im:
+        px = im.convert('RGB').getpixel((im.width // 2, im.height - 5))
+    check('the style\'s page background is under the art', px[2] > 40 and px[0] < 40, px)
+
     # a spread: both pages place the words, the right one shifted a page over
     path = os.path.join(tmp, 'spread.epub')
     build(fence('a') + '\n\n' + fence('sp') + '\n', [words('a', 'One'), spread('sp')], path)

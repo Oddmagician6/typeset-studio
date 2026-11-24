@@ -1030,16 +1030,19 @@ def find_page(designs, name):
     return None
 
 
-def build_page_pdf(design, trim_w, trim_h, out_path):
+def build_page_pdf(design, trim_w, trim_h, out_path, under=None):
     """A page design alone, as a one-page PDF with its bleed: the designer's
     proof (a spread on one sheet, both pages side by side). Returns
-    {element id: lines}, as `build_pdf` does."""
+    {element id: lines}, as `build_pdf` does. `under(canvas, g)`, when given,
+    draws first, beneath every element."""
     g = design_geometry(design, trim_w, trim_h)
     W, H = g['wrap_w'] * inch, g['wrap_h'] * inch
     b = g['bleed'] * inch
     c = rl_canvas.Canvas(out_path, pagesize=(W, H))
     c.setTrimBox((b, b, W - b, H - b))
     c.setBleedBox((0, 0, W, H))
+    if under:
+        under(c, g)
     lines = draw_elements(c, design, g, H)
     c.showPage()
     c.save()
@@ -1080,7 +1083,7 @@ def build_sheet_pdf(design, trim_w, trim_h, out_path, title=''):
     return out_path
 
 
-def render_page(design, trim_w, trim_h, out_path, dpi=200):
+def render_page(design, trim_w, trim_h, out_path, dpi=200, under=None):
     """A page design's trimmed page as a JPG: the ebook's image page and the
     designer's proof picture. A spread is one picture of both pages."""
     import tempfile
@@ -1091,7 +1094,7 @@ def render_page(design, trim_w, trim_h, out_path, dpi=200):
     fd, tmp = tempfile.mkstemp(suffix='.pdf')
     os.close(fd)
     try:
-        build_page_pdf(design, trim_w, trim_h, tmp)
+        build_page_pdf(design, trim_w, trim_h, tmp, under=under)
         b = g['bleed']
         with fitz.open(tmp) as doc:
             pix = doc[0].get_pixmap(dpi=dpi, alpha=False, clip=fitz.Rect(

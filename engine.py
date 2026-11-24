@@ -3082,26 +3082,8 @@ class BookDoc(BaseDocTemplate):
         canv.setStrokeColor(_colors.black)
 
     def _paint_background(self, canv, bg):
-        """The style's page background: its colour, then its picture at its
-        opacity, scaled to cover the page and its bleed (the page edge crops
-        the overflow)."""
-        x, y, pw, ph = self._bleed_rect(canv.getPageNumber())
-        canv.saveState()
-        if bg['color'] is not None:
-            canv.setFillColor(bg['color'])
-            canv.rect(x, y, pw, ph, stroke=0, fill=1)
-        if bg['path']:
-            try:
-                from reportlab.lib.utils import ImageReader
-                iw, ih = ImageReader(bg['path']).getSize()
-                s = max(pw / iw, ph / ih)
-                w, h = iw * s, ih * s
-                canv.setFillAlpha(bg['opacity'])
-                canv.drawImage(bg['path'], x + (pw - w) / 2, y + (ph - h) / 2,
-                               width=w, height=h, mask=None)
-            except Exception:
-                pass        # an unreadable picture: the page colour alone
-        canv.restoreState()
+        """The style's page background over this page and its bleed."""
+        paint_background(canv, bg, *self._bleed_rect(canv.getPageNumber()))
 
     def handle_flowable(self, flowables):
         f = flowables[0]
@@ -6251,6 +6233,29 @@ def ensure_parchment():
         os.makedirs(FIGURE_DIR, exist_ok=True)
         make_parchment(path)
     return path
+
+
+def paint_background(canv, bg, x, y, pw, ph):
+    """A style's page background (`page_background`) over the rectangle
+    (x, y, pw, ph): its colour, then its picture at its opacity, scaled to
+    cover it (the page edge crops the overflow). The ebook's page art
+    paints it too, so a page reads the same there as in print."""
+    canv.saveState()
+    if bg['color'] is not None:
+        canv.setFillColor(bg['color'])
+        canv.rect(x, y, pw, ph, stroke=0, fill=1)
+    if bg['path']:
+        try:
+            from reportlab.lib.utils import ImageReader
+            iw, ih = ImageReader(bg['path']).getSize()
+            s = max(pw / iw, ph / ih)
+            w, h = iw * s, ih * s
+            canv.setFillAlpha(bg['opacity'])
+            canv.drawImage(bg['path'], x + (pw - w) / 2, y + (ph - h) / 2,
+                           width=w, height=h, mask=None)
+        except Exception:
+            pass        # an unreadable picture: the page colour alone
+    canv.restoreState()
 
 
 def page_background_src(preset):

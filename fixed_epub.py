@@ -310,7 +310,7 @@ def art_dpi(trim_w, trim_h):
     return int(min(ART_DPI, (ART_PIXELS / (trim_w * trim_h)) ** 0.5))
 
 
-def _render_art(design, trim_w, trim_h, tmpdir, stem):
+def _render_art(design, trim_w, trim_h, tmpdir, stem, background=None):
     """The design without its words, as one JPG per page: [path] (two for a
     spread, its left page then its right)."""
     import wrap_design as W
@@ -318,7 +318,22 @@ def _render_art(design, trim_w, trim_h, tmpdir, stem):
     art = dict(design, elements=[e for e in design.get('elements', [])
                                  if not (isinstance(e, dict) and e.get('type') == 'text')])
     whole = os.path.join(tmpdir, f'{stem}-whole.jpg')
-    W.render_page(art, trim_w, trim_h, whole, dpi=art_dpi(trim_w, trim_h))
+    under = None
+    if background:
+        # the style's page background, as the bleed and screen PDFs lay it
+        # under every page: without it white words on it vanish here
+        import engine
+        from reportlab.lib.units import inch
+
+        def under(c, g):
+            H = g['wrap_h'] * inch
+            if W.is_spread(design):
+                fold = g['spine_x'] * inch
+                engine.paint_background(c, background, 0, 0, fold, H)
+                engine.paint_background(c, background, fold, 0, g['wrap_w'] * inch - fold, H)
+            else:
+                engine.paint_background(c, background, 0, 0, g['wrap_w'] * inch, H)
+    W.render_page(art, trim_w, trim_h, whole, dpi=art_dpi(trim_w, trim_h), under=under)
     if not W.is_spread(design):
         path = os.path.join(tmpdir, f'{stem}.jpg')
         os.replace(whole, path)
@@ -409,6 +424,8 @@ def build(ms, preset, out_path, meta):
         if not pg.get('blank') and pg['design'] not in used:
             used.append(pg['design'])
     fonts = _fonts(used)
+    import engine
+    background = engine.page_background(preset or {})
 
     manifest = [{'id': 'nav', 'href': 'nav.xhtml', 'type': 'application/xhtml+xml',
                  'props': 'nav'},
@@ -452,7 +469,7 @@ def build(ms, preset, out_path, meta):
                 if id(d) not in art:
                     stem = f'art{len(art) + 1:03d}'
                     try:
-                        paths = _render_art(d, tw, th, tmp, stem)
+                        paths = _render_art(d, tw, th, tmp, stem, background)
                     except Exception:
                         paths = []
                     hrefs = []
