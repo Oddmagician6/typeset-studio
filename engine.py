@@ -2796,6 +2796,7 @@ class BookDoc(BaseDocTemplate):
         self._bleed = bleed
         self.head_font = head_font
         self._body_start  = None           # page number of the first chapter opener
+        self._noteless    = set()          # blank and designed pages: no footnotes
         self._toc_entries = []             # filled by TocMarker during build
         # PDF bookmarks (#74 Phase 2): a running key, the last level used (an
         # outline may only go one level deeper at a time) and the level the
@@ -3189,6 +3190,7 @@ class BookDoc(BaseDocTemplate):
                 and not getattr(canv, '_is_blank', False)):
             self._body_start = page
         if getattr(canv, '_is_blank', False) or getattr(canv, '_is_plate', False):
+            self._noteless.add(page)
             return
         if self._body_start is None or page < self._body_start:
             return
@@ -5122,7 +5124,8 @@ def _fit_note(fl, room, avail_w, text_h):
     return parts[0], parts[1]
 
 
-def _plan_footnotes(pages, flowables, avail_w, text_h, preset, last_page=None):
+def _plan_footnotes(pages, flowables, avail_w, text_h, preset, last_page=None,
+                    noteless=None):
     """Turn {note: page} into per-page (reserved height, notes) plans.
 
     Returns (reserve, assign, unplaced, pieces). The notes on a page fill the
@@ -5161,6 +5164,10 @@ def _plan_footnotes(pages, flowables, avail_w, text_h, preset, last_page=None):
                          if key in flowables]
         spill = []
         if not queue:
+            continue
+        if noteless and page in noteless:
+            # a blank or designed page draws no notes: they wait for the next
+            spill = queue
             continue
         # Where there is no later page to run on to, the notes may take more of
         # the page — but never all of it: the text block has to keep room for a
@@ -6051,9 +6058,11 @@ def _resolve_footnotes(build, chapters, preset, fonts, st, avail_w, text_h,
         # the real stopping condition.
         seen = pages
         doc_pages = pages.pop('#pages', None)
+        noteless = pages.pop('#noteless', None)
         last_seen = doc_pages or last_seen
         new_reserve, assign, unplaced, pieces = _plan_footnotes(
-            pages, flow, avail_w, text_h, preset, last_page=doc_pages)
+            pages, flow, avail_w, text_h, preset, last_page=doc_pages,
+            noteless=noteless)
         merged = dict(reserve)
         for page, h in new_reserve.items():        # monotone: damps oscillation
             merged[page] = max(merged.get(page, 0), h)
@@ -6648,6 +6657,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             d = _make_doc(tmp)
             d._fn_reserve, d._fn_assign = reserve, assign
             d.build(story)
+            probe['#noteless'] = d._noteless
             return tmp
         found_reserve, found_assign, homeless, pieces = _resolve_footnotes(
             _measure, manuscript['chapters'], preset, fonts, st, avail_w, text_h,
