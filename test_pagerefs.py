@@ -199,6 +199,31 @@ def test_print():
                                                                for t in texts))
     pdf, _ = build(md, preset(1, chapter={'open_style': 'dropcap'}), 'dropcap')
     agrees(md, pdf, 'with a drop cap')
+    # a drop cap too tall for the room under its title moves on whole; its
+    # target and index entry go with it (they used to stay on the opener page)
+    dmd = ('# One\n\nOpening words Kx1k{#vault}{index: Vault} here. ' + LOREM * 10 +
+           '\n\n' + LOREM * 4 + '\n\n# Two\n\n' + LOREM + '\n\nSee Rx1r {page: vault}. ' + LOREM)
+    pdf, _ = build(dmd, preset(2, chapter={'open_style': 'dropcap'}), 'dropcap-moves')
+    with fitz.open(pdf) as d:
+        texts = [' '.join(pg.get_text().split()) for pg in d]
+    on = [i + 1 for i, t in enumerate(texts) if 'Kx1k' in t]
+    got = [m for t in texts for m in re.findall(r'Rx1r (\d+|\?\?)', t)]
+    check('a drop cap that moves on takes its link target with it',
+          on == [2] and got == ['2'], (on, got))
+    # a table header that repeats on later pages marks its place once (each
+    # repeat used to add an index page and move the link's destination on)
+    rows = '\n'.join(f'{i} | Item {i} lies here' for i in range(160))
+    tmd = ('# One\n\n' + LOREM + '\n\n~~~ table\nTreasure{index: Treasure}{#treasure} | Where\n'
+           + rows + '\n~~~\n\n# Two\n\nOpening.\n\nSee Rx1r {page: treasure}. ' + LOREM)
+    pdf, _ = build(tmd, preset(2), 'table-head-repeats')
+    _, printed, links, texts = read_pdf(pdf)
+    heads = sum('Treasure' in t for t in texts[:-1])
+    index = ' '.join(texts[-1].split())
+    check('a repeated table header marks its place once',
+          heads >= 3 and printed.get('Rx1r') == '1' and ('1', 1) in links
+          and not [ln for ln in links if ln[0] == '1' and ln[1] != 1]
+          and 'Treasure, 1' in index and 'Treasure, 1–' not in index,
+          (heads, printed.get('Rx1r'), links, index[-80:]))
     # a long book: its numbers reach two and three digits, past the guess
     long = book(length=26)
     pdf, _ = build(long, preset(1), 'long', include_toc=True)

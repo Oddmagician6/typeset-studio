@@ -202,6 +202,34 @@ def test_engine():
         check('in two columns it still takes a whole page',
               n and doc[n[0] - 1].get_text().split() == 'A Letter Found'.split(), n)
 
+    # the fence's words are only alt text: an anchor, index entry or note in
+    # them points at nothing printed, so it is dropped (a page reference to
+    # it used to stop the build with an unresolved PDF destination)
+    md3 = ('# Three\n\n' + L + '\n\n~~~ page src="handout-1"\nThe letter{#letter}'
+           '{index: Letters}[^n]\n~~~\n\n' + L + ' See page {page: letter}.\n\n[^n]: A note.\n')
+    try:
+        out, _ = build(md3, 'alt-markers')
+        built = os.path.exists(out)
+    except Exception as e:
+        built = repr(e)
+    check('markers in a page fence don\'t stop the build', built is True, built)
+    blk = [b for b in manuscript.parse_markdown(md3)['chapters'][0]['blocks']
+           if b[0] == 'doc_block' and b[2].get('_type') == 'page'][0]
+    check('and its alt text keeps the words, not the markers',
+          blk[1] == [('para', 'The letter')], blk[1])
+
+    # a book that opens on a designed page counts it as folio 1 (the plate
+    # used to skip the page-end hook that sets where numbering starts, so
+    # the first chapter's prose had no folios and chapter two restarted at 1)
+    p4 = preset()
+    p4['chapter'] = dict(p4['chapter'], show_number=False)
+    md4 = '~~~ page src="handout-1" side="any"\n~~~\n\n' + L + '\n\n# Two\n\n' + L
+    out, _ = build(md4, 'opens-on-design', p=p4)
+    with fitz.open(out) as doc:
+        last = [pg.get_text().split()[-1:] for pg in doc]
+    check('a book opening on a designed page numbers its prose from 2',
+          last[1] == ['2'] and last[-1] == [str(len(last))], last)
+
 
 # ---------------------------------------------------------------- 3
 def test_epub():

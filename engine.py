@@ -2480,6 +2480,29 @@ class _Kept(Flowable):
             f.drawOn(self.canv, 0, self.height - top - h)
 
 
+class _HeadCell(_P):
+    """A table header cell holding index entries or link targets. A header
+    that repeats on the next page draws this very cell again, so after its
+    first drawing it draws a copy without them: one marker, one place."""
+
+    def __init__(self, text, style):
+        super().__init__(text, style)
+        bare = _ANCHOR_DRAW_RE.sub('', _INDEX_DRAW_RE.sub('', text))
+        self._again = _P(re.sub(r'<a name="[^"]*"/>', '', bare), style)
+        self._done = False
+
+    def wrap(self, aW, aH):
+        self._ts_wrap = (aW, aH)
+        return super().wrap(aW, aH)
+
+    def drawOn(self, canv, x, y, _sW=0):
+        if self._done:
+            self._again.wrap(*self._ts_wrap)
+            return self._again.drawOn(canv, x, y, _sW)
+        self._done = True
+        return super().drawOn(canv, x, y, _sW)
+
+
 class ColumnRun(Flowable):
     """A run of flowables set in two columns inside the page's one frame.
 
@@ -2567,7 +2590,10 @@ class ColumnRun(Flowable):
         return cols, queue
 
     def _plan(self, aW, aH):
-        if self._memo and self._memo[0] == (aW, aH):
+        # the retry that lets a heading stand alone lays out differently in
+        # the same frame, so it is part of what a cached layout was made for
+        key = (aW, aH, bool(self._lone_heading_ok()))
+        if self._memo and self._memo[0] == key:
             return self._memo[1]
         canv = self.canv
         cols, rest = self._layout(canv, aW, aH)
@@ -2586,7 +2612,7 @@ class ColumnRun(Flowable):
             cols, rest = self._layout(canv, aW, best if best is not None else aH)
             if rest:                                   # never trade words for balance
                 cols, rest = self._layout(canv, aW, aH)
-        self._memo = ((aW, aH), (cols, rest))
+        self._memo = (key, (cols, rest))
         return cols, rest
 
     def wrap(self, aW, aH):
@@ -2648,9 +2674,10 @@ class HRule(Flowable):
 
 class DropCap(Flowable):
     """Sunken drop cap: first lines set beside the initial, rest flows below."""
-    def __init__(self, text, body_style, cap_font, lines=3):
+    def __init__(self, text, body_style, cap_font, lines=3, marks=()):
         super().__init__()
         self.text, self.body, self.cap_font, self.lines = text, body_style, cap_font, lines
+        self._marks = list(marks)      # its index and anchor markers, set at its top
         self._cap = text[:1]
         self._rest = text[1:].lstrip()
 
@@ -2683,6 +2710,8 @@ class DropCap(Flowable):
         c = self.canv
         leading = self.body.leading
         top = self.height
+        for m in self._marks:
+            m.drawOn(c, 0, top)
         c.setFont(self.cap_font, self.cap_size)
         c.drawString(0, top - self.cap_size * 0.82, self._cap)
         if self._beside:
@@ -2796,6 +2825,7 @@ class BookDoc(BaseDocTemplate):
         self._bleed = bleed
         self.head_font = head_font
         self._body_start  = None           # page number of the first chapter opener
+        self._noteless    = set()          # blank and designed pages: no footnotes
         self._toc_entries = []             # filled by TocMarker during build
         # PDF bookmarks (#74 Phase 2): a running key, the last level used (an
         # outline may only go one level deeper at a time) and the level the
@@ -3182,11 +3212,15 @@ class BookDoc(BaseDocTemplate):
     def _furniture(self, canv, doc):
         p = self.preset
         page = canv.getPageNumber()
-        if getattr(canv, '_is_blank', False) or getattr(canv, '_is_plate', False):
-            return
-        # the first chapter opener defines folio 1; everything before it is front matter
-        if getattr(canv, '_is_opener', False) and self._body_start is None:
+        # the first chapter opener defines folio 1; everything before it is
+        # front matter. A chapter that opens on a designed page counts it, so
+        # this comes before a plate's early return.
+        if (getattr(canv, '_is_opener', False) and self._body_start is None
+                and not getattr(canv, '_is_blank', False)):
             self._body_start = page
+        if getattr(canv, '_is_blank', False) or getattr(canv, '_is_plate', False):
+            self._noteless.add(page)
+            return
         if self._body_start is None or page < self._body_start:
             return
         folio = page - self._body_start + 1
@@ -3391,8 +3425,10 @@ def _opening_para(text, st, preset, fonts, hyph=None):
         marks.append(AnchorMark(_ANCHOR_DRAW_RE.findall(text)))
     if style == 'dropcap':
         plain_h = _hyphenate_markup(plain, hyph) if hyph else plain
-        return marks + [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
-                                lines=preset['chapter'].get('dropcap_lines', 3))]
+        # a drop cap can't split, so it sets its own markers: when it moves
+        # on to the next page or column they go with it, not stay behind
+        return [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
+                        lines=preset['chapter'].get('dropcap_lines', 3), marks=marks)]
     if style == 'raised_initial':
         rest = _hyphenate_markup(plain[1:], hyph) if hyph else plain[1:]
         return marks + [RaisedInitial(plain[:1], rest, st['first'], fonts['regular'])]
@@ -3872,6 +3908,12 @@ class BleedPlate(Flowable):
             return
         sizes = [p.wrap(self.width, self.height) for p in self.caption]
         total = sum(h + p.style.spaceBefore for p, (_, h) in zip(self.caption, sizes))
+        if total > self.height:
+            # drawn up from the foot, its opening lines would run off the page
+            raise DoesNotFit(
+                f'The caption of the full-bleed picture on page {c.getPageNumber()} '
+                f'is longer than the page can hold, so the book can’t be set. '
+                f'Shorten it, or set the rest as text after the picture.')
         pad = 6
         c.saveState()
         c.setFillColor(_colors.white)
@@ -4058,8 +4100,10 @@ def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
                 for p in caption) if caption else 0.0
 
     if edge:
-        # a page to itself, which the plate fills: what follows starts the next
-        return [PageBreak(), BleedPlate(path, caption, src or '(no src)')]
+        # a page to itself, which the plate fills: what follows starts the next.
+        # SideBreak('any') breaks only off a fresh page, so a plate straight
+        # after another full-page figure doesn't leave an empty page between
+        return [SideBreak('any'), BleedPlate(path, caption, src or '(no src)')]
     if full:
         box_w = avail_w
         max_h = text_h - cap_h
@@ -4076,7 +4120,7 @@ def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
 
     if full:
         # its own page: break, plate, caption, break
-        return [PageBreak(), img] + caption + [PageBreak()]
+        return [SideBreak('any'), img] + caption + [PageBreak()]
     # image and caption must not be separated by a page break
     return [Spacer(1, space), KeepTogether([img] + caption), Spacer(1, space)]
 
@@ -4372,7 +4416,8 @@ def _render_table_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=Non
             body = cell_text(text, is_head)
             if hyph and not is_head:
                 body = _hyphenate_markup(body, hyph)
-            line.append(Paragraph(body, cell_style(c, is_head)))
+            cls = _HeadCell if is_head and '<onDraw name="_ts_' in body else Paragraph
+            line.append(cls(body, cell_style(c, is_head)))
         data.append(line)
 
     tbl = Table(data, colWidths=widths, repeatRows=1 if header else 0,
@@ -5117,7 +5162,8 @@ def _fit_note(fl, room, avail_w, text_h):
     return parts[0], parts[1]
 
 
-def _plan_footnotes(pages, flowables, avail_w, text_h, preset, last_page=None):
+def _plan_footnotes(pages, flowables, avail_w, text_h, preset, last_page=None,
+                    noteless=None):
     """Turn {note: page} into per-page (reserved height, notes) plans.
 
     Returns (reserve, assign, unplaced, pieces). The notes on a page fill the
@@ -5156,6 +5202,10 @@ def _plan_footnotes(pages, flowables, avail_w, text_h, preset, last_page=None):
                          if key in flowables]
         spill = []
         if not queue:
+            continue
+        if noteless and page in noteless:
+            # a blank or designed page draws no notes: they wait for the next
+            spill = queue
             continue
         # Where there is no later page to run on to, the notes may take more of
         # the page — but never all of it: the text block has to keep room for a
@@ -5751,6 +5801,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         _label = ch.get('title') or (
             c.get('number_format', 'Chapter {n}').format(n=_numbers[idx - 1])
             if _numbers[idx - 1] is not None else '')
+        _toc_at = len(story)
         story.append(TocMarker(idx, ch.get('title'), ch.get('part'), label=_label))
         # chapter-opening art: over the number, or under the title/byline
         art = _chapter_art(preset, avail_w, text_h)
@@ -5765,6 +5816,9 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 and bool(_blocks) and _blocks[0][0] == 'doc_block'
                 and len(_blocks[0]) >= 3 and _blocks[0][2].get('_type') == 'page')
         if bare:
+            # the designed page's side break goes first, so the chapter's
+            # marker and link target land on it, not on a blank page before it
+            story.insert(_toc_at, _render_page_block(_blocks[0][2], preset)[0])
             if _anchors[idx - 1]:
                 story.append(AnchorMark(_anchors[idx - 1]))
         else:
@@ -6046,9 +6100,11 @@ def _resolve_footnotes(build, chapters, preset, fonts, st, avail_w, text_h,
         # the real stopping condition.
         seen = pages
         doc_pages = pages.pop('#pages', None)
+        noteless = pages.pop('#noteless', None)
         last_seen = doc_pages or last_seen
         new_reserve, assign, unplaced, pieces = _plan_footnotes(
-            pages, flow, avail_w, text_h, preset, last_page=doc_pages)
+            pages, flow, avail_w, text_h, preset, last_page=doc_pages,
+            noteless=noteless)
         merged = dict(reserve)
         for page, h in new_reserve.items():        # monotone: damps oscillation
             merged[page] = max(merged.get(page, 0), h)
@@ -6643,6 +6699,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             d = _make_doc(tmp)
             d._fn_reserve, d._fn_assign = reserve, assign
             d.build(story)
+            probe['#noteless'] = d._noteless
             return tmp
         found_reserve, found_assign, homeless, pieces = _resolve_footnotes(
             _measure, manuscript['chapters'], preset, fonts, st, avail_w, text_h,

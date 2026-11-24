@@ -205,6 +205,38 @@ def test_engine():
         check('a single page design beside a spread is still one page',
               pages_with(doc, 'Lone Page') == [2] and 'tide' in doc[2].get_text())
 
+    # a footnote that runs on carries past a spread to the next text page
+    # (the planner used to give the rest to the spread, which draws no notes,
+    # and since the first part printed nothing was reported)
+    p = preset()
+    p['endnotes'] = dict(p.get('endnotes', {}), placement='foot')
+    note = 'A long note about the bell and its founders. ' * 34 + 'Lastword.'
+    md = ('# One\n\n' + L + '\n\n' + L + ' The ref.[^1]\n\n~~~ page src="marsh-map"\n~~~\n\n'
+          + L + '\n\n[^1]: ' + note + '\n')
+    out, _ = build(md, 'note-past-spread', p=p)
+    with fitz.open(out) as doc:
+        sp, ends = pages_with(doc, 'Westward'), pages_with(doc, 'Lastword')
+    check('a note running on past a spread ends on the text page after it',
+          sp and ends and ends[0] > sp[0] + 1, (sp, ends))
+    flow = {(1, 1): engine.Paragraph('word ' * 2000, engine.ParagraphStyle('n'))}
+    _, assign, _, _ = engine._plan_footnotes({(1, 1): 3}, flow, 300, 500, p,
+                                             last_page=9, noteless={4, 5})
+    # a book that opens on a spread: a link to its first chapter lands on the
+    # spread's left half, not the blank page the side break leaves before it
+    p = preset()
+    p['chapter'] = dict(p['chapter'], show_number=False)
+    md = ('~~~ page src="marsh-map"\n~~~\n\n' + L + '\n\n# Two\n\nOpening words.\n\n'
+          'See [the map](#chapter-1).\n')
+    out, _ = build(md, 'link-to-spread', p=p)
+    with fitz.open(out) as doc:
+        sp = pages_with(doc, 'Westward')
+        to = [ln['page'] + 1 for pg in doc for ln in pg.get_links()
+              if ln.get('kind') == fitz.LINK_GOTO]
+    check('a link to a chapter that opens on a spread lands on the spread',
+          sp and to == sp[:1], (sp, to))
+    check('the planner gives nothing to a blank or designed page',
+          sorted(assign) and not {4, 5} & set(assign) and 3 in assign, sorted(assign))
+
 
 # ---------------------------------------------------------------- 3
 def test_epub():
