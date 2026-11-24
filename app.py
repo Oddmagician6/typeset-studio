@@ -1321,10 +1321,17 @@ def _slug_or_blank(name):
     if len(slug) > SLUG_MAX:
         cut = slug[:SLUG_MAX + 1]
         slug = (cut.rsplit('-', 1)[0] if '-' in cut[SLUG_MAX // 2:] else cut[:SLUG_MAX])
-    return slug.strip('-')
+    slug = slug.strip('-')
+    # Windows will not open a file named for a device, extension or not: a book
+    # titled "Con" lost its EPUB (con.epub) from a publish package
+    if slug in _WIN_RESERVED:
+        slug += '-book'
+    return slug
 
 
 SLUG_MAX = 60
+_WIN_RESERVED = {'con', 'prn', 'aux', 'nul', *(f'com{i}' for i in range(10)),
+                 *(f'lpt{i}' for i in range(10))}
 
 
 def slugify(name):
@@ -2784,6 +2791,9 @@ def cover_thumb(cid):
 
 
 EPUB_COVER_H = 2560   # px; the long edge KDP asks for on an ebook cover
+# Apple Books refuses a cover over 5.6 megapixels: a square or landscape trim at
+# 2560 px tall is over it, so those come out a little smaller (a margin kept)
+EPUB_COVER_MAX_PX = 5_500_000
 
 
 def _cover_page_jpeg(preset, meta, jpg_path):
@@ -2808,14 +2818,18 @@ def _cover_page_jpeg(preset, meta, jpg_path):
             with Image.open(art) as im:
                 im.load()
         cover_meta = dict(meta)
+        # the cover is the trimmed page: an interior with bleed would widen it
         cover_meta.update(front_matter='none', include_toc=False,
-                          right_hand_starts=False)
+                          right_hand_starts=False, bleed=False)
         stub = manuscript.parse_markdown('# Cover\n\nCover.', smartquotes=False)
         engine.build_pdf(stub, preset, pdf_path, cover_meta)
 
         with fitz.open(pdf_path) as doc:
             page = doc[0]
-            scale = EPUB_COVER_H / page.rect.height if page.rect.height else 1.0
+            pw, ph = page.rect.width, page.rect.height
+            scale = EPUB_COVER_H / ph if ph else 1.0
+            if pw * ph * scale * scale > EPUB_COVER_MAX_PX:
+                scale = (EPUB_COVER_MAX_PX / (pw * ph)) ** 0.5
             png = page.get_pixmap(matrix=fitz.Matrix(scale, scale),
                                   alpha=False).tobytes('png')
         # JPEG, else a photographic-family cover makes a multi-megabyte ebook.
@@ -5923,6 +5937,22 @@ def _art_resolution_check(res, w_in, h_in):
                        f'Ask for {need[0]}×{need[1]} px or larger.')}
 
 
+def _back_image_check(res, w_in):
+    """The check row for the back-cover photo or logo, placed `w_in` wide."""
+    if not res:
+        return {'label': 'Back-cover picture', 'ok': False,
+                'detail': ('The back-cover picture can’t be read (damaged, or not an '
+                           'image), so it is left off the wrap — upload it again')}
+    px, need = res['px'], res['need']
+    if res['ok']:
+        return {'label': 'Back-cover picture', 'ok': True,
+                'detail': f'{px[0]}×{px[1]} px — {res["dpi"]} dpi at {w_in:g}" wide'}
+    return {'label': 'Back-cover picture', 'ok': False,
+            'detail': (f'{px[0]}×{px[1]} px prints at {res["dpi"]} dpi at {w_in:g}" wide, '
+                       f'under the {res["want_dpi"]} dpi print wants, so it will print soft. '
+                       f'Use one of {need[0]}×{need[1]} px or larger, or place it smaller')}
+
+
 def _wrap_meta(meta, p):
     """A book's meta plus what only its wrap prints - the back-cover copy, the
     flaps, the author photo - from its Send to print settings `p`."""
@@ -6077,6 +6107,16 @@ def build_print_package(proj, scope='print'):
             aw, ah = engine.front_art_size(engine.wrap_geometry(dims))
             art_res = engine.image_cover_check(art, aw, ah)
             checks.append(_art_resolution_check(art_res, aw, ah))
+        # the author photo or logo on the back is printed art too, placed at the
+        # width set under Send to print (a design measures its own pictures)
+        back = '' if design else wmeta.get('cover_back_image')
+        if back:
+            bw = max(float(wmeta.get('cover_back_image_w') or 1.5), 0.25)
+            res = engine.image_cover_check(back, bw, bw)
+            if res:
+                bh = bw * res['px'][1] / float(res['px'][0])
+                res = engine.image_cover_check(back, bw, bh)
+            checks.append(_back_image_check(res, bw))
         if not wres['spine_text'] and not design:
             thin = engine.wrap_geometry(dims)['spine_text']    # allowed, but no room
             checks.append({'label': 'Spine text', 'ok': True,

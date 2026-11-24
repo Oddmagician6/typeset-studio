@@ -573,6 +573,42 @@ try:
           r.status_code == 200 and 'Manuscript file not found' in r.get_data(as_text=True))
 
     # ------------------------------------------------------------ the editor
+    print('the ebook cover image (bug hunt 1.11, 3.7)')
+    from PIL import Image
+    meta, _ = A._project_meta(dict(PROJ))
+    fd, jpg = tempfile.mkstemp(suffix='.jpg'); os.close(fd)
+    try:
+        square = dict(preset, trim={'w': 8.5, 'h': 8.5})
+        A._cover_page_jpeg(square, dict(meta), jpg)
+        with Image.open(jpg) as im:
+            sw, sh = im.size
+        check("a square cover stays under Apple's 5.6 megapixels",
+              sw * sh <= 5_600_000 and abs(sw - sh) <= 2, (sw, sh))
+        A._cover_page_jpeg(preset, dict(meta), jpg)
+        with Image.open(jpg) as im:
+            plain = im.size
+        A._cover_page_jpeg(preset, dict(meta, bleed=True), jpg)
+        with Image.open(jpg) as im:
+            bled = im.size
+        check('and bleed on the interior leaves the cover its trim shape',
+              plain == bled and plain[1] == A.EPUB_COVER_H, (plain, bled))
+    finally:
+        os.remove(jpg)
+
+    print('a small back-cover photo (bug hunt 3.13)')
+    # no leading underscore: the setting is read through secure_filename
+    back = os.path.join(A.PROJECT_MS_DIR, 'test-print-package-back.png')
+    Image.new('RGB', (120, 160), (90, 120, 150)).save(back)
+    with open(MS_PATH, 'w', encoding='utf-8') as f:      # "what it refuses" took it
+        f.write(MS)
+    try:
+        r = send(dict(PROJ, print_back_file=os.path.basename(back), print_back_w=1.5))
+    finally:
+        os.remove(back)
+    html = r.get_data(as_text=True)
+    check('is flagged at the dpi it prints at',
+          'Back-cover picture' in html and '80 dpi' in html, re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', html))[:1500])
+
     print('the project editor')
     with open(MS_PATH, 'w', encoding='utf-8') as f:
         f.write(MS)
@@ -612,6 +648,11 @@ check('48 pages on white is fine', count_row(48, 'white')['ok'])
 check("700 pages on cream at 8.5x11 is over KDP's large-trim limit",
       not count_row(700, 'cream', {'w': 8.5, 'h': 11.0})['ok'])
 check('and no paper keeps the plain 24-828 range', count_row(800, None)['ok'])
+
+print('a title Windows keeps for a device (bug hunt 3.11)')
+check('"Con" is not named con', A._slug_or_blank('Con') == 'con-book', A._slug_or_blank('Con'))
+check('nor "LPT1"', A._slug_or_blank('LPT1') == 'lpt1-book')
+check('while "Cone" is left alone', A._slug_or_blank('Cone') == 'cone')
 
 print('\n' + ('ALL PASS' if not fails else 'FAILED: ' + ', '.join(fails)))
 sys.exit(1 if fails else 0)
