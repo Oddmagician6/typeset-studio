@@ -891,8 +891,10 @@ def summary(g, design):
 
 def front_trim(g):
     """The finished front cover on the sheet, in inches (x, y, w, h; y down): the
-    trim, not the panel - on a jacket the panel is the board, a little larger."""
-    return g['front_x'], g['edge'] + g['board_ext'], g['trim_w'], g['trim_h']
+    trim, not the panel - on a jacket the panel is the board, a little larger;
+    on a case whose board is narrower than the pages, the board is all there is."""
+    return (g['front_x'], g['edge'] + g.get('board_ext', 0.0),
+            min(g['trim_w'], g['panel_w']), g['trim_h'])
 
 
 def missing(design):

@@ -782,9 +782,23 @@ WRAP_RETAILERS = {
         'label': 'IngramSpark', 'bleed': 0.125, 'spine_text_min': 48, 'cover_cmyk': True,
         'note': 'IngramSpark perfect-bound spine text from ~48 pages · 0.125" bleed. '
                 'Download IngramSpark’s cover template to confirm the spine.',
-        'hardcover_note': 'IngramSpark case laminate takes the same 0.625" (16 mm) wrap; '
-                          'part of it is covered by the end sheets. Generate their cover '
-                          'template to confirm the hinge for your trim.',
+        'hardcover_note': 'IngramSpark case laminate: boards 0.185" narrower and 0.25" taller '
+                          'than the trim, a 0.625" (16 mm) wrap round them (part of it under '
+                          'the end sheets) and a 0.5" (13 mm) hinge each side of the spine. '
+                          'A jacket: covers 0.4375" wider and 0.25" taller than the trim, '
+                          '3.25" flaps plus a 0.25" fold onto each, 0.125" bleed.',
+        # IngramSpark's File Creation Guide, custom case laminate and dust jacket:
+        # case width  .625 + board + .5 + spine + .5 + board + .625,
+        #      height .625 + board + .625, board = trim w - .185 by trim h + .25;
+        # jacket width .125 + 3.25 + .25 + cover + spine + cover + .25 + 3.25 + .125,
+        #      height .125 + (trim h + .25) + .125, cover = trim w + .4375.
+        # The jacket's .25" fold onto the flap is counted in the 3.5" flap, which
+        # is where it folds; there is no hinge between a jacket's covers and spine.
+        'allowances': {
+            'hardcover': {'wrap': 0.625, 'hinge': 0.5, 'bleed': 0.0,
+                          'board_ext': 0.125, 'board_ext_w': -0.185},
+            'jacket': {'flap': 3.5, 'hinge': 0.0, 'board_ext': 0.125, 'board_ext_w': 0.4375},
+        },
     },
     'generic': {
         'label': 'Generic / other POD', 'bleed': 0.125, 'spine_text_min': 80,
@@ -809,6 +823,30 @@ HARDCOVER = {'wrap': 0.625, 'hinge': 0.375, 'board': 0.06}
 # run 3–4"; 3.5" is the common house figure. Jackets are printer-specific —
 # among the retailers we preset, only IngramSpark prints them.
 JACKET = {'flap': 3.5, 'board_ext': 0.125, 'hinge': 0.375}
+
+
+def _allowances(retailer, binding):
+    """The case or jacket allowances a retailer's wrap is built to: the shared
+    defaults, then whatever the retailer documents differently. `board_ext` is
+    how far the board stands past the trim at the head and tail, `board_ext_w`
+    at the fore-edge (negative where the board is narrower than the pages)."""
+    rc = WRAP_RETAILERS.get(retailer, WRAP_RETAILERS['kdp'])
+    if binding == 'hardcover':
+        a = {'wrap': HARDCOVER['wrap'], 'hinge': HARDCOVER['hinge'], 'bleed': rc['bleed'],
+             'board_ext': 0.0, 'board_ext_w': 0.0}
+    elif binding == 'jacket':
+        a = {'flap': JACKET['flap'], 'hinge': JACKET['hinge'], 'bleed': rc['bleed'],
+             'board_ext': JACKET['board_ext'], 'board_ext_w': None}
+    else:
+        return {'bleed': rc['bleed']}
+    a.update((rc.get('allowances') or {}).get(binding, {}))
+    return a
+
+
+for _rid, _rc in WRAP_RETAILERS.items():
+    # what the cover editor fills its fields from when a printer is picked
+    _rc['binding_allowances'] = {b: _allowances(_rid, b)
+                                 for b in ('paperback', 'hardcover', 'jacket')}
 
 # KDP's hardcover programme is narrower than its paperback one; the wrap builds
 # either way, but a book outside these is one KDP will refuse.
@@ -3055,19 +3093,26 @@ def _wrap_dims(form, pages):
     # that same case, so it takes the same spine
     spine_w = pages * ppi + (_f(form, 'wrap_board', HARDCOVER['board'])
                              if (hard or jacket) else 0.0)
+    a = _allowances(retailer, binding)
     dims = {
         'trim_w': trim_w,
         'trim_h': trim_h,
         'spine_w': spine_w,
-        'bleed':  _f(form, 'wrap_bleed', rc['bleed']),
+        # a case's wrap takes the place of bleed where the printer says so
+        'bleed':  (a['bleed'] if hard and 'bleed' in (rc.get('allowances') or {}).get(
+                       'hardcover', {}) else _f(form, 'wrap_bleed', a['bleed'])),
         'pages':  pages,
         'spine_text_min': rc['spine_text_min'],
         'binding': binding,
-        'wrap':   _f(form, 'wrap_turnin', HARDCOVER['wrap']),
-        'hinge':  _f(form, 'wrap_hinge', HARDCOVER['hinge']),
-        'flap':   _f(form, 'wrap_flap', JACKET['flap']),
-        'board_ext': _f(form, 'wrap_board_ext', JACKET['board_ext']),
     }
+    if hard:
+        dims.update(wrap=_f(form, 'wrap_turnin', a['wrap']),
+                    hinge=_f(form, 'wrap_hinge', a['hinge']),
+                    board_ext=a['board_ext'], board_ext_w=a['board_ext_w'])
+    elif jacket:
+        ext = _f(form, 'wrap_board_ext', a['board_ext'])
+        dims.update(flap=_f(form, 'wrap_flap', a['flap']), hinge=a['hinge'], board_ext=ext,
+                    board_ext_w=ext if a['board_ext_w'] is None else a['board_ext_w'])
     dims['warnings'] = (hardcover_warnings(retailer, trim_w, trim_h, pages, paper)
                         if (hard or jacket) else [])
     if jacket and retailer == 'kdp':

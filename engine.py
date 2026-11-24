@@ -2000,18 +2000,24 @@ def wrap_geometry(dims):
     wrap = max(dims.get('wrap', 0.625), 0.0) if hard else 0.0
     hinge = max(dims.get('hinge', 0.375), 0.0) if (hard or jacket) else 0.0
     flap = max(dims.get('flap', 3.5), 0.0) if jacket else 0.0
-    bext = max(dims.get('board_ext', 0.125), 0.0) if jacket else 0.0
+    # the board past the trim: head and tail, and the fore-edge (where a case's
+    # board can be narrower than the pages, as IngramSpark's is)
+    bext = (max(dims.get('board_ext', 0.125 if jacket else 0.0) or 0.0, 0.0)
+            if (hard or jacket) else 0.0)
+    bext_w = dims.get('board_ext_w') if (hard or jacket) else 0.0
+    bext_w = bext if bext_w is None else max(bext_w, -tw / 2)
     pages = dims.get('pages')
     smin = dims.get('spine_text_min', 0) or 0
     edge = wrap + bl                       # outer allowance before a panel starts
-    pw = tw + bext                         # panel width: the board, on a jacket
+    pw = tw + bext_w                       # panel width: the board on a case or jacket
     ph = th + 2 * bext                     # panel height, likewise
     back_x = edge + flap
     spine_x = back_x + pw + hinge
     return {
         'binding': binding if binding in ('hardcover', 'jacket') else 'paperback',
         'trim_w': tw, 'trim_h': th, 'spine_w': sp, 'bleed': bl, 'wrap': wrap,
-        'hinge': hinge, 'flap': flap, 'board_ext': bext, 'edge': edge,
+        'hinge': hinge, 'flap': flap, 'board_ext': bext, 'board_ext_w': bext_w,
+        'edge': edge,
         'panel_w': pw, 'panel_h': ph,
         'wrap_w': 2 * edge + 2 * flap + 2 * pw + 2 * hinge + sp,
         'wrap_h': 2 * edge + ph,

@@ -622,9 +622,10 @@ try:
         glyph sits in the same place. The pixels are counted at two resolutions and
         the smaller count kept: a baseline that lands on a half pixel can snap
         either way over a thousandth of a point, and does so at one resolution
-        but not the next, where a real difference shows at both."""
+        but not the next, where a real difference shows at every one. (Three:
+        IngramSpark's case puts the spine title where 67 and 73 both snap.)"""
         counts = []
-        for dpi in (67, 73):
+        for dpi in (67, 73, 96):
             ims = []
             for p in (a, b):
                 with fitz.open(p) as doc:

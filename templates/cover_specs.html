@@ -144,11 +144,11 @@
         <div class="inner measure">
           <span class="k">Full wrap</span><span><b>{{ '%.4f'|format(W) }} &times; {{ '%.4f'|format(H) }}"</b><br>
             {{ '%.1f'|format(W * 25.4) }} &times; {{ '%.1f'|format(H * 25.4) }} mm · {{ px[0] }} &times; {{ px[1] }} px at {{ dpi }} dpi</span>
-          <span class="k">Each cover</span><span><b>{{ '%g'|format(pw) }} &times; {{ '%g'|format(g.panel_h) }}"</b>{% if g.board_ext %} (the board — trim plus {{ '%g'|format(g.board_ext) }}"){% endif %}</span>
+          <span class="k">Each cover</span><span><b>{{ '%g'|format(pw) }} &times; {{ '%g'|format(g.panel_h) }}"</b>{% if g.board_ext or g.board_ext_w %} (the board — the trim {{ '%+g'|format(g.board_ext_w) }}" across, {{ '%+g'|format(2 * g.board_ext) }}" down){% endif %}</span>
           <span class="k">Spine</span><span><b>{{ '%.4f'|format(g.spine_w) }}"</b>
             {% if not g.spine_text %}<br><span class="warn">No spine text — {{ rc.label }} allows it from {{ rc.spine_text_min }} pages{% if g.spine_w < 0.1 %}, and it needs 0.1" to be readable{% endif %}</span>{% endif %}</span>
           <span class="k">Bleed</span><span><b>{{ '%g'|format(g.bleed) }}"</b> past every outer trim</span>
-          {% if g.wrap %}<span class="k">Turn-in</span><span><b>{{ '%g'|format(g.wrap) }}"</b> beyond the bleed, all round</span>{% endif %}
+          {% if g.wrap %}<span class="k">Turn-in</span><span><b>{{ '%g'|format(g.wrap) }}"</b> {% if g.bleed %}beyond the bleed{% else %}past the board{% endif %}, all round</span>{% endif %}
           {% if g.hinge %}<span class="k">Hinge</span><span><b>{{ '%g'|format(g.hinge) }}"</b> each side of the spine</span>{% endif %}
           {% if g.flap %}<span class="k">Flaps</span><span><b>{{ '%g'|format(g.flap) }}"</b> each end</span>{% endif %}
           <span class="k">Safe area</span><span><b>{{ '%g'|format(safe) }}"</b> inside every trim and fold · <b>{{ '%g'|format(spine_safe) }}"</b> each side on the spine</span>
