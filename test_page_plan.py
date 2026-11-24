@@ -107,6 +107,19 @@ def test_model():
           and '~~~ figure src="old-name"' in r, r)
     check('rename: nothing to rename, nothing changed', P.rename('abc', 'x', 'y') == 'abc')
     check('no text is no manuscript', P.join([]) == '')
+    # a fence left open at the end of the file, moved ahead of another: it
+    # used to take the other's opening line as its close, losing that page
+    for last in ('~~~ page src="dusk"\n', '~~~ quote\nThe end, unclosed.\n\n'):
+        text = 'Intro.\n\n' + fence('dawn') + '\n\nMiddle.\n\n' + last
+        items = P.split(text)
+        check('an open fence at the end is read as the parser reads it', P.readable(text, items))
+        tail, rest = items[-1], items[:-1]
+        moved = P.join([rest[0], tail] + rest[1:])
+        check('moved first, it keeps every page and word',
+              engine.page_blocks(manuscript.parse_markdown(moved))
+              == ([p['src'] for p in [tail] + rest if p['kind'] == 'page'])
+              and 'Middle.' in manuscript.parse_markdown(moved)['chapters'][0]['blocks'].__repr__(),
+              moved)
 
 
 # ---------------------------------------------------------------- 2

@@ -133,7 +133,11 @@ def test_pages():
     check('a heading, prose and a quote are left out', left_out == [
         'A title', 'Loose words here, typed between pages.', 'A quote.'], left_out)
     check('a design the book lacks is named', missing == ['gone'], missing)
-    check('a spread after page 1 opens on page 2', [p['n'] for p in pages] == [1, 2, 3])
+    # print gives the missing design a (grey) page of its own, so the spread
+    # after it opens on page 4, as in the PDF and the page plan
+    check('a missing design keeps its page, as in print',
+          [(p['n'], bool(p.get('blank'))) for p in pages]
+          == [(1, False), (2, True), (3, True), (4, False), (5, False)], pages)
 
 
 # ---------------------------------------------------------------- 2
@@ -238,6 +242,21 @@ def test_words():
         check('the art at its resolution', im.size == (round(8.5 * F.art_dpi(8.5, 8.5)),) * 2
               and im.size[0] * im.size[1] <= F.ART_PIXELS, im.size)
 
+    # the style's page background is under the art, as print lays it: white
+    # words on a design with no ground of its own stay readable
+    night = words('night', 'The owl', color='#ffffff')
+    night['elements'] = night['elements'][1:]            # no ground: the page shows
+    dark = os.path.join(tmp, 'dark.epub')
+    epub.build_epub(manuscript.parse_markdown(fence('night') + '\n'),
+                    dict(PRESET, page_background={'color': '#102040', 'image': ''}), dark,
+                    {'title': 'T', 'author': 'A', 'page_designs': [night],
+                     'ebook_layout': 'fixed'})
+    zd = zipfile.ZipFile(dark)
+    art = next(n for n in zd.namelist() if n.startswith('OEBPS/images/art'))
+    with Image.open(zd.open(art)) as im:
+        px = im.convert('RGB').getpixel((im.width // 2, im.height - 5))
+    check('the style\'s page background is under the art', px[2] > 40 and px[0] < 40, px)
+
     # a spread: both pages place the words, the right one shifted a page over
     path = os.path.join(tmp, 'spread.epub')
     build(fence('a') + '\n\n' + fence('sp') + '\n', [words('a', 'One'), spread('sp')], path)
@@ -286,6 +305,15 @@ def test_notes():
     clean = F.notes(manuscript.parse_markdown(fence('un') + '\n'), {'page_designs': designs},
                     PRESET)
     check('a clean book has no notes', clean == [], clean)
+    # what print has and the ebook drops, though it holds no words of the
+    # manuscript's: Book settings pages, a figure without a caption
+    lost = F.notes(manuscript.parse_markdown(fence('un') + '\n\n~~~ figure src="pond.jpg" '
+                                             'full="bleed"\n~~~\n'),
+                   {'page_designs': designs, 'dedication': 'For the fox.',
+                    'acknowledgments': 'Thanks.'}, PRESET)
+    tb = ' '.join(r['detail'] for r in lost if r['label'] == 'Text between pages')
+    check('Book settings pages and a bare figure are said to be left out',
+          'Dedication' in tb and 'figure pond.jpg' in tb and 'Acknowledgments' in tb, tb)
     empty = F.notes(manuscript.parse_markdown('Just prose.\n'), {'page_designs': []}, PRESET)
     check('no pages at all is said', any(r['label'] == 'Designed pages' for r in empty), empty)
 

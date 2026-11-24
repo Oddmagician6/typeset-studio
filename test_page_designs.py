@@ -230,6 +230,37 @@ def test_engine():
     check('a book opening on a designed page numbers its prose from 2',
           last[1] == ['2'] and last[-1] == [str(len(last))], last)
 
+    # a picture's transparency prints: the red under a PNG whose left half is
+    # clear shows through, its right half is the picture's blue
+    from PIL import Image
+    art = '_pd_clear.png'
+    im = Image.new('RGBA', (200, 200), (0, 0, 255, 255))
+    im.paste((0, 0, 0, 0), (0, 0, 100, 200))
+    path = os.path.join(W.ART_DIRS[0], art)
+    os.makedirs(W.ART_DIRS[0], exist_ok=True)
+    im.save(path)
+    try:
+        d = design('clear')
+        d['elements'].append({'id': 'im', 'type': 'image', 'anchor': 'front', 'src': art,
+                              'x': 1, 'y': 2, 'w': 2, 'h': 2})
+        md5 = '# Four\n\n' + L + '\n\n~~~ page src="clear"\n~~~\n\n' + L
+        out = os.path.join(TMP, 'clear.pdf')
+        engine.build_pdf(manuscript.parse_markdown(md5), preset(), out,
+                         dict(META, page_designs=[d]))
+        with fitz.open(out) as doc:
+            pg = doc[pages_with(doc, 'A Letter Found')[0] - 1]
+            # the page's left trim edge is x=0 on a recto, inches to points
+            left, right = pixel(pg, 1.5 * 72, 3 * 72), pixel(pg, 2.5 * 72, 3 * 72)
+        check('a clear part of a picture shows the design under it',
+              near(left, (0xc0, 0x30, 0x20)) and near(right, (0, 0, 255)), (left, right))
+        # Customise this design: the upright copy of a picture keeps its clear parts
+        import io, wrap_convert
+        kept = Image.open(io.BytesIO(wrap_convert._pil_png(im)))
+        check('a picture carried into the designer keeps its transparency',
+              kept.mode == 'RGBA' and kept.getpixel((10, 10))[3] == 0, kept.mode)
+    finally:
+        os.remove(path)
+
 
 # ---------------------------------------------------------------- 3
 def test_epub():

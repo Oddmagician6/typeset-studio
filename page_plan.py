@@ -70,7 +70,16 @@ def split(text):
             j = i + 1
             while j < n and not FENCE_RE.match(lines[j]):
                 j += 1
-            block = lines[i:min(j, n - 1) + 1] if j < n else lines[i:]
+            if j < n:
+                block = lines[i:j + 1]
+            else:
+                # one left open at the end gets its closing line: moved ahead
+                # of another fence, it would take that one's opening line as
+                # its own close and swallow the page
+                block = lines[i:]
+                while len(block) > 1 and not block[-1].strip():
+                    block.pop()
+                block.append('~~~')
             kind, attrs = _header(line)
             if kind == 'page':
                 flush()
