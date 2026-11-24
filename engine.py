@@ -6077,7 +6077,7 @@ def press_check(path, colour=False):
     except ImportError:
         return None
 
-    rgb_ops = links = rgb_imgs = 0
+    rgb_ops = links = rgb_imgs = cmyk_imgs = 0
     transparency = False
     op_re = _RGB_BLACK_RE if colour else _RGB_OP_RE
     with fitz.open(path) as doc:
@@ -6091,6 +6091,8 @@ def press_check(path, colour=False):
                 continue
             if '/Image' in obj and '/DeviceRGB' in obj:
                 rgb_imgs += 1
+            elif '/Image' in obj and '/DeviceCMYK' in obj:
+                cmyk_imgs += 1
             if '/SMask' in obj or '/ExtGState' in obj:
                 transparency = True
     # the boxes live on the page objects; the file itself is the simplest read
@@ -6117,10 +6119,13 @@ def press_check(path, colour=False):
                         if rgb_ops == 0 else
                         f'{rgb_ops} RGB colour operations — a printer converts these, and '
                         'RGB black usually becomes a four-ink black that mis-registers')},
-            {'label': 'Illustrations', 'ok': rgb_imgs == 0,
-             'detail': ('No RGB images' if rgb_imgs == 0 else
+            {'label': 'Illustrations', 'ok': rgb_imgs + cmyk_imgs == 0,
+             'detail': ('No colour images' if rgb_imgs + cmyk_imgs == 0 else
                         f'{rgb_imgs} image(s) are RGB — POD printers convert them for you, '
-                        'but a press wants CMYK done deliberately')},
+                        'but a press wants CMYK done deliberately' if not cmyk_imgs else
+                        f'{rgb_imgs + cmyk_imgs} image(s) are in colour (RGB or CMYK) in a '
+                        'black-and-white interior — the printer turns them grey; convert '
+                        'them to greyscale first to see how they will print')},
         ]
     out = head + [
         {'label': 'Transparency', 'ok': not transparency,

@@ -195,6 +195,19 @@ try:
           figrows['Illustrations'])
     check('while the type around it is still single-ink', figrows['Colour']['ok'],
           figrows['Colour'])
+    # a colour CMYK picture in a black-and-white interior is colour all the same
+    cmyk = os.path.join(A.FIGURE_DIR, '_press_fig_cmyk.jpg')
+    Image.new('CMYK', (400, 300), (0, 200, 200, 0)).save(cmyk)
+    try:
+        engine.build_pdf(manuscript.parse_markdown(
+            '# One\n\nText.\n\n~~~ figure src="_press_fig_cmyk.jpg"\nA plate.\n~~~\n'),
+            preset, PDF, dict(META, include_toc=False), press=True)
+        cmrows = {r['label']: r for r in engine.press_check(PDF)}
+        check('a CMYK colour illustration in black and white is reported',
+              not cmrows['Illustrations']['ok'] and 'CMYK' in cmrows['Illustrations']['detail'],
+              cmrows['Illustrations'])
+    finally:
+        os.remove(cmyk)
 finally:
     os.remove(figp)
 os.remove(PDF)
