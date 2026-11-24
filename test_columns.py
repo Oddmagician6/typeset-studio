@@ -523,6 +523,18 @@ def gate5():
                   wa == wb, ((wa - wb).most_common(6), (wb - wa).most_common(6)))
         except Exception as exc:
             check('long stat block builds', False, '%s: %s' % (type(exc).__name__, str(exc)[:500]))
+    # a heading over a figure that fills a column, on the page after a
+    # full-page figure: the heading stands alone and the figure takes the next
+    # column (the retry used to reuse the first try's cached empty layout)
+    full, narrow = picture('g5-full.png', 1200, 800), picture('g5-narrow.png', 200, 3000)
+    md = (f'# One\n\n{para(2)}\n\n~~~ figure src="{full}" full="page"\nA map.\n~~~\n\n'
+          f'## The Tower\n\n~~~ figure src="{narrow}"\n~~~\n\n{para(2, "z")}\n')
+    try:
+        build(md, preset(figure={'max_height': 1.0}), 'g5-lone-heading')
+        ok = True
+    except Exception as exc:
+        ok = type(exc).__name__
+    check('a heading over a column-tall figure stands alone rather than fail', ok is True, ok)
     # unsplittable things taller than a column
     tall = picture('very-tall.png', 300, 3000)
     cases = {

@@ -2567,7 +2567,10 @@ class ColumnRun(Flowable):
         return cols, queue
 
     def _plan(self, aW, aH):
-        if self._memo and self._memo[0] == (aW, aH):
+        # the retry that lets a heading stand alone lays out differently in
+        # the same frame, so it is part of what a cached layout was made for
+        key = (aW, aH, bool(self._lone_heading_ok()))
+        if self._memo and self._memo[0] == key:
             return self._memo[1]
         canv = self.canv
         cols, rest = self._layout(canv, aW, aH)
@@ -2586,7 +2589,7 @@ class ColumnRun(Flowable):
             cols, rest = self._layout(canv, aW, best if best is not None else aH)
             if rest:                                   # never trade words for balance
                 cols, rest = self._layout(canv, aW, aH)
-        self._memo = ((aW, aH), (cols, rest))
+        self._memo = (key, (cols, rest))
         return cols, rest
 
     def wrap(self, aW, aH):
