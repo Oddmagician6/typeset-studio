@@ -88,11 +88,11 @@ End with a short "Speculative" list for anything you couldn't confirm by reading
 
 | # | Section | Report | Confirmed | Fixed | Merged |
 |---|---|---|---|---|---|
-| 1 | Picture books & fixed-layout EPUB | 13 (+2 spec.) | 7 Highs (1.1 by design) | 7 Highs (with 3.4) | Highs merged |
+| 1 | Picture books & fixed-layout EPUB | 13 (+2 spec.) | 7 Highs (1.1 by design) | 7 Highs (with 3.4); 1.10, 1.11 on bughunt-mediums | Highs merged |
 | 2 | TTRPG layout | 14 (+1 spec.) | 9 Highs | 9 Highs (+1 found while fixing: a note in a long opening paragraph sits on its start page) | Highs merged |
-| 3 | Fillable sheets & Send to print | 13 (+1 spec.) | 5 Highs (KDP hardcover spec. unverified) | 5 Highs (3.4 with section 1) | Highs merged |
-| 4 | Wrap designer & cover families | – | – | – | – |
-| 5 | Manuscript parsing & reflowable EPUB | – | – | – | – |
-| 6 | WYSIWYG / doc model | – | – | – | – |
-| 7 | `app.py` across all routes | – | – | – | – |
-| 8 | Upgrades & packaging | – | – | – | – |
+| 3 | Fillable sheets & Send to print | 13 (+1 spec.) | 5 Highs (KDP hardcover spec. unverified) | 5 Highs (3.4 with section 1); 3.6, 3.7, 3.11, 3.12, 3.13 on bughunt-mediums | Highs merged |
+| 4 | Wrap designer & cover families | 14 (+1 spec.) | 9 Highs claimed, untriaged | – | – |
+| 5 | Manuscript parsing & reflowable EPUB | 14 (+1 spec.) | 7 Highs claimed, untriaged | – | – |
+| 6 | WYSIWYG / doc model | 13 (+2 spec.) | 11 Highs claimed, untriaged | – | – |
+| 7 | `app.py` across all routes | 13 (+2 spec.) | 12 Highs claimed; 7.1 confirmed | – | – |
+| 8 | Upgrades & packaging | 13 (+1 spec.) | 3 Highs claimed, untriaged | – | – |
