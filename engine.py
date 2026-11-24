@@ -2651,9 +2651,10 @@ class HRule(Flowable):
 
 class DropCap(Flowable):
     """Sunken drop cap: first lines set beside the initial, rest flows below."""
-    def __init__(self, text, body_style, cap_font, lines=3):
+    def __init__(self, text, body_style, cap_font, lines=3, marks=()):
         super().__init__()
         self.text, self.body, self.cap_font, self.lines = text, body_style, cap_font, lines
+        self._marks = list(marks)      # its index and anchor markers, set at its top
         self._cap = text[:1]
         self._rest = text[1:].lstrip()
 
@@ -2686,6 +2687,8 @@ class DropCap(Flowable):
         c = self.canv
         leading = self.body.leading
         top = self.height
+        for m in self._marks:
+            m.drawOn(c, 0, top)
         c.setFont(self.cap_font, self.cap_size)
         c.drawString(0, top - self.cap_size * 0.82, self._cap)
         if self._beside:
@@ -3399,8 +3402,10 @@ def _opening_para(text, st, preset, fonts, hyph=None):
         marks.append(AnchorMark(_ANCHOR_DRAW_RE.findall(text)))
     if style == 'dropcap':
         plain_h = _hyphenate_markup(plain, hyph) if hyph else plain
-        return marks + [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
-                                lines=preset['chapter'].get('dropcap_lines', 3))]
+        # a drop cap can't split, so it sets its own markers: when it moves
+        # on to the next page or column they go with it, not stay behind
+        return [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
+                        lines=preset['chapter'].get('dropcap_lines', 3), marks=marks)]
     if style == 'raised_initial':
         rest = _hyphenate_markup(plain[1:], hyph) if hyph else plain[1:]
         return marks + [RaisedInitial(plain[:1], rest, st['first'], fonts['regular'])]
