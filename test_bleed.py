@@ -204,6 +204,17 @@ def test_plates():
         check('inside the trim, at the foot of the text area',
               words and t.y0 + t.height * 0.75 < words[0][1] < t.y1, words)
 
+    # a caption longer than the page is said, not drawn off the top of it
+    long_cap = '\n\n'.join(f'Key {i}: the causeway at low water, the bell rope, the ford.'
+                           for i in range(90))
+    try:
+        build(book([fig('bleed', long_cap)]), p, 'plate-long-cap', bleed=True)
+        said = None
+    except engine.DoesNotFit as exc:
+        said = str(exc)
+    check('a caption too long for its plate stops the build and says so',
+          said and 'caption' in said, said)
+
     plain, r = build(md, p, 'plate-plain')
     check('without bleed it is reported', r['bleed_wanted'] == [FIG], r['bleed_wanted'])
     with fitz.open(plain) as d:

@@ -3908,6 +3908,12 @@ class BleedPlate(Flowable):
             return
         sizes = [p.wrap(self.width, self.height) for p in self.caption]
         total = sum(h + p.style.spaceBefore for p, (_, h) in zip(self.caption, sizes))
+        if total > self.height:
+            # drawn up from the foot, its opening lines would run off the page
+            raise DoesNotFit(
+                f'The caption of the full-bleed picture on page {c.getPageNumber()} '
+                f'is longer than the page can hold, so the book can’t be set. '
+                f'Shorten it, or set the rest as text after the picture.')
         pad = 6
         c.saveState()
         c.setFillColor(_colors.white)
