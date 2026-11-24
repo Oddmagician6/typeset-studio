@@ -95,13 +95,18 @@ def sequence(ms, designs):
                 words = _block_words(block)
                 if words:
                     left_out.append(_snippet(words))
+                elif block[0] == 'doc_block' and len(block) >= 3 and block[2].get('_type'):
+                    # a figure without a caption has no words, but it is a
+                    # printed page (or picture) all the same
+                    what = block[2]['_type']
+                    src = (block[2].get('src') or '').strip()
+                    left_out.append(f'{what} {src}'.strip())
                 continue
             src = (block[2].get('src') or '').strip()
             name = W.page_name(src)
             d = W.find_page(designs, name)
             if not d:
                 missing.append(src or '(no name)')
-                continue
             alt = _plain(' '.join(t for _, t in block[1] if t))
             if W.is_spread(d):
                 if p % 2 == 1:
@@ -116,7 +121,12 @@ def sequence(ms, designs):
             if (want == 'right' and p % 2 == 0) or (want == 'left' and p % 2 == 1):
                 pages.append({'n': p, 'blank': True})
                 p += 1
-            pages.append({'n': p, 'name': name, 'design': d, 'half': None, 'alt': alt})
+            if not d:
+                # print gives it a page of its own (a grey stand-in): keep its
+                # place, so the pages after it stay on the side print puts them
+                pages.append({'n': p, 'blank': True})
+            else:
+                pages.append({'n': p, 'name': name, 'design': d, 'half': None, 'alt': alt})
             p += 1
     return pages, left_out, missing
 
@@ -172,6 +182,11 @@ def notes(ms, meta, preset):
     trim = (preset or {}).get('trim') or {'w': 6.0, 'h': 9.0}
     designs = (meta or {}).get('page_designs') or []
     pages, left_out, missing = sequence(ms, designs)
+    import matter
+    # a dedication, acknowledgments… from Book settings print as pages of
+    # their own; the page-by-page ebook holds only designed pages
+    left_out = [s['key'].replace('_', ' ').capitalize()
+                for s in matter.present(meta or {}, 'front')] + left_out         + [s['key'].replace('_', ' ').capitalize() for s in matter.present(meta or {}, 'back')]
     rows = []
     if left_out:
         shown = ', '.join(f'“{t}”' for t in left_out[:3])
