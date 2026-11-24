@@ -3182,11 +3182,14 @@ class BookDoc(BaseDocTemplate):
     def _furniture(self, canv, doc):
         p = self.preset
         page = canv.getPageNumber()
+        # the first chapter opener defines folio 1; everything before it is
+        # front matter. A chapter that opens on a designed page counts it, so
+        # this comes before a plate's early return.
+        if (getattr(canv, '_is_opener', False) and self._body_start is None
+                and not getattr(canv, '_is_blank', False)):
+            self._body_start = page
         if getattr(canv, '_is_blank', False) or getattr(canv, '_is_plate', False):
             return
-        # the first chapter opener defines folio 1; everything before it is front matter
-        if getattr(canv, '_is_opener', False) and self._body_start is None:
-            self._body_start = page
         if self._body_start is None or page < self._body_start:
             return
         folio = page - self._body_start + 1

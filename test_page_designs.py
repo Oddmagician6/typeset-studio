@@ -218,6 +218,18 @@ def test_engine():
     check('and its alt text keeps the words, not the markers',
           blk[1] == [('para', 'The letter')], blk[1])
 
+    # a book that opens on a designed page counts it as folio 1 (the plate
+    # used to skip the page-end hook that sets where numbering starts, so
+    # the first chapter's prose had no folios and chapter two restarted at 1)
+    p4 = preset()
+    p4['chapter'] = dict(p4['chapter'], show_number=False)
+    md4 = '~~~ page src="handout-1" side="any"\n~~~\n\n' + L + '\n\n# Two\n\n' + L
+    out, _ = build(md4, 'opens-on-design', p=p4)
+    with fitz.open(out) as doc:
+        last = [pg.get_text().split()[-1:] for pg in doc]
+    check('a book opening on a designed page numbers its prose from 2',
+          last[1] == ['2'] and last[-1] == [str(len(last))], last)
+
 
 # ---------------------------------------------------------------- 3
 def test_epub():
