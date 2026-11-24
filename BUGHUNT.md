@@ -88,7 +88,7 @@ End with a short "Speculative" list for anything you couldn't confirm by reading
 
 | # | Section | Report | Confirmed | Fixed | Merged |
 |---|---|---|---|---|---|
-| 1 | Picture books & fixed-layout EPUB | 13 (+2 spec.) | – | – | – |
+| 1 | Picture books & fixed-layout EPUB | 13 (+2 spec.) | 7 Highs (1.1 by design) | 7 Highs (with 3.4) | Highs merged |
 | 2 | TTRPG layout | 14 (+1 spec.) | 9 Highs | 9 Highs (+1 found while fixing: a note in a long opening paragraph sits on its start page) | Highs merged |
 | 3 | Fillable sheets & Send to print | 13 (+1 spec.) | – | – | – |
 | 4 | Wrap designer & cover families | – | – | – | – |
