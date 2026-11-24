@@ -5771,6 +5771,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         _label = ch.get('title') or (
             c.get('number_format', 'Chapter {n}').format(n=_numbers[idx - 1])
             if _numbers[idx - 1] is not None else '')
+        _toc_at = len(story)
         story.append(TocMarker(idx, ch.get('title'), ch.get('part'), label=_label))
         # chapter-opening art: over the number, or under the title/byline
         art = _chapter_art(preset, avail_w, text_h)
@@ -5785,6 +5786,9 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 and bool(_blocks) and _blocks[0][0] == 'doc_block'
                 and len(_blocks[0]) >= 3 and _blocks[0][2].get('_type') == 'page')
         if bare:
+            # the designed page's side break goes first, so the chapter's
+            # marker and link target land on it, not on a blank page before it
+            story.insert(_toc_at, _render_page_block(_blocks[0][2], preset)[0])
             if _anchors[idx - 1]:
                 story.append(AnchorMark(_anchors[idx - 1]))
         else:

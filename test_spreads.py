@@ -221,6 +221,19 @@ def test_engine():
     flow = {(1, 1): engine.Paragraph('word ' * 2000, engine.ParagraphStyle('n'))}
     _, assign, _, _ = engine._plan_footnotes({(1, 1): 3}, flow, 300, 500, p,
                                              last_page=9, noteless={4, 5})
+    # a book that opens on a spread: a link to its first chapter lands on the
+    # spread's left half, not the blank page the side break leaves before it
+    p = preset()
+    p['chapter'] = dict(p['chapter'], show_number=False)
+    md = ('~~~ page src="marsh-map"\n~~~\n\n' + L + '\n\n# Two\n\nOpening words.\n\n'
+          'See [the map](#chapter-1).\n')
+    out, _ = build(md, 'link-to-spread', p=p)
+    with fitz.open(out) as doc:
+        sp = pages_with(doc, 'Westward')
+        to = [ln['page'] + 1 for pg in doc for ln in pg.get_links()
+              if ln.get('kind') == fitz.LINK_GOTO]
+    check('a link to a chapter that opens on a spread lands on the spread',
+          sp and to == sp[:1], (sp, to))
     check('the planner gives nothing to a blank or designed page',
           sorted(assign) and not {4, 5} & set(assign) and 3 in assign, sorted(assign))
 
