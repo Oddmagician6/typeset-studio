@@ -330,9 +330,9 @@ def draw_elements(c, design, g, H, live=None):
                 c.translate(X + ox + dw / 2.0, Ytop - oy - dh / 2.0)
                 c.rotate(-turn)
                 uw, uh = (dh, dw) if turn in (90, 270) else (dw, dh)
-                c.drawImage(img, -uw / 2.0, -uh / 2.0, uw, uh)
+                c.drawImage(img, -uw / 2.0, -uh / 2.0, uw, uh, mask='auto')
             else:
-                c.drawImage(img, X + ox, Ytop - oy - dh, dw, dh)
+                c.drawImage(img, X + ox, Ytop - oy - dh, dw, dh, mask='auto')
         elif kind == 'vector' and w > 0 and h > 0:
             draw_vector(c, el, X, Ytop, w * inch, h * inch)
         elif kind == 'field' and w > 0 and h > 0:

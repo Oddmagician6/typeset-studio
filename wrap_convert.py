@@ -363,7 +363,9 @@ def _store(data, ext):
 def _pil_png(pil):
     import io
     buf = io.BytesIO()
-    pil.convert('RGB').save(buf, 'PNG')
+    # a PNG can't hold CMYK, but it can hold transparency: keep that
+    clear = pil.mode in ('RGBA', 'LA', 'PA') or 'transparency' in pil.info
+    pil.convert('RGBA' if clear else 'RGB').save(buf, 'PNG')
     return buf.getvalue()
 
 
