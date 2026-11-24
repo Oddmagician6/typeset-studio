@@ -853,6 +853,22 @@ for _rid, _rc in WRAP_RETAILERS.items():
 _KDP_HARDCOVER_TRIMS = [(5.5, 8.5), (6.0, 9.0), (6.14, 9.21), (7.0, 10.0), (8.25, 11.0)]
 _KDP_HARDCOVER_PAGES = (75, 550)
 
+# KDP paperback page ranges by paper, for a regular trim and a large one (wider
+# than 6.12" or taller than 9"), from KDP's trim-size table. Standard colour is
+# the one stock with a higher minimum; the large-trim maxima are its 8.5x11 row.
+_KDP_PAPERBACK_PAGES = {
+    'white':          ((24, 828), (24, 590)),
+    'cream':          ((24, 776), (24, 550)),
+    'color':          ((24, 828), (24, 590)),
+    'color_standard': ((72, 600), (72, 600)),
+}
+
+
+def kdp_page_range(paper, trim_w, trim_h):
+    """(min, max) pages KDP prints a paperback in, on this paper at this trim."""
+    small, large = _KDP_PAPERBACK_PAGES.get(paper or 'white', _KDP_PAPERBACK_PAGES['white'])
+    return large if (trim_w > 6.12 + 1e-6 or trim_h > 9.0 + 1e-6) else small
+
 
 def _min_inside(pages, table):
     for lo, hi, m in table:
@@ -894,8 +910,11 @@ def _missing_checks(figures=(), cover_fonts=(), design_missing=(), template_gone
     return out
 
 
-def _preflight(build_result, preset, page_count):
-    """Return a list of preflight check dicts: {label, ok, detail}."""
+def _preflight(build_result, preset, page_count, paper=None):
+    """Return a list of preflight check dicts: {label, ok, detail}.
+
+    `paper` is the print paper picked under Send to print; KDP's page range
+    depends on it (Standard colour starts at 72 pages)."""
     checks = []
     requested = preset.get('font_family', 'Book')
 
@@ -998,11 +1017,14 @@ def _preflight(build_result, preset, page_count):
                        'set the style to put notes at the back')})
 
     if page_count:
-        kdp_ok = 24 <= page_count <= 828
+        trim = preset.get('trim') or {}
+        lo, hi = kdp_page_range(paper, trim.get('w', 6.0), trim.get('h', 9.0))
+        on = (f' on {_PAPER[paper]["label"]} paper' if paper in _PAPER else '')
+        kdp_ok = lo <= page_count <= hi
         checks.append({'label': 'Page count', 'ok': kdp_ok,
-                       'detail': (f'{page_count} pages — within KDP range (24–828)'
+                       'detail': (f'{page_count} pages — within KDP range{on} ({lo}–{hi})'
                                   if kdp_ok else
-                                  f'{page_count} pages — outside KDP range (24–828)')})
+                                  f'{page_count} pages — outside KDP range{on} ({lo}–{hi})')})
 
     return checks
 
@@ -3089,6 +3111,9 @@ def _wrap_dims(form, pages):
     jacket = binding == 'jacket'
     trim_w = _f(form, 'wrap_trim_w', 6.0)
     trim_h = _f(form, 'wrap_trim_h', 9.0)
+    # every page is one side of a leaf, so a printer binds an odd count with a
+    # blank on the back of the last page; the spine is that leaf thicker
+    pages += pages % 2
     # a case spine carries the boards as well as the paper — and a jacket wraps
     # that same case, so it takes the same spine
     spine_w = pages * ppi + (_f(form, 'wrap_board', HARDCOVER['board'])
@@ -5708,7 +5733,8 @@ def project_generate(pid):
     page_count, build_result = res['page_count'], res['build_result']
     out_name, epub_name, preset = res['out_name'], res['epub_name'], res['preset']
     spec      = print_spec(page_count, preset) if page_count else None
-    preflight = _preflight(build_result, preset, page_count) if build_result else None
+    preflight = (_preflight(build_result, preset, page_count, proj.get('print_paper'))
+                 if build_result else None)
     press     = _press_report(out_name, build_result)
     chapters  = len(res['ms_parsed']['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
@@ -5743,7 +5769,8 @@ def project_rebuild(pid):
         return jsonify(ok=False, error=res['error'])
     issues = []
     if res['build_result']:
-        issues += issue_rows(_preflight(res['build_result'], res['preset'], res['page_count']))
+        issues += issue_rows(_preflight(res['build_result'], res['preset'], res['page_count'],
+                                             proj.get('print_paper')))
     if res['epub_name']:
         issues += issue_rows(_epub_checks(os.path.join(OUT_DIR, res['epub_name']),
                                           res['ms_parsed'], res['meta'], res['preset']))
@@ -5982,7 +6009,7 @@ def build_print_package(proj, scope='print'):
         pages = built['page_count']
         files[pdir + os.path.basename(interior)] = interior
 
-        checks = _preflight(built, preset, pages)
+        checks = _preflight(built, preset, pages, paper)
         if built.get('press_error'):
             checks.insert(0, {
                 'label': 'Press-ready', 'ok': False,
@@ -6230,7 +6257,9 @@ def _print_spec_text(info, names):
         f'  Printer      {info["retailer_label"]}',
         f'  Binding      {_BINDING_LABEL[info["binding"]]}',
         f'  Trim         {info["trim_w"]:g} x {info["trim_h"]:g} in',
-        f'  Pages        {info["pages"]}',
+        f'  Pages        {info["pages"]}' + (
+            f' (bound as {info["pages"] + 1}: a blank backs the last page)'
+            if info['pages'] % 2 else ''),
         f'  Paper        {info["paper_label"]}',
         f'  Spine        {w["spine_w"]:.4f} in',
         f'  Cover wrap   {w["wrap_w"]:g} x {w["wrap_h"]:g} in (bleed {info["bleed"]:g} in)',
