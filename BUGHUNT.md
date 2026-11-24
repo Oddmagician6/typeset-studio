@@ -88,9 +88,9 @@ End with a short "Speculative" list for anything you couldn't confirm by reading
 
 | # | Section | Report | Confirmed | Fixed | Merged |
 |---|---|---|---|---|---|
-| 1 | Picture books & fixed-layout EPUB | – | – | – | – |
-| 2 | TTRPG layout | – | – | – | – |
-| 3 | Fillable sheets & Send to print | – | – | – | – |
+| 1 | Picture books & fixed-layout EPUB | 13 (+2 spec.) | – | – | – |
+| 2 | TTRPG layout | 14 (+1 spec.) | – | – | – |
+| 3 | Fillable sheets & Send to print | 13 (+1 spec.) | – | – | – |
 | 4 | Wrap designer & cover families | – | – | – | – |
 | 5 | Manuscript parsing & reflowable EPUB | – | – | – | – |
 | 6 | WYSIWYG / doc model | – | – | – | – |

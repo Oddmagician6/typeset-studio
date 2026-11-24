@@ -202,6 +202,22 @@ def test_engine():
         check('in two columns it still takes a whole page',
               n and doc[n[0] - 1].get_text().split() == 'A Letter Found'.split(), n)
 
+    # the fence's words are only alt text: an anchor, index entry or note in
+    # them points at nothing printed, so it is dropped (a page reference to
+    # it used to stop the build with an unresolved PDF destination)
+    md3 = ('# Three\n\n' + L + '\n\n~~~ page src="handout-1"\nThe letter{#letter}'
+           '{index: Letters}[^n]\n~~~\n\n' + L + ' See page {page: letter}.\n\n[^n]: A note.\n')
+    try:
+        out, _ = build(md3, 'alt-markers')
+        built = os.path.exists(out)
+    except Exception as e:
+        built = repr(e)
+    check('markers in a page fence don\'t stop the build', built is True, built)
+    blk = [b for b in manuscript.parse_markdown(md3)['chapters'][0]['blocks']
+           if b[0] == 'doc_block' and b[2].get('_type') == 'page'][0]
+    check('and its alt text keeps the words, not the markers',
+          blk[1] == [('para', 'The letter')], blk[1])
+
 
 # ---------------------------------------------------------------- 3
 def test_epub():

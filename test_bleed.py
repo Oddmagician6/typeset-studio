@@ -248,6 +248,23 @@ def test_plates():
 
 
 # ---------------------------------------------------------------- 4
+def test_plates_back_to_back():
+    """A full-page figure straight after another takes the very next page: the
+    second's break used to ship an empty page (with folio and running head)
+    between them, turning every page after it to the other side."""
+    p = preset()
+    two = fig('page') + fig('bleed')
+    for bleed in (True, False):
+        out, _ = build(book([two]), p, f'back-to-back-{bleed}', bleed=bleed)
+        with fitz.open(out) as d:
+            plates = [i for i, pg in enumerate(d) if pg.get_images()]
+            after = d[plates[-1] + 1].get_text() if plates else ''
+        check(f'two plates in a row, on consecutive pages (bleed {bleed})',
+              len(plates) == 2 and plates[1] == plates[0] + 1, plates)
+        check(f'and the text goes on on the page after them (bleed {bleed})',
+              'tide comes in' in after, after[:60])
+
+
 def test_background():
     print('\nthe page background in print')
     p = preset(page_background={'image': BG, 'color': '', 'opacity': 1.0})
@@ -327,7 +344,7 @@ if __name__ == '__main__':
     Image.new('RGB', (600, 900), FIG_RGB).save(os.path.join(A.FIGURE_DIR, FIG))
     Image.new('RGB', (400, 520), BG_RGB).save(os.path.join(A.FIGURE_DIR, BG))
     try:
-        for t in (test_pages, test_plates, test_background, test_app):
+        for t in (test_pages, test_plates, test_plates_back_to_back, test_background, test_app):
             try:
                 t()
             except Exception:

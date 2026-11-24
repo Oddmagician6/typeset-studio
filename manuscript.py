@@ -182,6 +182,9 @@ ANCHOR_RE = re.compile(r'\{#([A-Za-z0-9][\w\-]*)\}')
 PAGE_RE = re.compile(r'\{page:[ \t]*#?([A-Za-z0-9][\w\-]*)[ \t]*\}')
 ANCHOR_TAG_RE = re.compile(r'<anchor name="([\w\-]+)"/>')
 PAGEREF_TAG_RE = re.compile(r'<pageref to="([\w\-]+)"/>')
+# markers a designed page's alt text can't carry: nothing of it is printed
+_PAGE_ALT_DROP_RE = re.compile(r'<anchor name="[\w\-]+"/>|<index item="[^"]*"/>'
+                               r'|<note id="[\w\-]+"/>')
 _TAGS_RE = re.compile(r'<[^>]+>')
 
 
@@ -652,6 +655,11 @@ def parse_markdown(raw, smartquotes=True):
                 smartquotes)
             block_buf[:] = _statblock_children(model)
             block_attrs = dict(block_attrs, _statblock=model)
+        if block_type == 'page':
+            # a designed page's own words are only its alt text: never
+            # printed, so an anchor, index entry or note in them would point
+            # at nothing (an unresolved PDF destination stops the build)
+            block_buf[:] = [(k, _PAGE_ALT_DROP_RE.sub('', t)) for k, t in block_buf]
         if block_buf or block_type:
             blk = ('doc_block', list(block_buf))
             if block_type:

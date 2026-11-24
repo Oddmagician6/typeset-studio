@@ -4058,8 +4058,10 @@ def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
                 for p in caption) if caption else 0.0
 
     if edge:
-        # a page to itself, which the plate fills: what follows starts the next
-        return [PageBreak(), BleedPlate(path, caption, src or '(no src)')]
+        # a page to itself, which the plate fills: what follows starts the next.
+        # SideBreak('any') breaks only off a fresh page, so a plate straight
+        # after another full-page figure doesn't leave an empty page between
+        return [SideBreak('any'), BleedPlate(path, caption, src or '(no src)')]
     if full:
         box_w = avail_w
         max_h = text_h - cap_h
@@ -4076,7 +4078,7 @@ def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
 
     if full:
         # its own page: break, plate, caption, break
-        return [PageBreak(), img] + caption + [PageBreak()]
+        return [SideBreak('any'), img] + caption + [PageBreak()]
     # image and caption must not be separated by a page break
     return [Spacer(1, space), KeepTogether([img] + caption), Spacer(1, space)]
 
