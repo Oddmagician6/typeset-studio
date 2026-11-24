@@ -2741,6 +2741,12 @@ def _cover_page_jpeg(preset, meta, jpg_path):
     pdf_fd, pdf_path = tempfile.mkstemp(suffix='.pdf')
     os.close(pdf_fd)
     try:
+        art = meta.get('cover_image') if meta.get('cover_mode') == 'image' else ''
+        if art and os.path.exists(art):
+            # the engine leaves art it can't decode off page 1, and the blank
+            # page would then go out as the store listing and the ebook cover
+            with Image.open(art) as im:
+                im.load()
         cover_meta = dict(meta)
         cover_meta.update(front_matter='none', include_toc=False,
                           right_hand_starts=False)
@@ -2807,6 +2813,9 @@ def _epub_cover(preset, meta):
             out = dict(meta)
             out['cover_image'] = img_path
             yield out
+        elif engine._front_art(meta) and not _image_file_ok(engine._front_art(meta)):
+            # damaged art: no cover beats a cover image no reader can open
+            yield dict(meta, cover_image='')
         else:
             yield meta
     finally:
@@ -4879,10 +4888,22 @@ def _safe_upload_name(filename, fallback):
     return stem + ext
 
 
+def _image_file_ok(path):
+    """Whether a picture on disk decodes all the way through."""
+    try:
+        with open(path, 'rb') as f:
+            return _is_image(f.read())
+    except OSError:
+        return False
+
+
 def _is_image(data):
     try:
         from PIL import Image
-        Image.open(io.BytesIO(data)).verify()
+        # verify() only reads the header: a JPEG cut off part way through
+        # passes it, then prints as nothing. Decoding it all catches that.
+        with Image.open(io.BytesIO(data)) as im:
+            im.load()
         return True
     except Exception:
         return False

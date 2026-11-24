@@ -526,6 +526,9 @@ def image_cover_check(path, w_in, h_in, dpi=300):
     try:
         with PILImage.open(path) as im:
             iw, ih = im.size
+            # decode it all: a truncated file has a readable header, and the
+            # wrap painter would leave the picture off without a word
+            im.load()
             if _exif_orientation(im) in _EXIF_TURNED:
                 iw, ih = ih, iw          # measured the way up it prints
     except Exception:

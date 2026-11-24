@@ -523,6 +523,29 @@ try:
     nmeta, npath = A._project_meta(dict(IMG_PROJ, cover_mode='none'))
     check('and a project set to No cover does not use the art it still keeps',
           nmeta['cover_image'] == '' and npath == '', (nmeta['cover_image'], npath))
+
+    # A JPEG cut off part way through: its header reads, so it used to pass the
+    # upload and the dpi check, print as nothing, and ship page 1 of a blank
+    # cover as the store listing and the ebook's cover.
+    buf = io.BytesIO()
+    Image.effect_noise((int(aw * 300), int(ah * 300)), 60).convert('RGB').save(
+        buf, 'JPEG', quality=95)
+    data = buf.getvalue()[:len(buf.getvalue()) // 3]
+    check('an upload cut off part way through is not taken as a picture',
+          not A._is_image(data))
+    with open(ART_PATH, 'wb') as f:
+        f.write(data)
+    r = send(dict(IMG_PROJ), 'publish')
+    html = r.get_data(as_text=True)
+    files = unpack(A.load_project(PID)['last_print_package'])
+    check('Send to publish says the art can\'t be read',
+          'can’t be read' in html, re.findall(r'Cover art[^<]*<[^>]*>[^<]*', html)[:2])
+    check('and ships no stand-in as the listing JPG',
+          not any(n.endswith('.jpg') for n in files), sorted(files))
+    dmeta, _ = A._project_meta(dict(IMG_PROJ))
+    with A._epub_cover(A.load_preset(PROJ['preset']), dmeta) as emeta:
+        check('nor in an exported EPUB, which goes without a cover',
+              emeta['cover_image'] == '', emeta['cover_image'])
     os.remove(ART_PATH)
 
     # ------------------------------------------------------------ refusals
