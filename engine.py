@@ -6113,6 +6113,28 @@ _RGB_OP_RE = re.compile(r'(?<![A-Za-z/])(rg|RG)(?![A-Za-z])')
 _RGB_BLACK_RE = re.compile(r'(?<![\d.])0 0 0 (rg|RG)(?![A-Za-z])')
 
 
+def rgb_usage(path):
+    """(RGB colour operations, RGB images) in a built PDF, read off the file:
+    what a printer that wants a CMYK cover (IngramSpark) would object to.
+    None if PyMuPDF isn't installed."""
+    try:
+        import fitz
+    except ImportError:
+        return None
+    ops = imgs = 0
+    with fitz.open(path) as doc:
+        for page in doc:
+            ops += len(_RGB_OP_RE.findall(page.read_contents().decode('latin-1')))
+        for xref in range(1, doc.xref_length()):
+            try:
+                obj = doc.xref_object(xref, compressed=True) or ''
+            except Exception:
+                continue
+            if '/Image' in obj and '/DeviceRGB' in obj:
+                imgs += 1
+    return ops, imgs
+
+
 def press_check(path, colour=False):
     """Read a built PDF back and report how close it is to press standard.
 

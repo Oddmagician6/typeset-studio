@@ -524,6 +524,15 @@ try:
     check('and a project set to No cover does not use the art it still keeps',
           nmeta['cover_image'] == '' and npath == '', (nmeta['cover_image'], npath))
 
+    # IngramSpark wants a CMYK cover; the wrap is RGB and the press check only
+    # ever read the interior, so the package passed without a word
+    Image.new('RGB', (int(aw * 300), int(ah * 300)), ART).save(ART_PATH, 'PNG')
+    html = send(dict(IMG_PROJ, print_retailer='ingramspark')).get_data(as_text=True)
+    check('an RGB cover bound for IngramSpark is flagged',
+          'Cover colour' in html and 'asks for CMYK' in html)
+    html = send(dict(IMG_PROJ)).get_data(as_text=True)
+    check('and not for KDP, which takes RGB covers', 'Cover colour' not in html)
+
     # A JPEG cut off part way through: its header reads, so it used to pass the
     # upload and the dpi check, print as nothing, and ship page 1 of a blank
     # cover as the store listing and the ebook's cover.

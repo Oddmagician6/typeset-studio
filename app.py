@@ -779,7 +779,7 @@ WRAP_RETAILERS = {
                           '(5.5×8.5, 6×9, 6.14×9.21, 7×10, 8.25×11).',
     },
     'ingramspark': {
-        'label': 'IngramSpark', 'bleed': 0.125, 'spine_text_min': 48,
+        'label': 'IngramSpark', 'bleed': 0.125, 'spine_text_min': 48, 'cover_cmyk': True,
         'note': 'IngramSpark perfect-bound spine text from ~48 pages · 0.125" bleed. '
                 'Download IngramSpark’s cover template to confirm the spine.',
         'hardcover_note': 'IngramSpark case laminate takes the same 0.625" (16 mm) wrap; '
@@ -5980,6 +5980,19 @@ def build_print_package(proj, scope='print'):
                 checks += _missing_checks(cover_fonts=engine.cover_fonts_missing(tpl),
                                           cover_art=engine.cover_art_missing(tpl))
         files[pdir + os.path.basename(wrap)] = wrap
+        if WRAP_RETAILERS[retailer].get('cover_cmyk'):
+            # The wrap is drawn in RGB (uploaded art as it came, the template's
+            # colours as set) and there is no ICC profile here to convert it
+            # honestly, so the press check on the interior says nothing about it.
+            rgb = engine.rgb_usage(wrap)
+            if rgb and any(rgb):
+                checks.append({'label': 'Cover colour', 'ok': False, 'detail': (
+                    f'The cover wrap is in RGB ({rgb[1]} RGB picture(s), {rgb[0]} RGB '
+                    f'colour settings), and {WRAP_RETAILERS[retailer]["label"]} asks for '
+                    'CMYK covers. Convert the wrap to CMYK (US Web Coated SWOP v2 or '
+                    'their recommended profile) in a tool like Acrobat or Affinity '
+                    'Publisher before uploading, or the printer’s own conversion may '
+                    'shift its colours')})
         for w in dims['warnings']:
             checks.append({'label': 'Cover wrap', 'ok': False, 'detail': w})
 
