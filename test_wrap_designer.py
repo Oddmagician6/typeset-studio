@@ -544,6 +544,21 @@ try:
     meta, cover = A._project_meta(proj)
     check("the book's cover is now that front, with no title laid over it",
           meta['cover_mode'] == 'image' and cover == front and not meta['cover_overlay'])
+    # the style's trim changes after the design was saved: the cached front was
+    # cut from a 6x9 wrap, and reusing it put the old cover in the ebook and the
+    # listing JPG while the print wrap used the new trim
+    real_load = A.load_preset
+    A.load_preset = lambda name: dict(real_load(name), trim={'w': 5.0, 'h': 8.0})
+    try:
+        meta2, cover2 = A._project_meta(proj)
+        with Image.open(cover2) as im:
+            check('a front cut at another trim is rendered again at the new one',
+                  im.size == (1500, 2400), im.size)
+    finally:
+        A.load_preset = real_load
+    A._project_meta(proj)
+    with Image.open(front) as im:
+        check('and again when it changes back', im.size == (1800, 2700), im.size)
     page = client.get(f'/project/{PID}/edit').get_data(as_text=True)
     check('the edit page offers it as the cover', 'value="wrap"' in page and 'My wrap design' in page)
 

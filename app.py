@@ -3194,14 +3194,40 @@ def _wrap_front_path(proj):
     if not fn or not design:
         return ''
     path = os.path.join(PROJECT_MS_DIR, fn)
-    if not os.path.exists(path):
+    try:
+        dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
+    except Exception:
+        logging.exception('Working out the wrap design geometry failed')
+        return path if os.path.exists(path) else ''
+    # The front is cut from a wrap of the book's current trim and spine: a file
+    # rendered at another size (the style's trim changed since the design was
+    # saved) would put a different cover in the ebook than on the print wrap.
+    if not os.path.exists(path) or _wrap_front_key(path) != _wrap_dims_key(dims):
         try:
-            dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
-            wrap_design.render_front(design, dims, path)
+            _render_wrap_front(design, dims, path)
         except Exception:
             logging.exception('Rendering the wrap design front cover failed')
             return ''
     return path
+
+
+def _wrap_dims_key(dims):
+    return json.dumps(dims, sort_keys=True, default=str)
+
+
+def _wrap_front_key(path):
+    try:
+        with open(path + '.dims', encoding='utf-8') as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _render_wrap_front(design, dims, path):
+    """Render a design's front cover, recording the geometry it was cut from."""
+    wrap_design.render_front(design, dims, path)
+    with open(path + '.dims', 'w', encoding='utf-8') as f:
+        f.write(_wrap_dims_key(dims))
 
 
 def _design_too_big(els):
@@ -3267,7 +3293,7 @@ def wrap_designer_save(pid):
     front = os.path.join(PROJECT_MS_DIR, proj['wrap_front_file'])
     try:
         dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
-        wrap_design.render_front(design, dims, front)
+        _render_wrap_front(design, dims, front)
     except Exception as exc:
         logging.error('Wrap design front render failed: %s', traceback.format_exc())
         return jsonify(ok=False, error=f'The design was not saved: {exc}')
@@ -6242,7 +6268,11 @@ _BOOK_FILES = ('manuscript_file', 'cover_file', 'print_back_file', 'wrap_front_f
 
 def _book_files(proj):
     """The files in the manuscripts folder a book names."""
-    return {os.path.basename(str(proj.get(k) or '')) for k in _BOOK_FILES} - {''}
+    names = {os.path.basename(str(proj.get(k) or '')) for k in _BOOK_FILES} - {''}
+    front = os.path.basename(str(proj.get('wrap_front_file') or ''))
+    if front:
+        names.add(front + '.dims')      # the geometry the front was rendered at
+    return names
 
 
 @app.route('/project/<pid>/delete', methods=['POST'])
