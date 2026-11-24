@@ -779,12 +779,26 @@ WRAP_RETAILERS = {
                           '(5.5×8.5, 6×9, 6.14×9.21, 7×10, 8.25×11).',
     },
     'ingramspark': {
-        'label': 'IngramSpark', 'bleed': 0.125, 'spine_text_min': 48,
+        'label': 'IngramSpark', 'bleed': 0.125, 'spine_text_min': 48, 'cover_cmyk': True,
         'note': 'IngramSpark perfect-bound spine text from ~48 pages · 0.125" bleed. '
                 'Download IngramSpark’s cover template to confirm the spine.',
-        'hardcover_note': 'IngramSpark case laminate takes the same 0.625" (16 mm) wrap; '
-                          'part of it is covered by the end sheets. Generate their cover '
-                          'template to confirm the hinge for your trim.',
+        'hardcover_note': 'IngramSpark case laminate: boards 0.185" narrower and 0.25" taller '
+                          'than the trim, a 0.625" (16 mm) wrap round them (part of it under '
+                          'the end sheets) and a 0.5" (13 mm) hinge each side of the spine. '
+                          'A jacket: covers 0.4375" wider and 0.25" taller than the trim, '
+                          '3.25" flaps plus a 0.25" fold onto each, 0.125" bleed.',
+        # IngramSpark's File Creation Guide, custom case laminate and dust jacket:
+        # case width  .625 + board + .5 + spine + .5 + board + .625,
+        #      height .625 + board + .625, board = trim w - .185 by trim h + .25;
+        # jacket width .125 + 3.25 + .25 + cover + spine + cover + .25 + 3.25 + .125,
+        #      height .125 + (trim h + .25) + .125, cover = trim w + .4375.
+        # The jacket's .25" fold onto the flap is counted in the 3.5" flap, which
+        # is where it folds; there is no hinge between a jacket's covers and spine.
+        'allowances': {
+            'hardcover': {'wrap': 0.625, 'hinge': 0.5, 'bleed': 0.0,
+                          'board_ext': 0.125, 'board_ext_w': -0.185},
+            'jacket': {'flap': 3.5, 'hinge': 0.0, 'board_ext': 0.125, 'board_ext_w': 0.4375},
+        },
     },
     'generic': {
         'label': 'Generic / other POD', 'bleed': 0.125, 'spine_text_min': 80,
@@ -809,6 +823,30 @@ HARDCOVER = {'wrap': 0.625, 'hinge': 0.375, 'board': 0.06}
 # run 3–4"; 3.5" is the common house figure. Jackets are printer-specific —
 # among the retailers we preset, only IngramSpark prints them.
 JACKET = {'flap': 3.5, 'board_ext': 0.125, 'hinge': 0.375}
+
+
+def _allowances(retailer, binding):
+    """The case or jacket allowances a retailer's wrap is built to: the shared
+    defaults, then whatever the retailer documents differently. `board_ext` is
+    how far the board stands past the trim at the head and tail, `board_ext_w`
+    at the fore-edge (negative where the board is narrower than the pages)."""
+    rc = WRAP_RETAILERS.get(retailer, WRAP_RETAILERS['kdp'])
+    if binding == 'hardcover':
+        a = {'wrap': HARDCOVER['wrap'], 'hinge': HARDCOVER['hinge'], 'bleed': rc['bleed'],
+             'board_ext': 0.0, 'board_ext_w': 0.0}
+    elif binding == 'jacket':
+        a = {'flap': JACKET['flap'], 'hinge': JACKET['hinge'], 'bleed': rc['bleed'],
+             'board_ext': JACKET['board_ext'], 'board_ext_w': None}
+    else:
+        return {'bleed': rc['bleed']}
+    a.update((rc.get('allowances') or {}).get(binding, {}))
+    return a
+
+
+for _rid, _rc in WRAP_RETAILERS.items():
+    # what the cover editor fills its fields from when a printer is picked
+    _rc['binding_allowances'] = {b: _allowances(_rid, b)
+                                 for b in ('paperback', 'hardcover', 'jacket')}
 
 # KDP's hardcover programme is narrower than its paperback one; the wrap builds
 # either way, but a book outside these is one KDP will refuse.
@@ -2741,6 +2779,12 @@ def _cover_page_jpeg(preset, meta, jpg_path):
     pdf_fd, pdf_path = tempfile.mkstemp(suffix='.pdf')
     os.close(pdf_fd)
     try:
+        art = meta.get('cover_image') if meta.get('cover_mode') == 'image' else ''
+        if art and os.path.exists(art):
+            # the engine leaves art it can't decode off page 1, and the blank
+            # page would then go out as the store listing and the ebook cover
+            with Image.open(art) as im:
+                im.load()
         cover_meta = dict(meta)
         cover_meta.update(front_matter='none', include_toc=False,
                           right_hand_starts=False)
@@ -2807,6 +2851,9 @@ def _epub_cover(preset, meta):
             out = dict(meta)
             out['cover_image'] = img_path
             yield out
+        elif engine._front_art(meta) and not _image_file_ok(engine._front_art(meta)):
+            # damaged art: no cover beats a cover image no reader can open
+            yield dict(meta, cover_image='')
         else:
             yield meta
     finally:
@@ -3046,19 +3093,26 @@ def _wrap_dims(form, pages):
     # that same case, so it takes the same spine
     spine_w = pages * ppi + (_f(form, 'wrap_board', HARDCOVER['board'])
                              if (hard or jacket) else 0.0)
+    a = _allowances(retailer, binding)
     dims = {
         'trim_w': trim_w,
         'trim_h': trim_h,
         'spine_w': spine_w,
-        'bleed':  _f(form, 'wrap_bleed', rc['bleed']),
+        # a case's wrap takes the place of bleed where the printer says so
+        'bleed':  (a['bleed'] if hard and 'bleed' in (rc.get('allowances') or {}).get(
+                       'hardcover', {}) else _f(form, 'wrap_bleed', a['bleed'])),
         'pages':  pages,
         'spine_text_min': rc['spine_text_min'],
         'binding': binding,
-        'wrap':   _f(form, 'wrap_turnin', HARDCOVER['wrap']),
-        'hinge':  _f(form, 'wrap_hinge', HARDCOVER['hinge']),
-        'flap':   _f(form, 'wrap_flap', JACKET['flap']),
-        'board_ext': _f(form, 'wrap_board_ext', JACKET['board_ext']),
     }
+    if hard:
+        dims.update(wrap=_f(form, 'wrap_turnin', a['wrap']),
+                    hinge=_f(form, 'wrap_hinge', a['hinge']),
+                    board_ext=a['board_ext'], board_ext_w=a['board_ext_w'])
+    elif jacket:
+        ext = _f(form, 'wrap_board_ext', a['board_ext'])
+        dims.update(flap=_f(form, 'wrap_flap', a['flap']), hinge=a['hinge'], board_ext=ext,
+                    board_ext_w=ext if a['board_ext_w'] is None else a['board_ext_w'])
     dims['warnings'] = (hardcover_warnings(retailer, trim_w, trim_h, pages, paper)
                         if (hard or jacket) else [])
     if jacket and retailer == 'kdp':
@@ -3194,14 +3248,40 @@ def _wrap_front_path(proj):
     if not fn or not design:
         return ''
     path = os.path.join(PROJECT_MS_DIR, fn)
-    if not os.path.exists(path):
+    try:
+        dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
+    except Exception:
+        logging.exception('Working out the wrap design geometry failed')
+        return path if os.path.exists(path) else ''
+    # The front is cut from a wrap of the book's current trim and spine: a file
+    # rendered at another size (the style's trim changed since the design was
+    # saved) would put a different cover in the ebook than on the print wrap.
+    if not os.path.exists(path) or _wrap_front_key(path) != _wrap_dims_key(dims):
         try:
-            dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
-            wrap_design.render_front(design, dims, path)
+            _render_wrap_front(design, dims, path)
         except Exception:
             logging.exception('Rendering the wrap design front cover failed')
             return ''
     return path
+
+
+def _wrap_dims_key(dims):
+    return json.dumps(dims, sort_keys=True, default=str)
+
+
+def _wrap_front_key(path):
+    try:
+        with open(path + '.dims', encoding='utf-8') as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _render_wrap_front(design, dims, path):
+    """Render a design's front cover, recording the geometry it was cut from."""
+    wrap_design.render_front(design, dims, path)
+    with open(path + '.dims', 'w', encoding='utf-8') as f:
+        f.write(_wrap_dims_key(dims))
 
 
 def _design_too_big(els):
@@ -3267,7 +3347,7 @@ def wrap_designer_save(pid):
     front = os.path.join(PROJECT_MS_DIR, proj['wrap_front_file'])
     try:
         dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
-        wrap_design.render_front(design, dims, front)
+        _render_wrap_front(design, dims, front)
     except Exception as exc:
         logging.error('Wrap design front render failed: %s', traceback.format_exc())
         return jsonify(ok=False, error=f'The design was not saved: {exc}')
@@ -4853,10 +4933,22 @@ def _safe_upload_name(filename, fallback):
     return stem + ext
 
 
+def _image_file_ok(path):
+    """Whether a picture on disk decodes all the way through."""
+    try:
+        with open(path, 'rb') as f:
+            return _is_image(f.read())
+    except OSError:
+        return False
+
+
 def _is_image(data):
     try:
         from PIL import Image
-        Image.open(io.BytesIO(data)).verify()
+        # verify() only reads the header: a JPEG cut off part way through
+        # passes it, then prints as nothing. Decoding it all catches that.
+        with Image.open(io.BytesIO(data)) as im:
+            im.load()
         return True
     except Exception:
         return False
@@ -5933,6 +6025,19 @@ def build_print_package(proj, scope='print'):
                 checks += _missing_checks(cover_fonts=engine.cover_fonts_missing(tpl),
                                           cover_art=engine.cover_art_missing(tpl))
         files[pdir + os.path.basename(wrap)] = wrap
+        if WRAP_RETAILERS[retailer].get('cover_cmyk'):
+            # The wrap is drawn in RGB (uploaded art as it came, the template's
+            # colours as set) and there is no ICC profile here to convert it
+            # honestly, so the press check on the interior says nothing about it.
+            rgb = engine.rgb_usage(wrap)
+            if rgb and any(rgb):
+                checks.append({'label': 'Cover colour', 'ok': False, 'detail': (
+                    f'The cover wrap is in RGB ({rgb[1]} RGB picture(s), {rgb[0]} RGB '
+                    f'colour settings), and {WRAP_RETAILERS[retailer]["label"]} asks for '
+                    'CMYK covers. Convert the wrap to CMYK (US Web Coated SWOP v2 or '
+                    'their recommended profile) in a tool like Acrobat or Affinity '
+                    'Publisher before uploading, or the printer’s own conversion may '
+                    'shift its colours')})
         for w in dims['warnings']:
             checks.append({'label': 'Cover wrap', 'ok': False, 'detail': w})
 
@@ -6242,7 +6347,11 @@ _BOOK_FILES = ('manuscript_file', 'cover_file', 'print_back_file', 'wrap_front_f
 
 def _book_files(proj):
     """The files in the manuscripts folder a book names."""
-    return {os.path.basename(str(proj.get(k) or '')) for k in _BOOK_FILES} - {''}
+    names = {os.path.basename(str(proj.get(k) or '')) for k in _BOOK_FILES} - {''}
+    front = os.path.basename(str(proj.get('wrap_front_file') or ''))
+    if front:
+        names.add(front + '.dims')      # the geometry the front was rendered at
+    return names
 
 
 @app.route('/project/<pid>/delete', methods=['POST'])

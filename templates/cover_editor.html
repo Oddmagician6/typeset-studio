@@ -619,7 +619,7 @@
           retailerSel.value = pr.retailer;
           retailerSel.dispatchEvent(new Event('change'));      // its bleed, and its notes
         }
-        if (pr.binding && bindingSel) { bindingSel.value = pr.binding; updateBinding(); }
+        if (pr.binding && bindingSel) { bindingSel.value = pr.binding; applyAllowances(); updateBinding(); }
         setField('prev_title', pr.title);
         setField('prev_author', pr.author);
         setField('prev_studio', pr.publisher);
@@ -673,12 +673,26 @@
             + 'prints jackets among the presets here; confirm flap and hinge with your printer.'
           : (hard && r ? (r.hardcover_note || '') : '');
       }
-      if (bindingSel) bindingSel.addEventListener('change', updateBinding);
+      // the printer's own case and jacket allowances (IngramSpark's differ from
+      // the shared defaults), into the fields the wrap is built from
+      function applyAllowances(){
+        var r = retailerData[retailerSel && retailerSel.value];
+        var a = r && r.binding_allowances && r.binding_allowances[bindingSel ? bindingSel.value : 'paperback'];
+        if (!a) return;
+        if ('bleed' in a) setField('wrap_bleed', a.bleed);
+        if ('wrap' in a) setField('wrap_turnin', a.wrap);
+        if ('hinge' in a && bindingSel.value === 'hardcover') setField('wrap_hinge', a.hinge);
+        if ('flap' in a) setField('wrap_flap', a.flap);
+        if ('board_ext' in a && bindingSel.value === 'jacket') setField('wrap_board_ext', a.board_ext);
+      }
+      if (bindingSel) bindingSel.addEventListener('change', function(){
+        applyAllowances();
+        updateBinding();
+      });
 
       if (retailerSel){
         retailerSel.addEventListener('change', function(){
-          var r = retailerData[retailerSel.value];
-          if (r) setField('wrap_bleed', r.bleed);
+          applyAllowances();
           updateRetailerNote();
           updateBinding();
         });

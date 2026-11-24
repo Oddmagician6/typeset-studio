@@ -526,6 +526,9 @@ def image_cover_check(path, w_in, h_in, dpi=300):
     try:
         with PILImage.open(path) as im:
             iw, ih = im.size
+            # decode it all: a truncated file has a readable header, and the
+            # wrap painter would leave the picture off without a word
+            im.load()
             if _exif_orientation(im) in _EXIF_TURNED:
                 iw, ih = ih, iw          # measured the way up it prints
     except Exception:
@@ -1997,18 +2000,24 @@ def wrap_geometry(dims):
     wrap = max(dims.get('wrap', 0.625), 0.0) if hard else 0.0
     hinge = max(dims.get('hinge', 0.375), 0.0) if (hard or jacket) else 0.0
     flap = max(dims.get('flap', 3.5), 0.0) if jacket else 0.0
-    bext = max(dims.get('board_ext', 0.125), 0.0) if jacket else 0.0
+    # the board past the trim: head and tail, and the fore-edge (where a case's
+    # board can be narrower than the pages, as IngramSpark's is)
+    bext = (max(dims.get('board_ext', 0.125 if jacket else 0.0) or 0.0, 0.0)
+            if (hard or jacket) else 0.0)
+    bext_w = dims.get('board_ext_w') if (hard or jacket) else 0.0
+    bext_w = bext if bext_w is None else max(bext_w, -tw / 2)
     pages = dims.get('pages')
     smin = dims.get('spine_text_min', 0) or 0
     edge = wrap + bl                       # outer allowance before a panel starts
-    pw = tw + bext                         # panel width: the board, on a jacket
+    pw = tw + bext_w                       # panel width: the board on a case or jacket
     ph = th + 2 * bext                     # panel height, likewise
     back_x = edge + flap
     spine_x = back_x + pw + hinge
     return {
         'binding': binding if binding in ('hardcover', 'jacket') else 'paperback',
         'trim_w': tw, 'trim_h': th, 'spine_w': sp, 'bleed': bl, 'wrap': wrap,
-        'hinge': hinge, 'flap': flap, 'board_ext': bext, 'edge': edge,
+        'hinge': hinge, 'flap': flap, 'board_ext': bext, 'board_ext_w': bext_w,
+        'edge': edge,
         'panel_w': pw, 'panel_h': ph,
         'wrap_w': 2 * edge + 2 * flap + 2 * pw + 2 * hinge + sp,
         'wrap_h': 2 * edge + ph,
@@ -6108,6 +6117,28 @@ _RGB_OP_RE = re.compile(r'(?<![A-Za-z/])(rg|RG)(?![A-Za-z])')
 
 
 _RGB_BLACK_RE = re.compile(r'(?<![\d.])0 0 0 (rg|RG)(?![A-Za-z])')
+
+
+def rgb_usage(path):
+    """(RGB colour operations, RGB images) in a built PDF, read off the file:
+    what a printer that wants a CMYK cover (IngramSpark) would object to.
+    None if PyMuPDF isn't installed."""
+    try:
+        import fitz
+    except ImportError:
+        return None
+    ops = imgs = 0
+    with fitz.open(path) as doc:
+        for page in doc:
+            ops += len(_RGB_OP_RE.findall(page.read_contents().decode('latin-1')))
+        for xref in range(1, doc.xref_length()):
+            try:
+                obj = doc.xref_object(xref, compressed=True) or ''
+            except Exception:
+                continue
+            if '/Image' in obj and '/DeviceRGB' in obj:
+                imgs += 1
+    return ops, imgs
 
 
 def press_check(path, colour=False):

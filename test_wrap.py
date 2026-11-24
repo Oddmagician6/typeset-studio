@@ -242,6 +242,35 @@ check('other retailers get their note, not invented limits',
 check('every retailer preset carries a hardcover note',
       all(r.get('hardcover_note') for r in A.WRAP_RETAILERS.values()))
 
+# IngramSpark's File Creation Guide, custom case laminate and dust jacket. The
+# wraps used the shared case defaults (0.125" bleed past a 0.625" wrap, the
+# board the trim's size, 0.375" hinges): 13.75" plus the spine at 5.75" wide.
+def ingram(binding):
+    return engine.wrap_geometry(A._wrap_dims({'wrap_retailer': 'ingramspark',
+                                              'wrap_binding': binding,
+                                              'wrap_trim_w': 5.75, 'wrap_trim_h': 8.75}, 320))
+g = ingram('hardcover')
+board_w, board_h = 5.75 - 0.185, 8.75 + 0.25
+check('an IngramSpark case is .625 + board + .5 + spine + .5 + board + .625 across',
+      abs(g['wrap_w'] - (0.625 * 2 + board_w * 2 + 0.5 * 2 + g['spine_w'])) < 1e-9
+      and abs(g['wrap_w'] - g['spine_w'] - 13.38) < 1e-9, g['wrap_w'] - g['spine_w'])
+check('and .625 + board + .625 down',
+      abs(g['wrap_h'] - (board_h + 1.25)) < 1e-9, g['wrap_h'])
+check('its folds are at the board edges and hinges',
+      abs(g['back_x'] - 0.625) < 1e-9 and abs(g['spine_x'] - (0.625 + board_w + 0.5)) < 1e-9
+      and abs(g['front_x'] - (g['spine_x'] + g['spine_w'] + 0.5)) < 1e-9, g)
+g = ingram('jacket')
+cover_w = 5.75 + 0.4375
+check('an IngramSpark jacket is .125 + 3.25 + .25 + cover + spine + cover + .25 + 3.25 + .125',
+      abs(g['wrap_w'] - (2 * (0.125 + 3.25 + 0.25 + cover_w) + g['spine_w'])) < 1e-9
+      and abs(g['front_x'] - (0.125 + 3.5 + cover_w + g['spine_w'])) < 1e-9, g)
+check('and .125 + board height + .125 down', abs(g['wrap_h'] - (8.75 + 0.25 + 0.25)) < 1e-9,
+      g['wrap_h'])
+kdp = engine.wrap_geometry(A._wrap_dims({'wrap_retailer': 'kdp', 'wrap_binding': 'hardcover',
+                                         'wrap_trim_w': 5.75, 'wrap_trim_h': 8.75}, 320))
+check('a KDP case keeps the shared defaults',
+      abs(kdp['wrap_w'] - kdp['spine_w'] - 13.75) < 1e-9 and kdp['panel_w'] == 5.75, kdp)
+
 os.remove(PDF)
 
 # ------------------------------------------------------------ the editor
