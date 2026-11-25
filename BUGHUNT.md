@@ -88,9 +88,9 @@ End with a short "Speculative" list for anything you couldn't confirm by reading
 
 | # | Section | Report | Confirmed | Fixed | Merged |
 |---|---|---|---|---|---|
-| 1 | Picture books & fixed-layout EPUB | 13 (+2 spec.) | 7 Highs (1.1 by design) | 7 Highs (with 3.4); 1.10, 1.11 on bughunt-mediums | Highs merged |
-| 2 | TTRPG layout | 14 (+1 spec.) | 9 Highs | 9 Highs (+1 found while fixing: a note in a long opening paragraph sits on its start page) | Highs merged |
-| 3 | Fillable sheets & Send to print | 13 (+1 spec.) | 5 Highs (KDP hardcover spec. unverified) | 5 Highs (3.4 with section 1); 3.6, 3.7, 3.11, 3.12, 3.13 on bughunt-mediums | Highs merged |
+| 1 | Picture books & fixed-layout EPUB | 13 (+2 spec.) | 7 Highs (1.1 by design) | 7 Highs (with 3.4); Mediums 1.8 (already fixed), 1.9, 1.10, 1.11, 1.12, 1.13 on bughunt-app | Highs merged |
+| 2 | TTRPG layout | 14 (+1 spec.) | 9 Highs | 9 Highs (+1 found while fixing: a note in a long opening paragraph sits on its start page); 2.10–2.14 and the speculative unsettled-pass warning on bughunt-app (`test_mediums_bughunt.py`, print changes OK'd) | Highs merged |
+| 3 | Fillable sheets & Send to print | 13 (+1 spec.) | 5 Highs (KDP hardcover spec. unverified) | 5 Highs (3.4 with section 1); 3.6–3.13 on bughunt-mediums / bughunt-app (3.8–3.10 in `test_fields.py`) | Highs merged |
 | 4 | Wrap designer & cover families | 14 (+1 spec.) | 9 Highs, all confirmed; 4.5, 4.6, 4.7, 4.9 change print (OK'd) | All 14 on bughunt-app (`test_wrap_bughunt.py`); RTL justify speculative, left open | – |
 | 5 | Manuscript parsing & reflowable EPUB | 14 (+1 spec.) | 7 Highs, all confirmed | 5.1–5.7 on bughunt-app (`test_manuscript_safety.py`); 5.6 OK'd (also escapes the title page, copyright and matter headings) | – |
 | 6 | WYSIWYG / doc model | 13 (+2 spec.) | 10 Highs confirmed; 6.6 not a bug (the typesetter also ends a note at a `##` line) | 6.1–6.5, 6.7–6.13 on bughunt-app (`test_bughunt6` in `test_doc_model.py`, 12 rich-editor scenarios) | – |
