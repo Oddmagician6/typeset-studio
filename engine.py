@@ -2511,9 +2511,9 @@ class _Kept(Flowable):
     def wrap(self, aW, aH):
         self._lay, y, prev = [], 0.0, 0.0
         for f in self._content:
-            _, h = f.wrapOn(self.canv, aW, 0xfffffff)
+            w, h = f.wrapOn(self.canv, aW, 0xfffffff)
             gap = max(f.getSpaceBefore(), prev) if self._lay else 0.0
-            self._lay.append((f, y + gap, h))
+            self._lay.append((f, y + gap, h, w))
             y += gap + h
             prev = f.getSpaceAfter()
         self.width, self.height = aW, y
@@ -2523,8 +2523,9 @@ class _Kept(Flowable):
         return []
 
     def draw(self):
-        for f, top, h in self._lay:
-            f.drawOn(self.canv, 0, self.height - top - h)
+        for f, top, h, w in self._lay:
+            # the unused width lets a narrow table keep its alignment
+            f.drawOn(self.canv, 0, self.height - top - h, _sW=self.width - w)
 
 
 class _HeadCell(_P):
@@ -2582,10 +2583,10 @@ class ColumnRun(Flowable):
         queue = list(queue)
         while queue:
             f = queue[0]
-            _, h = f.wrapOn(canv, cw, 0xfffffff)
+            w, h = f.wrapOn(canv, cw, 0xfffffff)
             gap = max(f.getSpaceBefore(), prev) if placed else 0.0
             if y + gap + h <= H + _COL_EPS:
-                placed.append((f, y + gap, h))
+                placed.append((f, y + gap, h, w))
                 y += gap + h
                 prev = f.getSpaceAfter()
                 queue.pop(0)
@@ -2597,9 +2598,9 @@ class ColumnRun(Flowable):
                 except Exception:
                     parts = []
                 if len(parts) >= 2:
-                    _, h0 = parts[0].wrapOn(canv, cw, 0xfffffff)
+                    w0, h0 = parts[0].wrapOn(canv, cw, 0xfffffff)
                     if h0 <= room + _COL_EPS:
-                        placed.append((parts[0], y + gap, h0))
+                        placed.append((parts[0], y + gap, h0, w0))
                         queue[0:1] = parts[1:]
             break
         if queue:
@@ -2689,8 +2690,9 @@ class ColumnRun(Flowable):
         cw = (aW - self._gap) / 2.0
         for i, (placed, _used) in enumerate(cols):
             x = i * (cw + self._gap)
-            for f, top, h in placed:
-                f.drawOn(self.canv, x, height - top - h)
+            for f, top, h, w in placed:
+                # the unused width lets a narrow table keep its alignment
+                f.drawOn(self.canv, x, height - top - h, _sW=cw - w)
         if self._rule:
             c = self.canv
             c.saveState()
@@ -6794,6 +6796,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
 
     has_index = _bookindex.wanted(
         _apply_index_markers(manuscript['chapters'], meta)[1], meta)
+    unsettled = False
 
     if foot_notes and not meta.get('include_toc'):
         try:
@@ -6855,6 +6858,9 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             if (_toc_folios(entries, body_start) == said and index == listed
                     and refs == printed):
                 break
+        else:
+            # out of passes: what this one printed may not be where things are
+            unsettled = (has_refs or has_index) and (index != listed or refs != printed)
         page_count = doc2.page
         unplaced_notes.extend(_notes_not_drawn(fn_flow, doc2._fn_drawn))
     else:
@@ -6887,6 +6893,8 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             listed, index = index, (_index_found(doc) if has_index else None)
             if refs == printed and index == listed:
                 break
+        else:
+            unsettled = (has_refs or has_index) and (index != listed or refs != printed)
         page_count = doc.page
         unplaced_notes.extend(_notes_not_drawn(fn_flow, doc._fn_drawn))
     if cover_path:
@@ -6897,6 +6905,8 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
     return {
         'page_count':     page_count,
         'notes_unplaced': len(set(unplaced_notes)),
+        # the page references or the index still moved on the last pass
+        'refs_unsettled': unsettled,
         'dead_links':     dead_links + dead_refs + sorted(_matter_dead),
         'font_family':    fonts['family'],
         'font_fallback':  fonts['fallback'],

@@ -1056,6 +1056,13 @@ def _preflight(build_result, preset, page_count, paper=None):
                        'of the book has no later page to continue on. Shorten it, or '
                        'set the style to put notes at the back')})
 
+    if build_result.get('refs_unsettled'):
+        checks.append({
+            'label': 'Page references', 'ok': False,
+            'detail': ('The page numbers in the text or the index were still moving when the '
+                       'build stopped re-setting the book, so one may be a page out. Rewording '
+                       'a line near a page break usually settles it — build again to check')})
+
     if page_count:
         trim = preset.get('trim') or {}
         lo, hi = kdp_page_range(paper, trim.get('w', 6.0), trim.get('h', 9.0))

@@ -433,8 +433,10 @@ def _walk_block_texts(blocks):
 def _statblock_paths(model):
     """Where the markup strings sit in a read stat block (notes may be in any)."""
     for i, _ in enumerate(model.get('fields', [])):
+        yield ('fields', i, 'label')
         yield ('fields', i, 'value')
     for i, sec in enumerate(model.get('sections', [])):
+        yield ('sections', i, 'name')
         for j, _ in enumerate(sec['entries']):
             yield ('sections', i, 'entries', j, 'name')
             yield ('sections', i, 'entries', j, 'text')
