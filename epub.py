@@ -361,10 +361,22 @@ def _style_css(preset=None):
     _weight = {'bold': 'font-weight: bold; font-style: normal;',
                'italic': 'font-weight: normal; font-style: italic;',
                'regular': 'font-weight: normal; font-style: normal;'}
+    try:
+        body_pt = float(((preset or {}).get('body') or {}).get('size') or 11.0)
+    except (TypeError, ValueError):
+        body_pt = 11.0
     for tag, key, dflt in (('h3', 'section', 'bold'), ('h4', 'subsection', 'italic')):
         align = 'center' if hd.get(key + '_align') == 'center' else 'left'
-        rules.append('%s { font-size: 1em; text-align: %s; %s margin: 1.2em 0 0.4em; }'
-                     % (tag, align, _weight.get(hd.get(key + '_style'), _weight[dflt])))
+        # a size set for print keeps its proportion to the body in the ebook
+        # (0, the default, is the body size)
+        try:
+            pt = float(hd.get(key + '_size') or 0)
+        except (TypeError, ValueError):
+            pt = 0.0
+        em = round(pt / body_pt, 3) if pt > 0 and body_pt > 0 else 1
+        rules.append('%s { font-size: %sem; text-align: %s; %s margin: 1.2em 0 0.4em; }'
+                     % (tag, f'{em:g}', align,
+                        _weight.get(hd.get(key + '_style'), _weight[dflt])))
     return '\n'.join(rules) + '\n' + """\
 body {
   font-family: Georgia, "Times New Roman", serif;

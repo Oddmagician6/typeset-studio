@@ -278,7 +278,7 @@ BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'preset
              'cover_template', 'cover_color', 'cover_collection', 'cover_kicker',
              'cover_accent', 'cover_epigraph', 'cover_studio', 'format', 'front_matter',
              'created', 'updated', 'last_pdf', 'last_epub', 'last_print_package',
-             'last_package_scope', 'last_screen_pdf')
+             'last_package_scope', 'last_screen_pdf', 'built')
 BOOK_FLAGS = ('include_toc', 'smartquotes', 'right_hand_starts', 'cover_overlay', 'press',
               'screen_pdf', 'index_statblocks', 'index_cr', 'link_pages', 'bleed',
               'picture_book')
@@ -400,8 +400,15 @@ def salvage_json(path):
         return data if isinstance(data, dict) else {}
     except ValueError:
         pass
+    try:
+        # a whole object with junk after it: everything before the junk is good
+        data, _end = json.JSONDecoder().raw_decode(text.lstrip())
+        if isinstance(data, dict):
+            return data
+    except ValueError:
+        pass
     lines = text.splitlines()
-    starts = [i for i, ln in enumerate(lines) if ln.startswith('  "')]
+    starts =[i for i, ln in enumerate(lines) if ln.startswith('  "')]
     for i in [len(lines)] + starts[::-1]:    # the longest run of whole settings first
         head = '\n'.join(lines[:i]).rstrip().rstrip(',')
         try:
@@ -1576,7 +1583,10 @@ def save_cover_template(cid, data):
 
 def unique_cover_id(base):
     cid, n = base, 2
-    existing = {i['id'] for i in list_cover_templates()} | _ids_in(COVER_DIR)
+    # a deleted bundled template's id stays reserved: a new one under it would
+    # take over the books still naming it, and Restore defaults would skip it
+    existing = ({i['id'] for i in list_cover_templates()} | _ids_in(COVER_DIR)
+                | _bundled_ids('covers'))
     while cid in existing:
         cid = f'{base}-{n}'
         n += 1
@@ -1664,7 +1674,9 @@ def unique_id(base):
     pid, n = base, 2
     # `new` is the editor's own address (/editor/new opens a blank style), so a
     # style called "New" saved there could never be opened again
-    existing = {i['id'] for i in list_presets()} | _ids_in(PRESET_DIR) | {'new'}
+    # a deleted bundled style's id stays reserved (as for covers)
+    existing = ({i['id'] for i in list_presets()} | _ids_in(PRESET_DIR) | {'new'}
+                | _bundled_ids('presets'))
     while pid in existing:
         pid = f'{base}-{n}'
         n += 1
@@ -1975,6 +1987,11 @@ def _fs(form, key, default):
     """A style's number field, held to STYLE_RANGES."""
     lo, hi = STYLE_RANGES[key]
     return min(max(_f(form, key, default), lo), hi)
+
+
+# top-level style keys the form writes only when set: absent from a save means
+# cleared, so an edit doesn't carry the old value forward
+_FORM_OPTIONAL_KEYS = frozenset({'min_text_size'})
 
 
 def parse_preset_form(form):
@@ -2633,6 +2650,16 @@ def editor(pid):
 @app.route('/save/<pid>', methods=['POST'])
 def save(pid=None):
     data = parse_preset_form(request.form)
+    if pid is not None:
+        # sections the editor has no fields for (a hand-set `poem`, say) are
+        # the style's own: a save that rebuilt it from the form dropped them
+        try:
+            old = load_preset(pid)
+        except Exception:
+            old = {}
+        for key, val in (old or {}).items():
+            if key not in data and key not in _FORM_OPTIONAL_KEYS:
+                data[key] = val
     opened = request.form.get('version', '')
     if pid is not None and opened and _style_version(pid) not in ('', opened):
         # saved since this tab opened it (another tab, another window): both
@@ -2697,11 +2724,13 @@ LARGE_PRINT_MIN_SIZE = 16.0
 LARGE_PRINT_TRIM = (7.0, 10.0)
 
 
-def _scale_sizes(section, factor, keys):
+def _scale_sizes(section, factor, keys, cap=72.0):
+    """Scale the sizes, held to the editor's own limit for them: a value past
+    it would be clamped - and the page changed - by the next unedited save."""
     for k in keys:
         v = section.get(k)
         if isinstance(v, (int, float)) and v > 0:
-            section[k] = round(v * factor, 1)
+            section[k] = min(round(v * factor, 1), max(cap, v))
 
 
 def make_large_print(preset):
@@ -2729,20 +2758,33 @@ def make_large_print(preset):
     lp['min_text_size'] = LARGE_PRINT_MIN_SIZE
 
     if lp.get('trim', {}).get('w', 6.0) < LARGE_PRINT_TRIM[0]:
-        lp['trim'] = {'w': LARGE_PRINT_TRIM[0], 'h': LARGE_PRINT_TRIM[1]}
+        # wider, never shorter: a tall page cut down could no longer hold its
+        # chapter sink
+        lp['trim'] = {'w': LARGE_PRINT_TRIM[0],
+                      'h': max(LARGE_PRINT_TRIM[1], lp.get('trim', {}).get('h', 0) or 0)}
     m = lp.setdefault('margins', {})
     m['top'] = max(m.get('top', 0.75), 0.85)
     m['bottom'] = max(m.get('bottom', 0.8), 0.9)
     m['inside'] = max(m.get('inside', 0.85), 1.0)
     m['outside'] = max(m.get('outside', 0.6), 0.7)
 
-    _scale_sizes(lp.get('chapter', {}), factor, ('number_size', 'title_size'))
-    _scale_sizes(lp.get('part_divider', {}), factor, ('number_size', 'title_size'))
-    _scale_sizes(lp.get('scene_break', {}), factor, ('size',))
+    # the wider margins take height too: the chapter sink must still leave
+    # the opener room on the page, or the build refuses it
+    ch = lp.get('chapter', {})
+    text_h = lp['trim'].get('h', 10.0) - m['top'] - m['bottom']
+    if isinstance(ch.get('sink'), (int, float)) and ch['sink'] > text_h - 1.5:
+        ch['sink'] = round(max(0.0, text_h - 1.5), 2)
+
+    _scale_sizes(lp.get('chapter', {}), factor, ('number_size', 'title_size'), 144.0)
+    _scale_sizes(lp.get('part_divider', {}), factor, ('number_size', 'title_size'), 144.0)
+    _scale_sizes(lp.get('scene_break', {}), factor, ('size',), 144.0)
     _scale_sizes(lp.get('running_head', {}), factor, ('size',))
     _scale_sizes(lp.get('folio', {}), factor, ('size',))
+    # explicit sizes everywhere else scale with the body, so they keep their
+    # proportion to it (the table and heading sizes were left behind)
+    _scale_sizes(lp.get('headings', {}), factor, ('section_size', 'subsection_size'))
     for key in ('document_block', 'poem', 'list', 'quote', 'figure', 'endnotes',
-                'readaloud', 'sidebar', 'statblock'):
+                'table', 'readaloud', 'sidebar', 'statblock'):
         _scale_sizes(lp.get(key, {}), factor,
                      ('font_size', 'header_size', 'title_size', 'caption_size',
                       'name_size', 'section_size'))
@@ -3795,6 +3837,18 @@ def page_designer_save(pid):
     else:
         designs.append(entry)
     proj['page_designs'] = designs
+    renames = {k: v for k, v in (proj.get('page_renames') or {}).items()
+               if isinstance(k, str) and isinstance(v, str)}
+    renames.pop(name, None)             # that name is a page again
+    if old is not None and name != was:
+        # remembered, so a History version from before the rename still finds
+        # the page when it is restored
+        renames = {k: (name if v == was else v) for k, v in renames.items()}
+        renames[was] = name
+    if renames:
+        proj['page_renames'] = renames
+    else:
+        proj.pop('page_renames', None)
     proj['updated'] = saved
     save_project_file(pid, proj)
     # renamed: the manuscript places it by its new name too (#75b-2), so the
@@ -4416,19 +4470,34 @@ def _named(path_or_name, fn):
     return os.path.basename(str(path_or_name or '')).lower() == fn.lower()
 
 
+def _with_damaged(items, kind):
+    """The readable records plus what can be salvaged of the damaged ones of
+    that kind: Repair keeps their settings, so a library file one of them names
+    is still in use."""
+    out = list(items)
+    for d in damaged_files(kind):
+        try:
+            data = salvage_json(os.path.join(_damage_dir(kind), d['id'] + '.json'))
+        except Exception:
+            data = {}
+        if isinstance(data, dict) and data:
+            out.append({'id': d['id'], 'data': data})
+    return out
+
+
 def _font_uses(fn):
     """Where a library font is named: styles, cover templates, books' wrap
-    designs and their designed interior pages and spreads."""
+    designs and their designed interior pages and spreads (damaged ones too)."""
     uses = []
-    for it in list_presets():
+    for it in _with_damaged(list_presets(), 'style'):
         files = it['data'].get('font_files')
         if isinstance(files, dict) and any(_named(v, fn) for v in files.values()):
             uses.append(f'the style “{it["data"].get("name") or it["id"]}”')
-    for it in list_cover_templates():
+    for it in _with_damaged(list_cover_templates(), 'cover'):
         fonts = it['data'].get('fonts')
         if isinstance(fonts, dict) and any(_named(v, fn) for v in fonts.values()):
             uses.append(f'the cover template “{it["data"].get("name") or it["id"]}”')
-    for it in list_projects():
+    for it in _with_damaged(list_projects(), 'book'):
         design = it['data'].get('wrap_design') or {}
         els = design.get('elements') if isinstance(design, dict) else None
         if isinstance(els, list) and any(isinstance(e, dict) and _named(e.get('font'), fn)
@@ -4445,26 +4514,41 @@ def _font_uses(fn):
     return uses
 
 
+def _places_figure(text, fn):
+    for line in (text or '').splitlines():
+        m = manuscript.DOCBLOCK_RE.match(line)
+        if m:
+            kind, attrs = manuscript._parse_block_header(m.group(1))
+            if kind == 'figure' and _named(attrs.get('src'), fn):
+                return True
+    return False
+
+
 def _figure_uses(fn):
-    """Where a figure is named: books' `~~~ figure` blocks, styles' chapter art."""
+    """Where a figure is named: books' `~~~ figure` blocks - the History
+    versions a restore would bring back too - and styles' chapter art
+    (damaged books and styles included: Repair keeps what they name)."""
     uses = []
-    for it in list_presets():
+    for it in _with_damaged(list_presets(), 'style'):
         if _named(engine.chapter_art_src(it['data']), fn):
             uses.append(f'the style “{it["data"].get("name") or it["id"]}” (chapter art)')
         if _named(engine.scene_image_src(it['data']), fn):
             uses.append(f'the style “{it["data"].get("name") or it["id"]}” (scene breaks)')
         if _named(engine.page_background_src(it['data']), fn):
             uses.append(f'the style “{it["data"].get("name") or it["id"]}” (page background)')
-    for it in list_projects():
-        text = _project_manuscript_text(it['data'], report_import=False)
-        for line in text.splitlines():
-            m = manuscript.DOCBLOCK_RE.match(line)
-            if m:
-                kind, attrs = manuscript._parse_block_header(m.group(1))
-                if kind == 'figure' and _named(attrs.get('src'), fn):
-                    name = it['data'].get('name') or it['data'].get('title') or it['id']
-                    uses.append(f'the book “{name}”')
-                    break
+    for it in _with_damaged(list_projects(), 'book'):
+        name = it['data'].get('name') or it['data'].get('title') or it['id']
+        try:
+            text = _project_manuscript_text(it['data'], report_import=False)
+        except Exception:
+            text = ''
+        if _places_figure(text, fn):
+            uses.append(f'the book “{name}”')
+            continue
+        for snap in list_snapshots(it['id']):
+            if _places_figure(read_snapshot(it['id'], snap['stamp']), fn):
+                uses.append(f'an older version of “{name}” kept in its History')
+                break
     return uses
 
 
@@ -5874,6 +5958,13 @@ def project_history_restore(pid, stamp):
         return jsonify({'ok': False, 'error': 'That version is no longer kept.'}), 404
     current = _project_manuscript_text(proj, report_import=False)
     snapshot_manuscript(pid, current, reason='restore', force=True)
+    # pages renamed since that version: place them by the name they have now
+    designs = _page_designs(proj)
+    for was, now in (proj.get('page_renames') or {}).items():
+        if (isinstance(was, str) and isinstance(now, str) and page_plan.readable(text)
+                and wrap_design.find_page(designs, now) is not None
+                and wrap_design.find_page(designs, was) is None):
+            text = page_plan.rename(text, was, now, key=wrap_design.page_name)
     new_file = secure_filename(pid) + '.md'
     _atomic_write_text(os.path.join(PROJECT_MS_DIR, new_file), text)
     proj['manuscript_file'] = new_file
@@ -6033,6 +6124,9 @@ def _build_project(pid, proj):
     done = {'last_pdf': res['out_name'], 'last_epub': res['epub_name'],
             'last_screen_pdf': res['screen_name'],
             'updated': datetime.now().isoformat(timespec='seconds')}
+    # when the downloads were made: `updated` moves with every later save or
+    # History restore, which then read as "Last built"
+    done['built'] = done['updated']
     if res.get('epub_failed'):
         del done['last_epub']           # the last one that worked stays downloadable
     if res['page_count']:
