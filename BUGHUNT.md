@@ -92,7 +92,7 @@ End with a short "Speculative" list for anything you couldn't confirm by reading
 | 2 | TTRPG layout | 14 (+1 spec.) | 9 Highs | 9 Highs (+1 found while fixing: a note in a long opening paragraph sits on its start page) | Highs merged |
 | 3 | Fillable sheets & Send to print | 13 (+1 spec.) | 5 Highs (KDP hardcover spec. unverified) | 5 Highs (3.4 with section 1); 3.6, 3.7, 3.11, 3.12, 3.13 on bughunt-mediums | Highs merged |
 | 4 | Wrap designer & cover families | 14 (+1 spec.) | 9 Highs claimed, untriaged | – | – |
-| 5 | Manuscript parsing & reflowable EPUB | 14 (+1 spec.) | 7 Highs claimed, untriaged | – | – |
+| 5 | Manuscript parsing & reflowable EPUB | 14 (+1 spec.) | 7 Highs, all confirmed | 5.1–5.5, 5.7 on bughunt-app (`test_manuscript_safety.py`); 5.6 changes print, awaiting OK | – |
 | 6 | WYSIWYG / doc model | 13 (+2 spec.) | 11 Highs claimed, untriaged | – | – |
-| 7 | `app.py` across all routes | 13 (+2 spec.) | 12 Highs claimed; 7.1 confirmed | – | – |
+| 7 | `app.py` across all routes | 13 (+2 spec.) | 12 Highs + 1 Medium, all confirmed (2 speculative left open) | All 13 on bughunt-app (`test_app_safety.py`) | – |
 | 8 | Upgrades & packaging | 13 (+1 spec.) | 3 Highs claimed, untriaged | – | – |

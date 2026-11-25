@@ -3590,7 +3590,7 @@ def _render_telegram_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
         rows.append([Paragraph(f'To: {_ep_esc(to_val.upper())}', meta_s)])
         n_hdr = 2
     for _, text in block_paras:
-        rows.append([Paragraph(_ep_plain(text).upper(), body_s)])
+        rows.append([Paragraph(_ep_esc(_ep_plain(text).upper()), body_s)])
 
     t = Table(rows, colWidths=[col_w])
     t.setStyle(TableStyle([

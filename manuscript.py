@@ -236,6 +236,38 @@ def _smarten(text):
 _EMPH_TAG_RE = re.compile(r'</?[bi]>')
 
 
+# Control characters a text file can carry but no book can print: XML 1.0
+# forbids them, so one in a chapter made its EPUB page unreadable, and the
+# inline pass below uses some of them as its own markers. A form feed (a text
+# export's page break) or vertical tab is read as a line break; the rest are
+# dropped. Tabs and newlines stay.
+_CONTROL_RE = re.compile('[\x00-\x08\x0e-\x1f\x7f]')
+
+_LINK_MARK_RE = re.compile(r'\x00\d+\x00|\x01')
+
+
+def _whole_links(span):
+    """True if every link a span touches starts and ends inside it."""
+    depth = 0
+    for m in _LINK_MARK_RE.finditer(span):
+        depth += -1 if m.group(0) == '\x01' else 1
+        if depth < 0:
+            return False
+    return depth == 0
+
+
+def _emph_span(tag):
+    """A replacement wrapping a match's span in `tag` - unless the span starts
+    or ends partway through a link, as `*[Guide*](url)` would: wrapped, it came
+    out `<i><a>Guide</i></a>`, crossed tags no XHTML reader accepts. Left
+    alone, the asterisks print as typed."""
+    def repl(m):
+        if not _whole_links(m.group(1)):
+            return m.group(0)
+        return f'<{tag}>{m.group(1)}</{tag}>'
+    return repl
+
+
 def _sub_between_tags(pattern, repl, text):
     """Apply an emphasis substitution to the stretches between <b>/<i> tags."""
     out, pos = [], 0
@@ -311,15 +343,15 @@ def _inline(text, smartquotes=True):
     # XHTML invalid. Matching the triple marker up front keeps the tags nested.
     text = re.sub(r'\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*', r'<b><i>\1</i></b>', text)
     text = re.sub(r'___(?!\s)(.+?)(?<!\s)___', r'<b><i>\1</i></b>', text)
-    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'\*\*(.+?)\*\*', _emph_span('b'), text)
     # The italic passes run on text that already carries <b>…</b>, and an
     # unpaired asterisk earlier in the line would otherwise pair with one inside
     # a bold span — `a*b **a *b* c**` giving `a<i>b <b>a *b</i> c</b>`. Emphasis
     # is applied between the emphasis tags, never across them, so a span cannot
     # straddle a boundary. Note and link markers are left inside the segments, so
     # italics containing a note still work.
-    text = _sub_between_tags(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<i>\1</i>', text)
-    text = _sub_between_tags(r'_(?!\s)(.+?)(?<!\s)_', r'<i>\1</i>', text)
+    text = _sub_between_tags(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', _emph_span('i'), text)
+    text = _sub_between_tags(r'_(?!\s)(.+?)(?<!\s)_', _emph_span('i'), text)
 
     if targets:
         # the link text keeps whatever emphasis it was given
@@ -573,7 +605,8 @@ def parse_markdown(raw, smartquotes=True):
     'part' on each chapter is {'title': str|None, 'number': int} or None.
     'tagline' (raw, like the byline) is present only on a chapter that has one.
     """
-    lines = raw.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    lines = _CONTROL_RE.sub('', raw.replace('\r\n', '\n').replace('\r', '\n')
+                            .replace('\f', '\n').replace('\v', '\n')).split('\n')
     chapters  = []
     cur       = None
     para_buf  = []
@@ -712,11 +745,15 @@ def parse_markdown(raw, smartquotes=True):
                 note_label, note_buf = m_ndef.group(1), [m_ndef.group(2)]
                 continue
             if note_label is not None:
-                if line.strip():                # a wrapped continuation line
+                # a wrapped continuation line - but a heading, fence or part
+                # marker ends the note and is read as itself: written straight
+                # after a note, `# Inland` used to vanish into it with its text
+                if line.strip() and not _is_block_line(line):
                     note_buf.append(line)
-                else:
-                    flush_note()
-                continue
+                    continue
+                flush_note()
+                if not line.strip():
+                    continue
 
         # === Part marker (only outside doc blocks)
         if not in_block:
@@ -974,18 +1011,28 @@ def _emph(runs, plain=False):
         # bold *and* italic is one span: emitting `**t**` here dropped the
         # italic on the way in, before anything downstream could keep it
         mark = '***' if bold and italic else '**' if bold else '*' if italic else ''
-        core = t.strip()
-        if not mark or not core:
+        if not mark:
             out.append(t)
             continue
-        # A run usually ends in the space before the next word ("Keen
-        # Smell. " then "The wolf…"). Inside the markers that space
-        # makes `***Keen Smell. ***`, which doesn't close, and printed
-        # two asterisks per trait in a 5e bestiary. Keep it outside.
-        lead = t[:len(t) - len(t.lstrip())]
-        trail = t[len(t.rstrip()):]
-        out.append(f'{lead}{mark}{core}{mark}{trail}')
+        # Each line marked on its own: a span across a manual line break
+        # (Shift+Enter, a `\n` in the run) is read line by line in verse, and
+        # `**Dawn` / `Dusk**` left both lines plain with the asterisks printed.
+        out.append('\n'.join(_marked(piece, mark) for piece in t.split('\n')))
     return ''.join(out)
+
+
+def _marked(t, mark):
+    """`t` inside emphasis markers, its surrounding spaces kept outside them."""
+    core = t.strip()
+    if not core:
+        return t
+    # A run usually ends in the space before the next word ("Keen
+    # Smell. " then "The wolf…"). Inside the markers that space
+    # makes `***Keen Smell. ***`, which doesn't close, and printed
+    # two asterisks per trait in a 5e bestiary. Keep it outside.
+    lead = t[:len(t) - len(t.lstrip())]
+    trail = t[len(t.rstrip()):]
+    return f'{lead}{mark}{core}{mark}{trail}'
 
 
 def _one_line(text):
@@ -1205,9 +1252,13 @@ def _table_md(tbl, report):
     """
     rows = []
     for row in tbl.rows:
-        cells = [_escape_literal(_cell_text(c)).replace('|', '/') for c in row.cells]
-        # a merged row repeats the same cell object; collapse the repeats
-        dedup = [c for i, c in enumerate(cells) if i == 0 or c != cells[i - 1]]
+        # a merged row repeats the same cell; collapse the repeats - by the
+        # cell itself, not its text: two neighbours both reading "8" are two
+        # columns, and dropping one moved the next value into its place
+        objs = list(row.cells)
+        dedup = [_escape_literal(_cell_text(c)).replace('|', '/')
+                 for i, c in enumerate(objs)
+                 if i == 0 or getattr(c, '_tc', c) is not getattr(objs[i - 1], '_tc', None)]
         if any(dedup):
             rows.append(' | '.join(dedup))
     if not rows:

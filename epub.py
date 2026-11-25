@@ -255,6 +255,11 @@ def _resolve_anchors(text):
 
 
 # ---------------------------------------------------------------- markup
+def _plain_markup(markup):
+    """Markup's text alone: tags dropped, entities read back."""
+    return html.unescape(re.sub(r'<[^>]+>', '', markup))
+
+
 def _markup_to_html(text):
     """Convert ReportLab XML tags to HTML equivalents.
 
@@ -1063,7 +1068,11 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
                                     .replace('<', '&lt;').replace('>', '&gt;'))
                     lines.append(f'    <header class="poem-title">{ptitle}</header>')
             for bi, (_, btext) in enumerate(val):
-                body_text = btext.upper() if btype == 'telegram' else _markup_to_html(btext)
+                # a telegram is its plain text upper-cased, as the PDF prints it:
+                # upper-casing the markup made `&amp;` the undefined `&AMP;`
+                # (and changed link targets), so the whole chapter failed to load
+                body_text = (html.escape(_plain_markup(btext).upper(), quote=False)
+                             if btype == 'telegram' else _markup_to_html(btext))
                 cls_p = ' class="no-indent"' if bi == 0 else ''
                 lines.append(f'    <p{cls_p}>{body_text}</p>')
             lines.append('  </div>')

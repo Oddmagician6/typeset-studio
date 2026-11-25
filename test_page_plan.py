@@ -98,9 +98,14 @@ def test_model():
         it['text'] in moved for it in items if it['kind'] == 'text'))
     check('reordered: the book reads the new order',
           engine.page_blocks(manuscript.parse_markdown(moved)) == ['sp', 'a', 'b'])
-    # a page fence the parser doesn't see as one (swallowed by a note's text)
+    # a page fence straight after a note: once swallowed by the note's text
+    # (bug hunt 5.1), now a page to the book and the plan alike
     odd = '[^1]: A note\n' + fence('a') + '\n'
-    check('a manuscript the plan reads differently is not readable', not P.readable(odd))
+    check('a page fence after a note is a page to both', P.readable(odd)
+          and engine.page_blocks(manuscript.parse_markdown(odd)) == ['a'])
+    # and a plan that reads the pages differently from the book is refused
+    check('a manuscript the plan reads differently is not readable',
+          not P.readable(odd, [{'kind': 'page', 'src': 'b', 'text': ''}]))
     r = P.rename('x\n' + fence('Old-Name', 'left') + '\n\n~~~ figure src="old-name"\n~~~\n',
                  'old-name', 'new-name', key=W.page_name)
     check('rename: only the page fence changes', 'src="new-name" side="left"' in r
