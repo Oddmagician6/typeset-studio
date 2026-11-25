@@ -371,6 +371,10 @@ def main():
             f = base.copy()
             for k, v in files.items():
                 f[k] = v
+            if 'cover' in files:
+                # a cover is uploaded with Uploaded image chosen: a file left in
+                # the hidden box under another mode is ignored (round 2, 12.3)
+                f['cover_mode'] = 'image'
             return c.post('/project/up/edit', data=f, content_type='multipart/form-data',
                           follow_redirects=True)
 

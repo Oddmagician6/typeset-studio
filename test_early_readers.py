@@ -196,6 +196,8 @@ def editor_tests():
     after = A.load_preset('early-reader')
     check('saved unchanged, the body is as it was', after['body'] == before['body'],
           (before['body'], after['body']))
+    # a save leaves the editor; a second save starts from a fresh page
+    form['version'] = A._style_version('early-reader')
     form['b_para_space'] = '0'
     form.pop('b_keep_whole', None)
     C.post('/save/early-reader', data=form)

@@ -79,9 +79,9 @@
   @media (max-width:900px){.work{grid-template-columns:1fr}.preview{position:static}}
 {% endblock %}
 
-{% macro nf(label, name, value, hint='') %}
+{% macro nf(label, name, value, hint='', min=None) %}
   <div class="field"><label>{{ label }}</label>{% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
-    <input class="num" type="number" step="any" name="{{ name }}" value="{{ value }}"></div>
+    <input class="num" type="number" step="any"{% if min is not none %} min="{{ min }}"{% endif %} name="{{ name }}" value="{{ value }}"></div>
 {%- endmacro %}
 
 {% macro ck(label, name, value) %}
@@ -495,9 +495,9 @@
               <span class="hint" id="wrap-from-note"></span></div>
           </div>
           <div class="row">
-            {{ nf('Trim width', 'wrap_trim_w', 6, 'inches') }}
-            {{ nf('Trim height', 'wrap_trim_h', 9, 'inches') }}
-            {{ nf('Bleed', 'wrap_bleed', 0.125, 'inches per side') }}
+            {{ nf('Trim width', 'wrap_trim_w', 6, 'inches', min=1) }}
+            {{ nf('Trim height', 'wrap_trim_h', 9, 'inches', min=1) }}
+            {{ nf('Bleed', 'wrap_bleed', 0.125, 'inches per side', min=0) }}
           </div>
           <div class="row">
             {{ nf('Page count', 'wrap_pages', 200, 'from the interior build') }}

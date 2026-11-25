@@ -537,9 +537,11 @@ def gate5():
     check('a heading over a column-tall figure stands alone rather than fail', ok is True, ok)
     # unsplittable things taller than a column
     tall = picture('very-tall.png', 300, 3000)
+    # (the table has no header row: a header repeats on every page or column
+    # the table goes on to, and one and two columns break it differently)
     cases = {
         'a very tall figure': f'# One\n\n{para(2)}\n\n~~~ figure src="{tall}" width="1.0"\nCaption.\n~~~\n\n{para(2, "z")}\n',
-        'a table with one enormous cell': '# One\n\n' + para(1) + '\n\n~~~ table\nA | B\n1 | ' + para(30, 'cell').replace('\n', ' ') + '\n~~~\n\n' + para(1, 'z') + '\n',
+        'a table with one enormous cell': '# One\n\n' + para(1) + '\n\n~~~ table header="no"\nA | B\n1 | ' + para(30, 'cell').replace('\n', ' ') + '\n~~~\n\n' + para(1, 'z') + '\n',
         'a boxed letter longer than a page': '# One\n\n' + para(1) + '\n\n~~~ readaloud\n' + para(40, 'box') + '\n~~~\n\n' + para(1, 'z') + '\n',
         'a 300-line poem': '# One\n\n~~~ poem\n' + '\n'.join(f'Line {i} of the long song' for i in range(300)) + '\n~~~\n\n' + para(1, 'z') + '\n',
     }
