@@ -44,6 +44,7 @@ import checker
 import matter
 import ornaments
 import page_plan
+import statblock
 import wrap_convert
 import wrap_design
 
@@ -4760,7 +4761,10 @@ def _manuscript_upload(up, folder):
         return path, text
     rep, why = {}, ''
     try:
-        text = manuscript.import_docx(path, report=rep)
+        # pictures named for the file as uploaded, not this temporary copy: a
+        # second preview of the same file reuses them instead of adding more
+        text = manuscript.import_docx(path, report=rep, stem=os.path.splitext(
+            _safe_upload_name(up.filename, 'manuscript'))[0])
         if not _wordcount(text):           # an empty heading imports as a bare "#"
             why = f'“{up.filename}” has no text in it.'
     except ModuleNotFoundError:
@@ -4837,7 +4841,9 @@ def generate():
     if raw is not None:
         pass
     elif form.get('pasted', '').strip():
-        raw = _norm_newlines(form['pasted'])
+        # a paste, as in the manuscript editor: Homebrewery stat blocks pasted
+        # with no fence get one
+        raw = statblock.wrap_unfenced(_norm_newlines(form['pasted']))
         stamp_p = datetime.now().strftime('%Y%m%d-%H%M%S')
         ms_path = os.path.join(UPLOAD_DIR, _claim_out(f'pasted-{stamp_p}.txt', UPLOAD_DIR))
         with open(ms_path, 'w', encoding='utf-8', newline='') as pf:
@@ -5030,7 +5036,7 @@ def _book_from_compose_form(tmp_files):
         tmp_ms, raw = _manuscript_upload(up, tempfile.gettempdir())
         tmp_files.append(tmp_ms)
     elif form.get('pasted', '').strip():
-        raw = _norm_newlines(form['pasted'])
+        raw = statblock.wrap_unfenced(_norm_newlines(form['pasted']))
     elif form.get('use_sample'):
         raw = open(SAMPLE, encoding='utf-8').read()
 
@@ -5263,7 +5269,7 @@ def project_create():
         ms_type = 'file'
     ms_file = ''
     if ms_type != 'sample' and ms_src and _in_folder(ms_src, UPLOAD_DIR):
-        ext = os.path.splitext(ms_src)[1]
+        ext = os.path.splitext(ms_src)[1].lower()
         ms_file = proj_id + ext
         shutil.copy2(ms_src, os.path.join(PROJECT_MS_DIR, ms_file))
 
@@ -5399,7 +5405,9 @@ def _replace_file(pid, data, name, old, stale):
     the new one (dropped first, a failed save left the book naming a file that
     was gone)."""
     _atomic_write_bytes(os.path.join(PROJECT_MS_DIR, name), data)
-    if old and old != name:
+    # `B.DOCX` and `b.docx` are one file on Windows: dropping the old spelling
+    # deleted the upload that had just replaced it
+    if old and os.path.normcase(old) != os.path.normcase(name):
         stale.append(old)
 
 
@@ -5445,7 +5453,8 @@ def project_edit(pid):
                 with os.fdopen(fd, 'wb') as f:
                     f.write(data)
                 try:
-                    if not manuscript.import_docx(tmp).strip():
+                    # named as the book's own import will name them
+                    if not manuscript.import_docx(tmp, stem=pid).strip():
                         why = 'has no text in it'
                 except Exception:
                     why = "couldn't be read as a Word document"
