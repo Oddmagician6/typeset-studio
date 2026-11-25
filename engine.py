@@ -5579,6 +5579,8 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body', unlink=Non
     blocks = [' '.join(l.strip() for l in b.split('\n') if l.strip()).strip()
               for b in text.replace('\r\n', '\n').split('\n\n')]
     blocks = [b for b in blocks if b]
+    # the heading is plain text and may carry the author's name ("Also by …")
+    heading = _esc_markup(heading or '')
 
     def _md(s):
         markup = _ms_inline(s, smartquotes)
@@ -5717,11 +5719,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         small = ParagraphStyle('sm', fontName=fonts['regular'], fontSize=8.5, leading=12.5)
 
         def title_page():
-            s = [Spacer(1, 1.8 * inch), Paragraph(meta.get('title', ''), big),
+            s = [Spacer(1, 1.8 * inch), Paragraph(_esc_markup(meta.get('title', '')), big),
                  Spacer(1, 0.3 * inch)]
             if meta.get('subtitle'):
-                s += [Paragraph(meta['subtitle'], auth), Spacer(1, 0.2 * inch)]
-            s += [Spacer(1, 0.2 * inch), Paragraph(meta.get('author', ''), auth), PageBreak()]
+                s += [Paragraph(_esc_markup(meta['subtitle']), auth), Spacer(1, 0.2 * inch)]
+            s += [Spacer(1, 0.2 * inch), Paragraph(_esc_markup(meta.get('author', '')), auth), PageBreak()]
             return s
 
         def copyright_page():
@@ -5732,7 +5734,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             text_h = (preset['trim']['h'] - preset['margins']['top']
                       - preset['margins']['bottom']) * inch
             top_gap = max(text_h - 2.4 * inch, 0.5 * inch)
-            para = Paragraph(cp.replace('\n', '<br/>'), small)
+            # plain text, like the EPUB's: an author `Lovelace & <B>` stopped the build
+            para = Paragraph(_esc_markup(cp).replace('\n', '<br/>'), small)
             # a block taller than that room (large print sets it at 16pt) is
             # raised just enough to stay on its page; one that fits doesn't move
             text_w = (preset['trim']['w'] - preset['margins']['inside']
@@ -5743,7 +5746,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             return [BlankMarker(), Spacer(1, top_gap), para, PageBreak()]
 
         if level == 'full':
-            story += [Spacer(1, 2.2 * inch), Paragraph(meta.get('title', ''), half), PageBreak()]
+            story += [Spacer(1, 2.2 * inch), Paragraph(_esc_markup(meta.get('title', '')), half), PageBreak()]
             if rhs:                                    # blank verso so title lands recto
                 story += [BlankMarker(), PageBreak()]
             story += title_page()
@@ -5814,7 +5817,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 story.append(Paragraph(label, st['part_num']))
                 story.append(Spacer(1, 0.15 * inch))
             if ch_part.get('title'):
-                story.append(Paragraph(ch_part['title'], st['part_title']))
+                # titles are plain text: `The <Tide>` prints as written
+                story.append(Paragraph(_esc_markup(ch_part['title']), st['part_title']))
             story.append(OutlineMarker(
                 ch_part.get('title') or pd.get('number_format', 'Part {n}').format(n=ch_part_num)))
             current_part_num = ch_part_num
@@ -5863,7 +5867,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             anchors = ''
             story.append(Spacer(1, 0.12 * inch))
         if ch['title']:
-            story.append(Paragraph(anchors + ch['title'], st['chap_title']))
+            story.append(Paragraph(anchors + _esc_markup(ch['title']), st['chap_title']))
             anchors = ''
         if anchors:                       # no number and no title: park them here
             story.append(Paragraph(anchors, st['chap_num']))
@@ -6038,8 +6042,8 @@ def _build_toc(entries, body_start, avail_w, preset, fonts, st):
         # Part heading (no page number)
         part = e.get('part')
         if part and part != last_part:
-            out.append(Paragraph(part.get('title') or
-                                 f"Part {part['number']}", toc_pt))
+            out.append(Paragraph(_esc_markup(part.get('title') or
+                                             f"Part {part['number']}"), toc_pt))
             last_part = part
 
         # Chapter line with dot leaders
@@ -6050,7 +6054,7 @@ def _build_toc(entries, body_start, avail_w, preset, fonts, st):
         indent   = 0.18 * inch if part else 0
         n_dots   = max(3, int((avail_w - indent - lw - fw)
                               / stringWidth(dot_char, font, size)))
-        line     = f'{label}  {dot_char * n_dots}  {folio_s}'
+        line     = f'{_esc_markup(label)}  {dot_char * n_dots}  {folio_s}'
         s = ParagraphStyle('toc_line', parent=toc_ch, leftIndent=indent)
         out.append(Paragraph(line, s))
 

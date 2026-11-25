@@ -700,6 +700,11 @@ def parse_markdown(raw, smartquotes=True):
                 smartquotes)
             block_buf[:] = _statblock_children(model)
             block_attrs = dict(block_attrs, _statblock=model)
+        if block_type == 'page' and not str(block_attrs.get('src') or '').strip():
+            # A page fence that names no design is a plain block, as `~~~ page`
+            # was before designed pages (1.8): its words are the book's text,
+            # and reading them as alt text printed a placeholder instead.
+            block_type, block_attrs = '', {}
         if block_type == 'page':
             # a designed page's own words are only its alt text: never
             # printed, so an anchor, index entry or note in them would point

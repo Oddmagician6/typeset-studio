@@ -3,6 +3,7 @@
 Joint bug hunt, section 8. Each check is one way an upgrade, the installed
 app or its update check went wrong, that the hunt found:
 
+    8.1   a `~~~ page` fence with no src= prints its words, as before 1.8
     8.2   (in test_fixed_layout.py) a picture book with no page designs flows
     8.3   with no WebView2, the app opens in the browser, not in IE's engine
     8.4   Setup refuses a build older than the VERSION file
@@ -49,6 +50,31 @@ def ours(v):
 
 
 try:
+    # ------------------------------------------------------------ 8.1
+    print('a page fence from before designed pages (8.1)')
+    import manuscript, engine, fitz
+    src = '# One\n\nBefore.\n\n~~~ page\nThe prose inside the fence.\n~~~\n\nAfter.\n'
+    blocks = manuscript.parse_markdown(src)['chapters'][0]['blocks']
+    check('is read as a plain block of the book\'s text',
+          ('doc_block', [('para', 'The prose inside the fence.')]) in blocks, blocks)
+    designed = manuscript.parse_markdown('# One\n\n~~~ page src="map"\nA map.\n~~~\n')
+    check('while a fence naming a design is still a designed page',
+          designed['chapters'][0]['blocks'][0][2].get('_type') == 'page')
+    tmp = tempfile.mkdtemp()
+    try:
+        preset = json.load(open(os.path.join(HERE, 'presets', 'classic-literary.json'),
+                                encoding='utf-8'))
+        out = os.path.join(tmp, 'legacy.pdf')
+        engine.build_pdf(manuscript.parse_markdown(src), preset, out,
+                         {'title': 'T', 'author': 'A', 'front_matter': 'none',
+                          'include_toc': False})
+        doc = fitz.open(out)
+        text = ' '.join(' '.join(pg.get_text().split()) for pg in doc)
+        doc.close()
+        check('and its words print', 'The prose inside the fence.' in text, text[:200])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
     # ------------------------------------------------------------ 8.3
     print('the desktop window (8.3)')
     fake = types.ModuleType('webview.platforms.winforms')

@@ -7,6 +7,7 @@ Joint bug hunt, section 5:
     5.3  emphasis that straddles a link's edge never crosses its tags
     5.4  control characters from a text file never reach the XHTML
     5.5  two neighbouring Word table cells that read the same are both kept
+    5.6  a title with <brackets> or & prints as written in the PDF
     5.7  Word verse in one bold run across Shift+Enter stays bold on each line
 """
 
@@ -124,6 +125,20 @@ def main():
         d.save(f)
         md = M.import_docx(f)
         check('is bold on each line', '**Dawn**\n**Dusk**' in md, repr(md))
+
+        print('5.6  titles print as written')
+        import engine, fitz
+        out = os.path.join(tmp, 'titles.pdf')
+        meta = dict(META, title='Salt <&> Ash', subtitle='A <Sub>', author='Lovelace & <B>',
+                    front_matter='full', include_toc=True, also_by='The Salt Road')
+        engine.build_pdf(M.parse_markdown('=== Part <One>\n\n# The <Tide>\n\nWords.\n\n'
+                                          '# Rock & Roll\n\nMore.\n'), PRESET, out, meta)
+        doc = fitz.open(out)
+        text = ' '.join(pg.get_text() for pg in doc)
+        doc.close()
+        for want in ('The <Tide>', 'Rock & Roll', 'Part <One>', 'Salt <&> Ash',
+                     'A <Sub>', 'Lovelace & <B>', 'Also by Lovelace & <B>'):
+            check(f'reads {want}', want in text)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         print()
