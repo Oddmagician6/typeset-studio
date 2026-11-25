@@ -95,4 +95,4 @@ End with a short "Speculative" list for anything you couldn't confirm by reading
 | 5 | Manuscript parsing & reflowable EPUB | 14 (+1 spec.) | 7 Highs, all confirmed | 5.1–5.5, 5.7 on bughunt-app (`test_manuscript_safety.py`); 5.6 changes print, awaiting OK | – |
 | 6 | WYSIWYG / doc model | 13 (+2 spec.) | 10 Highs confirmed; 6.6 not a bug (the typesetter also ends a note at a `##` line) | 6.1–6.5, 6.7–6.13 on bughunt-app (`test_bughunt6` in `test_doc_model.py`, 12 rich-editor scenarios) | – |
 | 7 | `app.py` across all routes | 13 (+2 spec.) | 12 Highs + 1 Medium, all confirmed (2 speculative left open) | All 13 on bughunt-app (`test_app_safety.py`) | – |
-| 8 | Upgrades & packaging | 13 (+1 spec.) | 3 Highs claimed, untriaged | – | – |
+| 8 | Upgrades & packaging | 13 (+1 spec.) | 3 Highs, all confirmed; 8.1 changes print (awaiting OK) | 8.2–8.12 on bughunt-app (`test_upgrades_bughunt.py`, 8.2 in `test_fixed_layout.py`); 8.1 waiting; 8.13 (fixture gaps) and feed pagination left open | – |

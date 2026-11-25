@@ -287,7 +287,7 @@
         <div class="field"><label>Ebook layout</label>
             <select name="ebook_layout">
               {{ keep(proj.get('ebook_layout'), ['', 'fixed', 'flow'], proj.get('ebook_layout') ~ ' (not known to this version)') }}
-              <option value=""      {{ 'selected' if not proj.get('ebook_layout') }}>Automatic — page by page for a picture book</option>
+              <option value=""      {{ 'selected' if not proj.get('ebook_layout') }}>Automatic — page by page for a picture book made of page designs</option>
               <option value="fixed" {{ 'selected' if proj.get('ebook_layout')=='fixed' }}>Page by page (fixed layout)</option>
               <option value="flow"  {{ 'selected' if proj.get('ebook_layout')=='flow' }}>Flowing text</option>
             </select>

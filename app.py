@@ -500,7 +500,8 @@ def _fetch_json(url, timeout=6):
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         if getattr(resp, 'status', 200) != 200:
             return None
-        return json.loads(resp.read(200_000).decode('utf-8', 'replace'))
+        # a whole release list, notes and all: 200 KB cut a valid feed short
+        return json.loads(resp.read(5_000_000).decode('utf-8', 'replace'))
 
 
 def _pick_release(data):
@@ -515,13 +516,20 @@ def _pick_release(data):
     releases page rather than handed to the UI.
     """
     entries = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
+    # A feed that names this app's releases by prefix is a shared one: there a
+    # bare `v9.0.0` belongs to some other product. Only a feed with no prefixed
+    # tag at all (a repo of this app alone) is read by bare tags.
+    def _tag(item):
+        return str(item.get('tag_name') or item.get('version') or '').strip()
+    prefixed = any(isinstance(i, dict) and re.match(r'typeset[-_ ]?studio', _tag(i), re.I)
+                   for i in entries)
     best = None
     for item in entries:
         if not isinstance(item, dict) or item.get('draft') or item.get('prerelease'):
             continue
-        tag = str(item.get('tag_name') or item.get('version') or '').strip()
+        tag = _tag(item)
         m = UPDATE_TAG_RE.match(tag)
-        if not m:
+        if not m or (prefixed and not re.match(r'typeset', tag, re.I)):
             continue
         version = m.group(1)
         url = str(item.get('html_url') or item.get('url') or UPDATE_PAGE)
@@ -553,16 +561,25 @@ def check_for_update(force=False, fetch=None):
     found = _pick_release(data)
     with _SETTINGS_LOCK:
         settings = load_settings()
+        if not force and not settings.get('update_check', UPDATE_CHECK_DEFAULT):
+            # turned off while the request was out: off forgets, so this
+            # answer must not be written back after the toggle cleared it
+            return None
         if not found:
             # remembered, or every page asked again (and waited) while offline
             settings['update_failed_at'] = time.time()
+        else:
+            settings.update({'update_checked_at': time.time(), 'update_latest': found[0],
+                             'update_url': found[1]})
+            settings.pop('update_failed_at', None)
+        try:
             save_settings(settings)
-            return None
-        latest, url = found
-        settings.update({'update_checked_at': time.time(), 'update_latest': latest,
-                         'update_url': url})
-        settings.pop('update_failed_at', None)
-        save_settings(settings)
+        except OSError:
+            # a full or locked settings folder: the answer still stands
+            logging.warning('Could not save the update check result', exc_info=True)
+    if not found:
+        return None
+    latest, url = found
     return {'version': latest, 'url': url, 'newer': is_newer(latest)}
 
 
@@ -573,7 +590,11 @@ def _update_due():
         failed = float(settings.get('update_failed_at') or 0)
     except (TypeError, ValueError):
         checked = failed = 0
-    return now - checked >= UPDATE_INTERVAL and now - failed >= UPDATE_RETRY
+    if failed > checked:
+        # the last attempt failed: retry an hour after it, whenever the last
+        # success was (a failed Check now must not wait out the day)
+        return now - failed >= UPDATE_RETRY
+    return now - checked >= UPDATE_INTERVAL
 
 
 def cached_update():
@@ -673,10 +694,16 @@ def _seed_defaults():
         for fn in os.listdir(src):
             s, d = os.path.join(src, fn), os.path.join(dst, fn)
             if os.path.isfile(s) and not os.path.exists(d) and fn not in skip:
+                # copied under a temporary name and renamed into place, so a
+                # start interrupted mid-copy leaves no half a font or style
+                # that every later start would take as already there
+                tmp = d + '.seeding'
                 try:
-                    shutil.copy2(s, d)
+                    shutil.copy2(s, tmp)
+                    os.replace(tmp, d)
                 except OSError:
-                    pass
+                    with contextlib.suppress(OSError):
+                        os.remove(tmp)
 
 
 _seed_defaults()
@@ -1052,7 +1079,10 @@ def _epubcheck_jar():
     env = os.environ.get('EPUBCHECK_JAR', '').strip()
     if env and os.path.exists(env):
         return env
-    for base in (DATA_DIR, HERE):
+    # beside the program is where the README says to put it; in an installed
+    # build that is the .exe's folder, not the bundle's _internal one
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if IS_FROZEN else HERE
+    for base in (DATA_DIR, exe_dir, HERE):
         p = os.path.join(base, 'epubcheck.jar')
         if os.path.exists(p):
             return p
@@ -6034,7 +6064,10 @@ def _project_meta(proj):
 
 # How a book's ebook is laid out (#75c): 'fixed' is page by page (a picture
 # book's), 'flow' the reflowable text every other book has. A book that never
-# chose ('' or no key) follows its picture-book flag.
+# chose ('' or no key) is page by page when it is a picture book made of page
+# designs. The flag alone isn't enough: in 1.13 it was only a print check, so a
+# picture book written as text and figures, with no designs, would otherwise
+# get an ebook holding nothing but its cover.
 EBOOK_LAYOUTS = ('', 'fixed', 'flow')
 
 
@@ -6042,7 +6075,7 @@ def ebook_layout(proj):
     chosen = proj.get('ebook_layout', '')
     if chosen in ('fixed', 'flow'):
         return chosen
-    return 'fixed' if proj.get('picture_book') else 'flow'
+    return 'fixed' if proj.get('picture_book') and _page_designs(proj) else 'flow'
 
 
 # ------------------------------------------------------------ send to print
@@ -6670,6 +6703,15 @@ def _want_window():
         return False
     try:
         import webview  # noqa: F401
+        if sys.platform == 'win32':
+            # Without the WebView2 runtime pywebview quietly falls back to
+            # Internet Explorer's engine, which can't run the editors' script
+            # (saving among it). The browser does better than that.
+            from webview.platforms import winforms
+            if winforms.renderer != 'edgechromium':
+                logging.warning('WebView2 not found (pywebview would use %s); '
+                                'opening in the browser instead.', winforms.renderer)
+                return False
         return True
     except Exception:
         return False

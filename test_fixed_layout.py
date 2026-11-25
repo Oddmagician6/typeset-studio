@@ -331,8 +331,13 @@ def project(pid, md, designs, **kw):
 
 def test_app():
     print('\nin the app')
-    check('automatic: a picture book is page by page',
-          A.ebook_layout({'picture_book': True}) == 'fixed')
+    one = [{'name': 'a', 'elements': []}]
+    check('automatic: a picture book of page designs is page by page',
+          A.ebook_layout({'picture_book': True, 'page_designs': one}) == 'fixed')
+    # bug hunt 8.2: in 1.13 the flag was only a print check, and a picture
+    # book written as text and figures got an ebook of just its cover
+    check('automatic: a picture book with no designs flows',
+          A.ebook_layout({'picture_book': True}) == 'flow')
     check('automatic: any other book flows', A.ebook_layout({}) == 'flow')
     check('chosen: either way round', A.ebook_layout({'picture_book': True,
                                                       'ebook_layout': 'flow'}) == 'flow'
