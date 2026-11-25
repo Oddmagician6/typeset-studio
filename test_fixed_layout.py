@@ -438,8 +438,56 @@ def test_browser():
     check('and the page matches it (only glyph edges differ)', off < 0.02, off)
 
 
+def test_bughunt_mediums():
+    print('\nbug hunt 1.9, 1.12, 1.13')
+    # 1.9: a dedication comes before the first design, so the plan can't number
+    check('1.9: no front matter: the plan numbers', A._plan_numbered({'front_matter': 'none'}))
+    check('1.9: a dedication stops the numbering',
+          not A._plan_numbered({'front_matter': 'none', 'dedication': 'For the fox.'}))
+    check('1.9: a back-matter page does not',
+          A._plan_numbered({'front_matter': 'none', 'also_by': 'Other books.'}))
+
+    # 1.12: each half of a spread says its own words, once
+    d = spread('sp2', 'across the fold we go')
+    d['elements'] += [
+        {'id': 'l', 'type': 'text', 'anchor': 'sheet', 'x': 0.75, 'y': 5.0, 'w': 4.0,
+         'text': 'Qzleft only', 'font': 'Andika-Bold.ttf', 'size': 20, 'color': INK},
+        {'id': 'r', 'type': 'text', 'anchor': 'sheet', 'x': 9.5, 'y': 5.0, 'w': 4.0,
+         'text': 'Qzright only', 'font': 'Andika-Bold.ttf', 'size': 20, 'color': INK}]
+    path = os.path.join(tmp, 'halves.epub')
+    build(fence('sp2') + '\n', [d], path)
+    z = zipfile.ZipFile(path)
+    pages = sorted(n for n in z.namelist() if re.match(r'OEBPS/page\d+\.xhtml$', n))
+    texts = [re.sub(r'<[^>]+>', '', z.read(n).decode()) for n in pages
+             if 'class="t"' in z.read(n).decode()]
+    check('1.12: the left half has its own words, not the right\'s',
+          len(texts) == 2 and 'Qzleft' in texts[0] and 'Qzright' not in texts[0], texts)
+    check('1.12: the right half has its own words, not the left\'s',
+          len(texts) == 2 and 'Qzright' in texts[1] and 'Qzleft' not in texts[1], texts)
+    check('1.12: a box across the fold is on both, clipped',
+          len(texts) == 2 and all('fold' in t for t in texts), texts)
+    j = words('jj', 'The little fox ran over the hill and far away, past the farm and '
+                    'the barn and the long field.', align='justify', w=3.0)
+    path = os.path.join(tmp, 'spaces.epub')
+    build(fence('jj') + '\n', [j], path)
+    plain = re.sub(r'<[^>]+>', '', zipfile.ZipFile(path).read('OEBPS/page001.xhtml').decode())
+    check('1.12: justified words keep their spaces in the text',
+          'The little fox' in ' '.join(plain.split()) and 'Thelittle' not in plain, plain[-200:])
+
+    # 1.13: a rule drawn over words is a shape over words
+    over = words('ru', 'Ruled words')
+    over['elements'].append({'id': 'rule', 'type': 'rule', 'anchor': 'front', 'x': 0.75,
+                             'y': 1.1, 'w': 3.0, 'h': 0, 'weight': 6, 'color': '#ff0000'})
+    clear = words('rc', 'Ruled words')
+    clear['elements'].append({'id': 'rule', 'type': 'rule', 'anchor': 'front', 'x': 0.75,
+                              'y': 7.0, 'w': 3.0, 'h': 0, 'weight': 6, 'color': '#ff0000'})
+    check('1.13: a thick rule over the words is caught', F.covered_words(over, 8.5, 8.5))
+    check('1.13: one well clear of them is not', not F.covered_words(clear, 8.5, 8.5))
+
+
 def main():
-    for t in (test_pages, test_file, test_words, test_notes, test_app, test_browser):
+    for t in (test_pages, test_file, test_words, test_notes, test_app, test_bughunt_mediums,
+              test_browser):
         try:
             t()
         except Exception:

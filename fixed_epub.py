@@ -168,6 +168,9 @@ def covered_words(design, trim_w, trim_h):
                 continue
             try:
                 ox, oy, ow, oh = W.el_rect(g, over)
+                if over.get('type') == 'rule':
+                    # a rule has no height of its own: it is as thick as its stroke
+                    oh = W.rule_weight(over) / 72.0
             except Exception:
                 continue
             if ow > 0 and oh > 0 and ox < tx + tw and tx < ox + ow \
@@ -257,9 +260,11 @@ def _num(v):
     return '0' if s in ('', '-0') else s
 
 
-def words_html(design, g, fonts, shift_x=0.0):
+def words_html(design, g, fonts, shift_x=0.0, page_w=None):
     """The design's words as absolutely placed lines, in viewport px from the
-    page's top-left. `shift_x` (inches) moves a spread's right page into view."""
+    page's top-left. `shift_x` (inches) moves a spread's right page into view;
+    with `page_w` (a spread's page width) a box wholly on the other page is
+    left to that page, so the text layer says each line once."""
     import wrap_design as W
     k = PX / 72.0
     out = []
@@ -268,7 +273,11 @@ def words_html(design, g, fonts, shift_x=0.0):
                 or el.get('font') not in fonts or not str(el.get('text', '')):
             continue
         fam, asc, desc = fonts[el['font']]
-        x, y, _, _ = W.el_rect(g, el)
+        x, y, w, _ = W.el_rect(g, el)
+        if page_w and not el.get('rotate'):      # a turned box: kept on both, clipped
+            left = x - g['bleed'] - shift_x
+            if left >= page_w or left + w <= 0:
+                continue
         X, Y = (x - g['bleed'] - shift_x) * PX, (y - g['bleed']) * PX
         size = el['size'] * k
         spans = []
@@ -290,7 +299,9 @@ def words_html(design, g, fonts, shift_x=0.0):
             style.append(f'opacity:{float(el["opacity"]):.3f}')
         if el.get('rotate') == 90:
             style.append('transform:rotate(90deg);transform-origin:0 0')
-        out.append(f'<div class="t" style="{";".join(style)}">' + ''.join(spans) + '</div>')
+        # a space between the placed pieces: unseen (it collapses), but the
+        # words read "The fox ran", not "Thefoxran", to search and to a reader
+        out.append(f'<div class="t" style="{";".join(style)}">' + ' '.join(spans) + '</div>')
     return out
 
 
@@ -488,7 +499,8 @@ def build(ms, preset, out_path, meta):
                          f'style="width:{vw}px;height:{vh}px" alt="{alt}"'
                          + ('' if alt else ' role="presentation"') + '/>'] if img else [])
                 g = W.design_geometry(d, tw, th)
-                body += words_html(d, g, fonts, shift_x=tw if pg['half'] == 'right' else 0.0)
+                body += words_html(d, g, fonts, shift_x=tw if pg['half'] == 'right' else 0.0,
+                                   page_w=tw if pg['half'] else None)
                 first_href = first_href or href
             docs[href] = _page_doc(f'Page {n}', vw, vh, body)
             manifest.append({'id': pid, 'href': href, 'type': 'application/xhtml+xml'})

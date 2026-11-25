@@ -249,7 +249,7 @@
       var note = $('pp-note'), notes = [];
       if (!D.readable) notes.push('This manuscript places its pages in a way the plan can\'t safely rearrange, ' +
         'so moving pages here is refused: move them in the manuscript editor.');
-      if (!D.numbered) notes.push('Page numbers show once the book has no generated front matter or contents ' +
+      if (!D.numbered) notes.push('Page numbers show once the book has no generated front matter, contents or dedication-style pages ' +
         '(its settings), as a picture book doesn\'t.');
       if (!D.bleed && D.items.some(function (it) { return it.kind === 'page'; }))
         notes.push('This book isn\'t set to print to the edge: art that reaches the trim may show a white sliver. ' +

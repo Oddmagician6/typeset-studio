@@ -3788,8 +3788,9 @@ PLAN_THUMB_DPI = 36
 
 def _plan_numbered(proj):
     """Whether the plan can number pages: nothing generated comes before the
-    first design (front matter, contents)."""
-    return proj.get('front_matter', 'full') == 'none' and not proj.get('include_toc')
+    first design (front matter, contents, a dedication or other extra)."""
+    return (proj.get('front_matter', 'full') == 'none' and not proj.get('include_toc')
+            and not matter.present(proj, 'front'))
 
 
 def _plan_data(pid, proj, text=None):
