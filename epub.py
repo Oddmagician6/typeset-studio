@@ -1278,7 +1278,7 @@ def check(path):
 
         # --- every content document must actually parse ---
         docs = [i for i in items.values() if i['type'] == 'application/xhtml+xml']
-        broken, ids, imgs, no_alt = [], {}, 0, []
+        broken, ids, imgs, no_alt, gone = [], {}, 0, [], []
         for d in docs:
             name = full(d['href'])
             if name not in names:
@@ -1291,6 +1291,16 @@ def check(path):
             ids[d['href']] = {el.getAttribute('id')
                               for el in dom.getElementsByTagName('*')
                               if el.getAttribute('id')}
+            # a figure whose picture never made it in is a note in the text,
+            # not a missing file, so the manifest check can't see it
+            for p_ in dom.getElementsByTagName('p'):
+                if 'figure-missing' in (p_.getAttribute('class') or '').split():
+                    t = ''.join(n.data for n in p_.childNodes
+                                if n.nodeType == n.TEXT_NODE).strip().strip('[]')
+                    # (a page design the book lacks is a note of the same kind;
+                    # the print preflight names those)
+                    if t.startswith('missing image: '):
+                        gone.append(t[len('missing image: '):] or '?')
             for img in dom.getElementsByTagName('img'):
                 imgs += 1
                 # a decorative image (the chapter ornament) is *supposed* to
@@ -1304,6 +1314,29 @@ def check(path):
         add('Content documents', not broken,
             f'{len(docs)} documents, all well-formed XHTML'
             if not broken else 'Not well-formed: ' + '; '.join(broken[:3]))
+
+        if gone:
+            add('Figures', False, 'Printed as a "missing image" note, not a picture: '
+                + ', '.join(sorted(set(gone))[:4])
+                + ' - upload them on the Figures page')
+
+        # a picture's bytes must be what its media type says: a BMP renamed
+        # .png went in as image/png, which a reader may refuse to show
+        wrong = []
+        for i in items.values():
+            if not i['type'].startswith('image/') or full(i['href']) not in names:
+                continue
+            head = zf.read(full(i['href']))[:16]
+            kind = ('image/png' if head.startswith(b'\x89PNG') else
+                    'image/jpeg' if head.startswith(b'\xff\xd8') else
+                    'image/gif' if head[:4] == b'GIF8' else
+                    'image/webp' if head[:4] == b'RIFF' and head[8:12] == b'WEBP' else
+                    'image/svg+xml' if b'<' in head[:16] else '')
+            if kind != i['type']:
+                wrong.append(f'{i["href"]} ({kind or "not a picture a reader shows"})')
+        if wrong:
+            add('Picture formats', False, 'Not the format the book declares: '
+                + ', '.join(wrong[:3]) + ' - save it as PNG or JPEG and upload it again')
 
         if imgs:
             add('Image alt text', not no_alt,

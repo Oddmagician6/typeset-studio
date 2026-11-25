@@ -989,7 +989,7 @@ def _missing_checks(figures=(), cover_fonts=(), design_missing=(), template_gone
     return out
 
 
-def _preflight(build_result, preset, page_count, paper=None):
+def _preflight(build_result, preset, page_count, paper=None, binding=None, retailer=None):
     """Return a list of preflight check dicts: {label, ok, detail}.
 
     `paper` is the print paper picked under Send to print; KDP's page range
@@ -1011,12 +1011,28 @@ def _preflight(build_result, preset, page_count, paper=None):
     checks.append({'label': 'Fonts embedded', 'ok': build_result.get('fonts_embedded', True),
                    'detail': ('Embedded & subsetted — upload-ready'
                               if build_result.get('fonts_embedded')
+                              else 'Not embedded: ' + ', '.join(build_result['fonts_unembedded'][:4])
+                              + ' — platforms may reject (a telegram block is set in the '
+                              'standard Courier)'
+                              if build_result.get('fonts_unembedded')
                               else 'Standard PDF fonts not embedded — platforms may reject')})
     checks += _missing_checks(build_result.get('figures_missing'),
                               build_result.get('cover_fonts_missing'),
                               template_gone=build_result.get('cover_template_gone', ''),
                               cover_art=build_result.get('cover_art_missing'),
                               scene_image=build_result.get('scene_image_missing', ''))
+
+    if build_result.get('page_background_missing'):
+        checks.append({'label': 'Page background', 'ok': False, 'detail': (
+            f'The style’s page background {build_result["page_background_missing"]} isn’t in '
+            'the figure library, or can’t be read, so the pages print without it - upload '
+            'it on the Figures page, or pick another in the style')})
+
+    if build_result.get('cover_glyphs_missing'):
+        checks.append({'label': 'Cover lettering', 'ok': False, 'detail': (
+            'The cover\u2019s fonts have no letters for '
+            + ' '.join(build_result['cover_glyphs_missing'][:20])
+            + ' - those print blank. Pick a cover font that has them')})
 
     if build_result.get('has_cover'):
         checks.append({
@@ -1052,6 +1068,10 @@ def _preflight(build_result, preset, page_count, paper=None):
                        'To print them to the edge of the paper, tick "Pages print to the '
                        'edge (bleed)" on the book\'s page')})
     # designed pages (#74 Phase 6b)
+    for name, what, names in build_result.get('pages_incomplete') or []:
+        what = what.replace('off the cover', 'off the page')
+        checks.append({'label': 'Designed pages', 'ok': False,
+                       'detail': f'“{name}”: {what}: {", ".join(names[:5])}'})
     gone = build_result.get('pages_missing') or []
     if gone:
         checks.append({
@@ -1106,6 +1126,11 @@ def _preflight(build_result, preset, page_count, paper=None):
         trim = preset.get('trim') or {}
         lo, hi = kdp_page_range(paper, trim.get('w', 6.0), trim.get('h', 9.0))
         on = (f' on {_PAPER[paper]["label"]} paper' if paper in _PAPER else '')
+        if binding in ('hardcover', 'jacket') and (retailer or 'kdp') == 'kdp':
+            # KDP binds a hardcover in a narrower range than a paperback; the
+            # paperback's 24-828 passed a 48-page case it would refuse
+            lo, hi = _KDP_HARDCOVER_PAGES
+            on = " for a hardcover"
         kdp_ok = lo <= page_count <= hi
         checks.append({'label': 'Page count', 'ok': kdp_ok,
                        'detail': (f'{page_count} pages — within KDP range{on} ({lo}–{hi})'
@@ -1146,8 +1171,10 @@ def _run_epubcheck(epub_path):
                                epub_path],
                               capture_output=True, text=True, timeout=120)
     except Exception as exc:
-        return {'label': 'epubcheck', 'ok': True,
-                'detail': f'Could not run epubcheck ({exc}) — our own checks above still ran'}
+        # not a pass: the reference validator never gave its verdict
+        return {'label': 'epubcheck', 'ok': False,
+                'detail': f'epubcheck did not finish ({exc}) — the EPUB is unverified by it; '
+                          'our own checks above still ran'}
     if proc.returncode == 0:
         return {'label': 'epubcheck', 'ok': True, 'detail': 'Valid EPUB 3 (reference validator)'}
     msg = (proc.stdout or proc.stderr or '').strip().splitlines()
@@ -1232,7 +1259,10 @@ def print_spec(page_count, preset):
     return {
         'page_count': page_count,
         'inside':     round(inside, 3),
-        'spines':     {k: round(page_count * v['ppi'], 3) for k, v in _PAPER.items()},
+        # an odd count is bound with a blank on the back of its last leaf, so
+        # the spine is that leaf thicker - as the wrap and Send to print have it
+        'spines':     {k: round((page_count + page_count % 2) * v['ppi'], 3)
+                       for k, v in _PAPER.items()},
         'paper':      {k: v['label'] for k, v in _PAPER.items()},
         'kdp_min':    kdp_min,
         'ingram_min': ingram_min,
@@ -1632,7 +1662,9 @@ def save_preset(pid, data):
 
 def unique_id(base):
     pid, n = base, 2
-    existing = {i['id'] for i in list_presets()} | _ids_in(PRESET_DIR)
+    # `new` is the editor's own address (/editor/new opens a blank style), so a
+    # style called "New" saved there could never be opened again
+    existing = {i['id'] for i in list_presets()} | _ids_in(PRESET_DIR) | {'new'}
     while pid in existing:
         pid = f'{base}-{n}'
         n += 1
@@ -2576,9 +2608,22 @@ def editor_new():
                            furniture=furniture_options())
 
 
+def _style_version(pid):
+    """A fingerprint of a style file as it is on disk now, or '' (no file):
+    the editor sends back the one it opened, so a save from a tab opened
+    before a newer save can't quietly put the older settings back."""
+    path = os.path.join(PRESET_DIR, secure_filename(pid) + '.json')
+    try:
+        with open(path, 'rb') as f:
+            return hashlib.sha1(f.read()).hexdigest()[:16]
+    except OSError:
+        return ''
+
+
 @app.route('/editor/<pid>')
 def editor(pid):
     return render_template('editor.html', pid=pid, p=load_preset(pid), is_new=False,
+                           version=_style_version(pid),
                            fonts=list_fonts(), trim_presets=TRIM_PRESETS,
                            ornaments=ornament_tiles(), figures=list_figures(),
                            furniture=furniture_options())
@@ -2588,6 +2633,18 @@ def editor(pid):
 @app.route('/save/<pid>', methods=['POST'])
 def save(pid=None):
     data = parse_preset_form(request.form)
+    opened = request.form.get('version', '')
+    if pid is not None and opened and _style_version(pid) not in ('', opened):
+        # saved since this tab opened it (another tab, another window): both
+        # are kept - the newer save stays, these settings become a copy
+        name = data['name']
+        data['name'] = f'{name} (edited elsewhere)'
+        new_id = unique_id(slugify(data['name']))
+        save_preset(new_id, data)
+        flash(f'\u201c{name}\u201d was saved from somewhere else after this page opened, '
+              f'so that newer version is kept and these settings were saved as '
+              f'\u201c{data["name"]}\u201d.')
+        return redirect(url_for('index'))
     if pid is None:
         pid = unique_id(slugify(data['name']))
     save_preset(pid, data)
@@ -3284,8 +3341,10 @@ def _wrap_dims(form, pages):
         binding = 'paperback'
     hard = binding == 'hardcover'
     jacket = binding == 'jacket'
-    trim_w = _f(form, 'wrap_trim_w', 6.0)
-    trim_h = _f(form, 'wrap_trim_h', 9.0)
+    # a negative or zero trim (or bleed, below) made a sheet smaller than the
+    # book, its trim lines off the PDF: clamped to what a printer can make
+    trim_w = min(max(_f(form, 'wrap_trim_w', 6.0), 1.0), 30.0)
+    trim_h = min(max(_f(form, 'wrap_trim_h', 9.0), 1.0), 30.0)
     # every page is one side of a leaf, so a printer binds an odd count with a
     # blank on the back of the last page; the spine is that leaf thicker
     pages += pages % 2
@@ -3300,7 +3359,7 @@ def _wrap_dims(form, pages):
         'spine_w': spine_w,
         # a case's wrap takes the place of bleed where the printer says so
         'bleed':  (a['bleed'] if hard and 'bleed' in (rc.get('allowances') or {}).get(
-                       'hardcover', {}) else _f(form, 'wrap_bleed', a['bleed'])),
+                       'hardcover', {}) else min(max(_f(form, 'wrap_bleed', a['bleed']), 0.0), 1.0)),
         'pages':  pages,
         'spine_text_min': rc['spine_text_min'],
         'binding': binding,
@@ -4162,7 +4221,7 @@ def cover_wrap_preview():
         pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.1, 1.1), alpha=False)
         b64 = base64.b64encode(pix.tobytes('png')).decode()
         doc.close()
-        spine_txt = 'spine text on' if res.get('spine_text') else 'spine text off (too few pages)'
+        spine_txt = 'spine text on' if res.get('spine_text') else 'spine text off (spine too narrow for type)'
         if res['binding'] == 'hardcover':
             kind = 'case laminate · %g" wrap · %g" hinge' % (res['wrap'], res['hinge'])
         elif res['binding'] == 'jacket':
@@ -4174,8 +4233,13 @@ def cover_wrap_preview():
                 f"full {res['wrap_w']:g}×{res['wrap_h']:g}\" · {spine_txt}")
         warnings = list(dims.get('warnings', []))
         for where in res.get('overflow', []):
-            warnings.append(f'The {where} copy is too long to fit: it runs past the bottom '
-                            'of the flap. Shorten it.')
+            foot = 'the barcode area' if where == 'back cover' else 'the bottom of the flap'
+            warnings.append(f'The {where} copy is too long to fit: it runs past {foot}. '
+                            'Shorten it.')
+        if res.get('glyphs_missing'):
+            warnings.append('The cover\u2019s fonts have no letters for '
+                            + ' '.join(res['glyphs_missing'][:20])
+                            + ' - those print blank. Pick a cover font that has them.')
         return jsonify({'ok': True, 'image': f'data:image/png;base64,{b64}', 'info': info,
                         'warnings': warnings})
     except Exception as exc:
@@ -4492,11 +4556,19 @@ def _figure_problem(path):
     try:
         from PIL import Image
         with Image.open(path) as im:
+            fmt = im.format
             im.verify()
     except Exception as exc:
         if type(exc).__name__ == 'DecompressionBombError':
             return 'too many pixels to print - save it smaller, at 300 dpi for its printed size'
         return 'not a readable image'
+    # the name must tell the truth: an ebook declares a picture's type from
+    # its extension, and a BMP renamed .png went into the EPUB as a PNG
+    want = {'.png': 'PNG', '.jpg': 'JPEG', '.jpeg': 'JPEG', '.gif': 'GIF'}.get(
+        os.path.splitext(path)[1].lower())
+    if want and fmt and fmt != want:
+        return (f'a {fmt} picture named {os.path.splitext(path)[1].lower()} - '
+                'save it as PNG or JPEG and upload it again')
     return None
 
 
@@ -4753,6 +4825,12 @@ def generate():
         screen_name, warn = _screen_build(ms, preset, meta, base, stamp)
         if warn:
             flash(warn)
+    elif meta.get('screen_pdf'):
+        # an ebook-only book that also asks for the colour screen PDF gets it:
+        # it was only ever built beside a print PDF, so the box did nothing
+        screen_name, warn = _screen_build(ms, preset, meta, base, stamp)
+        if warn:
+            flash(warn)
 
     if fmt in ('epub', 'both'):
         epub_name = _claim_out(f'{base}-{stamp}.epub')
@@ -4765,8 +4843,10 @@ def generate():
             _drop_out(epub_name)
             epub_name = ''
 
-    spec      = print_spec(page_count, preset) if page_count else None
-    preflight = _preflight(build_result, preset, page_count) if build_result else None
+    # the pages a printer binds: a proof's cover page is not one of them
+    bound     = (build_result or {}).get('interior_pages') or page_count
+    spec      = print_spec(bound, preset) if page_count else None
+    preflight = _preflight(build_result, preset, bound) if build_result else None
     press     = _press_report(out_name, build_result)
     chapters  = len(ms['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
@@ -4904,6 +4984,10 @@ def _book_from_compose_form(tmp_files):
         'cover_color': form.get('cover_color', 'light'),
         'include_toc':    'include_toc' in form,
         'smartquotes':    'smartquotes' in form,
+        # the print variant the export makes, so the preview shows it too
+        # (press-ready drops the cover; bleed runs pages to the edge)
+        'press':          'press' in form,
+        'bleed':          'bleed' in form,
         **{k: k in form for k in ON_FLAGS},
         **{k: form.get(k, '').strip() for k in matter.KEYS},
     }
@@ -4937,7 +5021,7 @@ def generate_preview():
         fd, tmp_pdf = tempfile.mkstemp(suffix='.pdf')
         os.close(fd)
         tmp_files.append(tmp_pdf)
-        engine.build_pdf(ms, preset, tmp_pdf, meta)
+        engine.build_pdf(ms, preset, tmp_pdf, meta, press=meta.get('press', False))
 
         doc = fitz.open(tmp_pdf)
         built_pages = doc.page_count
@@ -5001,7 +5085,10 @@ def generate_epub_preview():
         fd, tmp_epub = tempfile.mkstemp(suffix='.epub')
         os.close(fd)
         tmp_files.append(tmp_epub)
-        epub.build_epub(ms, preset, tmp_epub, meta)
+        # the cover the export gives the ebook (a designed one is rendered to
+        # a picture first), not none
+        with _epub_cover(preset, meta) as emeta:
+            epub.build_epub(ms, preset, tmp_epub, emeta)
 
         import zipfile as _zip
         from xml.dom import minidom
@@ -5303,6 +5390,11 @@ def project_edit(pid):
                                           'back-cover image')):
             f = request.files.get(field)
             if not (f and f.filename):
+                continue
+            if field == 'cover' and request.form.get('cover_mode', 'image') != 'image':
+                # a file still sitting in the hidden upload box once the cover
+                # was switched to None or a template is not a new cover: it
+                # replaced (and deleted) the saved art kept for later
                 continue
             ext, data = _upload_ext(f), f.read()
             if ext not in IMAGE_EXTS or not _is_image(data):
@@ -5919,6 +6011,11 @@ def _build_project(pid, proj):
         res['screen_name'], warn = _screen_build(ms_parsed, preset, meta, base, stamp)
         if warn:
             res['warnings'].append(warn)
+    elif meta.get('screen_pdf'):
+        # ebook only, with the screen PDF asked for: build it as well
+        res['screen_name'], warn = _screen_build(ms_parsed, preset, meta, base, stamp)
+        if warn:
+            res['warnings'].append(warn)
 
     if fmt in ('epub', 'both'):
         res['epub_name'] = _claim_out(f'{base}-{stamp}.epub')
@@ -5939,7 +6036,10 @@ def _build_project(pid, proj):
     if res.get('epub_failed'):
         del done['last_epub']           # the last one that worked stays downloadable
     if res['page_count']:
-        done['last_page_count'] = res['page_count']
+        # the interior a printer binds, so a wrap sized from it gets the same
+        # spine as Send to print (a proof's cover page is not a leaf)
+        done['last_page_count'] = (res['build_result'].get('interior_pages')
+                                   or res['page_count'])
     proj.update(done)
     # into the book as it is now: it may have been saved while this built
     proj.update(update_project(pid, done) or {})
@@ -5974,8 +6074,10 @@ def project_generate(pid):
 
     page_count, build_result = res['page_count'], res['build_result']
     out_name, epub_name, preset = res['out_name'], res['epub_name'], res['preset']
-    spec      = print_spec(page_count, preset) if page_count else None
-    preflight = (_preflight(build_result, preset, page_count, proj.get('print_paper'))
+    bound     = (build_result or {}).get('interior_pages') or page_count
+    spec      = print_spec(bound, preset) if page_count else None
+    preflight = (_preflight(build_result, preset, bound, proj.get('print_paper'),
+                            proj.get('print_binding'), proj.get('print_retailer'))
                  if build_result else None)
     press     = _press_report(out_name, build_result)
     chapters  = len(res['ms_parsed']['chapters'])
@@ -6014,8 +6116,10 @@ def project_rebuild(pid):
         return jsonify(ok=False, error='; '.join(res['warnings']) or 'The EPUB build failed.')
     issues = []
     if res['build_result']:
-        issues += issue_rows(_preflight(res['build_result'], res['preset'], res['page_count'],
-                                             proj.get('print_paper')))
+        issues += issue_rows(_preflight(res['build_result'], res['preset'],
+                                        res['build_result'].get('interior_pages')
+                                        or res['page_count'], proj.get('print_paper'),
+                                        proj.get('print_binding'), proj.get('print_retailer')))
     if res['epub_name']:
         issues += issue_rows(_epub_checks(os.path.join(OUT_DIR, res['epub_name']),
                                           res['ms_parsed'], res['meta'], res['preset']))
@@ -6024,6 +6128,7 @@ def project_rebuild(pid):
         issues=[f"{c['label'].strip()}: {c['detail']}" for c in issues],
         pdf=url_for('download', fn=res['out_name']) if res['out_name'] else '',
         epub=url_for('download', fn=res['epub_name']) if res['epub_name'] else '',
+        screen=url_for('download', fn=res['screen_name']) if res.get('screen_name') else '',
         thumb=url_for('project_thumb', pid=pid) if res['out_name'] else '')
 
 
@@ -6273,7 +6378,7 @@ def build_print_package(proj, scope='print'):
         pages = built['page_count']
         files[pdir + os.path.basename(interior)] = interior
 
-        checks = _preflight(built, preset, pages, paper)
+        checks = _preflight(built, preset, pages, paper, binding, retailer)
         if built.get('press_error'):
             checks.insert(0, {
                 'label': 'Press-ready', 'ok': False,

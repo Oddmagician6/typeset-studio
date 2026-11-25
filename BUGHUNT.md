@@ -77,6 +77,17 @@ End with a short "Speculative" list for anything you couldn't confirm by reading
 | 7 | `app.py` across all routes | All routes and `templates/` | Path traversal, upload handling, XSS in templates, non-atomic writes, damaged-file handling for the newer file kinds, thread safety |
 | 8 | Upgrades & packaging | `upgrade_project` (fields added in 1.4–1.14), update check, `typeset-studio.spec`, `typeset-studio.iss` | Opening the frozen `test_fixtures/v1.x` books, bundled data missing from the build |
 
+### Round 2 (started 2026-11-25, after 1.14.1)
+
+Code the first eight sections didn't cover.
+
+| # | Section | Main files | What to look for |
+|---|---|---|---|
+| 9 | Core interior typesetting | `engine.py` novel layout (openers, drop caps, running heads, TOC, footnotes, document blocks), `matter.py`, `ornaments.py` | Dropped or leaked text, wrong heads/folios, TOC numbers that disagree with the body, unescaped markup |
+| 10 | Template cover rendering | `engine.py` cover code, `covers/*.json` | Text off the trim or into the spine, wrap maths, crashes on empty or very long fields |
+| 11 | Preflight & results pages | `checker.py`, preflight/continuity/figures/fonts routes and templates | False passes, false blocks, wrong locations in warnings |
+| 12 | Project & editor front end | `editor.html`, `project_edit.html`, `projects.html`, `base.html`, `covers.html` | Lost unsaved changes, fields that don't round-trip, titles that break the page |
+
 ## After each section
 
 1. **Triage.** Claude sorts every finding as confirmed, false positive or needs a repro, and gives the user a short list.
@@ -96,3 +107,7 @@ End with a short "Speculative" list for anything you couldn't confirm by reading
 | 6 | WYSIWYG / doc model | 13 (+2 spec.) | 10 Highs confirmed; 6.6 not a bug (the typesetter also ends a note at a `##` line) | 6.1–6.5, 6.7–6.13 on bughunt-app (`test_bughunt6` in `test_doc_model.py`, 12 rich-editor scenarios) | – |
 | 7 | `app.py` across all routes | 13 (+2 spec.) | 12 Highs + 1 Medium, all confirmed (2 speculative left open) | All 13 on bughunt-app (`test_app_safety.py`); both speculatives fixed on bughunt-speculative (loopback-host + same-origin guard on state-changing requests, art route serves pictures only, nosniff) | – |
 | 8 | Upgrades & packaging | 13 (+1 spec.) | 3 Highs, all confirmed; 8.1 changes print (OK'd) | 8.1–8.12 on bughunt-app (`test_upgrades_bughunt.py`, 8.2 in `test_fixed_layout.py`); feed pagination raised to 100 on bughunt-speculative; 8.13 (fixture gaps) left open | – |
+| 9 | Core interior typesetting | 14 | 5 crashes (9.1–9.3, 9.9, 12.4) and the 9.10 garble reproduced; all 14 confirmed; print changes OK'd | All 14 on bughunt-round2 (`test_interior_bughunt.py`); a page-tall row or drop-cap paragraph splits only when it is taller than a page | – |
+| 10 | Template cover rendering | 14 (+1 spec.) | 13 confirmed; 10.13 (guide vs template barcode spot) a convention, not a bug; print changes OK'd | 10.1–10.12, 10.14 on bughunt-round2 (`test_covers_bughunt.py`); front-panel lines held to the safe area; scrim stripes (spec.) left open | – |
+| 11 | Preflight & results pages | 14 (+1 spec.) | 14 confirmed | All 14 on bughunt-round2 (`test_preflight_bughunt.py`); a telegram's Courier now shows as not embedded; spec. RGB-operand scan left open | – |
+| 12 | Project & editor front end | 13 (+1 spec.) | 13 confirmed | 12.1–12.3, 12.5–12.13 on bughunt-round2 (`test_frontend_bughunt.py`); 12.4 with section 9; double-click Regenerate (spec.) left open | – |

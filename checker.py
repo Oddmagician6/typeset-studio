@@ -43,9 +43,18 @@ def _chapter_paras(chapter: dict) -> list:
     return texts
 
 
-def _loc(ch_idx: int, chapter: dict) -> str:
+def _num_label(parsed: dict, ch_idx: int) -> str:
+    """'Chapter N' as the book prints it: an unnumbered chapter (`#*`, a
+    prologue) takes no number, so counting by position called the first
+    numbered chapter after a prologue Chapter 2."""
+    from manuscript import chapter_numbers
+    n = chapter_numbers(parsed['chapters'])[ch_idx]
+    return f'Chapter {n}' if n is not None else 'Unnumbered chapter'
+
+
+def _loc(ch_idx: int, chapter: dict, parsed: dict = None) -> str:
     title = chapter.get('title')
-    label = f'Chapter {ch_idx + 1}'
+    label = _num_label(parsed, ch_idx) if parsed else f'Chapter {ch_idx + 1}'
     if title:
         label += f' · “{title}”'
     return label
@@ -66,7 +75,9 @@ _STOPWORDS = {
 }
 
 _CAP_WORD_RE  = re.compile(r'\b([A-Z][a-z]{2,})\b')
-_SENT_SPLIT   = re.compile(r'(?<=[.!?])\s+')
+# a sentence ends at . ! or ? - or just after a closing quote or bracket
+# that follows one, so quoted dialogue is a sentence of its own
+_SENT_SPLIT   = re.compile(r'(?<=[.!?])\s+|(?<=[.!?][”’"\'\)\]])\s+')
 
 
 def _check_duplicate_titles(parsed: dict) -> list:
@@ -81,8 +92,9 @@ def _check_duplicate_titles(parsed: dict) -> list:
             issues.append({
                 'label':    f'Duplicate chapter title: “{title}”',
                 'severity': 'warn',
-                'detail':   f'Same title used in both Chapter {seen[key] + 1} and Chapter {ch_idx + 1}.',
-                'location': _loc(ch_idx, ch),
+                'detail':   (f'Same title used in both {_num_label(parsed, seen[key])} and '
+                             f'{_num_label(parsed, ch_idx)}.'),
+                'location': _loc(ch_idx, ch, parsed),
                 'tier': 1,
             })
         else:
@@ -99,13 +111,16 @@ def _check_thin_chapters(parsed: dict) -> list:
         has_text = any(
             b[0] == 'para'
             or (b[0] == 'doc_block' and any((sub[1] or '').strip() for sub in b[1]))
+            # a picture or a designed page is content too, with no words of its own
+            or (b[0] == 'doc_block' and len(b) > 2 and isinstance(b[2], dict)
+                and b[2].get('_type') in ('figure', 'page') and (b[2].get('src') or '').strip())
             for b in ch['blocks'])
         if not has_text:
             issues.append({
-                'label':    f'Empty chapter: {_loc(ch_idx, ch)}',
+                'label':    f'Empty chapter: {_loc(ch_idx, ch, parsed)}',
                 'severity': 'warn',
                 'detail':   'This chapter contains no paragraph text.',
-                'location': _loc(ch_idx, ch),
+                'location': _loc(ch_idx, ch, parsed),
                 'tier': 1,
             })
     return issues
@@ -117,7 +132,7 @@ def _check_name_variants(parsed: dict) -> list:
     token_first_loc: dict = {}
 
     for ch_idx, ch in enumerate(parsed['chapters']):
-        loc = _loc(ch_idx, ch)
+        loc = _loc(ch_idx, ch, parsed)
         for para in _chapter_paras(ch):
             for word in _CAP_WORD_RE.findall(para):
                 if word.lower() in _STOPWORDS:
@@ -163,6 +178,8 @@ def _check_name_variants(parsed: dict) -> list:
 
 _MAX_VARIANTS = 25
 _VARIANT_RATIO = 0.85
+_MAX_GROUP = 300
+_MAX_CANDIDATES = 400_000
 
 
 def _deletions(word, k):
@@ -194,12 +211,20 @@ def _similar_pairs(words, ratio):
             continue
         for key in _deletions(low, int(0.27 * len(low))):
             index[key].add(w)
+    # A key shared by hundreds of words says nothing about any two of them,
+    # and expanding every such group to its pairs (10,000 look-alike tokens
+    # made 50 million) could take all the memory there was: those groups are
+    # passed over, and the candidates are capped, so the check always ends.
     maybe = set()
     for group in index.values():
-        if len(group) > 1:
+        if 1 < len(group) <= _MAX_GROUP:
             g = sorted(group)
             maybe.update((a, b) for i, a in enumerate(g) for b in g[i + 1:])
+            if len(maybe) > _MAX_CANDIDATES:
+                break
     for w in long_words:
+        if len(maybe) > _MAX_CANDIDATES:
+            break
         maybe.update(tuple(sorted((w, o))) for o in words if o != w)
     out, sm = [], difflib.SequenceMatcher(None)
     for a, b in maybe:
@@ -249,7 +274,7 @@ def _check_pov_drift(parsed: dict) -> list:
         ch_dom = c.index(max(c))
         if ch_dom != book_dom and c[ch_dom] / ch_total > 0.60:
             issues.append({
-                'label':    f'POV pronoun shift in {_loc(ch_idx, ch)}',
+                'label':    f'POV pronoun shift in {_loc(ch_idx, ch, parsed)}',
                 'severity': 'warn',
                 'detail':   (
                     f'Book-wide dominant: {labels[book_dom]}'
@@ -260,7 +285,7 @@ def _check_pov_drift(parsed: dict) -> list:
                     f' {round(100 * c[ch_dom] / ch_total)} %). '
                     f'Possible POV inconsistency.'
                 ),
-                'location': _loc(ch_idx, ch),
+                'location': _loc(ch_idx, ch, parsed),
                 'tier': 1,
             })
     return issues
@@ -283,7 +308,7 @@ def _check_repeated_sentences(parsed: dict) -> list:
     issues = []
     for sent_key, ch_list in sentence_chapters.items():
         if len(ch_list) >= 2:
-            titles = [_loc(idx, parsed['chapters'][idx]) for idx in ch_list[:3]]
+            titles = [_loc(idx, parsed['chapters'][idx], parsed) for idx in ch_list[:3]]
             display = sent_key[:72] + '…' if len(sent_key) > 72 else sent_key
             issues.append({
                 'label':    f'Repeated sentence: “{display}”',
@@ -346,7 +371,7 @@ def _build_summary(parsed: dict, words_per_chapter: int = EXCERPT_WORDS) -> str:
                 part_label += f': {part["title"]}'
             lines.append(f'[{part_label}]')
         title = ch.get('title') or '(untitled)'
-        lines.append(f'Chapter {ch_idx + 1}: {title}')
+        lines.append(f'{_num_label(parsed, ch_idx)}: {title}')
         paras = _chapter_paras(ch)
         if paras:
             excerpt = ' '.join(' '.join(paras).split()[:words_per_chapter])

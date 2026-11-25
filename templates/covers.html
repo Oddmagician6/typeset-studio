@@ -75,7 +75,7 @@
                 <span class="k">Accent</span><span>{{ c.accent.color }} · {{ '%g'|format(c.accent.size) }}pt</span>
               </div>
               <div class="actions">
-                <a class="btn btn-primary btn-sm" href="{{ url_for('generate') }}">Set a book</a>
+                <a class="btn btn-primary btn-sm" href="{{ url_for('generate', cover=item.id) }}">Set a book</a>
                 <a class="btn btn-sm" href="{{ url_for('cover_editor', cid=item.id) }}">Edit</a>
                 <a class="btn btn-sm" href="{{ url_for('wrap_designer', **{'from': item.id}) }}"
                    title="Open the whole wrap in the Wrap designer, as layers you can move and edit">Customise</a>

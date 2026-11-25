@@ -43,6 +43,8 @@
   .orn-tile:hover{border-color:var(--muted)}
   .orn-tile input{position:absolute;opacity:0;pointer-events:none}
   .orn-tile:has(input:checked){border-color:var(--red);background:var(--surface);box-shadow:inset 0 0 0 1px var(--red)}
+  /* the radio is invisible, so the tile shows where the keyboard is */
+  .orn-tile:has(input:focus-visible){outline:2px solid var(--red);outline-offset:2px}
   .orn-art{display:flex;align-items:center;justify-content:center;height:34px;color:var(--ink)}
   .orn-art svg{width:100%;height:34px}
   .orn-art.orn-none{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
@@ -81,6 +83,7 @@
     <form class="editor" method="post" novalidate
           action="{{ url_for('save') if is_new else url_for('save', pid=pid) }}"
           oninput="updatePreview()">
+      {% if not is_new %}<input type="hidden" name="version" value="{{ version or '' }}">{% endif %}
 
       <fieldset>
         <legend>Identity</legend>
@@ -1002,8 +1005,10 @@
       document.getElementById('pv-trim').innerHTML = '<b>'+num('f-tw')+'\u00d7'+
         (document.querySelector('[name=trim_h]').value||'?')+'"</b>';
       var just = document.getElementById('f-just').checked ? ', justified' : '';
-      document.getElementById('pv-body').innerHTML = '<b>'+num('f-bsize')+'/'+num('f-blead')+
-        '</b> '+ (val('f-fam')||'—') + just;
+      // the family name is the writer's text, not markup: `Book <Draft> & Sons`
+      var body = document.getElementById('pv-body'), b = document.createElement('b');
+      b.textContent = num('f-bsize')+'/'+num('f-blead');
+      body.replaceChildren(b, document.createTextNode(' ' + (val('f-fam')||'—') + just));
       var start = document.getElementById('f-start').value=='recto' ? ', recto' : '';
       document.getElementById('pv-open').textContent = openLabel(document.getElementById('f-open').value)+start;
       document.getElementById('pv-break').textContent = breakLabel() || '—';
@@ -1061,6 +1066,15 @@
       const status = document.getElementById('preview-status');
       btn.disabled = true;
       status.textContent = 'Rendering…';
+      // what was sent, so pages that come back after the form changed say so
+      const sent = JSON.stringify([...new FormData(document.querySelector('form.editor'))]
+        .map(([k, v]) => [k, typeof v === 'string' ? v : '']));
+      // a failed render must not leave the last good one standing under the
+      // new settings, as if it were theirs
+      const clearPages = () => {
+        document.getElementById('preview-imgs').innerHTML = '';
+        document.getElementById('preview-pages').style.display = 'none';
+      };
       try {
         const data = new FormData(document.querySelector('form.editor'));
         const res  = await fetch('/preview', {method: 'POST', body: data});
@@ -1075,18 +1089,49 @@
           ).join('');
           document.getElementById('preview-pages').style.display = 'block';
           status.textContent = json.images.length + ' page' + (json.images.length !== 1 ? 's' : '');
+          const now = JSON.stringify([...new FormData(document.querySelector('form.editor'))]
+            .map(([k, v]) => [k, typeof v === 'string' ? v : '']));
+          if (now !== sent) status.textContent += ' — settings changed since; preview again';
           (json.warnings || []).forEach(w => {
             const li = document.createElement('li'); li.textContent = w; warn.appendChild(li);
           });
           warn.style.display = warn.children.length ? 'block' : 'none';
         } else {
+          clearPages();
           status.textContent = json.error;
         }
       } catch (e) {
+        clearPages();
         status.textContent = 'Preview failed.';
       } finally {
         btn.disabled = false;
       }
     });
+  </script>
+  <script>
+    // Unsaved changes: the header's links, Cover specs and the rest used to
+    // leave at once and lose what was changed here. Saving, or cloning, is
+    // a way out that keeps them; anything else asks first.
+    (function(){
+      var form = document.querySelector('form.editor');
+      if (!form) return;
+      function state(){
+        var out = [];
+        new FormData(form).forEach(function(v, k){
+          out.push([k, typeof v === 'string' ? v : (v && v.name) || '']);
+        });
+        return JSON.stringify(out);
+      }
+      var start = state(), leaving = false;
+      form.addEventListener('submit', function(){ leaving = true; });
+      document.querySelectorAll('form').forEach(function(f){
+        if (f !== form) f.addEventListener('submit', function(){ leaving = true; });
+      });
+      window.addEventListener('beforeunload', function(e){
+        if (leaving || state() === start) return;
+        e.preventDefault();
+        e.returnValue = '';
+      });
+    })();
   </script>
 {% endblock %}

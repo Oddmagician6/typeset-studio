@@ -739,7 +739,9 @@ try:
     res = engine.build_cover_wrap(tpl, engine._register_cover_fonts(tpl, interior), META, thin,
                                   os.path.join(tmp, 'thin.pdf'))
     check('a spine too thin for type inside its margins is left without, and says so',
-          engine.wrap_geometry(thin)['spine_text'] and not res['spine_text'], res)
+          # the geometry and the painter agree (round 2, 10.14): no spine
+          # text offered where the margins leave no room for it
+          not engine.wrap_geometry(thin)['spine_text'] and not res['spine_text'], res)
     labels = [e.get('label') for e in classic['elements']]
     texts = {e['text'] for e in classic['elements'] if e['type'] == 'text'}
     check('the background, frame and ornament are layers of their own',

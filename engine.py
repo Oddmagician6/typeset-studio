@@ -38,7 +38,7 @@ from manuscript import (_inline as _ms_inline_raw, book_anchors as _ms_book_anch
                         book_targets as _ms_targets,
                         ANCHOR_TAG_RE as _MS_ANCHOR_TAG_RE,
                         PAGEREF_TAG_RE as _MS_PAGEREF_TAG_RE,
-                        CELL_SEP as _MS_CELL)
+                        CELL_SEP as _MS_CELL, LINK_RE as _MS_LINK_RE)
 
 
 def _ms_inline(text, smartquotes=True):
@@ -127,16 +127,54 @@ def _hex(s):
         return _colors.black
 
 
+# While a front panel is painted, the trim's safe area across it (left, right):
+# every line the design families set there - title, byline, kicker - is held
+# inside it. A byline was drawn at its template size whatever its length, and
+# a long one ran across the spine fold or off the sheet. Thread-local, like
+# _FLOOR: builds run on the app's worker threads.
+_FRONT = threading.local()
+
+
+def _front_fit(x_lo, x_hi, text, font, size, tracking):
+    """(size, tracking) for a line that may use x_lo..x_hi, inside the front
+    panel's safe area when one is being painted."""
+    bounds = getattr(_FRONT, 'bounds', None)
+    if not bounds or not text:
+        return size, tracking
+    return _fit_line(text, font, size, x_hi - x_lo, tracking, min_size=min(size, 5.0))
+
+
 def _tracked_centre(canv, cx, y, text, font, size, tracking=0.0):
     """Draw letterspaced text centred on cx at baseline y."""
     if not text:
         return
+    bounds = getattr(_FRONT, 'bounds', None)
+    if bounds:
+        half = min(cx - bounds[0], bounds[1] - cx)
+        size, tracking = _front_fit(cx - half, cx + half, text, font, size, tracking)
     w = stringWidth(text, font, size) + tracking * max(len(text) - 1, 0)
     to = canv.beginText(cx - w / 2.0, y)
     to.setFont(font, size)
     to.setCharSpace(tracking)
     to.textOut(text)
     canv.drawText(to)
+
+
+def _fit_line(text, font, size, max_w, tracking=0.0, min_size=5.0):
+    """(size, tracking) that set one line of text within max_w: as given when
+    it fits, else scaled down together - no smaller than min_size, tracking
+    dropped last. A byline, an imprint or a spine line drawn at its template
+    size ran off the panel, across a fold or into the barcode reserve."""
+    def width(sz, tr):
+        return stringWidth(text, font, sz) + tr * max(len(text) - 1, 0)
+    if not text or max_w <= 0 or width(size, tracking) <= max_w:
+        return size, tracking
+    k = max_w / width(size, tracking)
+    nsz = max(size * k, min_size)
+    ntr = tracking * nsz / size
+    if width(nsz, ntr) > max_w:
+        ntr = 0.0
+    return nsz, ntr
 
 
 def _break_overlong(lines, font, size, max_w, tracking=0.0):
@@ -287,13 +325,18 @@ def figures_missing(ms, preset):
     chapter-opening art) that aren't in the figure library, or can't be read.
     Each prints as a "missing image" box, which is easy to miss in a long proof."""
     want = [chapter_art_src(preset)]
+    no_src = False
     for ch in ms.get('chapters', []):
         for block in ch.get('blocks', []):
             if block[0] == 'doc_block' and len(block) >= 3 \
                     and block[2].get('_type') == 'figure':
-                want.append((block[2].get('src') or '').strip())
-    return sorted({s for s in want if s and (not _figure_asset_path(s)
-                                              or picture_unreadable(_figure_asset_path(s)))})
+                src = (block[2].get('src') or '').strip()
+                # a figure with no src prints a "missing image" box too
+                no_src = no_src or not src
+                want.append(src)
+    out = sorted({s for s in want if s and (not _figure_asset_path(s)
+                                             or picture_unreadable(_figure_asset_path(s)))})
+    return out + (['(no src)'] if no_src else [])
 
 
 def scene_image_src(preset):
@@ -344,6 +387,41 @@ def _register_cover_fonts(tpl, interior):
     out.setdefault('display', out['serif'])
     out.setdefault('italic', interior.get('italic', 'Times-Italic'))
     return out
+
+
+def cover_glyphs_missing(meta, cf):
+    """Characters of the cover's words that its faces don't have.
+
+    `cover_fonts_missing` only asks whether a font file is there; a title in a
+    script the face doesn't cover (`星海` in a Latin display face) printed as
+    blank boxes or nothing at all, and every check passed. Only embedded
+    TrueType faces are read; the standard PDF fonts are left alone."""
+    from reportlab.pdfbase import pdfmetrics as _pm
+    words = {
+        'display': ' '.join(meta.get(k) or '' for k in ('title', 'subtitle', 'cover_accent',
+                                                      'author', 'cover_collection',
+                                                      'cover_kicker')),
+        'serif': ' '.join(meta.get(k) or '' for k in ('cover_blurb', 'cover_jacket_blurb',
+                                                    'cover_author_bio', 'cover_studio',
+                                                    'publisher', 'cover_epigraph',
+                                                    'cover_collection', 'author')),
+    }
+    missing = set()
+    for role, text in words.items():
+        name = cf.get(role)
+        try:
+            face = getattr(_pm.getFont(name), 'face', None)
+        except Exception:
+            continue
+        cmap = getattr(face, 'charToGlyph', None)
+        if not cmap:
+            continue
+        for ch in set(text) | set(text.upper()):
+            if ch.isspace() or ord(ch) < 32:
+                continue
+            if ord(ch) not in cmap:
+                missing.add(ch)
+    return ''.join(sorted(missing))
 
 
 # ---------------------------------------------------------------- cover panels
@@ -456,10 +534,19 @@ def _paint_cover_overlay(canv, title, author, tfont, afont, x0, y0, w, h, light=
     canv.setFillAlpha(1)
     canv.setFillColorRGB(1, 1, 1) if light else canv.setFillColorRGB(0.06, 0.06, 0.06)
     tsize = min(34, w / max(len(title), 8) * 1.6) if title else 28
+    # the guess from the letter count is measured in the real font: wide
+    # letters (`Worldwide Waterways`) ran past the trim and into the spine.
+    # Down to 14 pt it shrinks; past that the title takes more lines, upward.
+    max_w = w * 0.86
+    tsize, _ = _fit_line(title, tfont, tsize, max_w, 0.0, min_size=14.0)
+    lines = (_wrap_tracked(title, tfont, tsize, max_w, 0.0)
+             if title and stringWidth(title, tfont, tsize) > max_w else [title])
     canv.setFont(tfont, tsize)
-    canv.drawCentredString(cx, ty, title)
+    for i, ln in enumerate(lines):
+        canv.drawCentredString(cx, ty + (len(lines) - 1 - i) * tsize * 1.1, ln)
     if author:
-        canv.setFont(afont, tsize * 0.5)
+        asize, _ = _fit_line(author, afont, tsize * 0.5, max_w, 0.0, min_size=6.0)
+        canv.setFont(afont, asize)
         canv.drawCentredString(cx, ty - tsize * 0.95, author)
     canv.restoreState()
 
@@ -1061,6 +1148,9 @@ def _tracked_left(canv, x, y, text, font, size, tracking=0.0):
     """Draw letterspaced text left-aligned from x at baseline y."""
     if not text:
         return
+    bounds = getattr(_FRONT, 'bounds', None)
+    if bounds:
+        size, tracking = _front_fit(x, bounds[1], text, font, size, tracking)
     to = canv.beginText(x, y)
     to.setFont(font, size)
     to.setCharSpace(tracking)
@@ -1094,6 +1184,12 @@ def _shrink_to_clear(title, font, size, max_w, tracking, min_size, bottom, floor
     lines = _wrap_tracked(title, font, size, max_w, tracking)
     while size > min_size and bottom(lines, size) < floor:
         size -= 1
+        lines = _wrap_tracked(title, font, size, max_w, tracking)
+    # the style's floor is a preference, the trim is not: a title still too
+    # long at it keeps shrinking (to 7 pt) rather than set its last lines
+    # below the foot of the cover
+    while size > 7 and bottom(lines, size) < floor:
+        size -= 0.5
         lines = _wrap_tracked(title, font, size, max_w, tracking)
     return lines, size
 
@@ -1655,14 +1751,27 @@ def _paint_cover_front(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
     printed rectangle round it on a wrap, which flat grounds and full-height
     bands fill so the cut can wander without showing what is underneath."""
     fn = _COVER_DESIGNS.get(tpl.get('design') or 'classic-frame', _paint_cover_panel)
-    fn(canv, tpl, cf, meta, x0, y0, w, h, bleed=bleed)
+    safe = 0.125 * inch
+    _FRONT.bounds = (x0 + safe, x0 + w - safe)
+    try:
+        fn(canv, tpl, cf, meta, x0, y0, w, h, bleed=bleed)
+    finally:
+        _FRONT.bounds = None
 
 
 def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
-    """Back cover: border, collection line, blurb, studio footer, and a barcode zone."""
+    """Back cover: border, collection line, blurb, studio footer, and a barcode zone.
+
+    Returns True when the blurb is longer than the panel holds above the
+    barcode (what fits is drawn), so the wrap can say so."""
     cx = x0 + w / 2.0
     canv.saveState()
     bx0, by0, bx1, by1, gap = _paint_border(canv, tpl, x0, y0, w, h)
+    overflow = False
+    # barcode reserve zone - white box, lower-right, KDP-style ~2.0" x 1.2"
+    bw, bh = 2.0 * inch, 1.2 * inch
+    bxr = bx1 - gap - bw
+    byr = by0 + gap + 0.15 * inch
 
     def yat(frac):
         return y0 + h * frac
@@ -1677,18 +1786,38 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
     # blurb — centred serif block in the upper-middle
     blurb = meta.get('cover_blurb') or ''
     if blurb:
-        size = 11.0
-        lead = 16.0
         colw = (bx1 - bx0) * 0.82
         canv.setFillColor(_pal_color(tpl, 'ink'))
-        yy = yat(0.72)
-        for para in blurb.split('\n'):
-            if not para.strip():
-                yy -= lead * 0.6
-                continue
-            for ln in _wrap_tracked(para, cf['serif'], size, colw, 0.0):
+        top, floor = yat(0.72), byr + bh + 0.2 * inch
+
+        def layout(size, lead):
+            rows = []                     # (line, or None for a gap; step down)
+            for para in blurb.split('\n'):
+                if not para.strip():
+                    rows.append((None, lead * 0.6))
+                    continue
+                for ln in _wrap_tracked(para, cf['serif'], size, colw, 0.0):
+                    rows.append((ln, lead))
+            return rows
+
+        # a long blurb steps down in size before it reaches the barcode box,
+        # which used to be painted over its lines; at 8 pt what fits is drawn
+        size = 11.0
+        while True:
+            lead = size * 16.0 / 11.0
+            rows = layout(size, lead)
+            need = sum(step for _, step in rows) - lead
+            if top - need >= floor or size <= 8.0:
+                break
+            size -= 0.5
+        yy = top
+        for ln, step in rows:
+            if ln is not None:
+                if yy < floor:
+                    overflow = True
+                    break
                 _tracked_centre(canv, cx, yy, ln, cf['serif'], size, 0.0)
-                yy -= lead
+            yy -= step
 
     # optional author photo / publisher logo — centred, aspect preserved
     bimg = meta.get('cover_back_image')
@@ -1700,17 +1829,19 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
             tw = max(meta.get('cover_back_image_w', 1.5), 0.25) * inch
             tw = min(tw, (bx1 - bx0) - 2 * gap)          # keep inside the frame
             thh = tw * (ih / iw) if iw else tw
+            # a tall picture is fitted by its height too, and its centre kept
+            # far enough in that none of it is cut off at the top or the foot
+            room_h = (by1 - by0) - 2 * gap
+            if thh > room_h > 0:
+                tw, thh = tw * room_h / thh, room_h
             icx = cx
             icy = y0 + h * min(max(meta.get('cover_back_image_y', 0.4), 0.0), 1.0)
+            icy = min(max(icy, by0 + gap + thh / 2.0), by1 - gap - thh / 2.0)
             canv.drawImage(ir, icx - tw / 2.0, icy - thh / 2.0, width=tw, height=thh,
                            preserveAspectRatio=True, mask='auto')
         except Exception:
             pass
 
-    # barcode reserve zone — white box, lower-right, KDP-style ~2.0" x 1.2"
-    bw, bh = 2.0 * inch, 1.2 * inch
-    bxr = bx1 - gap - bw
-    byr = by0 + gap + 0.15 * inch
     canv.setFillColorRGB(1, 1, 1)
     canv.setStrokeGray(0.6)
     canv.setLineWidth(0.6)
@@ -1727,10 +1858,15 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
     studio = (meta.get('cover_studio') or meta.get('publisher') or '').upper()
     if studio:
         foot_cx = (bx0 + gap + (bxr - 0.12 * inch)) / 2.0
+        # measured into the room left of the box, not just centred there
+        ssize, strack = _fit_line(studio, cf['serif'], st.get('size', 8.5),
+                                  (bxr - 0.12 * inch) - (bx0 + gap),
+                                  st.get('tracking', 2.4))
         canv.setFillColor(_pal_color(tpl, st.get('color', 'muted')))
-        _tracked_centre(canv, foot_cx, byr + bh / 2.0 - st.get('size', 8.5) * 0.35, studio,
-                        cf['serif'], st.get('size', 8.5), st.get('tracking', 2.4))
+        _tracked_centre(canv, foot_cx, byr + bh / 2.0 - ssize * 0.35, studio,
+                        cf['serif'], ssize, strack)
     canv.restoreState()
+    return overflow
 
 
 def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
@@ -1759,7 +1895,8 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
                 _tracked_centre(canv, cx, top, ln, cf['display'], 13, 1.2)
                 top -= 17
             top -= 10
-        body = meta.get('cover_jacket_blurb') or meta.get('cover_blurb') or ''
+        body = ((meta.get('cover_jacket_blurb') or '').strip()
+                or (meta.get('cover_blurb') or '').strip())
     else:
         label = 'ABOUT THE AUTHOR' if (meta.get('cover_author_bio') or '').strip() else ''
         if label:
@@ -1846,6 +1983,11 @@ def _spine_layout(title, author, font, w, h):
             if with_author:
                 aa, ad = _depth(font, size * 0.62)
                 block += gap * size + aa + ad
+                # the byline runs along the spine as well: a long one at the
+                # title's 0.62 ran past both ends of the wrap
+                if stringWidth(author, font, size * 0.62) > h * 0.82:
+                    size -= 0.25
+                    continue
             if block <= room and stringWidth(title, font, size) <= h * 0.82:
                 return size
             size -= 0.25
@@ -1890,7 +2032,15 @@ def _paint_spine(canv, tpl, cf, meta, x0, y0, w, h, draw_text=True):
     canv.setFillColor(_pal_color(tpl, tpl.get('title', {}).get('color', 'gold')))
     _tracked_centre(canv, 0, tbase, title, cf['display'], tsize, 0.0)
     if asize:
-        canv.setFillColor(_pal_color(tpl, tpl.get('accent', {}).get('color', 'teal')))
+        acol = _pal_color(tpl, tpl.get('accent', {}).get('color', 'teal'))
+        # a template may colour its accent for a band on the front (dark on a
+        # gold band); on the spine's own ground that can all but vanish
+        pal = tpl.get('palette', {})
+        grounds = [_hex(pal[k]) for k in ('bg_top', 'bg_bottom')
+                   if isinstance(pal.get(k), str)]
+        if grounds and min(contrast(acol, g) for g in grounds) < 2.5:
+            acol = _pal_color(tpl, tpl.get('title', {}).get('color', 'gold'))
+        canv.setFillColor(acol)
         _tracked_centre(canv, 0, abase, author, cf['display'], asize, 0.0)
     canv.restoreState()
     return True
@@ -1978,7 +2128,7 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
         panel_meta.pop('cover_back_image', None)
         if not (meta.get('cover_jacket_blurb') or '').strip():
             panel_meta.pop('cover_blurb', None)
-    _paint_back_panel(c, tpl, cf, panel_meta, back_x, edge, pw, ph)
+    back_over = _paint_back_panel(c, tpl, cf, panel_meta, back_x, edge, pw, ph)
     drew_spine = _paint_spine(c, tpl, cf, meta, spine_x, edge, sp, ph, draw_text=draw_spine)
     art = _front_art(meta)
     # The front's art runs past the trim to the outer edge of the sheet — bleed,
@@ -1993,7 +2143,7 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
     else:
         _paint_background(c, tpl, front_x, edge, pw, ph, bleed=front_bleed)
         _paint_cover_front(c, tpl, cf, meta, front_x, edge, pw, ph, bleed=front_bleed)
-    overflow = []
+    overflow = ['back cover'] if back_over else []
     if flap:
         if _paint_flap(c, tpl, cf, meta, edge, edge, flap, ph, 'back'):
             overflow.append('back flap')
@@ -2009,6 +2159,7 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
     return {'wrap_w': round(g['wrap_w'], 3), 'wrap_h': round(g['wrap_h'], 3),
             'spine_w': round(g['spine_w'], 4), 'spine_text': bool(drew_spine),
             'overflow': overflow,
+            'glyphs_missing': cover_glyphs_missing(meta, cf),
             'binding': g['binding'], 'front': 'image' if art else 'designed',
             'wrap': round(g['wrap'], 4), 'hinge': round(g['hinge'], 4),
             'flap': round(g['flap'], 4), 'panel_w': round(g['panel_w'], 4)}
@@ -2060,7 +2211,11 @@ def wrap_geometry(dims):
         'wrap_w': 2 * edge + 2 * flap + 2 * pw + 2 * hinge + sp,
         'wrap_h': 2 * edge + ph,
         'back_x': back_x, 'spine_x': spine_x, 'front_x': spine_x + sp + hinge,
-        'spine_text': (pages is None or pages >= smin) and sp >= 0.10,
+        # type needs room inside the spine's own safe margins as well as the
+        # retailer's page minimum: a spine just over 0.10" passed here while
+        # its two margins left nothing for the painter to set
+        'spine_text': ((pages is None or pages >= smin)
+                       and sp >= max(0.10, 2 * WRAP_SPINE_SAFE + 0.05)),
     }
 
 
@@ -2335,8 +2490,15 @@ class SceneBreak(Flowable):
                 iw, ih = ir.getSize()
                 img_h = self.size
                 img_w = img_h * (iw / ih)
+                y = self.gap
+                if self.width and img_w > self.width:
+                    # a wide rule-like image: scaled to the measure and centred
+                    # in its line, never out into the margins and off the trim
+                    img_w = self.width
+                    img_h = img_w * (ih / iw)
+                    y = self.gap + (self.size - img_h) / 2.0
                 x = (self.width - img_w) / 2.0
-                self.canv.drawImage(ir, x, self.gap,
+                self.canv.drawImage(ir, x, y,
                                     width=img_w, height=img_h, mask='auto')
                 return
             except Exception:
@@ -2388,6 +2550,7 @@ class TocMarker(Flowable):
                 'idx':   self.idx,
                 'title': self.title,
                 'part':  self.part,
+                'label': self.label,
                 'page':  self.canv.getPageNumber(),
             })
         if isinstance(doc, BookDoc):
@@ -2451,6 +2614,19 @@ class HeadingPara(Paragraph):
     reads its tag; inside a column run the document never sees it (the run
     draws its own content), so there it reports as it is drawn."""
     _ts_in_columns = False
+
+    def split(self, availWidth, availHeight):
+        # the pieces ReportLab builds are new paragraphs: the first carries
+        # the tag on, or a heading split over a page left the contents, the
+        # bookmarks and the running head without it
+        parts = Paragraph.split(self, availWidth, availHeight)
+        if parts:
+            tag = getattr(self, '_ts_heading', None)
+            if tag is not None:
+                parts[0]._ts_heading = tag
+            for p in parts:
+                p._ts_in_columns = self._ts_in_columns
+        return parts
 
     def draw(self):
         Paragraph.draw(self)
@@ -2721,27 +2897,73 @@ class HRule(Flowable):
         c.line(0, y, self.width, y)
 
 
+_INITIAL_OPENERS = '"\'“‘„‚«‹([¿¡—–'
+_ENTITY_RE = re.compile(r'&(#\d+|#x[0-9a-fA-F]+|\w+);')
+
+
+def _split_initial(markup):
+    """(initial, rest) for a decorative opening: the initial is plain text (it
+    is drawn with drawString), the rest stays paragraph markup.
+
+    One code point used to be taken from escaped markup, so `<Wait>` gave the
+    cap `&` and printed `lt;Wait>`; an opening quote became the whole initial;
+    a combining accent was parted from its letter. The initial is now the
+    first character, unescaped, with any opening punctuation in front of it
+    and any combining marks after it."""
+    import html as _html, unicodedata as _ud
+    i, cap = 0, ''
+
+    def take():
+        nonlocal i
+        m = _ENTITY_RE.match(markup, i)
+        if m:
+            i = m.end()
+            return _html.unescape(m.group(0))
+        ch = markup[i]
+        i += 1
+        return ch
+
+    while i < len(markup):
+        ch = take()
+        cap += ch
+        if ch not in _INITIAL_OPENERS and not ch.isspace():
+            break
+    while i < len(markup):
+        m = _ENTITY_RE.match(markup, i)
+        nxt = _html.unescape(m.group(0)) if m else markup[i]
+        if not nxt or not all(_ud.combining(c) for c in nxt):
+            break
+        cap += take()
+    return _ud.normalize('NFC', cap.strip()), markup[i:]
+
+
 class DropCap(Flowable):
     """Sunken drop cap: first lines set beside the initial, rest flows below."""
-    def __init__(self, text, body_style, cap_font, lines=3, marks=()):
+    def __init__(self, text, body_style, cap_font, lines=3, marks=(), page_h=None):
         super().__init__()
+        self._page_h = page_h          # the text area's height: taller splits
         self.text, self.body, self.cap_font, self.lines = text, body_style, cap_font, lines
         self._marks = list(marks)      # its index and anchor markers, set at its top
-        self._cap = text[:1]
-        self._rest = text[1:].lstrip()
+        self._cap, self._rest = _split_initial(text)
+        self._rest = self._rest.lstrip()
 
     def wrap(self, availWidth, availHeight):
         leading = self.body.leading
         self.cap_size = leading * self.lines * 0.92
         cw = stringWidth(self._cap, self.cap_font, self.cap_size)
         self.cap_w = cw + self.body.fontSize * 0.16
+        # the lines beside the cap are not a page break, so widow and orphan
+        # control has no say there: it refused a two-plus-one split and the
+        # fallback set three lines in the room for two, over the heading above
         narrow = ParagraphStyle('beside', parent=self.body,
-                                leftIndent=self.cap_w, firstLineIndent=0)
+                                leftIndent=self.cap_w, firstLineIndent=0,
+                                allowWidows=1, allowOrphans=1)
         self._full = ParagraphStyle('below', parent=self.body, firstLineIndent=0)
         beside_h = leading * self.lines
         para = _P(self._rest, narrow)
         para.wrap(availWidth, availHeight)
         parts = para.split(availWidth, beside_h)
+        self._beside_h = beside_h
         if len(parts) == 2:
             self._beside, self._below = parts
             self._beside.wrap(availWidth, beside_h)
@@ -2750,10 +2972,31 @@ class DropCap(Flowable):
             self.height = beside_h + blh
         else:
             self._beside, self._below = para, None
-            self._beside.wrap(availWidth, availHeight)
+            _, ph = self._beside.wrap(availWidth, availHeight)
+            self._beside_h = max(beside_h, ph)
+            self.height = max(self.cap_size, self._beside_h)
+        if getattr(self, '_head_only', False) and self._below is not None:
+            self._below = None
             self.height = max(self.cap_size, beside_h)
         self.width = availWidth
         return (availWidth, self.height)
+
+    def split(self, availWidth, availHeight):
+        """The cap and the lines beside it, then the rest as a plain paragraph
+        that splits like any other: an opening paragraph taller than a page
+        could not be set at all."""
+        self.wrap(availWidth, availHeight)
+        if self._below is None:
+            return []
+        head_h = max(self.cap_size, self.body.leading * self.lines)
+        # as before, a drop cap that doesn't fit moves on whole (its link
+        # targets with it); only one taller than a page's text area is split
+        if head_h > availHeight or not self._page_h or self.height <= self._page_h:
+            return []
+        import copy as _copy
+        head = _copy.copy(self)
+        head._head_only = True
+        return [head, self._below]
 
     def draw(self):
         c = self.canv
@@ -2764,7 +3007,7 @@ class DropCap(Flowable):
         c.setFont(self.cap_font, self.cap_size)
         c.drawString(0, top - self.cap_size * 0.82, self._cap)
         if self._beside:
-            self._beside.drawOn(c, 0, top - leading * self.lines)
+            self._beside.drawOn(c, 0, top - self._beside_h)
         if self._below:
             c2 = self._below
             c2.drawOn(c, 0, top - leading * self.lines - c2.height)
@@ -3271,6 +3514,16 @@ class BookDoc(BaseDocTemplate):
             txt = self._running_head(recto)
             if rh.get('caps'):
                 txt = txt.upper()
+            # a long title or chapter name is cut at a word, with an ellipsis,
+            # to the text measure: it was centred whole and ran off the trim
+            if stringWidth(txt, self.head_font, rh['size']) > tw:
+                words = txt.split()
+                while len(words) > 1 and stringWidth(
+                        ' '.join(words) + '…', self.head_font, rh['size']) > tw:
+                    words.pop()
+                txt = ' '.join(words).rstrip(',;:.—–-') + '…'
+                while len(txt) > 1 and stringWidth(txt, self.head_font, rh['size']) > tw:
+                    txt = txt[:-2] + '…'
             canv.drawCentredString(cx, y, txt)
 
         self._draw_footnotes(canv, page)
@@ -3387,6 +3640,15 @@ def _esc_markup(text):
                 .replace('>', '&gt;'))
 
 
+def _num_label(fmt, n):
+    """A style's number format (`Chapter {n}`, `Part {n}`, `{n}.`) with the
+    number put in. It is the writer's plain text, not a Python format string:
+    a stray `{N}` or `{}` once raised KeyError and cost the build, so anything
+    but `{n}` (either case) prints as typed. Returns plain text: escape it."""
+    import re as _re
+    return _re.sub(r'\{[nN]\}', str(n), fmt or '')
+
+
 def _plain(text):
     """Strip ReportLab XML tags; leave XML entities (&amp; etc.) intact."""
     return _TAG_RE.sub('', text)
@@ -3458,11 +3720,14 @@ def _opening_para(text, st, preset, fonts, hyph=None):
         plain_h = _hyphenate_markup(plain, hyph) if hyph else plain
         # a drop cap can't split, so it sets its own markers: when it moves
         # on to the next page or column they go with it, not stay behind
+        trim, mar = preset['trim'], preset['margins']
         return [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
-                        lines=preset['chapter'].get('dropcap_lines', 3), marks=marks)]
+                        lines=preset['chapter'].get('dropcap_lines', 3), marks=marks,
+                        page_h=(trim['h'] - mar['top'] - mar['bottom']) * inch)]
     if style == 'raised_initial':
-        rest = _hyphenate_markup(plain[1:], hyph) if hyph else plain[1:]
-        return marks + [RaisedInitial(plain[:1], rest, st['first'], fonts['regular'])]
+        cap, rest = _split_initial(plain)
+        rest = _hyphenate_markup(rest, hyph) if hyph else rest
+        return marks + [RaisedInitial(cap, rest, st['first'], fonts['regular'])]
     if style == 'smallcaps_leadin':
         words = plain.split(' ')
         n     = preset['chapter'].get('leadin_words', 4)
@@ -3500,6 +3765,30 @@ def _ep_plain(markup):
 
 def _ep_dfont(fonts, dateline_style):
     return fonts['bold'] if dateline_style in ('bold', 'smallcaps') else fonts['italic']
+
+
+_NOTE_REF_RE = re.compile(
+    r'<a href="[^"]*"><super[^>]*>\d+</super></a>|<super[^>]*>\d+</super>')
+
+
+def _caps_keep_notes(markup):
+    """Markup as upper-case plain text, its note references kept as they are.
+
+    A telegram body and a small-caps table header are set in capitals with
+    the markup stripped, and that stripped the note's superscript and the
+    link the measuring pass finds it by: the marker and the footnote were
+    both lost. Entities are read back to characters first, so `&amp;` is not
+    upper-cased into `&AMP;`."""
+    import html as _html
+    out, pos = [], 0
+    def caps(t):
+        return _ep_esc(_html.unescape(_EP_TAG_RE.sub('', t)).upper())
+    for m in _NOTE_REF_RE.finditer(markup):
+        out.append(caps(markup[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(caps(markup[pos:]))
+    return ''.join(out)
 
 
 def _ep_esc(s):
@@ -3600,6 +3889,29 @@ def _render_journal_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
     return out
 
 
+class _TallRowTable(Table):
+    """A table that splits between rows, as ever, and inside a row only when it
+    must: a row refused once and refused again with as much room (a fresh page)
+    is taller than any page, and used to abort the build. Rows that merely
+    don't fit at a page's foot still go over whole."""
+    _ts_refused = None
+
+    def split(self, availWidth, availHeight):
+        parts = Table.split(self, availWidth, availHeight)
+        if parts:
+            return parts
+        if self._ts_refused is not None and availHeight >= self._ts_refused - 0.5:
+            self.splitInRow = 1
+            parts = Table.split(self, availWidth, availHeight)
+            self.splitInRow = 0
+            for p in parts:
+                p.splitInRow = 0
+            if parts:
+                return parts
+        self._ts_refused = availHeight
+        return []
+
+
 def _render_telegram_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
                             header_size, dateline_style):
     """Telegram: boxed with 'TELEGRAM' banner, Courier uppercase body."""
@@ -3630,9 +3942,9 @@ def _render_telegram_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
         rows.append([Paragraph(f'To: {_ep_esc(to_val.upper())}', meta_s)])
         n_hdr = 2
     for _, text in block_paras:
-        rows.append([Paragraph(_ep_esc(_ep_plain(text).upper()), body_s)])
+        rows.append([Paragraph(_caps_keep_notes(text), body_s)])
 
-    t = Table(rows, colWidths=[col_w])
+    t = _TallRowTable(rows, colWidths=[col_w])
     t.setStyle(TableStyle([
         ('BOX',          (0, 0),           (-1, -1),         1.0, _colors.Color(.3, .3, .3)),
         ('LINEBELOW',    (0, n_hdr - 1),   (0, n_hdr - 1),   0.5, _colors.Color(.4, .4, .4)),
@@ -3712,6 +4024,10 @@ def _render_redacted_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
     for _, text in block_paras:
         t = _hyphenate_markup(text, hyph) if hyph else text
         rows.append([Paragraph(t, body_s)])
+    if not rows:
+        # `~~~ redacted` closed at once, no banner: nothing to print (a Table
+        # with no rows is a ReportLab error, and it cost the whole build)
+        return []
 
     t_styles = [
         ('BOX',          (0, 0), (-1, -1), 1.0, _colors.Color(.2, .2, .2)),
@@ -3726,7 +4042,7 @@ def _render_redacted_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
             ('LINEBELOW',  (0, 0), (0, 0), 0.75,  _colors.Color(.2, .2, .2)),
         ]
 
-    tbl = Table(rows, colWidths=[col_w])
+    tbl = _TallRowTable(rows, colWidths=[col_w])
     tbl.setStyle(TableStyle(t_styles))
     return [Spacer(1, space), tbl, Spacer(1, space)]
 
@@ -4135,16 +4451,21 @@ def _render_figure_block(block_paras, attrs, preset, fonts, st, avail_w):
         # SideBreak('any') breaks only off a fresh page, so a plate straight
         # after another full-page figure doesn't leave an empty page between
         return [SideBreak('any'), BleedPlate(path, caption, src or '(no src)')]
+    # a caption too long to share the page with the picture runs on under it
+    # (its paragraphs split like any other); the picture keeps at least a
+    # third of the page rather than a negative height, which drew the caption
+    # from above the top of the page
+    room = max(text_h - cap_h, text_h / 3.0)
     if full:
         box_w = avail_w
-        max_h = text_h - cap_h
+        max_h = room
     else:
         try:
             frac = float(attrs.get('width', '') or fg.get('width', 0.8))
         except (TypeError, ValueError):
             frac = fg.get('width', 0.8)
         box_w = avail_w * max(0.05, min(1.0, frac))
-        max_h = (text_h - cap_h) * fg.get('max_height', 0.8)
+        max_h = room * fg.get('max_height', 0.8)
 
     w, h = _figure_size(path, box_w, max_h) if path else (box_w, box_w * 0.62)
     img = FigureImage(path, w, h, avail_w, align=align, label=src or '(no src)')
@@ -4235,8 +4556,8 @@ def _render_list_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=None
     )
     out = [Spacer(1, space)]
     for i, (_, text) in enumerate(block_paras):
-        marker = (lm.get('number_format', '{n}.').format(n=n + i) if numbered
-                  else bullet)
+        marker = _esc_markup(_num_label(lm.get('number_format', '{n}.'), n + i)
+                             if numbered else bullet)
         body = _hyphenate_markup(text, hyph) if hyph else text
         # a real tab would need tabstops; a fixed-width space keeps it simple
         out.append(Paragraph(f'{marker}<font size="{size}">&#160;&#160;</font>{body}',
@@ -4418,7 +4739,7 @@ def _render_table_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=Non
     # measurement and the render can't disagree
     def cell_text(text, is_head):
         if is_head and hstyle_name == 'smallcaps':
-            return _plain(text).upper()
+            return _caps_keep_notes(text)
         return text
 
     measured = [[(_plain(cell_text(t, header and r == 0)),
@@ -4451,7 +4772,7 @@ def _render_table_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=Non
             line.append(cls(body, cell_style(c, is_head)))
         data.append(line)
 
-    tbl = Table(data, colWidths=widths, repeatRows=1 if header else 0,
+    tbl = _TallRowTable(data, colWidths=widths, repeatRows=1 if header else 0,
                 hAlign=tm.get('align', 'CENTER').upper())
     style = [
         ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
@@ -5309,6 +5630,7 @@ def _endnotes_page(chapters, fonts, st, preset):
     """Flowables for the Notes back-matter page, grouped by chapter."""
     em      = preset.get('endnotes', {})
     heading = em.get('heading', 'Notes')
+    _numbers = _ms_numbers(chapters)
     size    = em.get('font_size', 0) or (st['body'].fontSize - 1.0)
     lead    = size * em.get('line_leading', 1.35)
     indent  = em.get('indent', 0.3) * inch
@@ -5324,14 +5646,17 @@ def _endnotes_page(chapters, fonts, st, preset):
         leftIndent=indent, firstLineIndent=-indent,     # hanging number
         spaceBefore=0, spaceAfter=em.get('entry_gap', 3.0))
 
-    out = [BlankMarker(), Paragraph(heading, st['chap_title']),
+    out = [BlankMarker(), Paragraph(_esc_markup(heading), st['chap_title']),
            Spacer(1, 0.3 * inch)]
     for i, ch in enumerate(chapters, start=1):
         notes = ch.get('notes') or []
         if not notes:
             continue
         if em.get('group_by_chapter', True):
-            label = ch.get('title') or f'Chapter {i}'
+            num = _numbers[i - 1]
+            label = ch.get('title') or (
+                _num_label(preset['chapter'].get('number_format', 'Chapter {n}'), num)
+                if num is not None else f'Chapter {i}')
             out.append(Paragraph(_esc_markup(label), head_style))
         for note in notes:
             body = (_note_text_markers(note['text'], i,
@@ -5578,8 +5903,23 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body', unlink=Non
     caught here as well or the whole PDF dies on the front matter.
     """
     # Split on blank lines into raw paragraph strings
-    blocks = [' '.join(l.strip() for l in b.split('\n') if l.strip()).strip()
-              for b in text.replace('\r\n', '\n').split('\n\n')]
+    raw = [[l.strip() for l in b.split('\n') if l.strip()]
+           for b in text.replace('\r\n', '\n').split('\n\n')]
+    _attr = ('—', '–', '--', '-')
+    if style == 'also_by':
+        # one title per line, as the field asks, blank line or not
+        raw = [[l] for b in raw for l in b]
+    elif style == 'epigraph':
+        # a last line starting with a dash is the source, set as its own line
+        # (it was run on into the quotation unless a blank line came first)
+        split = []
+        for b in raw:
+            if len(b) > 1 and b[-1].startswith(_attr):
+                split += [b[:-1], b[-1:]]
+            else:
+                split.append(b)
+        raw = split
+    blocks = [' '.join(b).strip() for b in raw]
     blocks = [b for b in blocks if b]
     # the heading is plain text and may carry the author's name ("Also by …")
     heading = _esc_markup(heading or '')
@@ -5612,7 +5952,6 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body', unlink=Non
             out.append(Spacer(1, 0.35 * inch))
         else:
             out.append(Spacer(1, 2.2 * inch))
-        _attr = ('—', '–', '--', '-')
         for i, b in enumerate(blocks):
             nxt = blocks[i + 1] if i + 1 < len(blocks) else ''
             # last block, or the one before another block's source line
@@ -5815,14 +6154,15 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             sink_pts = pd.get('sink', 0.38) * text_h
             story.append(Spacer(1, sink_pts))
             if pd.get('show_number', True):
-                label = pd.get('number_format', 'Part {n}').format(n=ch_part_num)
-                story.append(Paragraph(label, st['part_num']))
+                label = _num_label(pd.get('number_format', 'Part {n}'), ch_part_num)
+                story.append(Paragraph(_esc_markup(label), st['part_num']))
                 story.append(Spacer(1, 0.15 * inch))
             if ch_part.get('title'):
                 # titles are plain text: `The <Tide>` prints as written
                 story.append(Paragraph(_esc_markup(ch_part['title']), st['part_title']))
-            story.append(OutlineMarker(
-                ch_part.get('title') or pd.get('number_format', 'Part {n}').format(n=ch_part_num)))
+            story.append(OutlineMarker(_esc_markup(
+                ch_part.get('title') or _num_label(pd.get('number_format', 'Part {n}'),
+                                                   ch_part_num))))
             current_part_num = ch_part_num
             need_break = True
 
@@ -5834,10 +6174,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         need_break = True
 
         _label = ch.get('title') or (
-            c.get('number_format', 'Chapter {n}').format(n=_numbers[idx - 1])
+            _num_label(c.get('number_format', 'Chapter {n}'), _numbers[idx - 1])
             if _numbers[idx - 1] is not None else '')
         _toc_at = len(story)
-        story.append(TocMarker(idx, ch.get('title'), ch.get('part'), label=_label))
+        story.append(TocMarker(idx, ch.get('title'), ch.get('part'),
+                               label=_esc_markup(_label)))
         # chapter-opening art: over the number, or under the title/byline
         art = _chapter_art(preset, avail_w, text_h)
         art_pos = chapter_art_position(preset)
@@ -5857,15 +6198,29 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             if _anchors[idx - 1]:
                 story.append(AnchorMark(_anchors[idx - 1]))
         else:
-            story.append(Spacer(1, c['sink'] * inch))
+            # never sink the opener so deep that its first line can't follow
+            # on the same page: the number moved over alone, and the page left
+            # behind - empty - was the one the contents and folios called the
+            # opener
+            need = 0.0
+            if c.get('show_number', True) and _numbers[idx - 1] is not None:
+                need += st['chap_num'].leading + 0.12 * inch
+            if ch['title']:
+                need += st['chap_title'].leading
+            # (a sink deeper than the page itself is still refused outright:
+            # that style can't be set, and the preview says so)
+            sink = c['sink'] * inch
+            if sink < text_h:
+                sink = max(0.0, min(sink, text_h - need - 2.0))
+            story.append(Spacer(1, sink))
         if art and art_pos == 'above':
             story.extend(art)
         # Destinations for in-book links: `[see](#chapter-2)` or the title's slug.
         anchors = '' if bare else ''.join(_anchor_tag(a) for a in _anchors[idx - 1])
         heading_names = targets['headings'][idx - 1]
         if c.get('show_number', True) and _numbers[idx - 1] is not None:
-            label = c.get('number_format', 'Chapter {n}').format(n=_numbers[idx - 1])
-            story.append(Paragraph(anchors + label, st['chap_num']))
+            label = _num_label(c.get('number_format', 'Chapter {n}'), _numbers[idx - 1])
+            story.append(Paragraph(anchors + _esc_markup(label), st['chap_num']))
             anchors = ''
             story.append(Spacer(1, 0.12 * inch))
         if ch['title']:
@@ -5970,7 +6325,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             and preset.get('endnotes', {}).get('placement', 'end') != 'foot'):
         story.append(RectoBreak() if rhs else PageBreak())
         _bm_first = False
-        story.append(RunningHeadMarker(preset.get('endnotes', {}).get('heading', 'Notes')))
+        story.append(RunningHeadMarker(_esc_markup(
+            preset.get('endnotes', {}).get('heading', 'Notes'))))
         story.extend(_endnotes_page(manuscript['chapters'], fonts, st, preset))
 
     for _sec in _matter.present(meta, 'back'):
@@ -6049,7 +6405,10 @@ def _build_toc(entries, body_start, avail_w, preset, fonts, st):
             last_part = part
 
         # Chapter line with dot leaders
-        label    = e.get('title') or num_fmt.format(n=e['idx'])
+        # the opener's own label: an untitled chapter after an unnumbered
+        # prologue is Chapter 1 here too, not its position in the book
+        label    = (e.get('title') or _outline_text(e.get('label') or '')
+                    or _num_label(num_fmt, e['idx']))
         folio_s  = str(folio)
         lw       = stringWidth(label + '  ',  font, size)
         fw       = stringWidth('  ' + folio_s, font, size)
@@ -6161,6 +6520,32 @@ _RGB_OP_RE = re.compile(r'(?<![A-Za-z/])(rg|RG)(?![A-Za-z])')
 
 
 _RGB_BLACK_RE = re.compile(r'(?<![\d.])0 0 0 (rg|RG)(?![A-Za-z])')
+
+
+def unembedded_fonts(path):
+    """Names of the fonts a built PDF uses without embedding them, read off
+    the file (None if PyMuPDF isn't installed). The body face loading was taken
+    to mean every face was embedded, but a telegram is set in the standard
+    Courier, which never is."""
+    try:
+        import fitz
+    except ImportError:
+        return None
+    names = set()
+    with fitz.open(path) as doc:
+        for page in doc:
+            loose = {f[3].split('+')[-1] for f in page.get_fonts()
+                     if f[1] in ('n/a', '') and f[3]}
+            if not loose:
+                continue
+            # ReportLab declares Helvetica on every page as its starting font,
+            # used or not: only a face some text is actually set in counts
+            for b in page.get_text('dict')['blocks']:
+                for ln in b.get('lines', []):
+                    for sp in ln['spans']:
+                        if sp['font'] in loose and sp['text'].strip():
+                            names.add(sp['font'])
+    return sorted(names)
 
 
 def rgb_usage(path):
@@ -6613,7 +6998,32 @@ def _resolve_inbook_links(chapters):
     def fix(text, _ch):
         return _unlink_dead(text, known, dead)
 
-    return _ms_map_texts(chapters, fix), dead
+    out = _ms_map_texts(chapters, fix)
+    # The block walk above covers what a chapter prints in its body; the note
+    # definitions (already inlined) and a block's own attributes (a quote's
+    # source, a table's caption: still raw Markdown, inlined when the block
+    # is drawn) print too, and one dead link there failed the whole save.
+    def raw_fix(m):
+        target = m.group(2)
+        if not target.startswith('#') or target[1:] in known:
+            return m.group(0)
+        dead.append(target)
+        return m.group(1)
+
+    for ch in out:
+        if ch.get('notes'):
+            ch['notes'] = [dict(n, text=_unlink_dead(n.get('text') or '', known, dead))
+                           for n in ch['notes']]
+        blocks = ch.get('blocks') or []
+        for i, b in enumerate(blocks):
+            if b[0] != 'doc_block' or len(b) < 3 or not isinstance(b[2], dict):
+                continue
+            attrs = b[2]
+            new = {k: (_MS_LINK_RE.sub(raw_fix, v) if isinstance(v, str) and '](#' in v else v)
+                   for k, v in attrs.items()}
+            if new != attrs:
+                blocks[i] = b[:2] + (new,) + tuple(b[3:])
+    return out, dead
 
 
 def _coverless(meta):
@@ -6902,8 +7312,15 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             os.remove(cover_path)
         except OSError:
             pass
+    try:
+        unembedded = unembedded_fonts(out_path) or []
+    except Exception:                       # a check, never a reason to fail
+        unembedded = []
     return {
         'page_count':     page_count,
+        # the pages a printer binds: the cover page a proof opens with is the
+        # cover's own file at the printer, not a leaf of the book
+        'interior_pages': max(page_count - (1 if cover else 0), 0),
         'notes_unplaced': len(set(unplaced_notes)),
         # the page references or the index still moved on the last pass
         'refs_unsettled': unsettled,
@@ -6911,12 +7328,24 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         'font_family':    fonts['family'],
         'font_fallback':  fonts['fallback'],
         'font_details':   fonts['details'],
-        'fonts_embedded': not fonts['fallback'],
+        'fonts_embedded': not fonts['fallback'] and not unembedded,
+        'fonts_unembedded': unembedded or [],
         'figures_missing': figures_missing(manuscript, preset),
         'scene_image_missing': scene_image_missing(preset),
+        # a page background printed only with bleed (or on screen): its
+        # picture gone or unreadable leaves the colour, or white, unannounced
+        'page_background_missing': (
+            page_background_src(preset)
+            if (bleed_on or screen) and page_background_src(preset)
+            and page_background_src(preset) != PARCHMENT
+            and (not _figure_asset_path(page_background_src(preset))
+                 or picture_unreadable(_figure_asset_path(page_background_src(preset))))
+            else ''),
         'cover_template_gone': (meta.get('cover_template') or '?')
                                if meta.get('cover_mode') == 'designed'
                                and not meta.get('cover_template_data') else '',
+        'cover_glyphs_missing': (cover_glyphs_missing(meta, cover['fonts'])
+                                 if cover and cover.get('mode') == 'designed' else ''),
         'cover_fonts_missing': cover_fonts_missing(cover['template'])
                                if cover and cover.get('mode') == 'designed' else [],
         'cover_art_missing': cover_art_missing(cover['template'])
@@ -6933,6 +7362,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         # design for, and, in a print book without bleed, the ones placed
         # (each printed to the trim, so a cut that wanders shows white)
         'pages_missing':  pages_missing(manuscript, meta),
+        'pages_incomplete': pages_incomplete(manuscript, meta),
         'pages_bleed_wanted': [] if (bleed_on or screen) else
                               pages_to_edge(manuscript, meta, preset),
         # a picture book (#75b-2): its own page-count check, and the spreads
@@ -6965,6 +7395,23 @@ def pages_to_edge(ms, meta, preset):
         d = wrap_design.find_page(meta.get('page_designs') or [], name)
         if d is not None and name not in out                 and wrap_design.reaches_edge(d, wrap_design.design_geometry(d, tw, th)):
             out.append(name)
+    return out
+
+
+def pages_incomplete(ms, meta):
+    """[(design name, what, [names])] for each page design the book places that
+    prints without part of itself: a text box whose font has left the library
+    is skipped, a picture whose file has gone likewise. The design was there,
+    so the page passed - and printed without its text."""
+    import wrap_design
+    out, seen = [], set()
+    for name in page_blocks(ms):
+        d = wrap_design.find_page(meta.get('page_designs') or [], name)
+        if d is None or name in seen:
+            continue
+        seen.add(name)
+        for what, names in wrap_design.missing(d):
+            out.append((name, what, names))
     return out
 
 

@@ -175,6 +175,8 @@ def large_print_tests():
     C.post(f'/save/{new_id}', data=form)
     check('saved unchanged in the editor, it keeps it',
           A.load_preset(new_id).get('min_text_size') == 16, A.load_preset(new_id).get('min_text_size'))
+    # a save leaves the editor; a second save starts from a fresh page
+    form['version'] = A._style_version(new_id)
     form['min_text_size'] = '0'
     C.post(f'/save/{new_id}', data=form)
     check('set to 0, it is gone', 'min_text_size' not in A.load_preset(new_id))
