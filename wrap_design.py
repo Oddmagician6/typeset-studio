@@ -341,7 +341,7 @@ def draw_elements(c, design, g, H, live=None):
             draw_vector(c, el, X, Ytop, w * inch, h * inch)
         elif kind == 'field' and w > 0 and h > 0:
             draw_field(c, el, X, Ytop, w * inch, h * inch,
-                       bool(live and live(x, y, w, h)), alpha)
+                       (live(x, y, w, h) or False) if live else False, alpha)
         elif kind == 'text' and font_file(el.get('font')):
             layout = text_layout(el)
             lines[el.get('id', '')] = [ln for ln, _, _, _ in layout]
@@ -436,7 +436,8 @@ def _hex(col, dflt):
 
 def draw_field(c, el, X, Ytop, bw, bh, live, alpha=1.0):
     """A fillable box at (X, Ytop) in points, `bw` by `bh`: its printed look,
-    then, when `live`, the form field over it."""
+    then, when `live`, the form field over it (cut to the span `live` gives,
+    when it is a (left, right) pair in inches)."""
     kind = field_kind(el)
     if kind == 'check':
         bw = bh = min(bw, bh)
@@ -453,7 +454,11 @@ def draw_field(c, el, X, Ytop, bw, bh, live, alpha=1.0):
         else:
             c.rect(X + sw / 2.0, Ytop - bh + sw / 2.0, bw - sw, bh - sw, stroke=1, fill=0)
     if live:
-        add_live_field(c, el, X, Ytop - bh, bw, bh)
+        x0, x1 = X, X + bw
+        if isinstance(live, tuple):            # a spread's page: (left, right) in inches
+            x0, x1 = max(x0, live[0] * inch), min(x1, live[1] * inch)
+        if x1 - x0 > 0.5:
+            add_live_field(c, el, x0, Ytop - bh, x1 - x0, bh)
 
 
 def add_live_field(c, el, x, y, w, h):
@@ -465,8 +470,17 @@ def add_live_field(c, el, x, y, w, h):
     kind = field_kind(el)
     name = field_name(el)
     reg = c.__dict__.setdefault('_ts_fields', {})
-    if name in reg and reg[name]['check'] != (kind == 'check'):
-        name = f'{name} ({"tick" if kind == "check" else "text"})'[:FIELD_NAME_MAX + 8]
+    want = kind == 'check'
+    if name in reg and reg[name]['check'] != want:
+        # the other kind has this name: take "Name (tick)", or "(tick 2)" if
+        # that too is a field of the other kind (a writer may have used it)
+        tag, n = 'tick' if want else 'text', 1
+        while True:
+            alt = f'{name} ({tag}{"" if n == 1 else f" {n}"})'
+            if alt not in reg or reg[alt]['check'] == want:
+                break
+            n += 1
+        name = alt
     form = c.acroForm
     got = []
     add_annot = c._addAnnotation
@@ -1071,10 +1085,12 @@ def on_half(g, half):
     on a single page)."""
     if not half:
         return lambda x, y, w, h: True
+    # on a spread the answer is the page's span across the sheet (inches), so
+    # a box over the fold gets a field cut at the fold, not one off the page
     fold = g['spine_x']
     if half == 'left':
-        return lambda x, y, w, h: x + w / 2.0 < fold
-    return lambda x, y, w, h: x + w / 2.0 >= fold
+        return lambda x, y, w, h: (float('-inf'), fold) if x + w / 2.0 < fold else False
+    return lambda x, y, w, h: (fold, float('inf')) if x + w / 2.0 >= fold else False
 
 
 def build_sheet_pdf(design, trim_w, trim_h, out_path, title=''):

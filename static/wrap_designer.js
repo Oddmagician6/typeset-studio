@@ -1130,8 +1130,17 @@
     render();
   });
   $('wd-add-field').addEventListener('click', function () {
-    var n = design.elements.filter(function (e) { return e.type === 'field'; }).length + 1;
-    addEl({type:'field', kind:'line', name:'Field ' + n, anchor:'front', x:1, y:1 + 0.5 * ((n - 1) % 12),
+    var fields = design.elements.filter(function (e) { return e.type === 'field'; });
+    var n = fields.length + 1;
+    // a name no box has yet: after a delete, "Field <count + 1>" may be taken,
+    // and two boxes of one name share one value in the PDF
+    var taken = {};
+    fields.forEach(function (e) {
+      taken[String(e.name || '').replace(/\./g, ' ').split(/\s+/).join(' ').trim()] = true;
+    });
+    var k = n;
+    while (taken['Field ' + k]) k++;
+    addEl({type:'field', kind:'line', name:'Field ' + k, anchor:'front', x:1, y:1 + 0.5 * ((n - 1) % 12),
            w:2.5, h:0.3, look:'underline', color:'#000000', stroke_w:0.75, face:'sans', size:10, ink:'#000000'});
     render();
   });
