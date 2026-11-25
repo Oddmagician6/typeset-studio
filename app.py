@@ -500,7 +500,8 @@ def _fetch_json(url, timeout=6):
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         if getattr(resp, 'status', 200) != 200:
             return None
-        return json.loads(resp.read(200_000).decode('utf-8', 'replace'))
+        # a whole release list, notes and all: 200 KB cut a valid feed short
+        return json.loads(resp.read(5_000_000).decode('utf-8', 'replace'))
 
 
 def _pick_release(data):
@@ -515,13 +516,20 @@ def _pick_release(data):
     releases page rather than handed to the UI.
     """
     entries = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
+    # A feed that names this app's releases by prefix is a shared one: there a
+    # bare `v9.0.0` belongs to some other product. Only a feed with no prefixed
+    # tag at all (a repo of this app alone) is read by bare tags.
+    def _tag(item):
+        return str(item.get('tag_name') or item.get('version') or '').strip()
+    prefixed = any(isinstance(i, dict) and re.match(r'typeset[-_ ]?studio', _tag(i), re.I)
+                   for i in entries)
     best = None
     for item in entries:
         if not isinstance(item, dict) or item.get('draft') or item.get('prerelease'):
             continue
-        tag = str(item.get('tag_name') or item.get('version') or '').strip()
+        tag = _tag(item)
         m = UPDATE_TAG_RE.match(tag)
-        if not m:
+        if not m or (prefixed and not re.match(r'typeset', tag, re.I)):
             continue
         version = m.group(1)
         url = str(item.get('html_url') or item.get('url') or UPDATE_PAGE)
@@ -553,16 +561,25 @@ def check_for_update(force=False, fetch=None):
     found = _pick_release(data)
     with _SETTINGS_LOCK:
         settings = load_settings()
+        if not force and not settings.get('update_check', UPDATE_CHECK_DEFAULT):
+            # turned off while the request was out: off forgets, so this
+            # answer must not be written back after the toggle cleared it
+            return None
         if not found:
             # remembered, or every page asked again (and waited) while offline
             settings['update_failed_at'] = time.time()
+        else:
+            settings.update({'update_checked_at': time.time(), 'update_latest': found[0],
+                             'update_url': found[1]})
+            settings.pop('update_failed_at', None)
+        try:
             save_settings(settings)
-            return None
-        latest, url = found
-        settings.update({'update_checked_at': time.time(), 'update_latest': latest,
-                         'update_url': url})
-        settings.pop('update_failed_at', None)
-        save_settings(settings)
+        except OSError:
+            # a full or locked settings folder: the answer still stands
+            logging.warning('Could not save the update check result', exc_info=True)
+    if not found:
+        return None
+    latest, url = found
     return {'version': latest, 'url': url, 'newer': is_newer(latest)}
 
 
@@ -573,7 +590,11 @@ def _update_due():
         failed = float(settings.get('update_failed_at') or 0)
     except (TypeError, ValueError):
         checked = failed = 0
-    return now - checked >= UPDATE_INTERVAL and now - failed >= UPDATE_RETRY
+    if failed > checked:
+        # the last attempt failed: retry an hour after it, whenever the last
+        # success was (a failed Check now must not wait out the day)
+        return now - failed >= UPDATE_RETRY
+    return now - checked >= UPDATE_INTERVAL
 
 
 def cached_update():
@@ -673,10 +694,16 @@ def _seed_defaults():
         for fn in os.listdir(src):
             s, d = os.path.join(src, fn), os.path.join(dst, fn)
             if os.path.isfile(s) and not os.path.exists(d) and fn not in skip:
+                # copied under a temporary name and renamed into place, so a
+                # start interrupted mid-copy leaves no half a font or style
+                # that every later start would take as already there
+                tmp = d + '.seeding'
                 try:
-                    shutil.copy2(s, d)
+                    shutil.copy2(s, tmp)
+                    os.replace(tmp, d)
                 except OSError:
-                    pass
+                    with contextlib.suppress(OSError):
+                        os.remove(tmp)
 
 
 _seed_defaults()
@@ -700,6 +727,19 @@ app.secret_key = 'typeset-studio-local'
 # quotes - past which every save was refused. One writer on their own
 # machine; the cap only has to stop a runaway request.
 app.config['MAX_FORM_MEMORY_SIZE'] = 64 * 1024 * 1024
+
+
+@app.url_value_preprocessor
+def _canonical_pid(endpoint, values):
+    """Every route sees a book or preset id in the one form its files use.
+
+    Lookups always went through `secure_filename`, but some writes built a
+    path from the id as it arrived - so on Windows `..\\x` found the book `x`
+    and then wrote outside its folder. Canonicalising here means no route can
+    find a book under one name and write under another.
+    """
+    if values and isinstance(values.get('pid'), str):
+        values['pid'] = secure_filename(values['pid'])
 
 
 def issue_rows(rows):
@@ -853,6 +893,22 @@ for _rid, _rc in WRAP_RETAILERS.items():
 _KDP_HARDCOVER_TRIMS = [(5.5, 8.5), (6.0, 9.0), (6.14, 9.21), (7.0, 10.0), (8.25, 11.0)]
 _KDP_HARDCOVER_PAGES = (75, 550)
 
+# KDP paperback page ranges by paper, for a regular trim and a large one (wider
+# than 6.12" or taller than 9"), from KDP's trim-size table. Standard colour is
+# the one stock with a higher minimum; the large-trim maxima are its 8.5x11 row.
+_KDP_PAPERBACK_PAGES = {
+    'white':          ((24, 828), (24, 590)),
+    'cream':          ((24, 776), (24, 550)),
+    'color':          ((24, 828), (24, 590)),
+    'color_standard': ((72, 600), (72, 600)),
+}
+
+
+def kdp_page_range(paper, trim_w, trim_h):
+    """(min, max) pages KDP prints a paperback in, on this paper at this trim."""
+    small, large = _KDP_PAPERBACK_PAGES.get(paper or 'white', _KDP_PAPERBACK_PAGES['white'])
+    return large if (trim_w > 6.12 + 1e-6 or trim_h > 9.0 + 1e-6) else small
+
 
 def _min_inside(pages, table):
     for lo, hi, m in table:
@@ -894,8 +950,11 @@ def _missing_checks(figures=(), cover_fonts=(), design_missing=(), template_gone
     return out
 
 
-def _preflight(build_result, preset, page_count):
-    """Return a list of preflight check dicts: {label, ok, detail}."""
+def _preflight(build_result, preset, page_count, paper=None):
+    """Return a list of preflight check dicts: {label, ok, detail}.
+
+    `paper` is the print paper picked under Send to print; KDP's page range
+    depends on it (Standard colour starts at 72 pages)."""
     checks = []
     requested = preset.get('font_family', 'Book')
 
@@ -997,12 +1056,22 @@ def _preflight(build_result, preset, page_count):
                        'of the book has no later page to continue on. Shorten it, or '
                        'set the style to put notes at the back')})
 
+    if build_result.get('refs_unsettled'):
+        checks.append({
+            'label': 'Page references', 'ok': False,
+            'detail': ('The page numbers in the text or the index were still moving when the '
+                       'build stopped re-setting the book, so one may be a page out. Rewording '
+                       'a line near a page break usually settles it — build again to check')})
+
     if page_count:
-        kdp_ok = 24 <= page_count <= 828
+        trim = preset.get('trim') or {}
+        lo, hi = kdp_page_range(paper, trim.get('w', 6.0), trim.get('h', 9.0))
+        on = (f' on {_PAPER[paper]["label"]} paper' if paper in _PAPER else '')
+        kdp_ok = lo <= page_count <= hi
         checks.append({'label': 'Page count', 'ok': kdp_ok,
-                       'detail': (f'{page_count} pages — within KDP range (24–828)'
+                       'detail': (f'{page_count} pages — within KDP range{on} ({lo}–{hi})'
                                   if kdp_ok else
-                                  f'{page_count} pages — outside KDP range (24–828)')})
+                                  f'{page_count} pages — outside KDP range{on} ({lo}–{hi})')})
 
     return checks
 
@@ -1017,7 +1086,10 @@ def _epubcheck_jar():
     env = os.environ.get('EPUBCHECK_JAR', '').strip()
     if env and os.path.exists(env):
         return env
-    for base in (DATA_DIR, HERE):
+    # beside the program is where the README says to put it; in an installed
+    # build that is the .exe's folder, not the bundle's _internal one
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable)) if IS_FROZEN else HERE
+    for base in (DATA_DIR, exe_dir, HERE):
         p = os.path.join(base, 'epubcheck.jar')
         if os.path.exists(p):
             return p
@@ -1299,10 +1371,17 @@ def _slug_or_blank(name):
     if len(slug) > SLUG_MAX:
         cut = slug[:SLUG_MAX + 1]
         slug = (cut.rsplit('-', 1)[0] if '-' in cut[SLUG_MAX // 2:] else cut[:SLUG_MAX])
-    return slug.strip('-')
+    slug = slug.strip('-')
+    # Windows will not open a file named for a device, extension or not: a book
+    # titled "Con" lost its EPUB (con.epub) from a publish package
+    if slug in _WIN_RESERVED:
+        slug += '-book'
+    return slug
 
 
 SLUG_MAX = 60
+_WIN_RESERVED = {'con', 'prn', 'aux', 'nul', *(f'com{i}' for i in range(10)),
+                 *(f'lpt{i}' for i in range(10))}
 
 
 def slugify(name):
@@ -1527,9 +1606,14 @@ def list_projects():
     for fn in sorted(os.listdir(PROJECT_DIR)):
         if fn.endswith('.json'):
             try:
-                data = upgrade_project(read_book(os.path.join(PROJECT_DIR, fn)))
+                data = read_book(os.path.join(PROJECT_DIR, fn))
             except (OSError, DamagedFile):
                 continue
+            try:
+                data = upgrade_project(data)
+            except Exception:
+                # one book's odd design must not take the whole shelf down
+                logging.error('Upgrading %s failed: %s', fn, traceback.format_exc())
             items.append({'id': fn[:-5], 'data': data})
     return sorted(items, key=lambda x: str(x['data'].get('updated') or ''), reverse=True)
 
@@ -1566,6 +1650,7 @@ def save_project_file(pid, data):
     # that no page could open
     with _PROJECT_LOCK:
         _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
+        _RESERVED_IDS.discard(secure_filename(pid))   # its file holds the id now
 
 
 def update_project(pid, changes):
@@ -1622,18 +1707,26 @@ def _ids_in(folder, ext='.json'):
         return set()
 
 
+# ids handed out but not saved yet: two books made at once under one name
+# both picked the free id, copied into one manuscript path and saved one record
+_RESERVED_IDS = set()
+
+
 def unique_project_id(base):
     pid, n = base, 2
-    # a history folder left by a book deleted before 1.3.1 would otherwise be
-    # handed to the next book of that name, and its Restore offer the old text
-    try:
-        leftovers = set(os.listdir(HISTORY_DIR))
-    except OSError:
-        leftovers = set()
-    existing = {i['id'] for i in list_projects()} | _ids_in(PROJECT_DIR) | leftovers
-    while pid in existing:
-        pid = f'{base}-{n}'
-        n += 1
+    with _PROJECT_LOCK:
+        # a history folder left by a book deleted before 1.3.1 would otherwise be
+        # handed to the next book of that name, and its Restore offer the old text
+        try:
+            leftovers = set(os.listdir(HISTORY_DIR))
+        except OSError:
+            leftovers = set()
+        existing = ({i['id'] for i in list_projects()} | _ids_in(PROJECT_DIR) | leftovers
+                    | _RESERVED_IDS)
+        while pid in existing:
+            pid = f'{base}-{n}'
+            n += 1
+        _RESERVED_IDS.add(pid)       # held until the book is saved
     return pid
 
 
@@ -1643,6 +1736,14 @@ def _f(form, key, default):
     except (TypeError, ValueError):
         return default
     return v if math.isfinite(v) else default      # NaN would be written as JSON
+
+
+def _fsize(form, key, default):
+    """A type size from the cover editor: a size of 0 or less draws nothing and
+    broke the classic frame's shrink-to-fit (it scales by the size), so it falls
+    back to the template's own."""
+    v = _f(form, key, default)
+    return v if v > 0 else default
 
 
 # What each style number may be. The editor's page can't hold these back (its
@@ -2046,7 +2147,43 @@ def parse_cover_form(form):
     base = _json_field(form, 'base_json')
     if base is None:
         base = {'photo': _json_field(form, 'photo_json') or {}}
-    return _overlay(base, _cover_fields(form))
+    out = _overlay(base, _cover_fields(form))
+    _title_to_family(base, out)
+    return out
+
+
+def _title_to_family(base, out):
+    """Carry a change to the editor's Title size, leading and position into a
+    design family's own title settings (`typo.title_size` and the like), which
+    that family draws from instead: the Title fields did nothing on those
+    templates. Leading is points in the editor and a ratio of the size in a
+    family, so each change goes over as the ratio (or, for the position, the
+    shift) that it made."""
+    old, new = base.get('title') or {}, out.get('title') or {}
+    if not isinstance(old, dict):
+        return
+    for key in ('typo', 'photo', 'vintage'):
+        fam = out.get(key)
+        if not isinstance(fam, dict):
+            continue
+        fam = out[key] = dict(fam)
+        o_size, n_size = old.get('size'), new.get('size')
+        if 'title_size' in fam and o_size and n_size and o_size != n_size:
+            fam['title_size'] = round(_num_or(fam['title_size'], o_size) * n_size / o_size, 2)
+        o_lead, n_lead = old.get('leading'), new.get('leading')
+        if 'title_leading' in fam and o_lead and n_lead and o_lead != n_lead:
+            fam['title_leading'] = round(_num_or(fam['title_leading'], 1.0) * n_lead / o_lead, 3)
+        o_y, n_y = old.get('y'), new.get('y')
+        if 'title_top' in fam and o_y is not None and n_y is not None and o_y != n_y:
+            fam['title_top'] = round(min(max(_num_or(fam['title_top'], o_y) + n_y - o_y, 0.0), 1.0), 4)
+
+
+def _num_or(v, default):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) else default
 
 
 def _cover_fields(form):
@@ -2077,41 +2214,41 @@ def _cover_fields(form):
             'corner_line': _f(form, 'bd_corner_line', d['border']['corner_line']),
         },
         'collection': {
-            'size':     _f(form, 'col_size', d['collection']['size']),
+            'size':     _fsize(form, 'col_size', d['collection']['size']),
             'tracking': _f(form, 'col_tracking', d['collection']['tracking']),
             'color':    form.get('col_color', 'gold'),
             'top':      _f(form, 'col_top', d['collection']['top']),
             'bottom':   _f(form, 'col_bottom', d['collection']['bottom']),
         },
         'kicker': {
-            'size':     _f(form, 'kick_size', d['kicker']['size']),
+            'size':     _fsize(form, 'kick_size', d['kicker']['size']),
             'tracking': _f(form, 'kick_tracking', d['kicker']['tracking']),
             'color':    form.get('kick_color', 'muted'),
             'y':        _f(form, 'kick_y', d['kicker']['y']),
         },
         'title': {
-            'size':     _f(form, 'title_size', d['title']['size']),
+            'size':     _fsize(form, 'title_size', d['title']['size']),
             'leading':  _f(form, 'title_leading', d['title']['leading']),
             'tracking': _f(form, 'title_tracking', d['title']['tracking']),
             'color':    form.get('title_color', 'gold'),
             'y':        _f(form, 'title_y', d['title']['y']),
         },
         'accent': {
-            'size':     _f(form, 'acc_size', d['accent']['size']),
+            'size':     _fsize(form, 'acc_size', d['accent']['size']),
             'tracking': _f(form, 'acc_tracking', d['accent']['tracking']),
             'color':    form.get('acc_color', 'teal'),
             'gap':      _f(form, 'acc_gap', d['accent']['gap']),
         },
         'ornament': {
             'color':    form.get('orn_color', 'gold'),
-            'size':     _f(form, 'orn_size', d['ornament']['size']),
+            'size':     _fsize(form, 'orn_size', d['ornament']['size']),
             'spacing':  _f(form, 'orn_spacing', d['ornament']['spacing']),
             'rule':     _f(form, 'orn_rule', d['ornament']['rule']),
             'rule_len': _f(form, 'orn_rule_len', d['ornament']['rule_len']),
             'gap':      _f(form, 'orn_gap', d['ornament']['gap']),
         },
         'epigraph': {
-            'size':     _f(form, 'epi_size', d['epigraph']['size']),
+            'size':     _fsize(form, 'epi_size', d['epigraph']['size']),
             'leading':  _f(form, 'epi_leading', d['epigraph']['leading']),
             'tracking': _f(form, 'epi_tracking', d['epigraph']['tracking']),
             'color':    form.get('epi_color', 'muted'),
@@ -2119,7 +2256,7 @@ def _cover_fields(form):
             'top':      _f(form, 'epi_top', d['epigraph']['top']),
         },
         'studio': {
-            'size':     _f(form, 'std_size', d['studio']['size']),
+            'size':     _fsize(form, 'std_size', d['studio']['size']),
             'tracking': _f(form, 'std_tracking', d['studio']['tracking']),
             'color':    form.get('std_color', 'muted'),
             'y':        _f(form, 'std_y', d['studio']['y']),
@@ -2762,6 +2899,9 @@ def cover_thumb(cid):
 
 
 EPUB_COVER_H = 2560   # px; the long edge KDP asks for on an ebook cover
+# Apple Books refuses a cover over 5.6 megapixels: a square or landscape trim at
+# 2560 px tall is over it, so those come out a little smaller (a margin kept)
+EPUB_COVER_MAX_PX = 5_500_000
 
 
 def _cover_page_jpeg(preset, meta, jpg_path):
@@ -2786,14 +2926,18 @@ def _cover_page_jpeg(preset, meta, jpg_path):
             with Image.open(art) as im:
                 im.load()
         cover_meta = dict(meta)
+        # the cover is the trimmed page: an interior with bleed would widen it
         cover_meta.update(front_matter='none', include_toc=False,
-                          right_hand_starts=False)
+                          right_hand_starts=False, bleed=False)
         stub = manuscript.parse_markdown('# Cover\n\nCover.', smartquotes=False)
         engine.build_pdf(stub, preset, pdf_path, cover_meta)
 
         with fitz.open(pdf_path) as doc:
             page = doc[0]
-            scale = EPUB_COVER_H / page.rect.height if page.rect.height else 1.0
+            pw, ph = page.rect.width, page.rect.height
+            scale = EPUB_COVER_H / ph if ph else 1.0
+            if pw * ph * scale * scale > EPUB_COVER_MAX_PX:
+                scale = (EPUB_COVER_MAX_PX / (pw * ph)) ** 0.5
             png = page.get_pixmap(matrix=fitz.Matrix(scale, scale),
                                   alpha=False).tobytes('png')
         # JPEG, else a photographic-family cover makes a multi-megabyte ebook.
@@ -2986,12 +3130,19 @@ def cover_asset_upload():
     if ext not in IMAGE_EXTS:
         return jsonify({'ok': False, 'error': 'Use a .jpg or .png image.'})
     base = os.path.splitext(_safe_upload_name(f.filename, 'asset'))[0]
-    fn, dest, i = base + ext, os.path.join(COVER_ASSET_DIR, base + ext), 1
-    while os.path.exists(dest):
-        fn = f'{base}-{i}{ext}'
+    fn, i = base + ext, 1
+    # the name is claimed as the file is created: checked first and written
+    # after, two uploads of "emblem.png" at once could both be handed one name
+    while True:
         dest = os.path.join(COVER_ASSET_DIR, fn)
-        i += 1
-    f.save(dest)
+        try:
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0))
+            break
+        except FileExistsError:
+            fn = f'{base}-{i}{ext}'
+            i += 1
+    with os.fdopen(fd, 'wb') as out:
+        f.save(out)
     try:                                             # reject anything Pillow can't read
         from PIL import Image
         Image.open(dest).verify()
@@ -3004,16 +3155,23 @@ def cover_asset_upload():
     return jsonify({'ok': True, 'filename': fn})
 
 
+class _BadBackImage(ValueError):
+    pass
+
+
 def _save_back_image(f):
-    """Save an uploaded back-cover image (photo/logo) to a temp file. Returns path or None."""
+    """Save an uploaded back-cover image (photo/logo) to a temp file. Returns
+    the path, or None when none was chosen. One that isn't a readable .jpg or
+    .png raises `_BadBackImage`: the cover drew without it and said nothing."""
     if not f or not f.filename:
         return None
-    ext = _upload_ext(f)
-    if ext not in ('.jpg', '.jpeg', '.png'):
-        return None
+    ext, data = _upload_ext(f), f.read()
+    if ext not in IMAGE_EXTS or not _is_image(data):
+        raise _BadBackImage(f'The back-cover image “{f.filename}” is not a readable '
+                            '.jpg or .png picture. Choose another, or clear it.')
     fd, tmp = tempfile.mkstemp(suffix=ext)
-    os.close(fd)
-    f.save(tmp)
+    with os.fdopen(fd, 'wb') as out:
+        out.write(data)
     return tmp
 
 
@@ -3089,6 +3247,9 @@ def _wrap_dims(form, pages):
     jacket = binding == 'jacket'
     trim_w = _f(form, 'wrap_trim_w', 6.0)
     trim_h = _f(form, 'wrap_trim_h', 9.0)
+    # every page is one side of a leaf, so a printer binds an odd count with a
+    # blank on the back of the last page; the spine is that leaf thicker
+    pages += pages % 2
     # a case spine carries the boards as well as the paper — and a jacket wraps
     # that same case, so it takes the same spine
     spine_w = pages * ppi + (_f(form, 'wrap_board', HARDCOVER['board'])
@@ -3344,15 +3505,36 @@ def wrap_designer_save(pid):
     proj['wrap_front_file'] = secure_filename(f'{pid}-wrap-front.jpg')
     if body.get('use_as_cover'):
         proj['cover_mode'] = 'wrap'
+    elif proj.get('cover_mode') == 'wrap':
+        # unticked: back to the cover the book had before, as Send to print reads it
+        proj['cover_mode'] = ('designed' if proj.get('cover_template_data')
+                              else 'image' if proj.get('cover_file') else 'none')
     front = os.path.join(PROJECT_MS_DIR, proj['wrap_front_file'])
+    # rendered beside the real one and swapped in only once the book is saved:
+    # the builds reuse that file while its size fits, so writing it first let a
+    # failed save put the unsaved front on the next book built
+    pending = front + '.saving.jpg'
     try:
         dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
-        _render_wrap_front(design, dims, front)
+        wrap_design.render_front(design, dims, pending)
     except Exception as exc:
         logging.error('Wrap design front render failed: %s', traceback.format_exc())
+        _drop_files([os.path.basename(pending)])
         return jsonify(ok=False, error=f'The design was not saved: {exc}')
     proj['updated'] = datetime.now().isoformat(timespec='seconds')
-    save_project_file(pid, proj)
+    try:
+        save_project_file(pid, proj)
+    except Exception:
+        _drop_files([os.path.basename(pending)])
+        raise
+    try:
+        os.replace(pending, front)
+        with open(front + '.dims', 'w', encoding='utf-8') as f:
+            f.write(_wrap_dims_key(dims))
+    except OSError:
+        # the old front no longer matches the saved design: the next build draws it
+        _drop_files([os.path.basename(pending), proj['wrap_front_file'],
+                     proj['wrap_front_file'] + '.dims'])
     return jsonify(ok=True, saved=proj['wrap_design_saved'],
                    is_cover=proj.get('cover_mode') == 'wrap')
 
@@ -3606,8 +3788,9 @@ PLAN_THUMB_DPI = 36
 
 def _plan_numbered(proj):
     """Whether the plan can number pages: nothing generated comes before the
-    first design (front matter, contents)."""
-    return proj.get('front_matter', 'full') == 'none' and not proj.get('include_toc')
+    first design (front matter, contents, a dedication or other extra)."""
+    return (proj.get('front_matter', 'full') == 'none' and not proj.get('include_toc')
+            and not matter.present(proj, 'front'))
 
 
 def _plan_data(pid, proj, text=None):
@@ -3659,7 +3842,10 @@ def _plan_write(pid, proj, rev, build):
     """Rewrite the manuscript from the plan: `build(items)` returns the new
     pieces, or a refusal string. Refused when the manuscript changed since
     the plan was read, or when the plan can't read it as the book does."""
-    current = _project_manuscript_text(proj, report_import=False)
+    try:
+        current = _project_manuscript_text(proj, report_import=False, strict=True)
+    except DamagedFile:
+        return jsonify(ok=False, error=_UNREADABLE_DOCX), 409
     if rev != _ms_rev(current):
         return jsonify(ok=False, conflict=True,
                        error='The manuscript changed since this plan was opened '
@@ -3892,9 +4078,12 @@ def project_new_picture_book():
 
 @app.route('/cover/wrap', methods=['POST'])
 def cover_wrap():
+    try:
+        back = _save_back_image(request.files.get('wrap_back_image'))
+    except _BadBackImage as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
     fd, tmp = tempfile.mkstemp(suffix='.pdf')
     os.close(fd)
-    back = _save_back_image(request.files.get('wrap_back_image'))
     try:
         _wrap_from_form(request.form, tmp, back_image=back)
         with open(tmp, 'rb') as f:
@@ -3920,9 +4109,12 @@ def cover_wrap_preview():
     except ImportError:
         return jsonify({'ok': False,
                         'error': 'pymupdf not installed - run: pip install pymupdf'})
+    try:
+        back = _save_back_image(request.files.get('wrap_back_image'))
+    except _BadBackImage as exc:
+        return jsonify({'ok': False, 'error': str(exc)})
     fd, tmp = tempfile.mkstemp(suffix='.pdf')
     os.close(fd)
-    back = _save_back_image(request.files.get('wrap_back_image'))
     try:
         res, dims = _wrap_from_form(request.form, tmp, back_image=back)
         doc = fitz.open(tmp)
@@ -3939,8 +4131,12 @@ def cover_wrap_preview():
             kind = 'paperback'
         info = (f"{dims['trim_w']:g}×{dims['trim_h']:g}\" {kind} · spine {res['spine_w']:g}\" · "
                 f"full {res['wrap_w']:g}×{res['wrap_h']:g}\" · {spine_txt}")
+        warnings = list(dims.get('warnings', []))
+        for where in res.get('overflow', []):
+            warnings.append(f'The {where} copy is too long to fit: it runs past the bottom '
+                            'of the flap. Shorten it.')
         return jsonify({'ok': True, 'image': f'data:image/png;base64,{b64}', 'info': info,
-                        'warnings': dims.get('warnings', [])})
+                        'warnings': warnings})
     except Exception as exc:
         logging.error('wrap preview failed: %s', traceback.format_exc())
         return jsonify({'ok': False, 'error': str(exc)})
@@ -4116,7 +4312,8 @@ def _named(path_or_name, fn):
 
 
 def _font_uses(fn):
-    """Where a library font is named: styles, cover templates, books' wrap designs."""
+    """Where a library font is named: styles, cover templates, books' wrap
+    designs and their designed interior pages and spreads."""
     uses = []
     for it in list_presets():
         files = it['data'].get('font_files')
@@ -4133,6 +4330,13 @@ def _font_uses(fn):
                                          for e in els):
             name = it['data'].get('name') or it['data'].get('title') or it['id']
             uses.append(f'the wrap design of “{name}”')
+        pages = it['data'].get('page_designs')
+        for page in pages if isinstance(pages, list) else []:
+            els = page.get('elements') if isinstance(page, dict) else None
+            if isinstance(els, list) and any(isinstance(e, dict) and _named(e.get('font'), fn)
+                                             for e in els):
+                name = it['data'].get('name') or it['data'].get('title') or it['id']
+                uses.append(f'the page “{page.get("name") or "page"}” of “{name}”')
     return uses
 
 
@@ -4977,10 +5181,19 @@ def _num(form, key, current, lo, hi):
     return min(max(v, lo), hi)
 
 
-def _replace_file(pid, data, name, old):
-    """Write an upload into the book's folder and drop the file it replaces."""
+def _replace_file(pid, data, name, old, stale):
+    """Write an upload into the book's folder; the file it replaces goes on
+    `stale`, to be dropped by `_drop_files` once the book is saved pointing at
+    the new one (dropped first, a failed save left the book naming a file that
+    was gone)."""
     _atomic_write_bytes(os.path.join(PROJECT_MS_DIR, name), data)
     if old and old != name:
+        stale.append(old)
+
+
+def _drop_files(names):
+    """Remove files from the book's folder that nothing points at any more."""
+    for old in names:
         old_path = os.path.join(PROJECT_MS_DIR, old)
         if os.path.exists(old_path):
             try:
@@ -5006,6 +5219,7 @@ def project_edit(pid):
     if request.method == 'POST':
         form = request.form
         problems = []          # uploads refused; the rest of the form still saves
+        stale = []             # replaced files, dropped once the book is saved
 
         # Optional manuscript replacement
         up = request.files.get('manuscript')
@@ -5038,7 +5252,7 @@ def project_edit(pid):
                 # an upload here overwrites work that may exist nowhere else
                 snapshot_manuscript(pid, _project_manuscript_text(proj, report_import=False),
                                     reason='replaced', force=True)
-                _replace_file(pid, data, pid + ext, proj.get('manuscript_file', ''))
+                _replace_file(pid, data, pid + ext, proj.get('manuscript_file', ''), stale)
                 proj['manuscript_file'] = pid + ext
                 proj['manuscript_type'] = 'file'
 
@@ -5054,15 +5268,12 @@ def project_edit(pid):
                 problems.append(f'The {what} was not replaced: “{f.filename}” '
                                 "isn't a .jpg or .png picture.")
                 continue
-            _replace_file(pid, data, pid + suffix + ext, proj.get(key, ''))
+            _replace_file(pid, data, pid + suffix + ext, proj.get(key, ''), stale)
             proj[key] = pid + suffix + ext
         back = request.files.get('print_back_image')
         if 'print_back_clear' in form and not (back and back.filename) \
                 and proj.get('print_back_file'):
-            try:
-                os.remove(os.path.join(PROJECT_MS_DIR, proj['print_back_file']))
-            except OSError:
-                pass
+            stale.append(proj['print_back_file'])
             proj['print_back_file'] = ''
 
         def choice(key, allowed, default):
@@ -5115,6 +5326,7 @@ def project_edit(pid):
             'updated':          datetime.now().isoformat(timespec='seconds'),
         })
         save_project_file(pid, proj)
+        _drop_files(stale)
         if problems:
             for msg in problems:
                 flash(msg)
@@ -5140,12 +5352,17 @@ STARTER_DRAFT = ("# Chapter One\n\n"
                  "scene break with `* * *` on its own line.\n")
 
 
-def _project_manuscript_text(proj, report_import=True):
+def _project_manuscript_text(proj, report_import=True, strict=False):
     """Return a project's manuscript as editable Markdown text ('' if none).
 
     `report_import=False` for the internal readers (snapshotting before a
     destructive change): they want the text, not a flashed import summary the
     user never asked for.
+
+    `strict=True` for the callers that write the manuscript back: a Word file
+    that can't be read raises `DamagedFile` instead of reading as empty, since
+    writing over "empty" replaced the book with whatever was being added and
+    deleted the Word file it came from.
     """
     ms_type = proj.get('manuscript_type', 'file')
     ms_file = proj.get('manuscript_file', '')
@@ -5165,9 +5382,15 @@ def _project_manuscript_text(proj, report_import=True):
                         _flash_import(rep)   # the page-rendering callers only
                     return text
                 except Exception:
+                    if strict:
+                        raise DamagedFile(path, 'could not be read as a Word file.')
                     return ''
             return _read_text_file(path)
     return ''
+
+
+_UNREADABLE_DOCX = ("This book's Word manuscript can't be read, so it was left as it is "
+                    'rather than replaced. Replace it on the Edit page with a working copy.')
 
 
 def _load_preset_or_default(pid):
@@ -5438,21 +5661,16 @@ def _ms_rev(text):
 def _store_manuscript(pid, proj, text):
     """Write a book's manuscript as its own Markdown file (an imported Word
     file or the sample becomes one), keep a History snapshot, save the book."""
-    new_file = pid + '.md'
+    new_file = secure_filename(pid) + '.md'
     _atomic_write_text(os.path.join(PROJECT_MS_DIR, new_file), text)
     snapshot_manuscript(pid, text)
     old = proj.get('manuscript_file', '')
-    if old and old != new_file:
-        old_path = os.path.join(PROJECT_MS_DIR, old)
-        if os.path.exists(old_path):
-            try:
-                os.remove(old_path)
-            except OSError:
-                pass
     proj['manuscript_file'] = new_file
     proj['manuscript_type'] = 'markdown'
     proj['updated'] = datetime.now().isoformat(timespec='seconds')
     save_project_file(pid, proj)
+    if old and old != new_file:          # only once the book points at the new one
+        _drop_files([old])
 
 
 @app.route('/project/<pid>/write/save', methods=['POST'])
@@ -5473,7 +5691,12 @@ def project_write_save(pid):
     # `overwrite` is that choice made: the newer text goes to History instead.
     # A page from before revisions sends no `base` and saves as it always did.
     base = request.form.get('base')
-    current = _project_manuscript_text(proj, report_import=False)
+    try:
+        current = _project_manuscript_text(proj, report_import=False, strict=True)
+    except DamagedFile:
+        # keep what the page sent, but never write over the Word file
+        snapshot_manuscript(pid, text, reason='conflict', force=True)
+        return jsonify({'ok': False, 'error': _UNREADABLE_DOCX}), 409
     if base is not None and base != _ms_rev(current) and text != _norm_newlines(current):
         if request.form.get('overwrite') != '1':
             snapshot_manuscript(pid, text, reason='conflict', force=True)
@@ -5518,7 +5741,7 @@ def project_history_restore(pid, stamp):
         return jsonify({'ok': False, 'error': 'That version is no longer kept.'}), 404
     current = _project_manuscript_text(proj, report_import=False)
     snapshot_manuscript(pid, current, reason='restore', force=True)
-    new_file = pid + '.md'
+    new_file = secure_filename(pid) + '.md'
     _atomic_write_text(os.path.join(PROJECT_MS_DIR, new_file), text)
     proj['manuscript_file'] = new_file
     proj['manuscript_type'] = 'markdown'
@@ -5667,10 +5890,13 @@ def _build_project(pid, proj):
             res['warnings'].append(f'EPUB build failed: {exc}')
             _drop_out(res['epub_name'])
             res['epub_name'] = ''
+            res['epub_failed'] = True
 
     done = {'last_pdf': res['out_name'], 'last_epub': res['epub_name'],
             'last_screen_pdf': res['screen_name'],
             'updated': datetime.now().isoformat(timespec='seconds')}
+    if res.get('epub_failed'):
+        del done['last_epub']           # the last one that worked stays downloadable
     if res['page_count']:
         done['last_page_count'] = res['page_count']
     proj.update(done)
@@ -5708,7 +5934,8 @@ def project_generate(pid):
     page_count, build_result = res['page_count'], res['build_result']
     out_name, epub_name, preset = res['out_name'], res['epub_name'], res['preset']
     spec      = print_spec(page_count, preset) if page_count else None
-    preflight = _preflight(build_result, preset, page_count) if build_result else None
+    preflight = (_preflight(build_result, preset, page_count, proj.get('print_paper'))
+                 if build_result else None)
     press     = _press_report(out_name, build_result)
     chapters  = len(res['ms_parsed']['chapters'])
     return render_template('result.html', out_name=out_name, epub_name=epub_name,
@@ -5741,9 +5968,13 @@ def project_rebuild(pid):
         return jsonify(ok=False, error=f'Build failed: {exc}')
     if res['error']:
         return jsonify(ok=False, error=res['error'])
+    if res.get('epub_failed') and not res['out_name']:
+        # an EPUB-only book that built nothing has failed, not built with a warning
+        return jsonify(ok=False, error='; '.join(res['warnings']) or 'The EPUB build failed.')
     issues = []
     if res['build_result']:
-        issues += issue_rows(_preflight(res['build_result'], res['preset'], res['page_count']))
+        issues += issue_rows(_preflight(res['build_result'], res['preset'], res['page_count'],
+                                             proj.get('print_paper')))
     if res['epub_name']:
         issues += issue_rows(_epub_checks(os.path.join(OUT_DIR, res['epub_name']),
                                           res['ms_parsed'], res['meta'], res['preset']))
@@ -5841,7 +6072,10 @@ def _project_meta(proj):
 
 # How a book's ebook is laid out (#75c): 'fixed' is page by page (a picture
 # book's), 'flow' the reflowable text every other book has. A book that never
-# chose ('' or no key) follows its picture-book flag.
+# chose ('' or no key) is page by page when it is a picture book made of page
+# designs. The flag alone isn't enough: in 1.13 it was only a print check, so a
+# picture book written as text and figures, with no designs, would otherwise
+# get an ebook holding nothing but its cover.
 EBOOK_LAYOUTS = ('', 'fixed', 'flow')
 
 
@@ -5849,7 +6083,7 @@ def ebook_layout(proj):
     chosen = proj.get('ebook_layout', '')
     if chosen in ('fixed', 'flow'):
         return chosen
-    return 'fixed' if proj.get('picture_book') else 'flow'
+    return 'fixed' if proj.get('picture_book') and _page_designs(proj) else 'flow'
 
 
 # ------------------------------------------------------------ send to print
@@ -5894,6 +6128,22 @@ def _art_resolution_check(res, w_in, h_in):
                        f'{"well under" if res["soft"] else "under"} the {res["want_dpi"]} dpi '
                        f'print wants, so it will print soft. '
                        f'Ask for {need[0]}×{need[1]} px or larger.')}
+
+
+def _back_image_check(res, w_in):
+    """The check row for the back-cover photo or logo, placed `w_in` wide."""
+    if not res:
+        return {'label': 'Back-cover picture', 'ok': False,
+                'detail': ('The back-cover picture can’t be read (damaged, or not an '
+                           'image), so it is left off the wrap — upload it again')}
+    px, need = res['px'], res['need']
+    if res['ok']:
+        return {'label': 'Back-cover picture', 'ok': True,
+                'detail': f'{px[0]}×{px[1]} px — {res["dpi"]} dpi at {w_in:g}" wide'}
+    return {'label': 'Back-cover picture', 'ok': False,
+            'detail': (f'{px[0]}×{px[1]} px prints at {res["dpi"]} dpi at {w_in:g}" wide, '
+                       f'under the {res["want_dpi"]} dpi print wants, so it will print soft. '
+                       f'Use one of {need[0]}×{need[1]} px or larger, or place it smaller')}
 
 
 def _wrap_meta(meta, p):
@@ -5982,7 +6232,7 @@ def build_print_package(proj, scope='print'):
         pages = built['page_count']
         files[pdir + os.path.basename(interior)] = interior
 
-        checks = _preflight(built, preset, pages)
+        checks = _preflight(built, preset, pages, paper)
         if built.get('press_error'):
             checks.insert(0, {
                 'label': 'Press-ready', 'ok': False,
@@ -6050,6 +6300,16 @@ def build_print_package(proj, scope='print'):
             aw, ah = engine.front_art_size(engine.wrap_geometry(dims))
             art_res = engine.image_cover_check(art, aw, ah)
             checks.append(_art_resolution_check(art_res, aw, ah))
+        # the author photo or logo on the back is printed art too, placed at the
+        # width set under Send to print (a design measures its own pictures)
+        back = '' if design else wmeta.get('cover_back_image')
+        if back:
+            bw = max(float(wmeta.get('cover_back_image_w') or 1.5), 0.25)
+            res = engine.image_cover_check(back, bw, bw)
+            if res:
+                bh = bw * res['px'][1] / float(res['px'][0])
+                res = engine.image_cover_check(back, bw, bh)
+            checks.append(_back_image_check(res, bw))
         if not wres['spine_text'] and not design:
             thin = engine.wrap_geometry(dims)['spine_text']    # allowed, but no room
             checks.append({'label': 'Spine text', 'ok': True,
@@ -6230,7 +6490,9 @@ def _print_spec_text(info, names):
         f'  Printer      {info["retailer_label"]}',
         f'  Binding      {_BINDING_LABEL[info["binding"]]}',
         f'  Trim         {info["trim_w"]:g} x {info["trim_h"]:g} in',
-        f'  Pages        {info["pages"]}',
+        f'  Pages        {info["pages"]}' + (
+            f' (bound as {info["pages"] + 1}: a blank backs the last page)'
+            if info['pages'] % 2 else ''),
         f'  Paper        {info["paper_label"]}',
         f'  Spine        {w["spine_w"]:.4f} in',
         f'  Cover wrap   {w["wrap_w"]:g} x {w["wrap_h"]:g} in (bleed {info["bleed"]:g} in)',
@@ -6374,18 +6636,21 @@ def project_delete(pid):
                 proj = read_json(path)
             except (OSError, DamagedFile):
                 proj = None
+        # the record goes first: if it can't (another program holding it open),
+        # the book is left whole instead of a card naming files that are gone
+        if pid and os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                flash('The project could not be deleted: its file is in use by another '
+                      'program. Close that program and try again.')
+                return redirect(url_for('projects'))
         if isinstance(proj, dict):
             others = set()
             for it in list_projects():
                 if it['id'] != pid:
                     others |= _book_files(it['data'])
-            for fn in _book_files(proj) - others:
-                try:
-                    os.remove(os.path.join(PROJECT_MS_DIR, fn))
-                except OSError:
-                    pass
-        if pid and os.path.exists(path):
-            os.remove(path)
+            _drop_files(_book_files(proj) - others)
         if pid:
             shutil.rmtree(_history_folder(pid), ignore_errors=True)
             try:
@@ -6446,6 +6711,15 @@ def _want_window():
         return False
     try:
         import webview  # noqa: F401
+        if sys.platform == 'win32':
+            # Without the WebView2 runtime pywebview quietly falls back to
+            # Internet Explorer's engine, which can't run the editors' script
+            # (saving among it). The browser does better than that.
+            from webview.platforms import winforms
+            if winforms.renderer != 'edgechromium':
+                logging.warning('WebView2 not found (pywebview would use %s); '
+                                'opening in the browser instead.', winforms.renderer)
+                return False
         return True
     except Exception:
         return False

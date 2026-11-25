@@ -342,9 +342,14 @@ def _coalesce(runs):
 
 
 _EMPH_MARK = {(True, True): "***", (True, False): "**", (False, True): "*"}
+# Other spellings of italic and bold-italic, for when the usual ones collide with
+# a neighbour: italic `*red*` straight before `**blue**` writes `*red***blue**`,
+# which reads back as `*red` and a bold `*blue`; `_red_**blue**` does not.
+_ALT_MARKS = ({}, {(True, True): "___", (False, True): "_"},
+              {(True, True): "___"}, {(False, True): "_"})
 
 
-def _emph_md(group, force_escape=False):
+def _emph_md(group, force_escape=False, marks=None):
     r"""Serialize runs sharing one emphasis as a single span.
 
     Runs only sit side by side with the same emphasis when a note reference
@@ -352,7 +357,8 @@ def _emph_md(group, force_escape=False):
     would join into `**a****[^n]**`, which does not read back. A reference is
     written bare — its label is `[\w-]`, with nothing in it to escape.
     """
-    mark = _EMPH_MARK.get((group[0]["bold"], group[0]["italic"]), "")
+    key = (group[0]["bold"], group[0]["italic"])
+    mark = (marks or {}).get(key) or _EMPH_MARK.get(key, "")
     parts = []
     for r in group:
         if r.get("note"):
@@ -374,7 +380,7 @@ def _emph_md(group, force_escape=False):
     return mark + "".join(parts) + mark
 
 
-def _emit_runs(runs, force_escape=False):
+def _emit_runs(runs, force_escape=False, marks=None):
     parts = []
     i = 0
     while i < len(runs):
@@ -389,7 +395,7 @@ def _emit_runs(runs, force_escape=False):
             while (m < j and runs[m]["bold"] == runs[k]["bold"]
                    and runs[m]["italic"] == runs[k]["italic"]):
                 m += 1
-            inner.append(_emph_md(runs[k:m], force_escape))
+            inner.append(_emph_md(runs[k:m], force_escape, marks))
             k = m
         parts.append(f"[{''.join(inner)}]({link})" if link else "".join(inner))
         i = j
@@ -407,13 +413,49 @@ def _runs_to_md(runs):
     a plain "*" followed by an italic "*y*" concatenates to "**y*", which
     re-reads as bold. So the assembled line is checked as a whole, and if it no
     longer parses back to the runs we started with, it is re-emitted with every
-    plain run fully escaped.
+    plain run fully escaped. Escaping can't help two emphasis spans whose markers
+    run together, so each other spelling of the markers is tried in turn too.
     """
-    md = _emit_runs(runs)
     want = _coalesce([dict(r) for r in runs])
-    if _parse_inline(md, smartquotes=False) != want:
-        md = _emit_runs(runs, force_escape=True)
-    return md
+    for marks in _ALT_MARKS:
+        for force in (False, True):
+            md = _emit_runs(runs, force, marks)
+            if _parse_inline(md, smartquotes=False) == want:
+                return md
+    return _emit_runs(runs, force_escape=True)
+
+
+def _table_row(text, smartquotes):
+    """A table row's runs. The typesetter splits a row into cells on `|` before
+    it reads any emphasis, so each cell is read on its own here too: read whole,
+    `a_b | c_d` turned into an italic `b | c` and came back as `a*b | c*d`."""
+    runs = []
+    for i, cell in enumerate(text.split('|')):
+        if i:
+            runs.append(_run('|'))
+        runs.extend(_parse_inline(cell, smartquotes))
+    return _coalesce(runs)
+
+
+def _table_row_md(runs):
+    """A table row back to Markdown, a cell at a time (see _table_row)."""
+    cells = [[]]
+    for r in runs:
+        if _is_mark(r):
+            cells[-1].append(r)
+            continue
+        for j, piece in enumerate(r["text"].split('|')):
+            if j:
+                cells.append([])
+            if piece:
+                cells[-1].append(dict(r, text=piece))
+    return '|'.join(_runs_to_md(c) for c in cells)
+
+
+def _in_block(line):
+    r"""A line inside a fenced block, guarded if it would read as a fence:
+    `\~~~` is text, where a bare `~~~` closed the block early."""
+    return _BSL + line if manuscript.DOCBLOCK_RE.match(line) else line
 
 
 def _statblock_line(runs):
@@ -423,8 +465,10 @@ def _statblock_line(runs):
     if all(not r["bold"] and not r["italic"] and not r.get("link")
            and not _is_mark(r) for r in runs):
         return "".join(r["text"] for r in runs)
-    return "".join(_emph_md([r]) if (r["bold"] or r["italic"]) else r["text"]
-                   for r in runs)
+    # a note, index marker, anchor or page reference is written as its marker:
+    # its text alone is only the label, and the reference was lost
+    return "".join(_emph_md([r]) if (r["bold"] or r["italic"] or _is_mark(r))
+                   else r["text"] for r in runs)
 
 
 def _block_collision(line):
@@ -480,6 +524,11 @@ def from_markdown(raw, smartquotes=True):
                     if s.strip():
                         block_children.append({"type": "para",
                                                "runs": [_run(s.strip())]})
+            elif block_type == 'table':
+                for s in block_para_buf:                 # one row per line
+                    if s.strip():
+                        block_children.append(
+                            {"type": "para", "runs": _table_row(s.strip(), smartquotes)})
             elif block_type in manuscript.LINE_BLOCKS:
                 # One line = one child (a list item, or a line of an aligned block)
                 for s in block_para_buf:
@@ -538,6 +587,8 @@ def from_markdown(raw, smartquotes=True):
             continue
 
         if in_block:
+            if line[:1] == _BSL and manuscript.DOCBLOCK_RE.match(line[1:]):
+                line = line[1:]                  # `\~~~`: a line of text (see _in_block)
             if line.strip() == '':
                 flush_block_para()
             else:
@@ -629,16 +680,19 @@ def to_markdown(blocks):
                     if i > 0:
                         out.append("")                   # blank line between stanzas
                     for ln in stanza["lines"]:
-                        out.append(_runs_to_md(ln["runs"]))
+                        out.append(_in_block(_runs_to_md(ln["runs"])))
             elif b["block_type"] == "statblock":
                 for kid in kids:                         # source lines, as written
-                    out.append(_statblock_line(kid["runs"]))
+                    out.append(_in_block(_statblock_line(kid["runs"])))
+            elif b["block_type"] == "table":
+                for kid in kids:                         # one row per line
+                    out.append(_in_block(_table_row_md(kid["runs"])))
             elif b["block_type"] in manuscript.LINE_BLOCKS:
                 for kid in kids:                         # one item/line per line
-                    out.append(_runs_to_md(kid["runs"]))
+                    out.append(_in_block(_runs_to_md(kid["runs"])))
             else:
                 for i, kid in enumerate(kids):
-                    out.append(_runs_to_md(kid["runs"]))
+                    out.append(_in_block(_runs_to_md(kid["runs"])))
                     if i < len(kids) - 1:
                         out.append("")                   # blank line between paras
             out.append("~~~")

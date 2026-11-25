@@ -134,9 +134,13 @@ def fill_rect(g, which):
     H = g['wrap_h']
     if g.get('page') and not g.get('spread'):
         return 0.0, 0.0, g['wrap_w'], H        # a page design: the page is the sheet
+    # on a jacket a panel stops at its flap's fold, as a template jacket's art
+    # does: past the fold is the flap, which folds in behind the cover
     if which == 'front':
-        return g['front_x'], 0.0, g['wrap_w'] - g['front_x'], H
+        return g['front_x'], 0.0, (g['panel_w'] if g.get('flap') else g['wrap_w'] - g['front_x']), H
     if which == 'back':
+        if g.get('flap'):
+            return g['back_x'], 0.0, g['panel_w'], H
         return 0.0, 0.0, g['back_x'] + g['panel_w'], H
     if which == 'spine':
         return g['spine_x'], 0.0, g['spine_w'], H
@@ -158,7 +162,7 @@ def text_layout(el):
     top-left. `words` is None, or for a justified line [(word, x offset)]: the
     line's words spread to fill the box."""
     face = pdfmetrics.getFont(font_name(el['font'])).face
-    size, lead = el['size'], el.get('leading', 1.2)
+    size, lead = el['size'], el.get('leading') or 1.2   # a cleared box: as the canvas draws it
     asc = face.ascent / 1000.0 * size
     box = el.get('w', 0) * 72.0
     blank = blank_of(el)
@@ -315,7 +319,7 @@ def draw_elements(c, design, g, H, live=None):
         elif kind == 'barcode' and w > 0 and h > 0:
             draw_barcode(c, el, X, Ytop, w * inch, h * inch)
         elif kind == 'image' and drawable_art(el.get('src')) and w > 0 and h > 0:
-            img = ImageReader(art_file(el['src']))
+            img = ImageReader(engine._upright(art_file(el['src'])))  # as the browser shows it
             iw, ih = img.getSize()
             turn = turn_of(el)
             if turn in (90, 270):
@@ -337,7 +341,7 @@ def draw_elements(c, design, g, H, live=None):
             draw_vector(c, el, X, Ytop, w * inch, h * inch)
         elif kind == 'field' and w > 0 and h > 0:
             draw_field(c, el, X, Ytop, w * inch, h * inch,
-                       bool(live and live(x, y, w, h)), alpha)
+                       (live(x, y, w, h) or False) if live else False, alpha)
         elif kind == 'text' and font_file(el.get('font')):
             layout = text_layout(el)
             lines[el.get('id', '')] = [ln for ln, _, _, _ in layout]
@@ -432,7 +436,8 @@ def _hex(col, dflt):
 
 def draw_field(c, el, X, Ytop, bw, bh, live, alpha=1.0):
     """A fillable box at (X, Ytop) in points, `bw` by `bh`: its printed look,
-    then, when `live`, the form field over it."""
+    then, when `live`, the form field over it (cut to the span `live` gives,
+    when it is a (left, right) pair in inches)."""
     kind = field_kind(el)
     if kind == 'check':
         bw = bh = min(bw, bh)
@@ -449,7 +454,11 @@ def draw_field(c, el, X, Ytop, bw, bh, live, alpha=1.0):
         else:
             c.rect(X + sw / 2.0, Ytop - bh + sw / 2.0, bw - sw, bh - sw, stroke=1, fill=0)
     if live:
-        add_live_field(c, el, X, Ytop - bh, bw, bh)
+        x0, x1 = X, X + bw
+        if isinstance(live, tuple):            # a spread's page: (left, right) in inches
+            x0, x1 = max(x0, live[0] * inch), min(x1, live[1] * inch)
+        if x1 - x0 > 0.5:
+            add_live_field(c, el, x0, Ytop - bh, x1 - x0, bh)
 
 
 def add_live_field(c, el, x, y, w, h):
@@ -461,8 +470,17 @@ def add_live_field(c, el, x, y, w, h):
     kind = field_kind(el)
     name = field_name(el)
     reg = c.__dict__.setdefault('_ts_fields', {})
-    if name in reg and reg[name]['check'] != (kind == 'check'):
-        name = f'{name} ({"tick" if kind == "check" else "text"})'[:FIELD_NAME_MAX + 8]
+    want = kind == 'check'
+    if name in reg and reg[name]['check'] != want:
+        # the other kind has this name: take "Name (tick)", or "(tick 2)" if
+        # that too is a field of the other kind (a writer may have used it)
+        tag, n = 'tick' if want else 'text', 1
+        while True:
+            alt = f'{name} ({tag}{"" if n == 1 else f" {n}"})'
+            if alt not in reg or reg[alt]['check'] == want:
+                break
+            n += 1
+        name = alt
     form = c.acroForm
     got = []
     add_annot = c._addAnnotation
@@ -707,6 +725,16 @@ def reserve_box(el):
     size - what "Customise this design" makes of a template's reserve."""
     if el.get('type') != 'vector' or el.get('fill') or len(el.get('ops') or []) != 1:
         return None
+    # a design from the data folder can hold anything: an op that isn't the
+    # shape this looks for is "not a reserve", never an error (one damaged
+    # design took the whole Projects page down)
+    try:
+        return _reserve_box(el)
+    except (IndexError, KeyError, TypeError, AttributeError, ValueError):
+        return None
+
+
+def _reserve_box(el):
     op = el['ops'][0]
     st = op[-1]
     if op[0] != 'path' or st.get('fill') != '#ffffff' or st.get('stroke') != '#999999':
@@ -1057,10 +1085,12 @@ def on_half(g, half):
     on a single page)."""
     if not half:
         return lambda x, y, w, h: True
+    # on a spread the answer is the page's span across the sheet (inches), so
+    # a box over the fold gets a field cut at the fold, not one off the page
     fold = g['spine_x']
     if half == 'left':
-        return lambda x, y, w, h: x + w / 2.0 < fold
-    return lambda x, y, w, h: x + w / 2.0 >= fold
+        return lambda x, y, w, h: (float('-inf'), fold) if x + w / 2.0 < fold else False
+    return lambda x, y, w, h: (fold, float('inf')) if x + w / 2.0 >= fold else False
 
 
 def build_sheet_pdf(design, trim_w, trim_h, out_path, title=''):

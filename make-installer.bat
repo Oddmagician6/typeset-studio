@@ -9,6 +9,13 @@ if exist "VERSION" set /p APPVERSION=<VERSION
 
 if not exist "dist\Typeset Studio\Typeset Studio.exe" goto NOBUILD
 
+rem The build carries its own copy of VERSION. If it differs, VERSION was
+rem bumped after the last build: Setup would be named for the new version
+rem and install the old program. Rebuild first.
+set "BUILTVERSION=none"
+if exist "dist\Typeset Studio\_internal\VERSION" set /p BUILTVERSION=<"dist\Typeset Studio\_internal\VERSION"
+if not "%BUILTVERSION%"=="%APPVERSION%" goto STALE
+
 rem Find the Inno Setup compiler (ISCC.exe): versions 7 and 6, both roots.
 set "ISCC="
 if exist "%ProgramFiles(x86)%\Inno Setup 7\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 7\ISCC.exe"
@@ -32,6 +39,12 @@ goto END
 echo.
 echo The app has not been built yet.
 echo Run build.bat first to create "dist\Typeset Studio\", then run this again.
+goto END
+
+:STALE
+echo.
+echo The built app is version %BUILTVERSION% but VERSION says %APPVERSION%.
+echo Run build.bat again, then run this again.
 goto END
 
 :NOINNO

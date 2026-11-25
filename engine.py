@@ -139,6 +139,24 @@ def _tracked_centre(canv, cx, y, text, font, size, tracking=0.0):
     canv.drawText(to)
 
 
+def _break_overlong(lines, font, size, max_w, tracking=0.0):
+    """Lines with any still wider than max_w cut between letters: the last
+    resort for a word too long for its frame at the smallest size allowed,
+    which would otherwise print across the border."""
+    def wide(s):
+        return stringWidth(s, font, size) + tracking * max(len(s) - 1, 0)
+    out = []
+    for ln in lines:
+        while len(ln) > 1 and wide(ln) > max_w:
+            n = len(ln) - 1
+            while n > 1 and wide(ln[:n]) > max_w:
+                n -= 1
+            out.append(ln[:n])
+            ln = ln[n:].lstrip()
+        out.append(ln)
+    return out
+
+
 def _wrap_tracked(text, font, size, max_w, tracking=0.0):
     """Word-wrap text to max_w, honouring the tracking already applied."""
     out = []
@@ -786,11 +804,20 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
     title = (meta.get('title') or '').upper()
     last_y = yat(title_y)
     tsize = tt.get('size', 40)
+    if not tsize or tsize <= 0:          # a template saved with a size of 0
+        tt, tsize = dict(tt, size=40), 40
     if title:
         maxw = inner_w - 0.4 * inch
         trk = tt.get('tracking', 0.6)
         lines = _wrap_tracked(title, cf['display'], tsize, maxw, trk)
         while tsize > 14 and any(
+                stringWidth(ln, cf['display'], tsize) + trk * max(len(ln) - 1, 0) > maxw
+                for ln in lines):
+            tsize -= 1
+            lines = _wrap_tracked(title, cf['display'], tsize, maxw, trk)
+        # a single word too long for the frame even at 14 pt keeps shrinking,
+        # rather than print across the border; a title that fits is unchanged
+        while tsize > 6 and any(
                 stringWidth(ln, cf['display'], tsize) + trk * max(len(ln) - 1, 0) > maxw
                 for ln in lines):
             tsize -= 1
@@ -819,6 +846,7 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
             return y - orn.get('gap', 0.05) * h - orn.get('size', 2.4) * 1.25
 
         lines, tsize = _shrink_to_clear(title, cf['display'], tsize, maxw, trk, 14, bottom, floor)
+        lines = _break_overlong(lines, cf['display'], tsize, maxw, trk)
         leading = tt.get('leading', 46) * (tsize / tt.get('size', 40))
         canv.setFillColor(_pal_color(tpl, tt.get('color', 'gold')))
         yy = yat(title_y)
@@ -1717,7 +1745,7 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
     pad = min(0.42 * inch, w * 0.14)
     colw = w - 2 * pad
     if colw <= 24:                       # a flap too narrow to set type in
-        return
+        return False
     cx = x0 + w / 2.0
     size, lead = 9.5, 13.5
     canv.saveState()
@@ -1754,6 +1782,7 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
                 pass
         body = meta.get('cover_author_bio') or ''
 
+    low = top
     if body:
         canv.setFillColor(_pal_color(tpl, 'ink'))
         yy = top
@@ -1766,6 +1795,7 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
                 # PDF text state, so the tracking set by the line above would
                 # still be in force and the flap copy would run past its fold
                 _tracked_left(canv, x0 + pad, yy, ln, cf['serif'], size, 0.0)
+                low = yy
                 yy -= lead
 
     st = tpl.get('studio', {})
@@ -1776,6 +1806,10 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
                         cf['serif'], min(st.get('size', 8.5), 8.0),
                         st.get('tracking', 2.4))
     canv.restoreState()
+    # Whether the copy ran past its room - into the imprint, or off the flap -
+    # for the caller to warn about: the flap has no smaller size to fall back to
+    floor = y0 + (0.55 * inch + 12 if studio else 0.4 * inch)
+    return bool(body) and low - size * 0.25 < floor
 
 
 def _depth(font, size):
@@ -1959,9 +1993,12 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
     else:
         _paint_background(c, tpl, front_x, edge, pw, ph, bleed=front_bleed)
         _paint_cover_front(c, tpl, cf, meta, front_x, edge, pw, ph, bleed=front_bleed)
+    overflow = []
     if flap:
-        _paint_flap(c, tpl, cf, meta, edge, edge, flap, ph, 'back')
-        _paint_flap(c, tpl, cf, meta, front_x + pw, edge, flap, ph, 'front')
+        if _paint_flap(c, tpl, cf, meta, edge, edge, flap, ph, 'back'):
+            overflow.append('back flap')
+        if _paint_flap(c, tpl, cf, meta, front_x + pw, edge, flap, ph, 'front'):
+            overflow.append('front flap')
     if guides:
         folds = [edge, edge + flap, back_x + pw, spine_x, spine_x + sp,
                  front_x, front_x + pw, front_x + pw + flap]
@@ -1971,6 +2008,7 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
         c.save()
     return {'wrap_w': round(g['wrap_w'], 3), 'wrap_h': round(g['wrap_h'], 3),
             'spine_w': round(g['spine_w'], 4), 'spine_text': bool(drew_spine),
+            'overflow': overflow,
             'binding': g['binding'], 'front': 'image' if art else 'designed',
             'wrap': round(g['wrap'], 4), 'hinge': round(g['hinge'], 4),
             'flap': round(g['flap'], 4), 'panel_w': round(g['panel_w'], 4)}
@@ -2473,9 +2511,9 @@ class _Kept(Flowable):
     def wrap(self, aW, aH):
         self._lay, y, prev = [], 0.0, 0.0
         for f in self._content:
-            _, h = f.wrapOn(self.canv, aW, 0xfffffff)
+            w, h = f.wrapOn(self.canv, aW, 0xfffffff)
             gap = max(f.getSpaceBefore(), prev) if self._lay else 0.0
-            self._lay.append((f, y + gap, h))
+            self._lay.append((f, y + gap, h, w))
             y += gap + h
             prev = f.getSpaceAfter()
         self.width, self.height = aW, y
@@ -2485,8 +2523,9 @@ class _Kept(Flowable):
         return []
 
     def draw(self):
-        for f, top, h in self._lay:
-            f.drawOn(self.canv, 0, self.height - top - h)
+        for f, top, h, w in self._lay:
+            # the unused width lets a narrow table keep its alignment
+            f.drawOn(self.canv, 0, self.height - top - h, _sW=self.width - w)
 
 
 class _HeadCell(_P):
@@ -2544,10 +2583,10 @@ class ColumnRun(Flowable):
         queue = list(queue)
         while queue:
             f = queue[0]
-            _, h = f.wrapOn(canv, cw, 0xfffffff)
+            w, h = f.wrapOn(canv, cw, 0xfffffff)
             gap = max(f.getSpaceBefore(), prev) if placed else 0.0
             if y + gap + h <= H + _COL_EPS:
-                placed.append((f, y + gap, h))
+                placed.append((f, y + gap, h, w))
                 y += gap + h
                 prev = f.getSpaceAfter()
                 queue.pop(0)
@@ -2559,9 +2598,9 @@ class ColumnRun(Flowable):
                 except Exception:
                     parts = []
                 if len(parts) >= 2:
-                    _, h0 = parts[0].wrapOn(canv, cw, 0xfffffff)
+                    w0, h0 = parts[0].wrapOn(canv, cw, 0xfffffff)
                     if h0 <= room + _COL_EPS:
-                        placed.append((parts[0], y + gap, h0))
+                        placed.append((parts[0], y + gap, h0, w0))
                         queue[0:1] = parts[1:]
             break
         if queue:
@@ -2651,8 +2690,9 @@ class ColumnRun(Flowable):
         cw = (aW - self._gap) / 2.0
         for i, (placed, _used) in enumerate(cols):
             x = i * (cw + self._gap)
-            for f, top, h in placed:
-                f.drawOn(self.canv, x, height - top - h)
+            for f, top, h, w in placed:
+                # the unused width lets a narrow table keep its alignment
+                f.drawOn(self.canv, x, height - top - h, _sW=cw - w)
         if self._rule:
             c = self.canv
             c.saveState()
@@ -3590,7 +3630,7 @@ def _render_telegram_block(block_paras, attrs, db, fonts, st, avail_w, hyph,
         rows.append([Paragraph(f'To: {_ep_esc(to_val.upper())}', meta_s)])
         n_hdr = 2
     for _, text in block_paras:
-        rows.append([Paragraph(_ep_plain(text).upper(), body_s)])
+        rows.append([Paragraph(_ep_esc(_ep_plain(text).upper()), body_s)])
 
     t = Table(rows, colWidths=[col_w])
     t.setStyle(TableStyle([
@@ -5541,6 +5581,8 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body', unlink=Non
     blocks = [' '.join(l.strip() for l in b.split('\n') if l.strip()).strip()
               for b in text.replace('\r\n', '\n').split('\n\n')]
     blocks = [b for b in blocks if b]
+    # the heading is plain text and may carry the author's name ("Also by …")
+    heading = _esc_markup(heading or '')
 
     def _md(s):
         markup = _ms_inline(s, smartquotes)
@@ -5679,11 +5721,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         small = ParagraphStyle('sm', fontName=fonts['regular'], fontSize=8.5, leading=12.5)
 
         def title_page():
-            s = [Spacer(1, 1.8 * inch), Paragraph(meta.get('title', ''), big),
+            s = [Spacer(1, 1.8 * inch), Paragraph(_esc_markup(meta.get('title', '')), big),
                  Spacer(1, 0.3 * inch)]
             if meta.get('subtitle'):
-                s += [Paragraph(meta['subtitle'], auth), Spacer(1, 0.2 * inch)]
-            s += [Spacer(1, 0.2 * inch), Paragraph(meta.get('author', ''), auth), PageBreak()]
+                s += [Paragraph(_esc_markup(meta['subtitle']), auth), Spacer(1, 0.2 * inch)]
+            s += [Spacer(1, 0.2 * inch), Paragraph(_esc_markup(meta.get('author', '')), auth), PageBreak()]
             return s
 
         def copyright_page():
@@ -5694,7 +5736,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             text_h = (preset['trim']['h'] - preset['margins']['top']
                       - preset['margins']['bottom']) * inch
             top_gap = max(text_h - 2.4 * inch, 0.5 * inch)
-            para = Paragraph(cp.replace('\n', '<br/>'), small)
+            # plain text, like the EPUB's: an author `Lovelace & <B>` stopped the build
+            para = Paragraph(_esc_markup(cp).replace('\n', '<br/>'), small)
             # a block taller than that room (large print sets it at 16pt) is
             # raised just enough to stay on its page; one that fits doesn't move
             text_w = (preset['trim']['w'] - preset['margins']['inside']
@@ -5705,7 +5748,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             return [BlankMarker(), Spacer(1, top_gap), para, PageBreak()]
 
         if level == 'full':
-            story += [Spacer(1, 2.2 * inch), Paragraph(meta.get('title', ''), half), PageBreak()]
+            story += [Spacer(1, 2.2 * inch), Paragraph(_esc_markup(meta.get('title', '')), half), PageBreak()]
             if rhs:                                    # blank verso so title lands recto
                 story += [BlankMarker(), PageBreak()]
             story += title_page()
@@ -5776,7 +5819,8 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 story.append(Paragraph(label, st['part_num']))
                 story.append(Spacer(1, 0.15 * inch))
             if ch_part.get('title'):
-                story.append(Paragraph(ch_part['title'], st['part_title']))
+                # titles are plain text: `The <Tide>` prints as written
+                story.append(Paragraph(_esc_markup(ch_part['title']), st['part_title']))
             story.append(OutlineMarker(
                 ch_part.get('title') or pd.get('number_format', 'Part {n}').format(n=ch_part_num)))
             current_part_num = ch_part_num
@@ -5825,7 +5869,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             anchors = ''
             story.append(Spacer(1, 0.12 * inch))
         if ch['title']:
-            story.append(Paragraph(anchors + ch['title'], st['chap_title']))
+            story.append(Paragraph(anchors + _esc_markup(ch['title']), st['chap_title']))
             anchors = ''
         if anchors:                       # no number and no title: park them here
             story.append(Paragraph(anchors, st['chap_num']))
@@ -6000,8 +6044,8 @@ def _build_toc(entries, body_start, avail_w, preset, fonts, st):
         # Part heading (no page number)
         part = e.get('part')
         if part and part != last_part:
-            out.append(Paragraph(part.get('title') or
-                                 f"Part {part['number']}", toc_pt))
+            out.append(Paragraph(_esc_markup(part.get('title') or
+                                             f"Part {part['number']}"), toc_pt))
             last_part = part
 
         # Chapter line with dot leaders
@@ -6012,7 +6056,7 @@ def _build_toc(entries, body_start, avail_w, preset, fonts, st):
         indent   = 0.18 * inch if part else 0
         n_dots   = max(3, int((avail_w - indent - lw - fw)
                               / stringWidth(dot_char, font, size)))
-        line     = f'{label}  {dot_char * n_dots}  {folio_s}'
+        line     = f'{_esc_markup(label)}  {dot_char * n_dots}  {folio_s}'
         s = ParagraphStyle('toc_line', parent=toc_ch, leftIndent=indent)
         out.append(Paragraph(line, s))
 
@@ -6752,6 +6796,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
 
     has_index = _bookindex.wanted(
         _apply_index_markers(manuscript['chapters'], meta)[1], meta)
+    unsettled = False
 
     if foot_notes and not meta.get('include_toc'):
         try:
@@ -6813,6 +6858,9 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             if (_toc_folios(entries, body_start) == said and index == listed
                     and refs == printed):
                 break
+        else:
+            # out of passes: what this one printed may not be where things are
+            unsettled = (has_refs or has_index) and (index != listed or refs != printed)
         page_count = doc2.page
         unplaced_notes.extend(_notes_not_drawn(fn_flow, doc2._fn_drawn))
     else:
@@ -6845,6 +6893,8 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             listed, index = index, (_index_found(doc) if has_index else None)
             if refs == printed and index == listed:
                 break
+        else:
+            unsettled = (has_refs or has_index) and (index != listed or refs != printed)
         page_count = doc.page
         unplaced_notes.extend(_notes_not_drawn(fn_flow, doc._fn_drawn))
     if cover_path:
@@ -6855,6 +6905,8 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
     return {
         'page_count':     page_count,
         'notes_unplaced': len(set(unplaced_notes)),
+        # the page references or the index still moved on the last pass
+        'refs_unsettled': unsettled,
         'dead_links':     dead_links + dead_refs + sorted(_matter_dead),
         'font_family':    fonts['family'],
         'font_fallback':  fonts['fallback'],

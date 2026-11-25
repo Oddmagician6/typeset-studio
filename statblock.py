@@ -69,7 +69,8 @@ _CELL_RE = re.compile(
     r'^(' + _NAME + r')\s+' + _SCORE +
     r'(?:\s*' + _MOD_PAREN + r'|\s+(' + _SIGNED + r')\s+(' + _SIGNED + r'))?$')
 _INLINE_CELL_RE = re.compile(
-    r'(' + _NAME + r')\s+' + _SCORE + r'(?:\s*' + _MOD_PAREN + r')?')
+    r'(' + _NAME + r')\s+' + _SCORE +
+    r'(?:\s*' + _MOD_PAREN + r'|\s+(' + _SIGNED + r')\s+(' + _SIGNED + r'))?')
 _NAMES_LINE_RE = re.compile(r'^' + _NAME + r'(?:\s+' + _NAME + r')+$')
 _VALUE_RE = re.compile(r'(\d+)(?:\s*' + _MOD_PAREN + r')?')
 
@@ -187,7 +188,8 @@ def _score_cells(s):
         if s[pos:m.start()].strip():
             return None
         cells.append({'name': m.group(1), 'score': m.group(2),
-                      'mod': minus(m.group(3) or ''), 'save': ''})
+                      'mod': minus(m.group(3) or m.group(4) or ''),
+                      'save': minus(m.group(5) or '')})
         pos = m.end()
     if s[pos:].strip() or len(cells) < 2:
         return None

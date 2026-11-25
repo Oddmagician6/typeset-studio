@@ -314,6 +314,11 @@ f.onload = function () {
     nf.name = 'Character name';
     d.getElementById('wd-guides').dispatchEvent(new w.Event('change'));
     out.checks2 = d.getElementById('wd-checks').textContent;
+    // bug hunt 3.9: the next default name is one no box has
+    E.design().elements.find(function (e) { return e.name === 'Notes'; }).name = 'Field 5';
+    d.getElementById('wd-add-field').click();
+    var e2 = E.design().elements;
+    out.next = e2[e2.length - 1].name;
     d.getElementById('wd-sheet-btn').click();
     var w2 = setInterval(function () {
       var link = d.getElementById('wd-sheet-link');
@@ -376,13 +381,44 @@ def browser_half():
     check('and a checkbox offers no underline', not any(o.startswith('underline') for o in r['looks']), r['looks'])
     check('a shared name is pointed out', 'Shared names' in r['checks2'] and 'Character name' in r['checks2'],
           r['checks2'])
+    check('3.9: a new box skips a default name already taken', r.get('next') == 'Field 6', r.get('next'))
     check('the sheet button builds a sheet and links it',
           '/download/' in r.get('href', '') and 'fillable field' in r.get('sheet', ''), r)
 
 
+def test_bughunt():
+    print('\nbug hunt 3.8, 3.10')
+    # 3.8: "Notes (tick)" as text, then "Notes" as text, then a "Notes" checkbox
+    f = lambda i, kind, name, y: {'id': i, 'type': 'field', 'kind': kind, 'name': name,
+                                  'anchor': 'front', 'x': 1, 'y': y, 'w': 2, 'h': 0.3}
+    d = {'name': 'clash', 'saved': '2026-11-12T10:00:00', 'elements': [
+        f('a', 'line', 'Notes (tick)', 1), f('b', 'line', 'Notes', 2), f('c', 'check', 'Notes', 3)]}
+    out = W.build_sheet_pdf(d, 6, 9, os.path.join(TMP, 'clash.pdf'))
+    with fitz.open(out) as doc:
+        got = form_fields(doc)
+        kinds = {w.field_name: w.field_type_string for w in doc[0].widgets()}
+    check('3.8: three boxes, three fields', len(got) == 3 == W.field_count(d), got)
+    check('3.8: the checkbox is not joined to the text field',
+          kinds.get('Notes (tick)') == 'Text' and 'CheckBox' in kinds.values(), kinds)
+
+    # 3.10: a box across a spread's fold gets a field cut at the fold
+    d = sheet('fold', spread=True)
+    g = W.design_geometry(d, 6, 9)
+    d['elements'].append({'id': 'x', 'type': 'field', 'kind': 'line', 'name': 'Across',
+                          'anchor': 'sheet', 'x': g['spine_x'] - 0.6, 'y': 7, 'w': 1.0, 'h': 0.3})
+    out = W.build_sheet_pdf(d, 6, 9, os.path.join(TMP, 'fold.pdf'))
+    with fitz.open(out) as doc:
+        on = [(i, w.rect) for i, pg in enumerate(doc) for w in pg.widgets() if w.field_name == 'Across']
+        pw = doc[0].rect.width
+    check('3.10: one widget, on the left page', len(on) == 1 and on[0][0] == 0, on)
+    check('3.10: inside the page, ending at the fold',
+          on and on[0][1].x1 <= pw + 0.01 and abs(on[0][1].x1 - pw) < 0.5
+          and abs(on[0][1].width - 0.6 * 72) < 1, on)
+
+
 if __name__ == '__main__':
     try:
-        for t in (test_model, test_engine, test_app):
+        for t in (test_model, test_engine, test_bughunt, test_app):
             try:
                 t()
             except Exception:

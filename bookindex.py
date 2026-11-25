@@ -23,7 +23,7 @@ HEADING = 'Index'
 CR_HEADING = 'By Challenge Rating'
 
 _TAG_RE = re.compile(r'<[^>]+>')
-_CR_RE = re.compile(r'\d+(?:\s*/\s*\d+)?')
+_CR_RE = re.compile(r'\d+(?:\s*/\s*\d+|\.\d+)?')
 
 
 def on(meta, key):
@@ -119,17 +119,20 @@ def wanted(marks, meta):
 
 
 def sort_key(text):
-    """Order for an entry: letters and digits only, accents and case aside."""
+    """Order for an entry: one that starts with a digit or a sign first, then
+    the rest by letters and digits only, accents and case aside."""
     flat = unicodedata.normalize('NFKD', text)
     flat = ''.join(c for c in flat if not unicodedata.combining(c)).casefold()
-    return (re.sub(r'[^\w\s]', '', flat).strip() or flat, text)
+    lead = flat.lstrip()[:1]
+    bare = re.sub(r'[^\w\s]|_', '', flat).strip() or flat
+    return (1 if lead.isalpha() else 0, bare, text)
 
 
 def letter(text):
     """The letter an entry is filed under, or '' for one that starts with a
     digit or a sign (those come first, under no letter)."""
-    head = sort_key(text)[0][:1].upper()
-    return head if head.isalpha() else ''
+    lettered, bare, _ = sort_key(text)
+    return bare[:1].upper() if lettered else ''
 
 
 def tree(marks, found, meta):

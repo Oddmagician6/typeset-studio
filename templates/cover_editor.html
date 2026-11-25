@@ -505,7 +505,8 @@
               <select name="wrap_paper">
                 <option value="white">White (60 lb)</option>
                 <option value="cream">Cream (60 lb)</option>
-                <option value="color">Color</option>
+                <option value="color_standard">Standard colour</option>
+                <option value="color">Premium colour</option>
               </select></div>
             <div class="check"><input type="checkbox" id="wrap-guides" name="wrap_guides" value="1">
               <label for="wrap-guides">Proof guides (fold &amp; trim lines)</label></div>
@@ -601,6 +602,11 @@
         var el = form.querySelector('[name=' + name + ']');
         if (el && val !== undefined && val !== null && val !== '') el.value = val;
       }
+      // the book's own copy: a field it leaves blank clears what the last book put there
+      function setCopy(name, val){
+        var el = form.querySelector('[name=' + name + ']');
+        if (el) el.value = (val === undefined || val === null) ? '' : val;
+      }
       var wrapFrom = document.getElementById('wrap-from');
       if (wrapFrom) wrapFrom.addEventListener('change', function(){
         var note = document.getElementById('wrap-from-note');
@@ -612,17 +618,17 @@
         setField('prev_h', pr.trim_h);
         // the book's printer, paper and binding: the spine is worked out from them
         setField('wrap_paper', pr.paper);
-        setField('wrap_blurb', pr.blurb);
-        setField('wrap_flap_blurb', pr.flap_blurb);
-        setField('wrap_flap_bio', pr.flap_bio);
+        setCopy('wrap_blurb', pr.blurb);
+        setCopy('wrap_flap_blurb', pr.flap_blurb);
+        setCopy('wrap_flap_bio', pr.flap_bio);
         if (pr.retailer && retailerSel) {
           retailerSel.value = pr.retailer;
           retailerSel.dispatchEvent(new Event('change'));      // its bleed, and its notes
         }
         if (pr.binding && bindingSel) { bindingSel.value = pr.binding; applyAllowances(); updateBinding(); }
         setField('prev_title', pr.title);
-        setField('prev_author', pr.author);
-        setField('prev_studio', pr.publisher);
+        setCopy('prev_author', pr.author);
+        setCopy('prev_studio', pr.publisher);
         if (pr.page_count){
           setField('wrap_pages', pr.page_count);
           note.textContent = 'Spine from last build: ' + pr.page_count + ' pages.';
@@ -724,7 +730,12 @@
         wstatus.textContent = 'Building PDF…';
         try {
           var res = await fetch('/cover/wrap', {method: 'POST', body: new FormData(form)});
-          if (!res.ok) { wstatus.textContent = 'Wrap failed.'; return; }
+          if (!res.ok) {
+            var err = null;
+            try { err = (await res.json()).error; } catch (e) {}
+            wstatus.textContent = err || 'Wrap failed.';
+            return;
+          }
           var blob = await res.blob();
           var url  = URL.createObjectURL(blob);
           var a    = document.createElement('a');
@@ -804,7 +815,8 @@
           if (!slotEl) return;
           var slot = slotEl.value;
           var hasImg = imgEl && imgEl.value.trim();
-          var wIn = numField('emblem' + n + '_w', n === 1 ? 0.7 : 0.6);
+          // the PDF draws an emblem no narrower than 0.1 in (engine._paint_emblems)
+          var wIn = Math.max(numField('emblem' + n + '_w', n === 1 ? 0.7 : 0.6), 0.1);
           dims.push('Emblem ' + n + ' ' + fmtIn(wIn) + ' in wide');
 
           // footprint as a fraction of the trim; square placeholder (real height = image aspect)

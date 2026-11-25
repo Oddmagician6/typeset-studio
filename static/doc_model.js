@@ -33,18 +33,18 @@
   var LINE_BLOCKS = ['list', 'center', 'centre', 'right', 'left', 'table', 'statblock'];
   // A link target is restricted to unambiguous forms, so ordinary prose like
   // "[sic](ibid)" never becomes a link. Mirrors manuscript.LINK_RE.
-  var LINK_RE = /\[([^\[\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+|#[A-Za-z0-9][\w\-]*)\)/g;
+  var LINK_RE = /\[([^\[\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+|#[A-Za-z0-9][\p{L}\p{N}_\-]*)\)/gu;
   // `[^label]: …` — an endnote's text. Kept as a plain paragraph here, but it
   // must start a new one. Mirrors manuscript.NOTE_DEF_RE.
-  var NOTE_DEF_RE = /^\s*\[\^([\w\-]+)\]:\s*(.*)$/;
+  var NOTE_DEF_RE = /^\s*\[\^([\p{L}\p{N}_\-]+)\]:\s*(.*)$/u;
   // `[^label]` — an endnote reference. Mirrors manuscript.NOTE_REF_RE.
-  var NOTE_REF_RE = /\[\^([\w\-]+)\]/g;
+  var NOTE_REF_RE = /\[\^([\p{L}\p{N}_\-]+)\]/gu;
   // `{index: term}` — an index marker. Mirrors manuscript.INDEX_RE.
   var INDEX_RE = /\{index:[ \t]*([^{}\[\]\x00-\x08]*[^{}\[\]\s\x00-\x08])[ \t]*\}/g;
   // `{#name}` and `{page: name}` — a link target and a page reference (#74
   // Phase 5b). Mirror manuscript.ANCHOR_RE / PAGE_RE.
-  var ANCHOR_RE = /\{#([A-Za-z0-9][\w\-]*)\}/g;
-  var PAGE_RE = /\{page:[ \t]*#?([A-Za-z0-9][\w\-]*)[ \t]*\}/g;
+  var ANCHOR_RE = /\{#([A-Za-z0-9][\p{L}\p{N}_\-]*)\}/gu;
+  var PAGE_RE = /\{page:[ \t]*#?([A-Za-z0-9][\p{L}\p{N}_\-]*)[ \t]*\}/gu;
   var SCENE_BREAK_RE = /^\s*(\*\s*\*\s*\*|\*{3,}|-{3,}|#{3,})\s*$/;
   var CHAPTER_RE     = /^#\s+(.*)$/;
   // `#* Prologue` — a chapter that takes no number. Mirrors manuscript.UNNUMBERED_RE.
@@ -60,7 +60,9 @@
   var DOCBLOCK_RE    = /^\s*~~~(.*)/;
   var PART_RE        = /^\s*===\s*(.*)/;
   // straight or curly quotes (pasted from a word processor); mirrors manuscript._ATTR_RE
-  var ATTR_RE        = /(\w+)=["“”]([^"“”]*)["“”]/g;
+  // A value may hold quotes (a poem titled `The "Blue" Hour`): it ends at the
+  // quote followed by the next `key="` or the end; else at its first quote.
+  var ATTR_RE        = /([\p{L}\p{N}_]+)=["“”]((?:(?!\s[\p{L}\p{N}_]+=["“”]).)*?)["“”](?=\s+[\p{L}\p{N}_]+=["“”]|\s*$)|([\p{L}\p{N}_]+)=["“”]([^"“”]*)["“”]/gu;
   var BYLINE_SEP     = ' | ';   // "# Title | Author" anthology byline (mirror manuscript.py)
 
   function splitByline(titleLine) {
@@ -258,9 +260,16 @@
   // Runs sharing one emphasis are written as a single span. They only sit side
   // by side when a note reference splits them, and `**a**` + `**[^n]**` would join
   // into `**a****[^n]**`, which does not read back. A reference is written bare.
-  function emphMd(group, forceEscape) {
+  // Other spellings of italic and bold-italic, for when the usual ones collide
+  // with a neighbour: `*red*` + `**blue**` writes `*red***blue**`, which reads
+  // back wrong; `_red_**blue**` doesn't. Mirrors doc_model._ALT_MARKS.
+  var ALT_MARKS = [{}, { bi: '___', i: '_' }, { bi: '___' }, { i: '_' }];
+
+  function emphMd(group, forceEscape, marks) {
     var g = group[0];
-    var mark = g.bold && g.italic ? '***' : g.bold ? '**' : g.italic ? '*' : '';
+    marks = marks || {};
+    var mark = g.bold && g.italic ? (marks.bi || '***') : g.bold ? '**'
+             : g.italic ? (marks.i || '*') : '';
     return mark + group.map(function (r) {
       if (r.note) return '[^' + r.text + ']';
       // the term is written bare, but for the three characters that would end it early
@@ -272,7 +281,7 @@
     }).join('') + mark;
   }
 
-  function emitRuns(runs, forceEscape) {
+  function emitRuns(runs, forceEscape, marks) {
     var parts = [], i = 0;
     while (i < runs.length) {
       var link = runs[i].link || '', j = i;
@@ -281,7 +290,7 @@
       while (k < j) {                       // one span per emphasis
         var m = k;
         while (m < j && runs[m].bold === runs[k].bold && runs[m].italic === runs[k].italic) m++;
-        inner.push(emphMd(runs.slice(k, m), forceEscape));
+        inner.push(emphMd(runs.slice(k, m), forceEscape, marks));
         k = m;
       }
       parts.push(link ? '[' + inner.join('') + '](' + link + ')' : inner.join(''));
@@ -293,11 +302,44 @@
   // escapePlain only asks whether a run survives a parse on its own, which is not
   // enough: a plain "*" next to an italic "*y*" joins into "**y*" and re-reads as
   // bold. Check the assembled line, and re-emit fully escaped if it drifted.
+  // Escaping can't help two emphasis spans whose markers run together, so each
+  // other spelling of the markers is tried in turn too.
   function runsToMd(runs) {
-    var md = emitRuns(runs, false);
-    if (!sameRuns(parseInline(md), coalesce(runs.map(copyRun)))) md = emitRuns(runs, true);
-    return md;
+    var want = coalesce(runs.map(copyRun));
+    for (var a = 0; a < ALT_MARKS.length; a++) {
+      for (var f = 0; f < 2; f++) {
+        var md = emitRuns(runs, !!f, ALT_MARKS[a]);
+        if (sameRuns(parseInline(md), want)) return md;
+      }
+    }
+    return emitRuns(runs, true);
   }
+
+  // A table row's runs, a cell at a time: the typesetter splits a row on `|`
+  // before it reads emphasis, and read whole `a_b | c_d` came back `a*b | c*d`.
+  // Mirrors doc_model._table_row / _table_row_md.
+  function tableRow(text) {
+    var runs = [];
+    text.split('|').forEach(function (cell, i) {
+      if (i) runs.push(run('|'));
+      runs = runs.concat(parseInline(cell));
+    });
+    return coalesce(runs);
+  }
+  function tableRowMd(runs) {
+    var cells = [[]];
+    runs.forEach(function (r) {
+      if (isMark(r)) { cells[cells.length - 1].push(r); return; }
+      r.text.split('|').forEach(function (piece, j) {
+        if (j) cells.push([]);
+        if (piece) { var c = copyRun(r); c.text = piece; cells[cells.length - 1].push(c); }
+      });
+    });
+    return cells.map(runsToMd).join('|');
+  }
+  // A line inside a fenced block, guarded if it would read as a fence: `\~~~`
+  // is text, where a bare `~~~` closed the block early. Mirrors doc_model._in_block.
+  function inBlockLine(line) { return DOCBLOCK_RE.test(line) ? BSL + line : line; }
 
   function sameRuns(a, b) {
     if (a.length !== b.length) return false;
@@ -343,7 +385,9 @@
     var rest = header.trim().slice(parts[0].length);
     var attrs = {}, m;
     ATTR_RE.lastIndex = 0;
-    while ((m = ATTR_RE.exec(rest)) !== null) attrs[m[1]] = m[2];
+    while ((m = ATTR_RE.exec(rest)) !== null) {
+      if (m[1] !== undefined) attrs[m[1]] = m[2]; else attrs[m[3]] = m[4];
+    }
     return { blockType: blockType, attrs: attrs };
   }
 
@@ -376,6 +420,10 @@
           // line (its `___` rules and `--- Actions` must survive an edit).
           blockParaBuf.forEach(function (s) {
             if (s.trim()) blockChildren.push({ type: 'para', runs: [run(s.trim())] });
+          });
+        } else if (blockType === 'table') {
+          blockParaBuf.forEach(function (s) {            // one row per line
+            if (s.trim()) blockChildren.push({ type: 'para', runs: tableRow(s.trim()) });
           });
         } else if (LINE_BLOCKS.indexOf(blockType) !== -1) {
           // One line = one child (a list item, or a line of an aligned block)
@@ -431,6 +479,8 @@
         continue;
       }
       if (inBlock) {
+        // `\~~~` is a line of text (inBlockLine)
+        if (line.charAt(0) === BSL && DOCBLOCK_RE.test(line.slice(1))) line = line.slice(1);
         if (line.trim() === '') flushBlockPara();
         else blockParaBuf.push(line);
         continue;
@@ -466,7 +516,7 @@
     return blocks;
   }
 
-  function shallow(o) { var r = {}; for (var k in o) if (o.hasOwnProperty(k)) r[k] = o[k]; return r; }
+  function shallow(o) { var r = {}; for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) r[k] = o[k]; return r; }
 
   // ---- document model -> markdown ------------------------------------------
 
@@ -475,7 +525,9 @@
   // Mirrors doc_model._statblock_line.
   function statblockLine(runs) {
     return runs.map(function (r) {
-      return (r.bold || r.italic) ? emphMd([r], false) : r.text;
+      // a note, index marker, anchor or page reference is written as its
+      // marker: its text alone is only the label
+      return (r.bold || r.italic || isMark(r)) ? emphMd([r], false) : r.text;
     }).join('');
   }
 
@@ -502,22 +554,24 @@
         var header = '~~~';
         if (b.block_type) {
           header += ' ' + b.block_type;
-          for (var k in b.attrs) if (b.attrs.hasOwnProperty(k)) header += ' ' + k + '="' + b.attrs[k] + '"';
+          for (var k in b.attrs) if (Object.prototype.hasOwnProperty.call(b.attrs, k)) header += ' ' + k + '="' + b.attrs[k] + '"';
         }
         out.push(header);
         var kids = b.children || [];
         if (b.block_type === 'poem') {
           for (var si = 0; si < kids.length; si++) {     // stanzas of verse lines
             if (si > 0) out.push('');                    // blank line between stanzas
-            kids[si].lines.forEach(function (ln) { out.push(runsToMd(ln.runs)); });
+            kids[si].lines.forEach(function (ln) { out.push(inBlockLine(runsToMd(ln.runs))); });
           }
         } else if (b.block_type === 'statblock') {
-          for (var sl = 0; sl < kids.length; sl++) out.push(statblockLine(kids[sl].runs));
+          for (var sl = 0; sl < kids.length; sl++) out.push(inBlockLine(statblockLine(kids[sl].runs)));
+        } else if (b.block_type === 'table') {
+          for (var tr = 0; tr < kids.length; tr++) out.push(inBlockLine(tableRowMd(kids[tr].runs)));
         } else if (LINE_BLOCKS.indexOf(b.block_type) !== -1) {
-          for (var li = 0; li < kids.length; li++) out.push(runsToMd(kids[li].runs));
+          for (var li = 0; li < kids.length; li++) out.push(inBlockLine(runsToMd(kids[li].runs)));
         } else {
           for (var i = 0; i < kids.length; i++) {
-            out.push(runsToMd(kids[i].runs));
+            out.push(inBlockLine(runsToMd(kids[i].runs)));
             if (i < kids.length - 1) out.push('');
           }
         }

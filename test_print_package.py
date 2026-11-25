@@ -120,7 +120,8 @@ try:
           saved.get('last_page_count') == pages, saved.get('last_page_count'))
 
     _, ww, wh = pdf_info(files['the-salt-road-cover-wrap.pdf'])
-    want_w = 2 * 0.125 + 2 * tw + pages * A._PAPER['cream']['ppi']
+    bound = pages + pages % 2                 # an odd count gets a blank leaf
+    want_w = 2 * 0.125 + 2 * tw + bound * A._PAPER['cream']['ppi']
     check('the wrap is sized from that page count, on that paper',
           abs(ww - want_w) < 0.01, (ww, want_w))
     check('and is trim plus bleed tall', abs(wh - (th + 0.25)) < 0.01, wh)
@@ -128,7 +129,7 @@ try:
     spec = files['PRINT-SPEC.txt'].decode('utf-8')
     check('the spec sheet states the pages and spine',
           f'Pages        {pages}' in spec
-          and f'{pages * A._PAPER["cream"]["ppi"]:.4f} in' in spec, spec[:400])
+          and f'{bound * A._PAPER["cream"]["ppi"]:.4f} in' in spec, spec[:400])
     check('and walks through the KDP upload', 'Upload a cover you already have' in spec)
     check('a short book is told its spine is blank, not failed',
           'Spine text' in html and 'under Amazon KDP' in html)
@@ -572,6 +573,42 @@ try:
           r.status_code == 200 and 'Manuscript file not found' in r.get_data(as_text=True))
 
     # ------------------------------------------------------------ the editor
+    print('the ebook cover image (bug hunt 1.11, 3.7)')
+    from PIL import Image
+    meta, _ = A._project_meta(dict(PROJ))
+    fd, jpg = tempfile.mkstemp(suffix='.jpg'); os.close(fd)
+    try:
+        square = dict(preset, trim={'w': 8.5, 'h': 8.5})
+        A._cover_page_jpeg(square, dict(meta), jpg)
+        with Image.open(jpg) as im:
+            sw, sh = im.size
+        check("a square cover stays under Apple's 5.6 megapixels",
+              sw * sh <= 5_600_000 and abs(sw - sh) <= 2, (sw, sh))
+        A._cover_page_jpeg(preset, dict(meta), jpg)
+        with Image.open(jpg) as im:
+            plain = im.size
+        A._cover_page_jpeg(preset, dict(meta, bleed=True), jpg)
+        with Image.open(jpg) as im:
+            bled = im.size
+        check('and bleed on the interior leaves the cover its trim shape',
+              plain == bled and plain[1] == A.EPUB_COVER_H, (plain, bled))
+    finally:
+        os.remove(jpg)
+
+    print('a small back-cover photo (bug hunt 3.13)')
+    # no leading underscore: the setting is read through secure_filename
+    back = os.path.join(A.PROJECT_MS_DIR, 'test-print-package-back.png')
+    Image.new('RGB', (120, 160), (90, 120, 150)).save(back)
+    with open(MS_PATH, 'w', encoding='utf-8') as f:      # "what it refuses" took it
+        f.write(MS)
+    try:
+        r = send(dict(PROJ, print_back_file=os.path.basename(back), print_back_w=1.5))
+    finally:
+        os.remove(back)
+    html = r.get_data(as_text=True)
+    check('is flagged at the dpi it prints at',
+          'Back-cover picture' in html and '80 dpi' in html, re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', html))[:1500])
+
     print('the project editor')
     with open(MS_PATH, 'w', encoding='utf-8') as f:
         f.write(MS)
@@ -594,6 +631,28 @@ try:
           and 'value="publish"' in listing)
 finally:
     cleanup()
+
+print('page counts the printer will see (bug hunt 3.6, 3.12)')
+odd = A._wrap_dims({'wrap_retailer': 'kdp', 'wrap_paper': 'white'}, 201)
+even = A._wrap_dims({'wrap_retailer': 'kdp', 'wrap_paper': 'white'}, 202)
+check("an odd count is bound with a blank leaf, so the spine is the even one's",
+      abs(odd['spine_w'] - even['spine_w']) < 1e-9, (odd['spine_w'], even['spine_w']))
+pre = {'trim': {'w': 6.0, 'h': 9.0}, 'font_family': 'Book'}
+def count_row(pages, paper, trim=None):
+    rows = A._preflight({'font_family': 'Book'}, dict(pre, trim=trim or pre['trim']),
+                        pages, paper)
+    return next(r for r in rows if r['label'] == 'Page count')
+r = count_row(48, 'color_standard')
+check("48 pages on Standard colour is under KDP's 72", not r['ok'] and '72' in r['detail'], r)
+check('48 pages on white is fine', count_row(48, 'white')['ok'])
+check("700 pages on cream at 8.5x11 is over KDP's large-trim limit",
+      not count_row(700, 'cream', {'w': 8.5, 'h': 11.0})['ok'])
+check('and no paper keeps the plain 24-828 range', count_row(800, None)['ok'])
+
+print('a title Windows keeps for a device (bug hunt 3.11)')
+check('"Con" is not named con', A._slug_or_blank('Con') == 'con-book', A._slug_or_blank('Con'))
+check('nor "LPT1"', A._slug_or_blank('LPT1') == 'lpt1-book')
+check('while "Cone" is left alone', A._slug_or_blank('Cone') == 'cone')
 
 print('\n' + ('ALL PASS' if not fails else 'FAILED: ' + ', '.join(fails)))
 sys.exit(1 if fails else 0)

@@ -301,7 +301,9 @@ def test_app():
     for name in ('doc_model.js', 'wysiwyg.js'):
         js = open(os.path.join(REPO, 'static', name), encoding='utf-8').read()
         check(f'{name} knows both runs', 'anchor' in js and 'pageref' in js)
-    js = open(os.path.join(REPO, 'static', 'doc_model.js'), encoding='utf-8').read()
+    # JS spells Python's Unicode \w as \p{L}\p{N}_ (its own \w is ASCII only)
+    js = open(os.path.join(REPO, 'static', 'doc_model.js'), encoding='utf-8').read() \
+        .replace('\\p{L}\\p{N}_', '\\w')
     check('the JS grammar mirrors manuscript.py',
           manuscript.ANCHOR_RE.pattern.replace('\\-', '-') in js.replace('\\/', '/').replace('\\-', '-')
           and manuscript.PAGE_RE.pattern.replace('\\-', '-') in js.replace('\\-', '-'))

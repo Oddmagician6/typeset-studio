@@ -487,14 +487,34 @@ def _continues(group, it):
     return abs((lx + last['w']) - (ix + it['w'])) < 0.05
 
 
-def _align(group):
+def _align(group, sheet=None):
     if len(group) == 1:
-        return 'center'
+        return _lone_align(group[0], sheet)
     xs = [_along(it)[0] for it in group]
     if max(xs) - min(xs) < 0.05:
         return 'left'
     cs = [x + it['w'] / 2 for x, it in zip(xs, group)]
     return 'center' if max(cs) - min(cs) < 0.05 else 'right'
+
+
+def _lone_align(it, sheet):
+    """How a single line was set, read off where it sits in its panel: centred
+    if its margins either side match, otherwise to the nearer edge. Calling
+    every lone line centred moved a left-set title's edge inward once the
+    writer typed a shorter one."""
+    if sheet is None or it['angle'] != 0:
+        return 'center'
+    g = sheet.g
+    x0, x1 = it['x'] / 72.0, (it['x'] + it['w']) / 72.0
+    anchor = sheet.panel((x0 + x1) / 2.0)
+    ox, _ = wrap_design.origin(g, anchor)
+    pw = wrap_design.panel_width(g, anchor)
+    left, right = x0 - ox, ox + pw - x1
+    if left < 0 or right < 0:                # on a flap, off its panel: as before
+        return 'center'
+    if abs(left - right) < 0.05:
+        return 'center'
+    return 'left' if left < right else 'right'
 
 
 def _text_element(group, sheet, notes, fonts):
@@ -521,7 +541,7 @@ def _text_element(group, sheet, notes, fonts):
             text += '\n' + it['text']
         else:
             text += ' ' + it['text']
-    align = _align(group)
+    align = _align(group, sheet)
     face = pdfmetrics.getFont(rl_font).face
     asc = face.ascent / 1000.0 * size
     across = _along(first)[0]
@@ -578,6 +598,17 @@ def _text_element(group, sheet, notes, fonts):
         if room * 2 > width:
             width = room * 2
             bx = ox + c - room
+    elif lone and align in ('left', 'right'):
+        # a single line set to one side grows away from that side, to the safe zone
+        ox, _ = wrap_design.origin(g, anchor)
+        pw = wrap_design.panel_width(g, anchor)
+        inset = engine.WRAP_SAFE if anchor != 'spine' else engine.WRAP_SPINE_SAFE
+        if align == 'left':
+            width = max(width, ox + pw - inset - bx)
+        else:
+            right = bx + width
+            bx = min(bx, ox + inset)
+            width = right - bx
     el['w'] = _r(width)
     return sheet.place(el, bx, top, anchor)
 
