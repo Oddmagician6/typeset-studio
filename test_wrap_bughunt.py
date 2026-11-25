@@ -118,6 +118,30 @@ try:
     check('a paperback\'s front still runs to the sheet\'s edge',
           abs(sum(WDm.fill_rect(gp, 'front')[::2]) - gp['wrap_w']) < 1e-9)
 
+    print('\n[4.11 the Title fields on a family that sets its own title]')
+    import json
+    typo = A.load_cover_template('typographic-bold')
+    f11 = dict(FORM, base_json=json.dumps(typo), title_size='20',
+               title_leading=str(typo['title']['leading']), title_y=str(typo['title']['y'] + 0.1))
+    t11 = A.parse_cover_form(f11)
+    check('Size and position reach the family\'s own title settings',
+          abs(t11['typo']['title_size'] - 20) < 0.01
+          and abs(t11['typo']['title_top'] - (typo['typo']['title_top'] + 0.1)) < 1e-6, t11['typo'])
+    t11b = A.parse_cover_form(dict(FORM, base_json=json.dumps(typo),
+                                   title_size=str(typo['title']['size']),
+                                   title_leading=str(typo['title']['leading']),
+                                   title_y=str(typo['title']['y'])))
+    check('untouched, they leave it as it was', t11b['typo'] == typo['typo'])
+
+    print('\n[4.12 Customise keeps a one-line title\'s side]')
+    import wrap_convert as WC
+    cf12 = engine._register_cover_fonts(typo, engine.register_fonts(A.DEFAULTS))
+    d12 = A._wrap_dims({}, 320)
+    design, _ = WC.from_template(typo, cf12, {'title': 'Map', 'author': 'Ada Merrow'}, d12)
+    title = [e for e in design['elements'] if e.get('type') == 'text' and e.get('text') == 'MAP' and e.get('anchor') == 'front']
+    check('a left-set title stays left-set', title and title[0]['align'] == 'left',
+          [(e.get('text'), e.get('align')) for e in design['elements'] if e.get('type') == 'text'])
+
     print('\n[4.13 unticking "Use as this book\'s cover"]')
     PID = 'salt-road'
     with open(os.path.join(A.PROJECT_MS_DIR, PID + '.md'), 'w', encoding='utf-8') as f:

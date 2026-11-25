@@ -2110,7 +2110,43 @@ def parse_cover_form(form):
     base = _json_field(form, 'base_json')
     if base is None:
         base = {'photo': _json_field(form, 'photo_json') or {}}
-    return _overlay(base, _cover_fields(form))
+    out = _overlay(base, _cover_fields(form))
+    _title_to_family(base, out)
+    return out
+
+
+def _title_to_family(base, out):
+    """Carry a change to the editor's Title size, leading and position into a
+    design family's own title settings (`typo.title_size` and the like), which
+    that family draws from instead: the Title fields did nothing on those
+    templates. Leading is points in the editor and a ratio of the size in a
+    family, so each change goes over as the ratio (or, for the position, the
+    shift) that it made."""
+    old, new = base.get('title') or {}, out.get('title') or {}
+    if not isinstance(old, dict):
+        return
+    for key in ('typo', 'photo', 'vintage'):
+        fam = out.get(key)
+        if not isinstance(fam, dict):
+            continue
+        fam = out[key] = dict(fam)
+        o_size, n_size = old.get('size'), new.get('size')
+        if 'title_size' in fam and o_size and n_size and o_size != n_size:
+            fam['title_size'] = round(_num_or(fam['title_size'], o_size) * n_size / o_size, 2)
+        o_lead, n_lead = old.get('leading'), new.get('leading')
+        if 'title_leading' in fam and o_lead and n_lead and o_lead != n_lead:
+            fam['title_leading'] = round(_num_or(fam['title_leading'], 1.0) * n_lead / o_lead, 3)
+        o_y, n_y = old.get('y'), new.get('y')
+        if 'title_top' in fam and o_y is not None and n_y is not None and o_y != n_y:
+            fam['title_top'] = round(min(max(_num_or(fam['title_top'], o_y) + n_y - o_y, 0.0), 1.0), 4)
+
+
+def _num_or(v, default):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) else default
 
 
 def _cover_fields(form):

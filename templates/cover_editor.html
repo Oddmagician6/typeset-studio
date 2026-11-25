@@ -814,7 +814,8 @@
           if (!slotEl) return;
           var slot = slotEl.value;
           var hasImg = imgEl && imgEl.value.trim();
-          var wIn = numField('emblem' + n + '_w', n === 1 ? 0.7 : 0.6);
+          // the PDF draws an emblem no narrower than 0.1 in (engine._paint_emblems)
+          var wIn = Math.max(numField('emblem' + n + '_w', n === 1 ? 0.7 : 0.6), 0.1);
           dims.push('Emblem ' + n + ' ' + fmtIn(wIn) + ' in wide');
 
           // footprint as a fraction of the trim; square placeholder (real height = image aspect)

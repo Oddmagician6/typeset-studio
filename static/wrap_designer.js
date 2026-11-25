@@ -1202,7 +1202,10 @@
     var el = design.elements.find(function (e) { return e.type === 'image' && e.fill === where; });
     if (el) { el.src = src; choose(el.id); showProps(); }
     else {                                          // just above that panel's colour
-      var bg = design.elements.findIndex(function (e) { return e.type === 'rect' && e.fill === where; });
+      // its ground: a colour, or (after Customise) a drawn vector filling the
+      // panel - the art goes above the last of them, or it would sit underneath
+      var bg = -1;
+      design.elements.forEach(function (e, i) { if (e.type !== 'image' && e.fill === where) bg = i; });
       var img = {id:'image-' + (++seq), type:'image', fill:where, src:src};
       design.elements.splice(bg + 1, 0, img); choose(img.id); showProps();
     }
