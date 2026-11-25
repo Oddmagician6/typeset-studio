@@ -8,6 +8,116 @@ line here.
 
 ---
 
+## 1.14.1 — 25 November 2026
+
+A bug-fix release: a second, eight-part bug hunt across picture books, game
+books, Send to print, the cover designer, the manuscript, the rich editor, the
+app's routes and upgrades. Nothing new to learn, but a lot that now does what
+it says.
+
+### Fixed
+
+**Printing and Send to print**
+
+- IngramSpark hardcovers and dust jackets are built to IngramSpark's own
+  measurements (a 5.75" case was 13.75" plus the spine; it is 13.38"). KDP and
+  generic wraps are unchanged.
+- A package for IngramSpark flags an RGB cover, as it already did an RGB
+  interior.
+- An odd page count is bound with a blank leaf, so the spine is worked out
+  from the even count. The Page count row uses KDP's range for the paper and
+  trim you picked (Standard colour starts at 72 pages).
+- A cover picture cut off part way through is refused, rather than printing
+  as nothing and becoming a blank ebook cover.
+- After a trim change, the ebook cover and listing JPG follow the new trim.
+  They no longer change with the interior's bleed, and a square or landscape
+  cover stays under Apple Books' size limit.
+- A back-cover photo is measured for dpi at the size it prints.
+- A book titled like a Windows device name (Con, Aux, LPT1) publishes its
+  ebook.
+- Transparent PNGs print transparent in page designs and wraps, Customised
+  ones included.
+- A colour CMYK picture in a black-and-white book is reported.
+
+**Game books**
+
+- A book that opens on a designed page numbers its pages from it.
+- A footnote that runs on carries past a spread instead of vanishing.
+- A drop cap that moves to the next page takes its index entries and link
+  targets with it.
+- A chapter that opens on a spread links to the spread, not the blank before
+  it.
+- A heading over a column-tall figure no longer fails the build.
+- A repeated table header no longer adds index entries on every page.
+- Two full-page figures in a row no longer leave an empty page between them.
+- A full-bleed figure's caption too long for its page is reported, not cut
+  off.
+- A page reference to an anchor inside a page fence no longer stops the build.
+- A narrow table set to centre or right sits that way in two columns.
+- Scores pasted as `Str 14 +2 +2 Dex 8 -1 -1` fill the score table.
+- An index entry in a stat block's section heading reaches the index.
+- `cr="0.5"` gets its own group in the challenge list.
+- Index entries starting with a sign or a digit come first, under no letter.
+- If page numbers in the text or index were still moving when the build
+  finished, preflight says so.
+
+**Picture books and the page-by-page ebook**
+
+- The ebook paints the style's page background, so white words on a design
+  with no ground of their own show.
+- A caption-less figure and the Book settings pages are listed as left out of
+  the ebook, and a missing design keeps its page, so the pages after it stay
+  on their side.
+- Each half of a spread holds only its own words, and justified words keep
+  their spaces when a reader searches or reads aloud.
+- A thick rule over words is flagged as drawn over them.
+- The page plan stops numbering when a dedication or similar page comes
+  first, and a page fence left open at the end no longer swallows another.
+- A `~~~ page` fence with no design named prints its words, as before 1.8.
+
+**Cover designer and Cover Studio**
+
+- A phone photo taken sideways prints upright, a cleared line spacing prints
+  as the canvas shows it, and jacket fills stop at the flap folds.
+- A classic-frame title too long for the frame shrinks, then breaks, instead
+  of crossing it. Words too long for a box and flap copy too long for a flap
+  are flagged.
+- Save waits for the chosen book to load, and switching books asks before
+  dropping unsaved changes. Cover Studio clears the last book's blurb, flaps
+  and imprint when the next book leaves them blank.
+- Customise keeps art above the drawn ground, the title's size and position,
+  and a one-line title on its side. Unticking "Use as this book's cover"
+  restores the old cover.
+- Fillable boxes: a checkbox and text field never share a field by accident,
+  a new box never reuses a name, and a box across a spread's fold stays on
+  its page.
+
+**The manuscript and the rich editor**
+
+- Titles, the title page and the copyright page print `<` and `&` as written,
+  so an author named `Lovelace & <B>` no longer stops the build.
+- A heading straight after an endnote starts its chapter. A telegram with `&`
+  and stray control characters no longer break the EPUB, and Word table
+  cells with the same text are both kept.
+- The rich editor keeps poems, tables, notes in stat blocks, attributes with
+  quotes, and italic next to bold exactly as written. Replace All, paste and
+  Enter over selected verse behave, and the outline jumps to the chapter.
+
+**The app**
+
+- Edits, deletes, saves and uploads can no longer overwrite or lose another
+  book's files, or a Word manuscript that couldn't be read.
+- One damaged wrap design no longer takes down Projects, and a failed
+  ebook-only rebuild keeps the last download.
+- Upgrading keeps a 1.13 picture book of text and figures as a flowing ebook.
+- Without WebView2, the app opens in your browser instead of an old engine.
+- The update check copes with long feeds, a read-only settings file and
+  network failures, and stays quiet once you turn it off.
+- The cover editor offers Standard colour paper, and an `epubcheck.jar`
+  placed beside the installed app is found.
+
+---
+
 ## 1.14.0 — 13 November 2026
 
 Picture books, last step: a picture book's ebook now keeps its pages. Every
