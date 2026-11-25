@@ -144,6 +144,16 @@ def _front_fit(x_lo, x_hi, text, font, size, tracking):
     return _fit_line(text, font, size, x_hi - x_lo, tracking, min_size=min(size, 5.0))
 
 
+def _source(canv, role=None, text='', **kw):
+    """Tell a recording canvas (Customise, wrap_convert.Recorder) what the lines
+    drawn next were set from: the writer's own text, before it was broken into
+    lines, so the conversion keeps that rather than rebuilding it from the
+    drawn pieces. `role=None` ends the piece. A real canvas has no such hook."""
+    hook = getattr(canv, 'source_text', None)
+    if hook:
+        hook(role, text, **kw)
+
+
 def _tracked_centre(canv, cx, y, text, font, size, tracking=0.0):
     """Draw letterspaced text centred on cx at baseline y."""
     if not text:
@@ -938,10 +948,12 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
         leading = tt.get('leading', 46) * (tsize / tt.get('size', 40))
         canv.setFillColor(_pal_color(tpl, tt.get('color', 'gold')))
         yy = yat(title_y)
+        _source(canv, 'title', title, leading=leading)
         for ln in lines:
             _tracked_centre(canv, cx, yy, ln, cf['display'], tsize, trk)
             last_y = yy
             yy -= leading
+        _source(canv)
 
     # accent line (author) — cleared below the title
     ac = tpl.get('accent', {})
@@ -1781,8 +1793,10 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
     coll = (meta.get('cover_collection') or '').upper()
     if coll:
         canv.setFillColor(_pal_color(tpl, cc.get('color', 'gold')))
+        _source(canv, 'label', coll)
         _tracked_centre(canv, cx, yat(0.86), coll,
                         cf['serif'], cc.get('size', 12.5) * 0.85, cc.get('tracking', 3.4))
+        _source(canv)
 
     # blurb — centred serif block in the upper-middle
     blurb = meta.get('cover_blurb') or ''
@@ -1812,6 +1826,7 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
                 break
             size -= 0.5
         yy = top
+        _source(canv, 'blurb', blurb, leading=lead, gap=0.6)
         for ln, step in rows:
             if ln is not None:
                 if yy < floor:
@@ -1819,6 +1834,7 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
                     break
                 _tracked_centre(canv, cx, yy, ln, cf['serif'], size, 0.0)
             yy -= step
+        _source(canv)
 
     # optional author photo / publisher logo — centred, aspect preserved
     bimg = meta.get('cover_back_image')

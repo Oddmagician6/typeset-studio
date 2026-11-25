@@ -3466,7 +3466,7 @@ def wrap_designer():
                            page_design=wrap_design.page_name(request.args.get('design', '')),
                            templates=[{'id': c['id'], 'name': c['data'].get('name') or c['id']}
                                       for c in list_cover_templates()],
-                           fonts=[f for f in list_fonts() if f.lower().endswith('.ttf')],
+                           fonts=[f for f in list_fonts() if wrap_design.font_file(f)],
                            assets=assets, stand_in=WRAP_STAND_IN,
                            retailers=WRAP_RETAILERS, papers=_PAPER, trims=TRIM_PRESETS,
                            barcode=engine.BARCODE, safe=engine.WRAP_SAFE,
@@ -3707,7 +3707,9 @@ def wrap_designer_customise():
         except Exception:
             preset = DEFAULTS
         p = {**PRINT_DEFAULTS, **{k: proj[k] for k in PRINT_DEFAULTS if k in proj}}
-        meta = _wrap_meta(_project_meta(proj)[0], p)
+        # with a template picked, the book's own one is never read: a damaged
+        # old template stopped the conversion from a healthy new one
+        meta = _wrap_meta(_project_meta(dict(proj, cover_mode='none') if cid else proj)[0], p)
         # the cover the book has of its own; a saved wrap design's front is
         # handed on as uploaded art, which is not a cover to start from
         own = proj.get('cover_mode', 'none')
