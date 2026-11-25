@@ -702,6 +702,19 @@ app.secret_key = 'typeset-studio-local'
 app.config['MAX_FORM_MEMORY_SIZE'] = 64 * 1024 * 1024
 
 
+@app.url_value_preprocessor
+def _canonical_pid(endpoint, values):
+    """Every route sees a book or preset id in the one form its files use.
+
+    Lookups always went through `secure_filename`, but some writes built a
+    path from the id as it arrived - so on Windows `..\\x` found the book `x`
+    and then wrote outside its folder. Canonicalising here means no route can
+    find a book under one name and write under another.
+    """
+    if values and isinstance(values.get('pid'), str):
+        values['pid'] = secure_filename(values['pid'])
+
+
 def issue_rows(rows):
     """The check rows a writer still has something to do about.
 
@@ -1556,9 +1569,14 @@ def list_projects():
     for fn in sorted(os.listdir(PROJECT_DIR)):
         if fn.endswith('.json'):
             try:
-                data = upgrade_project(read_book(os.path.join(PROJECT_DIR, fn)))
+                data = read_book(os.path.join(PROJECT_DIR, fn))
             except (OSError, DamagedFile):
                 continue
+            try:
+                data = upgrade_project(data)
+            except Exception:
+                # one book's odd design must not take the whole shelf down
+                logging.error('Upgrading %s failed: %s', fn, traceback.format_exc())
             items.append({'id': fn[:-5], 'data': data})
     return sorted(items, key=lambda x: str(x['data'].get('updated') or ''), reverse=True)
 
@@ -1595,6 +1613,7 @@ def save_project_file(pid, data):
     # that no page could open
     with _PROJECT_LOCK:
         _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
+        _RESERVED_IDS.discard(secure_filename(pid))   # its file holds the id now
 
 
 def update_project(pid, changes):
@@ -1651,18 +1670,26 @@ def _ids_in(folder, ext='.json'):
         return set()
 
 
+# ids handed out but not saved yet: two books made at once under one name
+# both picked the free id, copied into one manuscript path and saved one record
+_RESERVED_IDS = set()
+
+
 def unique_project_id(base):
     pid, n = base, 2
-    # a history folder left by a book deleted before 1.3.1 would otherwise be
-    # handed to the next book of that name, and its Restore offer the old text
-    try:
-        leftovers = set(os.listdir(HISTORY_DIR))
-    except OSError:
-        leftovers = set()
-    existing = {i['id'] for i in list_projects()} | _ids_in(PROJECT_DIR) | leftovers
-    while pid in existing:
-        pid = f'{base}-{n}'
-        n += 1
+    with _PROJECT_LOCK:
+        # a history folder left by a book deleted before 1.3.1 would otherwise be
+        # handed to the next book of that name, and its Restore offer the old text
+        try:
+            leftovers = set(os.listdir(HISTORY_DIR))
+        except OSError:
+            leftovers = set()
+        existing = ({i['id'] for i in list_projects()} | _ids_in(PROJECT_DIR) | leftovers
+                    | _RESERVED_IDS)
+        while pid in existing:
+            pid = f'{base}-{n}'
+            n += 1
+        _RESERVED_IDS.add(pid)       # held until the book is saved
     return pid
 
 
@@ -3022,12 +3049,19 @@ def cover_asset_upload():
     if ext not in IMAGE_EXTS:
         return jsonify({'ok': False, 'error': 'Use a .jpg or .png image.'})
     base = os.path.splitext(_safe_upload_name(f.filename, 'asset'))[0]
-    fn, dest, i = base + ext, os.path.join(COVER_ASSET_DIR, base + ext), 1
-    while os.path.exists(dest):
-        fn = f'{base}-{i}{ext}'
+    fn, i = base + ext, 1
+    # the name is claimed as the file is created: checked first and written
+    # after, two uploads of "emblem.png" at once could both be handed one name
+    while True:
         dest = os.path.join(COVER_ASSET_DIR, fn)
-        i += 1
-    f.save(dest)
+        try:
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0))
+            break
+        except FileExistsError:
+            fn = f'{base}-{i}{ext}'
+            i += 1
+    with os.fdopen(fd, 'wb') as out:
+        f.save(out)
     try:                                             # reject anything Pillow can't read
         from PIL import Image
         Image.open(dest).verify()
@@ -3040,16 +3074,23 @@ def cover_asset_upload():
     return jsonify({'ok': True, 'filename': fn})
 
 
+class _BadBackImage(ValueError):
+    pass
+
+
 def _save_back_image(f):
-    """Save an uploaded back-cover image (photo/logo) to a temp file. Returns path or None."""
+    """Save an uploaded back-cover image (photo/logo) to a temp file. Returns
+    the path, or None when none was chosen. One that isn't a readable .jpg or
+    .png raises `_BadBackImage`: the cover drew without it and said nothing."""
     if not f or not f.filename:
         return None
-    ext = _upload_ext(f)
-    if ext not in ('.jpg', '.jpeg', '.png'):
-        return None
+    ext, data = _upload_ext(f), f.read()
+    if ext not in IMAGE_EXTS or not _is_image(data):
+        raise _BadBackImage(f'The back-cover image “{f.filename}” is not a readable '
+                            '.jpg or .png picture. Choose another, or clear it.')
     fd, tmp = tempfile.mkstemp(suffix=ext)
-    os.close(fd)
-    f.save(tmp)
+    with os.fdopen(fd, 'wb') as out:
+        out.write(data)
     return tmp
 
 
@@ -3384,14 +3425,31 @@ def wrap_designer_save(pid):
     if body.get('use_as_cover'):
         proj['cover_mode'] = 'wrap'
     front = os.path.join(PROJECT_MS_DIR, proj['wrap_front_file'])
+    # rendered beside the real one and swapped in only once the book is saved:
+    # the builds reuse that file while its size fits, so writing it first let a
+    # failed save put the unsaved front on the next book built
+    pending = front + '.saving.jpg'
     try:
         dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
-        _render_wrap_front(design, dims, front)
+        wrap_design.render_front(design, dims, pending)
     except Exception as exc:
         logging.error('Wrap design front render failed: %s', traceback.format_exc())
+        _drop_files([os.path.basename(pending)])
         return jsonify(ok=False, error=f'The design was not saved: {exc}')
     proj['updated'] = datetime.now().isoformat(timespec='seconds')
-    save_project_file(pid, proj)
+    try:
+        save_project_file(pid, proj)
+    except Exception:
+        _drop_files([os.path.basename(pending)])
+        raise
+    try:
+        os.replace(pending, front)
+        with open(front + '.dims', 'w', encoding='utf-8') as f:
+            f.write(_wrap_dims_key(dims))
+    except OSError:
+        # the old front no longer matches the saved design: the next build draws it
+        _drop_files([os.path.basename(pending), proj['wrap_front_file'],
+                     proj['wrap_front_file'] + '.dims'])
     return jsonify(ok=True, saved=proj['wrap_design_saved'],
                    is_cover=proj.get('cover_mode') == 'wrap')
 
@@ -3698,7 +3756,10 @@ def _plan_write(pid, proj, rev, build):
     """Rewrite the manuscript from the plan: `build(items)` returns the new
     pieces, or a refusal string. Refused when the manuscript changed since
     the plan was read, or when the plan can't read it as the book does."""
-    current = _project_manuscript_text(proj, report_import=False)
+    try:
+        current = _project_manuscript_text(proj, report_import=False, strict=True)
+    except DamagedFile:
+        return jsonify(ok=False, error=_UNREADABLE_DOCX), 409
     if rev != _ms_rev(current):
         return jsonify(ok=False, conflict=True,
                        error='The manuscript changed since this plan was opened '
@@ -3931,9 +3992,12 @@ def project_new_picture_book():
 
 @app.route('/cover/wrap', methods=['POST'])
 def cover_wrap():
+    try:
+        back = _save_back_image(request.files.get('wrap_back_image'))
+    except _BadBackImage as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 400
     fd, tmp = tempfile.mkstemp(suffix='.pdf')
     os.close(fd)
-    back = _save_back_image(request.files.get('wrap_back_image'))
     try:
         _wrap_from_form(request.form, tmp, back_image=back)
         with open(tmp, 'rb') as f:
@@ -3959,9 +4023,12 @@ def cover_wrap_preview():
     except ImportError:
         return jsonify({'ok': False,
                         'error': 'pymupdf not installed - run: pip install pymupdf'})
+    try:
+        back = _save_back_image(request.files.get('wrap_back_image'))
+    except _BadBackImage as exc:
+        return jsonify({'ok': False, 'error': str(exc)})
     fd, tmp = tempfile.mkstemp(suffix='.pdf')
     os.close(fd)
-    back = _save_back_image(request.files.get('wrap_back_image'))
     try:
         res, dims = _wrap_from_form(request.form, tmp, back_image=back)
         doc = fitz.open(tmp)
@@ -4155,7 +4222,8 @@ def _named(path_or_name, fn):
 
 
 def _font_uses(fn):
-    """Where a library font is named: styles, cover templates, books' wrap designs."""
+    """Where a library font is named: styles, cover templates, books' wrap
+    designs and their designed interior pages and spreads."""
     uses = []
     for it in list_presets():
         files = it['data'].get('font_files')
@@ -4172,6 +4240,13 @@ def _font_uses(fn):
                                          for e in els):
             name = it['data'].get('name') or it['data'].get('title') or it['id']
             uses.append(f'the wrap design of “{name}”')
+        pages = it['data'].get('page_designs')
+        for page in pages if isinstance(pages, list) else []:
+            els = page.get('elements') if isinstance(page, dict) else None
+            if isinstance(els, list) and any(isinstance(e, dict) and _named(e.get('font'), fn)
+                                             for e in els):
+                name = it['data'].get('name') or it['data'].get('title') or it['id']
+                uses.append(f'the page “{page.get("name") or "page"}” of “{name}”')
     return uses
 
 
@@ -5016,10 +5091,19 @@ def _num(form, key, current, lo, hi):
     return min(max(v, lo), hi)
 
 
-def _replace_file(pid, data, name, old):
-    """Write an upload into the book's folder and drop the file it replaces."""
+def _replace_file(pid, data, name, old, stale):
+    """Write an upload into the book's folder; the file it replaces goes on
+    `stale`, to be dropped by `_drop_files` once the book is saved pointing at
+    the new one (dropped first, a failed save left the book naming a file that
+    was gone)."""
     _atomic_write_bytes(os.path.join(PROJECT_MS_DIR, name), data)
     if old and old != name:
+        stale.append(old)
+
+
+def _drop_files(names):
+    """Remove files from the book's folder that nothing points at any more."""
+    for old in names:
         old_path = os.path.join(PROJECT_MS_DIR, old)
         if os.path.exists(old_path):
             try:
@@ -5045,6 +5129,7 @@ def project_edit(pid):
     if request.method == 'POST':
         form = request.form
         problems = []          # uploads refused; the rest of the form still saves
+        stale = []             # replaced files, dropped once the book is saved
 
         # Optional manuscript replacement
         up = request.files.get('manuscript')
@@ -5077,7 +5162,7 @@ def project_edit(pid):
                 # an upload here overwrites work that may exist nowhere else
                 snapshot_manuscript(pid, _project_manuscript_text(proj, report_import=False),
                                     reason='replaced', force=True)
-                _replace_file(pid, data, pid + ext, proj.get('manuscript_file', ''))
+                _replace_file(pid, data, pid + ext, proj.get('manuscript_file', ''), stale)
                 proj['manuscript_file'] = pid + ext
                 proj['manuscript_type'] = 'file'
 
@@ -5093,15 +5178,12 @@ def project_edit(pid):
                 problems.append(f'The {what} was not replaced: “{f.filename}” '
                                 "isn't a .jpg or .png picture.")
                 continue
-            _replace_file(pid, data, pid + suffix + ext, proj.get(key, ''))
+            _replace_file(pid, data, pid + suffix + ext, proj.get(key, ''), stale)
             proj[key] = pid + suffix + ext
         back = request.files.get('print_back_image')
         if 'print_back_clear' in form and not (back and back.filename) \
                 and proj.get('print_back_file'):
-            try:
-                os.remove(os.path.join(PROJECT_MS_DIR, proj['print_back_file']))
-            except OSError:
-                pass
+            stale.append(proj['print_back_file'])
             proj['print_back_file'] = ''
 
         def choice(key, allowed, default):
@@ -5154,6 +5236,7 @@ def project_edit(pid):
             'updated':          datetime.now().isoformat(timespec='seconds'),
         })
         save_project_file(pid, proj)
+        _drop_files(stale)
         if problems:
             for msg in problems:
                 flash(msg)
@@ -5179,12 +5262,17 @@ STARTER_DRAFT = ("# Chapter One\n\n"
                  "scene break with `* * *` on its own line.\n")
 
 
-def _project_manuscript_text(proj, report_import=True):
+def _project_manuscript_text(proj, report_import=True, strict=False):
     """Return a project's manuscript as editable Markdown text ('' if none).
 
     `report_import=False` for the internal readers (snapshotting before a
     destructive change): they want the text, not a flashed import summary the
     user never asked for.
+
+    `strict=True` for the callers that write the manuscript back: a Word file
+    that can't be read raises `DamagedFile` instead of reading as empty, since
+    writing over "empty" replaced the book with whatever was being added and
+    deleted the Word file it came from.
     """
     ms_type = proj.get('manuscript_type', 'file')
     ms_file = proj.get('manuscript_file', '')
@@ -5204,9 +5292,15 @@ def _project_manuscript_text(proj, report_import=True):
                         _flash_import(rep)   # the page-rendering callers only
                     return text
                 except Exception:
+                    if strict:
+                        raise DamagedFile(path, 'could not be read as a Word file.')
                     return ''
             return _read_text_file(path)
     return ''
+
+
+_UNREADABLE_DOCX = ("This book's Word manuscript can't be read, so it was left as it is "
+                    'rather than replaced. Replace it on the Edit page with a working copy.')
 
 
 def _load_preset_or_default(pid):
@@ -5477,21 +5571,16 @@ def _ms_rev(text):
 def _store_manuscript(pid, proj, text):
     """Write a book's manuscript as its own Markdown file (an imported Word
     file or the sample becomes one), keep a History snapshot, save the book."""
-    new_file = pid + '.md'
+    new_file = secure_filename(pid) + '.md'
     _atomic_write_text(os.path.join(PROJECT_MS_DIR, new_file), text)
     snapshot_manuscript(pid, text)
     old = proj.get('manuscript_file', '')
-    if old and old != new_file:
-        old_path = os.path.join(PROJECT_MS_DIR, old)
-        if os.path.exists(old_path):
-            try:
-                os.remove(old_path)
-            except OSError:
-                pass
     proj['manuscript_file'] = new_file
     proj['manuscript_type'] = 'markdown'
     proj['updated'] = datetime.now().isoformat(timespec='seconds')
     save_project_file(pid, proj)
+    if old and old != new_file:          # only once the book points at the new one
+        _drop_files([old])
 
 
 @app.route('/project/<pid>/write/save', methods=['POST'])
@@ -5512,7 +5601,12 @@ def project_write_save(pid):
     # `overwrite` is that choice made: the newer text goes to History instead.
     # A page from before revisions sends no `base` and saves as it always did.
     base = request.form.get('base')
-    current = _project_manuscript_text(proj, report_import=False)
+    try:
+        current = _project_manuscript_text(proj, report_import=False, strict=True)
+    except DamagedFile:
+        # keep what the page sent, but never write over the Word file
+        snapshot_manuscript(pid, text, reason='conflict', force=True)
+        return jsonify({'ok': False, 'error': _UNREADABLE_DOCX}), 409
     if base is not None and base != _ms_rev(current) and text != _norm_newlines(current):
         if request.form.get('overwrite') != '1':
             snapshot_manuscript(pid, text, reason='conflict', force=True)
@@ -5557,7 +5651,7 @@ def project_history_restore(pid, stamp):
         return jsonify({'ok': False, 'error': 'That version is no longer kept.'}), 404
     current = _project_manuscript_text(proj, report_import=False)
     snapshot_manuscript(pid, current, reason='restore', force=True)
-    new_file = pid + '.md'
+    new_file = secure_filename(pid) + '.md'
     _atomic_write_text(os.path.join(PROJECT_MS_DIR, new_file), text)
     proj['manuscript_file'] = new_file
     proj['manuscript_type'] = 'markdown'
@@ -5706,10 +5800,13 @@ def _build_project(pid, proj):
             res['warnings'].append(f'EPUB build failed: {exc}')
             _drop_out(res['epub_name'])
             res['epub_name'] = ''
+            res['epub_failed'] = True
 
     done = {'last_pdf': res['out_name'], 'last_epub': res['epub_name'],
             'last_screen_pdf': res['screen_name'],
             'updated': datetime.now().isoformat(timespec='seconds')}
+    if res.get('epub_failed'):
+        del done['last_epub']           # the last one that worked stays downloadable
     if res['page_count']:
         done['last_page_count'] = res['page_count']
     proj.update(done)
@@ -5781,6 +5878,9 @@ def project_rebuild(pid):
         return jsonify(ok=False, error=f'Build failed: {exc}')
     if res['error']:
         return jsonify(ok=False, error=res['error'])
+    if res.get('epub_failed') and not res['out_name']:
+        # an EPUB-only book that built nothing has failed, not built with a warning
+        return jsonify(ok=False, error='; '.join(res['warnings']) or 'The EPUB build failed.')
     issues = []
     if res['build_result']:
         issues += issue_rows(_preflight(res['build_result'], res['preset'], res['page_count'],
@@ -6443,18 +6543,21 @@ def project_delete(pid):
                 proj = read_json(path)
             except (OSError, DamagedFile):
                 proj = None
+        # the record goes first: if it can't (another program holding it open),
+        # the book is left whole instead of a card naming files that are gone
+        if pid and os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                flash('The project could not be deleted: its file is in use by another '
+                      'program. Close that program and try again.')
+                return redirect(url_for('projects'))
         if isinstance(proj, dict):
             others = set()
             for it in list_projects():
                 if it['id'] != pid:
                     others |= _book_files(it['data'])
-            for fn in _book_files(proj) - others:
-                try:
-                    os.remove(os.path.join(PROJECT_MS_DIR, fn))
-                except OSError:
-                    pass
-        if pid and os.path.exists(path):
-            os.remove(path)
+            _drop_files(_book_files(proj) - others)
         if pid:
             shutil.rmtree(_history_folder(pid), ignore_errors=True)
             try:

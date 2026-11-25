@@ -707,6 +707,16 @@ def reserve_box(el):
     size - what "Customise this design" makes of a template's reserve."""
     if el.get('type') != 'vector' or el.get('fill') or len(el.get('ops') or []) != 1:
         return None
+    # a design from the data folder can hold anything: an op that isn't the
+    # shape this looks for is "not a reserve", never an error (one damaged
+    # design took the whole Projects page down)
+    try:
+        return _reserve_box(el)
+    except (IndexError, KeyError, TypeError, AttributeError, ValueError):
+        return None
+
+
+def _reserve_box(el):
     op = el['ops'][0]
     st = op[-1]
     if op[0] != 'path' or st.get('fill') != '#ffffff' or st.get('stroke') != '#999999':

@@ -23,7 +23,9 @@ goes in where that takes one.
 import re
 
 FENCE_RE = re.compile(r'^\s*~~~(.*)$')
-_ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
+# straight or curly quotes, as the book reads them (manuscript._ATTR_RE): a
+# straight-only reading missed `src=“map”` the book places
+_ATTR_RE = re.compile(r'(\w+)=["“”]([^"“”]*)["“”]')
 _SIDES = {'right': 'right', 'recto': 'right', 'left': 'left', 'verso': 'left'}
 
 # Picture-book page counts (#75b-2): KDP prints no fewer than 24 pages; 32 is
@@ -109,7 +111,9 @@ def rename(text, old, new, key=lambda s: s):
         in_block = True
         kind, attrs = _header(line)
         if kind == 'page' and key(attrs.get('src', '')) == key(old):
-            lines[i] = re.sub(r'(\bsrc=")[^"]*(")', lambda m: m.group(1) + new + m.group(2),
+            # straight or curly quotes, as the book reads them (manuscript._ATTR_RE);
+            # written back straight
+            lines[i] = re.sub(r'\bsrc=["“”][^"“”]*["“”]', lambda m: f'src="{new}"',
                               line, count=1)
             changed = True
     return '\n'.join(lines) if changed else text

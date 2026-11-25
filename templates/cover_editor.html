@@ -724,7 +724,12 @@
         wstatus.textContent = 'Building PDF…';
         try {
           var res = await fetch('/cover/wrap', {method: 'POST', body: new FormData(form)});
-          if (!res.ok) { wstatus.textContent = 'Wrap failed.'; return; }
+          if (!res.ok) {
+            var err = null;
+            try { err = (await res.json()).error; } catch (e) {}
+            wstatus.textContent = err || 'Wrap failed.';
+            return;
+          }
           var blob = await res.blob();
           var url  = URL.createObjectURL(blob);
           var a    = document.createElement('a');

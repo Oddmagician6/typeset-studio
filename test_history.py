@@ -34,7 +34,7 @@ def check(name, cond, detail=''):
 
 
 PID = '_test_history_project'
-MS_PATH = os.path.join(A.PROJECT_MS_DIR, PID + '.md')
+MS_PATH = os.path.join(A.PROJECT_MS_DIR, A.secure_filename(PID) + '.md')
 HIST = A._history_folder(PID)
 # secure_filename strips the leading underscore, so that is the name on disk
 PROJ_JSON = os.path.join(A.PROJECT_DIR, A.secure_filename(PID) + '.json')
@@ -232,7 +232,7 @@ try:
 
     page = client.get(f'/project/{PID}/write').get_data(as_text=True)
     check('the editor shows the history panel', 'id="history"' in page and 'History' in page)
-    check('and knows where to load it from', f'/project/{PID}/history' in page)
+    check('and knows where to load it from', f'/project/{A.secure_filename(PID)}/history' in page)
 
     # replacing the manuscript by upload: the draft it overwrites may exist
     # nowhere else, so it is kept first — the same forced copy as a restore.

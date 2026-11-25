@@ -1581,7 +1581,8 @@
   // is brought up to date by the server first, as a book's design is
   var upgraded = (saved && saved.design && saved.design.elements)
     ? post('/wrap-designer/upgrade', {design: design})
-        .then(function (res) { if (res.ok) design = res.design; }).catch(function () {})
+        // only the elements come back: the rest (a spread's `spread`) is kept
+        .then(function (res) { if (res.ok) design.elements = res.design.elements; }).catch(function () {})
     : Promise.resolve();
   var startPromise = upgraded.then(function () {
     if (PAGE) {
