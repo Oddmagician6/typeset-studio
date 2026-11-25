@@ -53,18 +53,34 @@ ANCHORS = ('front', 'back', 'spine', 'sheet')
 
 
 def font_file(fname):
-    """The path of a font-library file, or None. Only a bare .ttf name is accepted."""
+    """The path of a font-library file, or None. Only a bare name is accepted: a
+    .ttf, or an .otf with TrueType outlines - the kind the cover templates set
+    their type in (one with PostScript outlines, ReportLab can't embed)."""
     base = os.path.basename(fname or '')
-    if not base.lower().endswith('.ttf'):
+    low = base.lower()
+    if not low.endswith(('.ttf', '.otf')):
         return None
     path = os.path.join(FONT_DIR, base)
-    return path if os.path.isfile(path) else None
+    if not os.path.isfile(path):
+        return None
+    if low.endswith('.otf'):
+        try:
+            with open(path, 'rb') as fh:
+                if fh.read(4) not in (b'\x00\x01\x00\x00', b'true'):
+                    return None
+        except OSError:
+            return None
+    return path
 
 
 def art_file(fname):
     """The path of an art file a design names, from the first folder that has it."""
     base = os.path.basename(fname or '')
-    for d in ART_DIRS:
+    # a picture Customise copied in (`imported-<hash>`) lives in the designer's
+    # own folder, the last: a Cover Studio upload given the same name came
+    # first, and a converted wrap drew it in place of its own art
+    dirs = ART_DIRS[::-1] if base.startswith('imported-') else ART_DIRS
+    for d in dirs:
         path = os.path.join(d, base)
         if base and os.path.isfile(path):
             return path
@@ -107,6 +123,18 @@ def break_lines(el):
     text = el.get('text', '')
     if not el.get('w'):
         return text.splitlines() or ['']
+    if el.get('keep_spaces'):
+        # a label typed with a gap in it (`NORTH     STAR`, carried over from a
+        # template that drew it so): a paragraph that fits keeps its spaces
+        out = []
+        for para in (text.splitlines() or ['']):
+            p = para.strip()
+            if p and line_width(p, el) <= el['w'] * 72.0:
+                out.append(p)
+            else:
+                out += engine._wrap_tracked(para, font_name(el['font']), el['size'],
+                                            el['w'] * 72.0, el.get('tracking', 0.0))
+        return out
     return engine._wrap_tracked(text, font_name(el['font']), el['size'],
                                 el['w'] * 72.0, el.get('tracking', 0.0))
 
@@ -153,6 +181,11 @@ def el_rect(g, el):
         return fill_rect(g, el['fill'])
     anchor = el.get('anchor', 'sheet')
     ox, oy = origin(g, anchor)
+    if anchor == 'front' and el.get('flap') == 'front':
+        # on the front flap: measured from its fold, which moves out with the
+        # front panel when the trim grows (the back flap's fold is the back
+        # panel's own edge already)
+        ox += g['panel_w']
     x = panel_width(g, anchor) / 2 + el['cx'] if 'cx' in el else el.get('x', 0)
     return ox + x, oy + el.get('y', 0), el.get('w', 0), el.get('h', 0)
 
@@ -1161,13 +1194,27 @@ def reaches_edge(design, g):
     return False
 
 
-def page_words(design):
+def page_words(design, trim_w=None, trim_h=None):
     """The words on a page design, top to bottom, for the ebook's alt text (a
-    spread's left page before its right)."""
+    spread's left page before its right). Given the trim, a spread's box is
+    placed by where it sits on the sheet: one dragged across the fold keeps
+    its old anchor, so the anchor alone can put it on the wrong page."""
     texts = [el for el in (design or {}).get('elements', [])
              if isinstance(el, dict) and el.get('type') == 'text' and not el.get('hidden')
              and str(el.get('text', '')).strip()]
-    side = (lambda el: 0 if el.get('anchor') == 'back' else 1) if is_spread(design) \
-        else (lambda el: 0)
-    texts.sort(key=lambda el: (side(el), el.get('y', 0), el.get('x', el.get('cx', 0))))
+    if trim_w and trim_h:
+        g = design_geometry(design, float(trim_w), float(trim_h))
+
+        def key(el):
+            try:
+                x, y, w, _ = el_rect(g, el)
+            except (TypeError, ValueError, KeyError):
+                return (1, 0, 0)
+            side = (0 if x + w / 2 < g['spine_x'] else 1) if is_spread(design) else 0
+            return (side, y, x)
+    else:
+        def key(el):
+            side = (0 if el.get('anchor') == 'back' else 1) if is_spread(design) else 0
+            return (side, el.get('y', 0), el.get('x', el.get('cx', 0)))
+    texts.sort(key=key)
     return ' '.join(' '.join(str(el['text']).split()) for el in texts)

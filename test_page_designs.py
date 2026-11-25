@@ -282,7 +282,9 @@ def test_epub():
     report = epub.check(out) if hasattr(epub, 'check') else None
     if report is not None:
         bad = [c for c in report if not c.get('ok')] if isinstance(report, list) else []
-        check('the ebook passes its own checks', not bad, bad[:3])
+        # the deliberately missing design is reported, and nothing else is
+        check('the ebook passes its own checks, bar the missing design',
+              [c['label'] for c in bad] == ['Page designs'] and 'nope' in bad[0]['detail'], bad[:3])
 
 
 # ---------------------------------------------------------------- 4

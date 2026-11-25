@@ -121,7 +121,7 @@
         <div class="body">
           <div class="spec">
             <b>Style</b> {{ style_name }}<br>
-            {% if p.last_pdf %}<b>Last built</b> {{ p.updated[:10] }}{% endif %}
+            {% if p.last_pdf %}<b>Last built</b> {{ (p.built or p.updated)[:10] }}{% if p.built and p.updated and p.updated > p.built %} · <i>changed since</i>{% endif %}{% endif %}
             {% if p.manuscript_type == 'sample' %}<br><b>Manuscript</b> bundled sample{% elif p.manuscript_file %}<br><b>Manuscript</b> {{ p.manuscript_file }}{% endif %}
           </div>
           <div class="actions">

@@ -144,6 +144,16 @@ def _front_fit(x_lo, x_hi, text, font, size, tracking):
     return _fit_line(text, font, size, x_hi - x_lo, tracking, min_size=min(size, 5.0))
 
 
+def _source(canv, role=None, text='', **kw):
+    """Tell a recording canvas (Customise, wrap_convert.Recorder) what the lines
+    drawn next were set from: the writer's own text, before it was broken into
+    lines, so the conversion keeps that rather than rebuilding it from the
+    drawn pieces. `role=None` ends the piece. A real canvas has no such hook."""
+    hook = getattr(canv, 'source_text', None)
+    if hook:
+        hook(role, text, **kw)
+
+
 def _tracked_centre(canv, cx, y, text, font, size, tracking=0.0):
     """Draw letterspaced text centred on cx at baseline y."""
     if not text:
@@ -251,8 +261,9 @@ def font_for(path):
         if name not in pdfmetrics.getRegisteredFontNames():
             font = TTFont(name, path)
             held = getattr(pdfmetrics, '_dynFaceNames', {}).get(font.face.name)
-            if held is not None and os.path.abspath(
-                    getattr(held.face, 'filename', '') or '') != path:
+            if held is not None:
+                # another file - or this path before it was replaced - holds
+                # the internal name: ReportLab would hand back its face
                 font.face.name += b'-' + key.encode('ascii')
             pdfmetrics.registerFont(font)
     return name
@@ -937,10 +948,12 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
         leading = tt.get('leading', 46) * (tsize / tt.get('size', 40))
         canv.setFillColor(_pal_color(tpl, tt.get('color', 'gold')))
         yy = yat(title_y)
+        _source(canv, 'title', title, leading=leading)
         for ln in lines:
             _tracked_centre(canv, cx, yy, ln, cf['display'], tsize, trk)
             last_y = yy
             yy -= leading
+        _source(canv)
 
     # accent line (author) — cleared below the title
     ac = tpl.get('accent', {})
@@ -1780,8 +1793,10 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
     coll = (meta.get('cover_collection') or '').upper()
     if coll:
         canv.setFillColor(_pal_color(tpl, cc.get('color', 'gold')))
+        _source(canv, 'label', coll)
         _tracked_centre(canv, cx, yat(0.86), coll,
                         cf['serif'], cc.get('size', 12.5) * 0.85, cc.get('tracking', 3.4))
+        _source(canv)
 
     # blurb — centred serif block in the upper-middle
     blurb = meta.get('cover_blurb') or ''
@@ -1811,6 +1826,7 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
                 break
             size -= 0.5
         yy = top
+        _source(canv, 'blurb', blurb, leading=lead, gap=0.6)
         for ln, step in rows:
             if ln is not None:
                 if yy < floor:
@@ -1818,6 +1834,7 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
                     break
                 _tracked_centre(canv, cx, yy, ln, cf['serif'], size, 0.0)
             yy -= step
+        _source(canv)
 
     # optional author photo / publisher logo — centred, aspect preserved
     bimg = meta.get('cover_back_image')
@@ -2381,9 +2398,17 @@ def register_fonts(preset):
         faces = (roles['regular'], roles.get('bold', roles['regular']),
                  roles.get('italic', roles['regular']))
         with _FONT_LOCK:
-            pdfmetrics.registerFontFamily(
-                'TSF-' + hashlib.sha1('|'.join(faces).encode('utf-8')).hexdigest()[:10],
-                normal=faces[0], bold=faces[1], italic=faces[2], boldItalic=faces[1])
+            fam_name = 'TSF-' + hashlib.sha1('|'.join(faces).encode('utf-8')).hexdigest()[:10]
+            # no bold file: bold italic keeps the italic face rather than
+            # dropping back to upright
+            bold_italic = faces[2] if faces[1] == faces[0] else faces[1]
+            pdfmetrics.registerFontFamily(fam_name, normal=faces[0], bold=faces[1],
+                                          italic=faces[2], boldItalic=bold_italic)
+            # a file standing in for a missing face is mapped back to the last
+            # role it was registered for: the regular face read as bold, and
+            # an <i> inside it found no flag to change. Regular is regular.
+            from reportlab.lib.fonts import addMapping
+            addMapping(fam_name, 0, 0, faces[0])
 
     return {
         'family':   fam,
@@ -5178,7 +5203,7 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     ncolor = _gb_color(sm, 'name_color') or base.textColor
     if name or count or cr:
         text = _caps_markup(name) if sm.get('name_caps', True) else name
-        if attrs.get('_ix') is not None:      # the block is in the index
+        if isinstance(attrs.get('_ix'), int):  # in the index (not a writer's own `_ix`)
             text = _index_tag(attrs['_ix']) + text
         if count:
             text += (f' <font name="{fonts["regular"]}">&#215;&#160;'
@@ -5209,7 +5234,10 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     at = min(model.get('scores_at', 0), len(fields)) if scores else len(fields)
     flabel = sm.get('field_label_style', 'bold')
     lab_open, lab_close = {'bold': ('<b>', '</b>'), 'bolditalic': ('<b><i>', '</i></b>'),
-                           'italic': ('<i>', '</i>')}.get(flabel, ('', ''))
+                           'italic': ('<i>', '</i>'),
+                           # small caps as elsewhere: capitals, a size smaller
+                           'smallcaps': (f'<b><font size="{size - 1:g}">', '</font></b>'),
+                           }.get(flabel, ('', ''))
     field_style = ParagraphStyle('sbfield', parent=base, leftIndent=size,
                                  firstLineIndent=-size)
 
@@ -5219,7 +5247,7 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
             body = f['value']
             if hyph and body:
                 body = _hyphenate_markup(body, hyph)
-            out.append(Paragraph(f"{lab_open}{f['label']}{lab_close}"
+            out.append(Paragraph(f"{lab_open}{_gb_caps(f['label'], flabel)}{lab_close}"
                                  + (f' {body}' if body else ''), field_style))
         return out
 
@@ -5240,9 +5268,11 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     ssize = sm.get('section_size', 0) or size + 1
     sec_style = ParagraphStyle('sbsection', parent=base, fontName=_gb_font(fonts, sstyle),
                                fontSize=ssize, leading=ssize * 1.3, textColor=ncolor)
+    estyle = sm.get('entry_name_style', 'bolditalic')
     eo, ec = {'bolditalic': ('<b><i>', '</i></b>'), 'bold': ('<b>', '</b>'),
-              'italic': ('<i>', '</i>')}.get(sm.get('entry_name_style', 'bolditalic'),
-                                             ('', ''))
+              'italic': ('<i>', '</i>'),
+              'smallcaps': (f'<b><font size="{size - 1:g}">', '</font></b>'),
+              }.get(estyle, ('', ''))
     ent_style = ParagraphStyle('sbentry', parent=base,
                                leftIndent=sm.get('entry_indent', 0.0) * inch)
     for k, sec in enumerate(model.get('sections', [])):
@@ -5262,7 +5292,7 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
             body = e['text']
             if hyph and body:
                 body = _hyphenate_markup(body, hyph)
-            lead_in = f"{eo}{e['name']}{ec}" if e['name'] else ''
+            lead_in = f"{eo}{_gb_caps(e['name'], estyle)}{ec}" if e['name'] else ''
             rows.append((Paragraph(lead_in + (' ' if lead_in and body else '') + body,
                                    ent_style), gap))
     if not rows:

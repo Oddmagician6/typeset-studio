@@ -134,13 +134,16 @@
   function elRect(el) {
     if (el.fill) return fillRect(el.fill);
     var o = origin(el.anchor || 'sheet');
+    // on the front flap: measured from its fold (mirrors wrap_design.el_rect)
+    if (el.anchor === 'front' && el.flap === 'front') o = [o[0] + g.panel_w, o[1]];
     var x = ('cx' in el) ? panelW(el.anchor) / 2 + el.cx : (el.x || 0);
     return [o[0] + x, o[1] + (el.y || 0), el.w || 0, el.h || 0];
   }
   function layout(el) {                 // [(line, dx, base)] in points, as text_layout
     var m = metrics[el.font];
     if (!m) return [];
-    var lines = el.w ? WD.breakLines(el.text, m, el.size, el.w * 72, el.tracking || 0)
+    var lines = el.w ? (el.keep_spaces ? keptLines(el, m)
+                                       : WD.breakLines(el.text, m, el.size, el.w * 72, el.tracking || 0))
                      : String(el.text).split(/\r?\n/);
     var asc = m.ascent / 1000 * el.size, box = (el.w || 0) * 72, down = 0;
     var step = el.size * (el.leading || 1.2), blank = blankOf(el);
@@ -154,6 +157,18 @@
       down += step * (ln.trim() ? 1 : blank);
       return out;
     });
+  }
+  // A label typed with a gap in it keeps its spaces where a paragraph fits
+  // (mirrors wrap_design.break_lines with `keep_spaces`).
+  function keptLines(el, m) {
+    var out = [], tr = el.tracking || 0, paras = WD.splitlines(String(el.text));
+    if (!paras.length) paras = [''];
+    paras.forEach(function (p) {
+      var t = p.replace(/^[\s\x1c-\x1f\x85]+|[\s\x1c-\x1f\x85]+$/g, '');
+      if (t && WD.width(t, m, el.size, tr) <= el.w * 72) out.push(t);
+      else Array.prototype.push.apply(out, WD.breakLines(p, m, el.size, el.w * 72, tr));
+    });
+    return out;
   }
   // Whether each line ends its paragraph: a justified box leaves those ragged.
   // Mirrors wrap_design.para_ends.
@@ -1267,14 +1282,16 @@
     var f = designFaces(), book = $('wd-project').value ? currentBook : null;
     var pad = Math.max(geo.safe, Math.min(0.42, g.flap * 0.14)), col = round(g.flap - 2 * pad);
     var anchor = side === 'front' ? 'front' : 'back';
-    var x = round(side === 'front' ? g.panel_w + pad : -g.flap + pad);
+    // the front flap's copy is kept to its fold, which moves when the trim does
+    var x = round(side === 'front' ? pad : -g.flap + pad);
     var head = {type:'text', anchor:anchor, x:x, y:0.75, w:col, leading:1.3, align:'center'};
+    if (side === 'front') head.flap = 'front';
     if (side === 'front')
       Object.assign(head, {text:((book && book.title) || 'My Book').toUpperCase(), font:f.head, size:13,
                            tracking:1.2, color:f.headColor});
     else
       Object.assign(head, {text:'ABOUT THE AUTHOR', font:f.body, size:8, tracking:2.6, color:f.headColor});
-    var body = {type:'text', anchor:anchor, x:x, w:col, font:f.body, size:9.5, leading:1.42,
+    var body = {type:'text', anchor:anchor, x:x, w:col, font:f.body, size:9.5, leading:1.42, flap:head.flap,
                 color:f.bodyColor, align:'justify', tracking:0,
                 text:side === 'front' ? (book && (book.flap_blurb || book.blurb)) || FLAP_COPY
                                       : (book && book.flap_bio) || FLAP_BIO};
@@ -1312,6 +1329,12 @@
     return post('/wrap-designer/customise', {template: from === '@book' ? '' : from, project: pid,
                                              settings: settings()})
       .then(function (res) {
+        // another book opened while this converted: the result is that
+        // book's cover, not this one's - put on the page, Save wrote it here
+        if ($('wd-project').value !== pid) {
+          msg.textContent = 'Another book was opened before the conversion came back: nothing changed. Start again for this book.';
+          return;
+        }
         if (!res.ok) { msg.textContent = res.error; return; }
         commit();
         design = res.design; choose(null); showProps();

@@ -198,6 +198,7 @@ PAGEREF_TAG_RE = re.compile(r'<pageref to="([\w\-]+)"/>')
 _PAGE_ALT_DROP_RE = re.compile(r'<anchor name="[\w\-]+"/>|<index item="[^"]*"/>'
                                r'|<note id="[\w\-]+"/>')
 _TAGS_RE = re.compile(r'<[^>]+>')
+_NOTEREF_SUP_RE = re.compile(r'<sup class="noteref"[^>]*>.*?</sup>', re.S)
 
 
 def _is_block_line(line):
@@ -951,7 +952,11 @@ def book_targets(chapters):
         for i, block in enumerate(ch.get('blocks', [])):
             if block[0] not in HEADING_KINDS:
                 continue
-            words = ' '.join(html.unescape(_TAGS_RE.sub('', block[1])).split())
+            # a note's number is not one of the heading's words: the ebook,
+            # which has set it as a superscript by now, named `## Guard
+            # Room[^1]` "guard-room1" and every reference to it dangled
+            words = ' '.join(html.unescape(_TAGS_RE.sub('', _NOTEREF_SUP_RE.sub(
+                '', block[1]))).split())
             base = slugify(words) or 'section'
             name, k = base, 2
             while name in out['where']:
@@ -1017,6 +1022,33 @@ def _emph(runs, plain=False):
     """
     if plain:
         return ''.join(r.text for r in runs if r.text)
+    md = _emph_spans(runs)
+    # Two spans side by side can run their markers together: italic "un" then
+    # bold "broken" made `*un***broken**`, read back as `*un` and a bold
+    # `*broken`. The rich editor's serializer tries the other spellings of the
+    # markers until the line reads back as written, so a line that doesn't is
+    # handed to it.
+    if '\n' not in md and ('**' in md or '__' in md):
+        try:
+            import doc_model
+            want = doc_model._coalesce([{'text': r.text, 'bold': bool(r.bold),
+                                         'italic': bool(r.italic), 'link': ''}
+                                        for r in runs if r.text])
+            def marks(rs):
+                # the styling of each visible character: a space moved outside
+                # the markers (see `_marked`) is not a difference
+                return [(ch, bool(r['bold']), bool(r['italic']))
+                        for r in rs for ch in r['text'] if not ch.isspace()]
+            if marks(doc_model._parse_inline(md, smartquotes=False)) != marks(want):
+                alt = doc_model._runs_to_md(want)
+                if marks(doc_model._parse_inline(alt, smartquotes=False)) == marks(want):
+                    return alt
+        except Exception:
+            pass
+    return md
+
+
+def _emph_spans(runs):
     # Word splits one styled phrase into several runs at will (an edit, a
     # spell-check), and `*a**b*` reads back with a stray asterisk, so runs
     # with the same emphasis are joined into one span first.
@@ -1113,7 +1145,11 @@ def _notes_map(doc):
         for el in root.findall(qn('w:' + kind)):
             if el.get(qn('w:type')):          # separator / continuationSeparator
                 continue
-            paras = [_one_line(_emph(Paragraph(pe, part).runs))
+            # through links too: `Paragraph.runs` skips a hyperlink's runs,
+            # and a note that was all link read as empty and was dropped
+            scratch = _new_report()
+            holder = type('_NotePart', (), {'part': part})()   # links resolve in its part
+            paras = [_one_line(_para_md(Paragraph(pe, holder), scratch))
                      for pe in el.findall(qn('w:p'))]
             text = ' '.join(t for t in paras if t).strip()
             if text:
@@ -1146,8 +1182,9 @@ def _para_md(p, report, notes=None, plain=False):
         return text if plain else _escape_literal(text)
 
     try:
-        parts = list(p.iter_inner_content())
-    except AttributeError:                       # older python-docx
+        from docx.text.hyperlink import Hyperlink as _Hyperlink
+        parts = list(_inner_items(p))
+    except Exception:                            # older python-docx
         return _emph(p.runs, plain) or _fallback(p.text)
 
     chunks = []
@@ -1159,10 +1196,16 @@ def _para_md(p, report, notes=None, plain=False):
             pending.clear()
 
     for item in parts:
-        if hasattr(item, 'address'):             # Hyperlink
+        if isinstance(item, _Hyperlink):
             flush_runs()
             text = _emph(item.runs, plain)
-            md = None if plain else _link_md(text, getattr(item, 'address', ''))
+            # `url` is the address with its #fragment; `address` alone dropped
+            # the part of the page the link was to
+            try:
+                address = item.url or item.address
+            except Exception:
+                address = ''
+            md = None if plain else _link_md(text, address)
             if md:
                 report['links_kept'] += 1
                 chunks.append(md)
@@ -1179,6 +1222,117 @@ def _para_md(p, report, notes=None, plain=False):
                 chunks.append(_note_ref(ref, notes, report))
     flush_runs()
     return ''.join(chunks) or _fallback(p.text)
+
+
+# Word wraps runs in elements python-docx's own walk doesn't enter: a tracked
+# insertion, a content control, a smart tag, a simple field's result, custom
+# XML. Their words are on the page in Word, so they are read; a tracked
+# deletion (and the old place of a moved passage) is not on the page.
+_RUN_WRAPPERS = ('ins', 'moveTo', 'smartTag', 'sdt', 'sdtContent', 'fldSimple',
+                 'customXml', 'dir', 'bdo')
+_RUN_SKIPPED = ('del', 'moveFrom', 'sdtPr', 'sdtEndPr', 'customXmlPr', 'smartTagPr')
+
+
+def _local(el):
+    tag = el.tag if isinstance(el.tag, str) else ''
+    return tag.rsplit('}', 1)[-1]
+
+
+def _inner_items(p):
+    """A paragraph's runs and hyperlinks in document order, through the wrappers
+    above (`Paragraph.iter_inner_content` sees only its direct children)."""
+    from docx.text.run import Run
+    from docx.text.hyperlink import Hyperlink
+
+    def walk(el, parent):
+        for child in el:
+            name = _local(child)
+            if name == 'r':
+                yield Run(child, parent)
+            elif name == 'hyperlink':
+                yield Hyperlink(child, parent)
+            elif name in _RUN_WRAPPERS:
+                yield from walk(child, parent)
+    return walk(p._p, p)
+
+
+def _para_plain(p):
+    """The paragraph's words as Word shows them (see `_inner_items`)."""
+    try:
+        out = []
+        for item in _inner_items(p):
+            out.append(item.text or '')
+        return ''.join(out)
+    except Exception:
+        return p.text
+
+
+def _body_items(doc):
+    """The document body's paragraphs and tables in order, through content
+    controls and custom XML, with each text box's paragraphs after the
+    paragraph that anchors it (the box's words were lost whole)."""
+    from docx.text.paragraph import Paragraph
+    from docx.table import Table
+    from docx.oxml.ns import qn
+    body = doc.element.body
+
+    def boxes(p_el, parent):
+        # a box drawn twice (DrawingML and its VML fallback) is read once
+        for tx in p_el.iter(qn('w:txbxContent')):
+            if any(_local(a) == 'Fallback' for a in tx.iterancestors()):
+                continue
+            for el in tx:
+                if _local(el) == 'p':
+                    yield Paragraph(el, parent)
+
+    def walk(el):
+        for child in el:
+            name = _local(child)
+            if name == 'p':
+                yield Paragraph(child, doc._body)
+                yield from boxes(child, doc._body)
+            elif name == 'tbl':
+                yield Table(child, doc._body)
+            elif name in ('sdt', 'sdtContent', 'customXml', 'ins', 'moveTo'):
+                yield from walk(child)
+    return list(walk(body))
+
+
+def _num_ref(p):
+    """(numId, level) of a numbered/bulleted Word paragraph, or (None, 0)."""
+    try:
+        num_pr = p._p.pPr.numPr if p._p.pPr is not None else None
+        if num_pr is None:
+            return None, 0
+        num_id = num_pr.numId.val if num_pr.numId is not None else None
+        ilvl = num_pr.ilvl.val if num_pr.ilvl is not None else 0
+        return (str(num_id) if num_id not in (None, 0) else None), int(ilvl or 0)
+    except Exception:
+        return None, 0
+
+
+def _numbering_formats(doc):
+    """{(numId, level): 'bullet' or a number format} from the numbering part."""
+    from docx.oxml.ns import qn
+    try:
+        root = doc.part.numbering_part.element
+    except Exception:
+        return {}
+    abstract = {}
+    for an in root.findall(qn('w:abstractNum')):
+        lv = {}
+        for lvl in an.findall(qn('w:lvl')):
+            fmt = lvl.find(qn('w:numFmt'))
+            lv[int(lvl.get(qn('w:ilvl')) or 0)] = (fmt.get(qn('w:val')) if fmt is not None
+                                                  else 'decimal')
+        abstract[an.get(qn('w:abstractNumId'))] = lv
+    out = {}
+    for num in root.findall(qn('w:num')):
+        ref = num.find(qn('w:abstractNumId'))
+        lv = abstract.get(ref.get(qn('w:val')) if ref is not None else None, {})
+        for level, fmt in lv.items():
+            out[(num.get(qn('w:numId')), level)] = fmt
+    return out
 
 
 def _note_ref(ref, notes, report):
@@ -1212,13 +1366,22 @@ def _para_images(p, stem, report):
     from docx.oxml.ns import qn
     import hashlib
     found = []
-    blips = p._p.findall('.//' + qn('a:blip'))
+    def own(el):
+        # not a compatibility copy (the same picture again, for older Word),
+        # and not inside a text box, whose paragraphs are read on their own
+        for a in el.iterancestors():
+            if a is p._p:
+                return True
+            if _local(a) in ('Fallback', 'txbxContent'):
+                return False
+        return True
+    blips = [b for b in p._p.iter(qn('a:blip')) if own(b)]
     if not blips:
         return found
     # Real alt text lives in docPr/@descr, one per image, in document order.
     # @name is ignored on purpose — Word fills it with "Picture 1", which is
     # noise, not a description.
-    descrs = [(el.get('descr') or '') for el in p._p.findall('.//' + qn('wp:docPr'))]
+    descrs = [(el.get('descr') or '') for el in p._p.iter(qn('wp:docPr')) if own(el)]
     for i, blip in enumerate(blips):
         rid = blip.get(qn('r:embed')) or blip.get(qn('r:link'))
         if not rid:
@@ -1251,48 +1414,75 @@ def _para_images(p, stem, report):
     return found
 
 
-def _cell_text(cell):
-    """Every word in a cell, including any table nested inside it.
+def _cell_md(cell, report, notes=None, stem='', figs=None):
+    """Every word in a cell as manuscript text - emphasis, links and note
+    references kept - including any table nested inside it.
 
-    `_Cell.text` reads the cell's paragraphs only, so a cell holding a nested
-    table read as empty — and a table whose rows all read empty was dropped
-    whole, without even a line in the import summary. Nesting has no equivalent
-    in a `~~~ table`, so the inner rows are flattened into the cell rather than
-    lost; the words reach the book, which is what the writer cares about.
+    Nesting has no equivalent in a `~~~ table`, so the inner rows are
+    flattened into the cell rather than lost. A picture can't sit in a cell
+    either: it goes on `figs`, to be placed after the table, instead of
+    vanishing without a word in the import summary.
     """
-    parts = [p.text for p in cell.paragraphs]
-    for inner in getattr(cell, 'tables', []):
-        for row in inner.rows:
-            parts.extend(_cell_text(c) for c in row.cells)
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+    parts = []
+    for item in cell.iter_inner_content():
+        if isinstance(item, Table):
+            for row in item.rows:
+                parts.extend(_row_cells(row, report, notes, stem, figs))
+            continue
+        if figs is not None and stem:
+            figs.extend(_para_images(item, stem, report))
+        parts.append(_para_md(item, report, notes) if _para_plain(item).strip() else '')
     return ' '.join(' '.join(parts).split())
 
 
-def _table_md(tbl, report):
-    """A Word table -> a `~~~ table` block, one line per row.
+def _row_cells(row, report, notes=None, stem='', figs=None):
+    """A row's cells, one per column of the table's grid: a cell merged across
+    columns is its text then blanks (collapsing it moved the next value into
+    the wrong column), a cell merged down from the row above is blank (its
+    text was repeated on every row it spans), and the grid positions a row
+    skips at its start are blank too."""
+    out = [''] * (getattr(row, 'grid_cols_before', 0) or 0)
+    for tc in row._tr.tc_lst:
+        if tc.vMerge == 'continue':
+            text = ''
+        else:
+            from docx.table import _Cell
+            text = _cell_md(_Cell(tc, row.table), report, notes, stem, figs)
+        out.append(text.replace('|', '/'))
+        out.extend([''] * (max(1, tc.grid_span) - 1))
+    return out
+
+
+def _table_md(tbl, report, notes=None, stem=''):
+    """A Word table -> a `~~~ table` block, one line per row, then any
+    pictures its cells held.
 
     Cells keep their columns now that there is a table block to import into.
     A pipe inside a cell would read as a column break, so it becomes a slash —
     the one substitution made here, and vanishingly rare in a Word table.
     """
-    rows = []
+    rows, figs = [], []
     for row in tbl.rows:
-        # a merged row repeats the same cell; collapse the repeats - by the
-        # cell itself, not its text: two neighbours both reading "8" are two
-        # columns, and dropping one moved the next value into its place
-        objs = list(row.cells)
-        dedup = [_escape_literal(_cell_text(c)).replace('|', '/')
-                 for i, c in enumerate(objs)
-                 if i == 0 or getattr(c, '_tc', c) is not getattr(objs[i - 1], '_tc', None)]
-        if any(dedup):
-            rows.append(' | '.join(dedup))
+        cells = _row_cells(row, report, notes, stem, figs)
+        if any(cells):
+            # a row starting `~~~` would close the table and open a block
+            # that swallowed what followed
+            rows.append(_guard(' | '.join(cells)))
+    after = []
+    for fn, alt in figs:
+        report['figures'] += 1
+        alt_attr = f' alt="{alt}"' if alt and '"' not in alt else ''
+        after.extend(['', f'~~~ figure src="{fn}"{alt_attr}', '', '~~~', ''])
     if not rows:
-        return []
+        return after
     report['tables'] += 1
     # Word marks a header row in tblHeader; absent that, assume the first row is
     # one only when every cell in it is non-empty and the table has body rows
     header = len(rows) > 1 and all(c.strip() for c in rows[0].split('|'))
     fence = '~~~ table' + ('' if header else ' header="no"')
-    return ['', fence] + rows + ['~~~', '']
+    return ['', fence] + rows + ['~~~', ''] + after
 
 
 _WORD_HEADING_RE = re.compile(r'heading\s*(\d+)')
@@ -1358,7 +1548,7 @@ def _new_report():
             'images_failed': 0}
 
 
-def import_docx(path, report=None):
+def import_docx(path, report=None, stem=None):
     """Best-effort .docx -> canonical Markdown string.
 
     Heading 1/Title become chapters, other headings subheads; centered short
@@ -1388,7 +1578,9 @@ def import_docx(path, report=None):
     rep.update({k: v for k, v in _new_report().items() if k not in rep})
 
     doc = Document(path)
-    stem = _slug(os.path.splitext(os.path.basename(path))[0])
+    # pictures are named for the file: a caller importing a temporary copy
+    # names the real one, so the same pictures aren't saved again
+    stem = _slug(stem or os.path.splitext(os.path.basename(path))[0])
     # note text is read once up front; `defs` collects what the current chapter
     # cites, so the definitions land in the chapter that owns them
     notes = {'texts': _notes_map(doc), 'seen': {}, 'defs': [], 'n': 0}
@@ -1398,6 +1590,8 @@ def import_docx(path, report=None):
     list_buf = []           # consecutive list paragraphs -> one ~~~ list block
     poem_buf = []           # consecutive verse paragraphs -> one ~~~ poem
     list_numbered = False
+    list_key = None
+    list_start = 1
     fig_caption_at = None   # index in `out` where a Caption paragraph can land
 
     def flush_quotes():
@@ -1413,9 +1607,11 @@ def import_docx(path, report=None):
             quote_buf = []
 
     def flush_list():
-        nonlocal list_buf
+        nonlocal list_buf, list_start
         if list_buf:
             header = '~~~ list type="number"' if list_numbered else '~~~ list'
+            if list_numbered and list_start > 1:
+                header += f' start="{list_start}"'
             out.extend(['', header])
             for i, item in enumerate(list_buf):
                 if i:
@@ -1423,6 +1619,7 @@ def import_docx(path, report=None):
                 out.append(item)
             out.extend(['~~~', ''])
             list_buf = []
+            list_start = 1
 
     def flush_poem():
         nonlocal poem_buf
@@ -1453,9 +1650,11 @@ def import_docx(path, report=None):
         flush_poem()
 
     try:
-        body = list(doc.iter_inner_content())
-    except AttributeError:                        # older python-docx: no tables
+        body = _body_items(doc)
+    except Exception:                             # older python-docx: no tables
         body = list(doc.paragraphs)
+    numbering = _numbering_formats(doc)
+    list_counts = {}        # numId -> items so far at the top level of that list
 
     top_level, title_para = _top_heading_level(body)
 
@@ -1465,13 +1664,20 @@ def import_docx(path, report=None):
             # *before* this table in the document and must be emitted first
             flush_all()
             fig_caption_at = None
-            out.extend(_table_md(item, rep))
+            out.extend(_table_md(item, rep, notes, stem))
             continue
 
         p = item
         # A document with no Normal style (made by a tool, not by Word) gives
         # an unstyled paragraph no style at all; it is body text.
         style = ((p.style.name if p.style is not None else '') or '').lower()
+        level = _heading_level(style, top_level)
+        if item is title_para or level == 1:
+            # a chapter starts here: the outgoing chapter's notes go out first,
+            # so a note on this heading belongs to the chapter it heads (it was
+            # flushed into the one before, and its marker dropped)
+            flush_all()
+            flush_notes()
         # keep the manual line breaks for now; each branch below decides whether
         # they mean anything (verse, an address block) or should be collapsed
         raw = _para_md(p, rep, notes).strip()
@@ -1479,7 +1685,7 @@ def import_docx(path, report=None):
         # with #, ##, ===, ~~~ or a scene break is still structure, and a Word
         # paragraph beginning "#1 bestseller" would open a new chapter. Guard the
         # line, and take structural decisions from the untouched Word text.
-        plain_text = _one_line(p.text)
+        plain_text = _one_line(_para_plain(p))
         lines = [_guard(ln.strip()) for ln in raw.split('\n') if ln.strip()]
         text = _guard(_one_line(raw))
 
@@ -1502,15 +1708,13 @@ def import_docx(path, report=None):
         if text:
             fig_caption_at = None
 
-        level = _heading_level(style, top_level)
         if item is title_para:
             flush_all()
             rep['chapters'] += 1
             out.extend(['', '#* ' + _one_line(_para_md(p, rep, None, plain=True)), ''])
             continue
         if level == 1:
-            flush_all()
-            flush_notes()                     # the outgoing chapter's notes
+            flush_all()                       # (its notes went out above)
             rep['chapters'] += 1
             # titles are stored raw by the engine, so a bolded Word heading must
             # arrive as words: `# **Title**` printed the asterisks
@@ -1523,7 +1727,14 @@ def import_docx(path, report=None):
             continue
         if not text:
             continue
-        if SCENE_BREAK_RE.match(plain_text):
+        try:
+            centred = p.alignment is not None and 'CENTER' in str(p.alignment)
+        except Exception:
+            centred = False
+        # asterisks are a scene break wherever they sit; `###` or `---` only
+        # centred, as manuscripts set them - on the left they are just what
+        # was typed (a tutorial's Markdown, say)
+        if SCENE_BREAK_RE.match(plain_text) and (centred or '*' in plain_text):
             flush_all()
             out.extend(['', '* * *', ''])
             continue
@@ -1544,12 +1755,26 @@ def import_docx(path, report=None):
         is_list = ('list' in style
                    or (p._p.pPr is not None and p._p.pPr.numPr is not None))
         if is_list:
-            numbered = 'number' in style
-            if list_buf and numbered != list_numbered:
-                flush_list()                  # bullets and numbers are separate lists
+            num_id, ilvl = _num_ref(p)
+            fmt = numbering.get((num_id, ilvl)) if num_id else None
+            # the list's own number format says numbered or bulleted; the
+            # style name only when there is none (it named every `numPr` list
+            # styled Normal or List Paragraph a bullet list)
+            numbered = (fmt not in ('bullet', 'none')) if fmt else 'number' in style
+            key = (num_id, ilvl)
+            if list_buf and (numbered != list_numbered or key != list_key):
+                flush_list()                  # another list, or a level in or out
             flush_quotes()
             flush_poem()
-            list_numbered = numbered
+            if not list_buf:
+                list_numbered, list_key = numbered, key
+                # a list picked up again after its nested items carries on
+                # counting where it was
+                list_start = list_counts.get(key, 0) + 1
+            if num_id:
+                list_counts[key] = list_counts.get(key, 0) + 1
+                for k in [k for k in list_counts if k[0] == num_id and k[1] > ilvl]:
+                    del list_counts[k]        # a deeper level restarts under a new parent
             rep['lists'] += 1
             list_buf.append(text)
             continue
@@ -1557,10 +1782,6 @@ def import_docx(path, report=None):
         flush_all()
 
         # a centred paragraph that isn't a scene break becomes an alignment block
-        try:
-            centred = p.alignment is not None and 'CENTER' in str(p.alignment)
-        except Exception:
-            centred = False
         if centred:
             rep['aligned'] += 1
             out.extend(['', '~~~ center'] + lines + ['~~~', ''])
@@ -1593,6 +1814,9 @@ _IMP_HEADING_RE = re.compile(r'^#{1,6}\s')
 _IMP_READALOUD_RE = re.compile(
     r'^#{2,4}\s+(?:\*\*)?\s*read[\s-]aloud\b.*$', re.I)
 _IMP_PACING_RE = re.compile(r'^#{2,4}\s+(?:\*\*)?\s*(pacing(?:\s+notes?)?)\s*(?:\*\*)?\s*$', re.I)
+# the chapter's note texts, written after its last paragraph: never a box's
+# or a stat block's own lines
+_IMP_NOTEDEF_RE = re.compile(r'^\[\^[^\]]+\]:')
 _IMP_LORE_RE = re.compile(r'^\*{2,3}lore\.?\*{2,3}$', re.I)
 
 
@@ -1609,6 +1833,8 @@ def _imp_score_row(lines, i):
         j += 1
     if j >= len(lines) or not rows or len(rows) > 2:
         return None
+    # cells keep their emphasis now (a bold STR header): scores are read plain
+    rows = [re.sub(r'(?<!\\)[*_]+', '', r) for r in rows]
     if len(rows) == 2:
         names = [c.strip() for c in rows[0].split('|')]
         vals = [c.strip() for c in rows[1].split('|')]
@@ -1665,7 +1891,8 @@ def _imp_statblocks(lines, rep):
         while j < len(lines):
             ln = lines[j].strip()
             if (_IMP_HEADING_RE.match(ln) or ln.startswith('~~~') or _IMP_LORE_RE.match(ln)
-                    or SCENE_BREAK_RE.match(ln) or PART_RE.match(ln) or _imp_name(ln)):
+                    or SCENE_BREAK_RE.match(ln) or PART_RE.match(ln) or _imp_name(ln)
+                    or _IMP_NOTEDEF_RE.match(ln)):
                 break
             j += 1
         tail = [ln.strip() for ln in lines[after:j] if ln.strip()]
@@ -1691,7 +1918,8 @@ def _imp_boxes(lines, rep):
         while j < len(lines):
             ln = lines[j].strip()
             if (_IMP_HEADING_RE.match(ln) or ln.startswith('~~~')
-                    or SCENE_BREAK_RE.match(ln) or PART_RE.match(ln)):
+                    or SCENE_BREAK_RE.match(ln) or PART_RE.match(ln)
+                    or _IMP_NOTEDEF_RE.match(ln)):
                 break
             j += 1
         paras = [ln.strip() for ln in lines[i + 1:j] if ln.strip()]

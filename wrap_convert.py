@@ -23,6 +23,7 @@ template does. `test_wrap_designer.py` checks that pixel by pixel for all 24.
 import hashlib
 import math
 import os
+import re
 import sys
 
 import engine
@@ -125,6 +126,17 @@ class Recorder:
                     'dash': None, 'cap': 0, 'join': 0, 'font': None, 'size': 12.0, 'tc': 0.0,
                     'ctm': (1.0, 0.0, 0.0, 1.0, 0.0, 0.0), 'clip': None}
         self._stack = []
+        self._src, self._nsrc = None, 0
+
+    def source_text(self, role=None, text='', **kw):
+        """What the lines drawn next were set from (`engine._source`): each is
+        tagged with it, lines of two pieces never join, and the text box keeps
+        the writer's text rather than the drawn pieces rejoined."""
+        if role is None:
+            self._src = None
+            return
+        self._nsrc += 1
+        self._src = dict(kw, n=self._nsrc, role=role, text=str(text or ''))
 
     # -- state
     def saveState(self):
@@ -316,7 +328,8 @@ class Recorder:
         self.items.append({'kind': 'text', 'text': text, 'x': bx, 'y': by,
                            'angle': round(math.degrees(math.atan2(b, a))) % 360,
                            'font': self._st['font'], 'size': self._st['size'],
-                           'tc': self._st['tc'], 'color': self._st['fill'], 'fa': self._st['fa']})
+                           'tc': self._st['tc'], 'color': self._st['fill'], 'fa': self._st['fa'],
+                           'src': self._src})
 
     def showPage(self):
         pass
@@ -342,9 +355,11 @@ def _font_file(name, notes):
     if base and wrap_design.font_file(base):
         return base
     want = 'Bold' if 'Bold' in (name or '') else 'Italic' if 'Italic' in (name or '') else 'Regular'
-    lib = sorted(f for f in os.listdir(wrap_design.FONT_DIR) if f.lower().endswith('.ttf'))
+    lib = sorted(f for f in os.listdir(wrap_design.FONT_DIR) if wrap_design.font_file(f))
+    if not lib:
+        raise ValueError('your font library has no font the designer can set type in')
     pick = next((f for f in lib if f == f'Book-{want}.ttf'), None) or \
-        next((f for f in lib if want in f), None) or (lib[0] if lib else '')
+        next((f for f in lib if want in f), None) or lib[0]
     notes.append(f'The face {name} is not in your font library, so {pick} stands in for it.')
     return pick
 
@@ -355,8 +370,18 @@ def _store(data, ext):
     dest = os.path.join(IMPORT_DIR, name)
     if not os.path.exists(dest):
         os.makedirs(IMPORT_DIR, exist_ok=True)
-        with open(dest, 'wb') as fh:
+        # written beside it and moved in whole: a second conversion seeing the
+        # name while the first was still writing handed on a half-written file
+        part = f'{dest}.{os.getpid()}.{id(data)}.part'
+        with open(part, 'wb') as fh:
             fh.write(data)
+        try:
+            os.replace(part, dest)
+        except OSError:
+            if os.path.exists(part):
+                os.remove(part)
+            if not os.path.exists(dest):
+                raise
     return name
 
 
@@ -428,6 +453,10 @@ class _Sheet:
         anchor = anchor or self.panel(x)
         ox, oy = wrap_design.origin(self.g, anchor)
         el['anchor'] = anchor
+        fold = self.g['front_x'] + self.g['panel_w']
+        if anchor == 'front' and self.g.get('flap') and x >= fold - 0.001:
+            el['flap'] = 'front'                 # kept to its fold, not the panel's edge
+            ox = fold
         if anchor == 'spine':
             el['cx'] = _r(x - ox - self.g['spine_w'] / 2.0)
         else:
@@ -469,6 +498,13 @@ def _continues(group, it):
     last = group[-1]
     if any(last[k] != it[k] for k in ('font', 'size', 'tc', 'color', 'fa', 'angle')):
         return False
+    # two pieces of the writer's text (a title and its byline set alike) stay
+    # two boxes; the lines of one piece belong together whatever their gaps
+    a, b = (last.get('src') or {}).get('n'), (it.get('src') or {}).get('n')
+    if a != b:
+        return False
+    if a is not None:
+        return True
     if it['angle'] not in (0, 270):
         return False
     (lx, ld), (ix, idn) = _along(last), _along(it)
@@ -541,6 +577,28 @@ def _text_element(group, sheet, notes, fonts):
             text += '\n' + it['text']
         else:
             text += ' ' + it['text']
+    keep = False
+    src = first.get('src') or {}
+    if src.get('text', '').strip():
+        # the writer's own text, not the drawn lines rejoined: a blurb cut off
+        # above the barcode keeps all of its copy, its paragraphs keep their
+        # breaks (one-line paragraphs no longer read their gaps as the
+        # leading), a word the template broke between letters stays one word,
+        # and a label keeps the spaces it was typed with
+        lines = src['text'].splitlines()
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        text = '\n'.join(lines)
+        if src.get('leading'):
+            lead = float(src['leading'])
+        blank = src.get('gap') if any(not ln.strip() for ln in lines) else None
+        keep = bool(re.search(r'\S {2,}\S', text))
+        if any(_width(wd, rl_font, size, tc) > box for wd in text.split()):
+            notes.append(f'A word in the {src["role"]} is too long for its frame: the template '
+                         'broke it between letters, the design keeps it whole. Widen its box '
+                         'or make it smaller.')
     align = _align(group, sheet)
     face = pdfmetrics.getFont(rl_font).face
     asc = face.ascent / 1000.0 * size
@@ -557,6 +615,8 @@ def _text_element(group, sheet, notes, fonts):
         el['leading'] = _r((face.ascent - face.descent) / 1000.0)
     if blank is not None:
         el['blank'] = _r(blank)
+    if keep:
+        el['keep_spaces'] = True
     if first['fa'] < 1:
         el['opacity'] = _r(first['fa'])
     g = sheet.g
@@ -738,10 +798,23 @@ def from_template(tpl, cf, meta, dims):
     """The wrap `engine.build_cover_wrap` would draw, as a design. Returns
     (design, notes) - notes are what didn't carry over exactly, in words."""
     rec = Recorder()
-    engine.build_cover_wrap(tpl, cf, meta, dims, None, canv=rec)
+    res = engine.build_cover_wrap(tpl, cf, meta, dims, None, canv=rec) or {}
     g = engine.wrap_geometry(dims)
     sheet = _Sheet(g)
     notes, fonts, elements = [], {}, []
+    # what the template itself left out is said, not lost without a word: copy
+    # it cut short (its text box has all of it), and art it couldn't find
+    for where in res.get('overflow') or []:
+        notes.append(f'The {where} copy is longer than the template fits: all of it is in '
+                     'its text box, running past the space - shorten it or make it smaller.')
+    try:
+        gone = engine.cover_art_missing(tpl)
+    except (AttributeError, TypeError):
+        gone = []
+    if gone:
+        notes.append('The template\'s ' + ', '.join(gone) + (' is' if len(gone) == 1 else ' are')
+                     + ' missing from your art library, so the design has no picture for '
+                     + ('it' if len(gone) == 1 else 'them') + ' - put it back, or add a picture.')
     shapes = []
 
     def flush():

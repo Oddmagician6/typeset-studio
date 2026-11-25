@@ -88,6 +88,15 @@ Code the first eight sections didn't cover.
 | 11 | Preflight & results pages | `checker.py`, preflight/continuity/figures/fonts routes and templates | False passes, false blocks, wrong locations in warnings |
 | 12 | Project & editor front end | `editor.html`, `project_edit.html`, `projects.html`, `base.html`, `covers.html` | Lost unsaved changes, fields that don't round-trip, titles that break the page |
 
+### Round 3 (started 2026-11-25)
+
+| # | Section | Main files | What to look for |
+|---|---|---|---|
+| 13 | Manuscript import | `manuscript.import_docx`, import routes and helpers in `app.py` | Text dropped or duplicated on import, unescaped markup, crashes on unusual .docx files, wrong import summaries |
+| 14 | Reflowable EPUB for newer features | `epub.py` (ornaments, matter, notes, stat blocks, index, page references, chapter art) | Features in the PDF that are lost or garbled in the EPUB, XHTML/OPF that epubcheck would reject |
+| 15 | Customise (template to designer) | `wrap_convert.py`, `/wrap-designer/customise` | A customised design that doesn't match its template, elements lost in conversion, crashes on empty fields |
+| 16 | Styles, defaults & libraries | Style editor routes, large print, defaults restore, fonts/figures libraries, history restore, repair | Settings saved but ignored, deleting a font or figure still in use, restores that drop data |
+
 ## After each section
 
 1. **Triage.** Claude sorts every finding as confirmed, false positive or needs a repro, and gives the user a short list.
@@ -111,3 +120,7 @@ Code the first eight sections didn't cover.
 | 10 | Template cover rendering | 14 (+1 spec.) | 13 confirmed; 10.13 (guide vs template barcode spot) a convention, not a bug; print changes OK'd | 10.1–10.12, 10.14 on bughunt-round2 (`test_covers_bughunt.py`); front-panel lines held to the safe area; scrim stripes (spec.) left open | – |
 | 11 | Preflight & results pages | 14 (+1 spec.) | 14 confirmed | All 14 on bughunt-round2 (`test_preflight_bughunt.py`); a telegram's Courier now shows as not embedded; spec. RGB-operand scan left open | – |
 | 12 | Project & editor front end | 13 (+1 spec.) | 13 confirmed | 12.1–12.3, 12.5–12.13 on bughunt-round2 (`test_frontend_bughunt.py`); 12.4 with section 9; double-click Regenerate (spec.) left open | – |
+| 13 | Word import | 14 (+1 spec.) | 14 confirmed | All 14 and the spec. on bughunt-round3 (`test_import_bughunt.py`) | – |
+| 14 | EPUB extras | 13 | 13 confirmed; EPUB changes OK'd | All 13 on bughunt-round3 (`test_epub_bughunt.py`); a missing page design now fails the ebook's own checks | – |
+| 15 | Customise (template to designer) | 11 (+1 spec.) | 11 confirmed; cover changes OK'd | All 11 and the spec. on bughunt-round3 (`test_customise_bughunt.py`); the engine names the text it draws (`engine._source`), front-flap copy measured from its fold, `keep_spaces` labels; title/byline separation is wired for Classic Frame only | – |
+| 16 | Styles, defaults & libraries | 14 (+1 spec.) | 14 confirmed | All 14 on bughunt-round3 (`test_styles_bughunt.py`); overlapping builds swapping emphasis faces (spec.) left open | – |

@@ -111,7 +111,7 @@ def main():
         d.save(f)
         md = M.import_docx(f)
         check('are both kept', '8 | 8 | 6' in md, md)
-        check('while a merged cell is still one', 'Both | x' in md, md)
+        check('while a merged cell is still one, its columns kept', 'Both |  | x' in md, md)
 
         print('5.7  Word verse in one bold run')
         d = docx.Document()
