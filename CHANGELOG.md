@@ -8,6 +8,75 @@ line here.
 
 ---
 
+## 1.14.2 — 25 November 2026
+
+A bug-fix release: two more rounds of the bug hunt, covering the interior
+typesetting, template covers, preflight, the book page, Word import, ebook
+extras, Customise in the cover designer, and styles and libraries. Nothing new
+to learn.
+
+### Fixed
+
+**Printed interior**
+
+- Page-tall table rows, telegrams and drop-cap paragraphs split across pages
+  instead of stopping the build, and a figure caption longer than a page no
+  longer does either.
+- A note reference inside capitals, a very deep chapter sink, a long running
+  head and a wide scene-break picture all print where they should; drop caps
+  no longer overprint the text beside them.
+- Contents and Notes show chapter numbers as printed, and Also By and
+  epigraph lines break where you broke them.
+
+**Covers**
+
+- The blurb and imprint stay out of the barcode area, and copy too long to fit
+  is reported. Front-panel lines keep to the safe area, and spine type is set
+  only where the spine has room.
+- Characters a cover face lacks are reported, and very tall back-cover pictures
+  fit the panel.
+
+**Cover designer (Customise)**
+
+- A converted design keeps your own text: a long blurb keeps all its copy (and
+  says it overflows), paragraphs keep their spacing, a title and byline styled
+  alike stay separate boxes, and a series line keeps the spaces you typed.
+- Front-flap copy stays on the flap when you change the trim.
+- Switching books while a conversion runs no longer puts one book's cover on
+  another, and a damaged old template no longer blocks converting from a
+  different one.
+- Missing template art is named; .otf fonts with TrueType outlines can be used.
+
+**Ebooks**
+
+- A custom block label such as `~~~ Q&A`, or a table caption with a link in
+  it, no longer makes a chapter unreadable.
+- A footnote on a heading, a page reference inside a link, and anchors inside
+  telegrams all link correctly; an empty heading stays out of the contents.
+- A placed page design that's missing now fails the ebook's own checks.
+- Links in the device preview work, shop links keep their query strings, and
+  chapter art keeps its height limit.
+
+**Word import**
+
+- Text inside tracked insertions, content controls and fields is imported;
+  merged table cells, pictures and notes in tables, numbered lists and links
+  with #fragments come through as in Word.
+- Replacing a .DOCX manuscript with a .docx keeps the new file.
+
+**Styles, libraries and preflight**
+
+- Saving a style keeps settings the editor has no fields for; Large Print
+  keeps page height and scales table and heading sizes.
+- Re-uploaded fonts are read afresh, and library usage counts include History.
+- Preflight reports missing figures, page backgrounds and incomplete page
+  designs, checks which fonts are really embedded, and matches the export.
+
+**Safety**
+
+- The app refuses requests from other websites, so a web page can't change
+  your books through it.
+
 ## 1.14.1 — 25 November 2026
 
 A bug-fix release: a second, eight-part bug hunt across picture books, game
