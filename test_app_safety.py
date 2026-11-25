@@ -222,6 +222,46 @@ def main():
         check('counts as failed', r.get_json().get('ok') is False, r.get_json())
         check('and keeps the last download', stored('ebook').get('last_epub') == 'ebook-old.epub',
               stored('ebook').get('last_epub'))
+
+        print('7.S1 another site can\'t change a book')
+        make_book('target')
+        r = c.post('/project/target/delete', headers={'Origin': 'http://evil.example'})
+        check('a cross-origin delete is refused', r.status_code == 403, r.status_code)
+        r = c.post('/project/target/delete', headers={'Sec-Fetch-Site': 'cross-site'})
+        check('so is one the browser marks cross-site', r.status_code == 403, r.status_code)
+        r = c.post('/project/target/delete', headers={'Origin': 'null'})
+        check('and one from an opaque origin', r.status_code == 403, r.status_code)
+        check('the book is still there', os.path.isfile(os.path.join(A.PROJECT_DIR, 'target.json')))
+        r = c.get('/', base_url='http://rebound.example/')
+        check('a page asked for under another hostname is refused', r.status_code == 403,
+              r.status_code)
+        r = c.post('/project/target/delete', headers={'Origin': 'http://localhost',
+                                               'Sec-Fetch-Site': 'same-origin'})
+        check('the app\'s own page still deletes', r.status_code == 302
+              and not os.path.isfile(os.path.join(A.PROJECT_DIR, 'target.json')), r.status_code)
+
+        print('7.S2 the art route serves only pictures')
+        art = os.path.join(tmp, 'art')
+        os.makedirs(art)
+        with open(os.path.join(art, 'page.html'), 'w') as f:
+            f.write('<script>alert(1)</script>')
+        with open(os.path.join(art, 'pic.png'), 'wb') as f:
+            f.write(png_bytes())
+        real_dirs = list(A.wrap_design.ART_DIRS)
+        A.wrap_design.ART_DIRS[:] = [art]
+        try:
+            r = c.get('/wrap-designer/art/page.html')
+            check('an html file in an art folder is not served', r.status_code == 404, r.status_code)
+            r = c.get('/wrap-designer/art/pic.png')
+            check('a picture is', r.status_code == 200, r.status_code)
+            check('and can\'t be sniffed as anything else',
+                  r.headers.get('X-Content-Type-Options') == 'nosniff', dict(r.headers))
+            r.close()
+        finally:
+            A.wrap_design.ART_DIRS[:] = real_dirs
+
+        print('8.S  the update feed asks for a full page')
+        check('100 releases, not 30', 'per_page=100' in A.UPDATE_FEED, A.UPDATE_FEED)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

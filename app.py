@@ -441,7 +441,7 @@ APP_VERSION = _read_version()
 # no key for a public repo. Point this at a JSON file of your own
 # ({"version": "1.3.0", "url": "…"}) if you'd rather not use GitHub at all.
 UPDATE_FEED = ('https://api.github.com/repos/Oddmagician6/Ashforge-Studio-LLC'
-               '/releases?per_page=30')
+               '/releases?per_page=100')   # GitHub's largest page: other products share it
 UPDATE_PAGE = 'https://github.com/Oddmagician6/Ashforge-Studio-LLC/releases'
 # Tags look like `typeset-studio-v1.2.0`; a bare `v1.2.0` is accepted too, so a
 # repo dedicated to this app alone would work without changing anything.
@@ -740,6 +740,45 @@ def _canonical_pid(endpoint, values):
     """
     if values and isinstance(values.get('pid'), str):
         values['pid'] = secure_filename(values['pid'])
+
+
+_LOCAL_HOSTS = ('127.0.0.1', 'localhost', '[::1]')
+
+
+@app.before_request
+def _local_requests_only():
+    """Only this machine's own pages may talk to the app.
+
+    The server listens on loopback, but any web page the writer has open can
+    still aim a form at it - a cross-site POST to /delete/<pid> would remove a
+    book - and a rebound hostname can reach it as a "same-origin" site. So
+    every request must name a loopback host, and anything that changes state
+    must not come from another origin. A browser always sends `Origin` on a
+    cross-site POST; the app's own pages send their own; tools and tests that
+    send none are not browsers and are let through.
+    """
+    host = (request.host or '').lower()
+    if not host.endswith(']'):        # "[::1]" has no port to strip
+        host = host.rsplit(':', 1)[0]
+    if host not in _LOCAL_HOSTS:
+        abort(403)
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return None
+    if request.headers.get('Sec-Fetch-Site') in ('cross-site', 'same-site'):
+        abort(403)
+    origin = request.headers.get('Origin')
+    if origin is not None:
+        from urllib.parse import urlsplit
+        if origin == 'null' or urlsplit(origin).netloc.lower() != (request.host or '').lower():
+            abort(403)
+    return None
+
+
+@app.after_request
+def _no_sniffing(resp):
+    # a file served as an image is only ever read as one
+    resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    return resp
 
 
 def issue_rows(rows):
@@ -3379,7 +3418,9 @@ def wrap_designer_upgrade():
 @app.route('/wrap-designer/art/<path:fname>')
 def wrap_designer_art(fname):
     path = wrap_design.art_file(fname)
-    if not path:
+    # only pictures: anything else in an art folder (an .html dropped there by
+    # hand) would otherwise run as a page under the app's own origin
+    if not path or not path.lower().endswith(IMAGE_EXTS):
         abort(404)
     return send_from_directory(os.path.dirname(path), os.path.basename(path))
 
