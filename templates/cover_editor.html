@@ -601,6 +601,11 @@
         var el = form.querySelector('[name=' + name + ']');
         if (el && val !== undefined && val !== null && val !== '') el.value = val;
       }
+      // the book's own copy: a field it leaves blank clears what the last book put there
+      function setCopy(name, val){
+        var el = form.querySelector('[name=' + name + ']');
+        if (el) el.value = (val === undefined || val === null) ? '' : val;
+      }
       var wrapFrom = document.getElementById('wrap-from');
       if (wrapFrom) wrapFrom.addEventListener('change', function(){
         var note = document.getElementById('wrap-from-note');
@@ -612,17 +617,17 @@
         setField('prev_h', pr.trim_h);
         // the book's printer, paper and binding: the spine is worked out from them
         setField('wrap_paper', pr.paper);
-        setField('wrap_blurb', pr.blurb);
-        setField('wrap_flap_blurb', pr.flap_blurb);
-        setField('wrap_flap_bio', pr.flap_bio);
+        setCopy('wrap_blurb', pr.blurb);
+        setCopy('wrap_flap_blurb', pr.flap_blurb);
+        setCopy('wrap_flap_bio', pr.flap_bio);
         if (pr.retailer && retailerSel) {
           retailerSel.value = pr.retailer;
           retailerSel.dispatchEvent(new Event('change'));      // its bleed, and its notes
         }
         if (pr.binding && bindingSel) { bindingSel.value = pr.binding; applyAllowances(); updateBinding(); }
         setField('prev_title', pr.title);
-        setField('prev_author', pr.author);
-        setField('prev_studio', pr.publisher);
+        setCopy('prev_author', pr.author);
+        setCopy('prev_studio', pr.publisher);
         if (pr.page_count){
           setField('wrap_pages', pr.page_count);
           note.textContent = 'Spine from last build: ' + pr.page_count + ' pages.';

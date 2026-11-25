@@ -125,8 +125,9 @@
   function panelW(a) { return a === 'spine' ? g.spine_w : (a === 'front' || a === 'back') ? g.panel_w : g.wrap_w; }
   function fillRect(w) {
     if (g.page && !g.spread) return [0, 0, g.wrap_w, g.wrap_h];   // a page design: the page is the sheet
-    if (w === 'front') return [g.front_x, 0, g.wrap_w - g.front_x, g.wrap_h];
-    if (w === 'back') return [0, 0, g.back_x + g.panel_w, g.wrap_h];
+    // on a jacket a panel stops at its flap's fold (mirrors wrap_design.fill_rect)
+    if (w === 'front') return [g.front_x, 0, g.flap ? g.panel_w : g.wrap_w - g.front_x, g.wrap_h];
+    if (w === 'back') return g.flap ? [g.back_x, 0, g.panel_w, g.wrap_h] : [0, 0, g.back_x + g.panel_w, g.wrap_h];
     if (w === 'spine') return [g.spine_x, 0, g.spine_w, g.wrap_h];
     return [0, 0, g.wrap_w, g.wrap_h];
   }
@@ -660,7 +661,7 @@
       out.push(['bad', 'This printer doesn\'t allow spine text on a book this thin' +
                        (min ? ' (from ' + min + ' pages).' : '.')]);
     }
-    var outside = [], missing = [], gutter = [];
+    var outside = [], missing = [], gutter = [], wide = [];
     design.elements.forEach(function (el) {
       if (el.hidden) return;
       if (g.spread && ((el.type === 'text' && String(el.text || '').trim()) || el.type === 'field')) {
@@ -681,6 +682,11 @@
           return !/\s/.test(ch) && m.widths[ch.codePointAt(0)] === undefined;
         });
         if (gone.length) missing.push(label(el) + ' (' + Array.from(new Set(gone)).join(' ') + ')');
+        // a word longer than its box gets a line of its own and runs past the box's
+        // edge, where the safe-zone check (which measures the box) can't see it
+        if (el.w && layout(el).some(function (l) {
+              return WD.width(l[0], m, el.size, el.tracking || 0) > el.w * 72 + 0.5; }))
+          wide.push(label(el));
       }
       if (!el.anchor || el.anchor === 'sheet') return;
       var bb = bbox(el), z = safeBox(el), eps = 0.005;
@@ -689,6 +695,8 @@
     });
     if (outside.length) out.push(['bad', 'Outside the safe zone, may be trimmed: ' + outside.join(', ')]);
     else out.push(['ok', 'All text is inside the safe zones.']);
+    if (wide.length) out.push(['bad', 'A word too long for its box runs past the box’s edge: ' + wide.join(', ') +
+                                      '. Widen the box or make the text smaller.']);
     if (gutter.length) out.push(['bad', 'In the gutter, where the binding may swallow it: ' + gutter.join(', ')]);
     if (missing.length) out.push(['bad', 'Characters the font doesn\'t have, which would print blank: ' + missing.join('; ')]);
     if (spineText && g.spine_text) out.push(['ok', 'The spine is wide enough for text.']);
@@ -1330,9 +1338,11 @@
     $('wd-save-group').style.display = on ? 'inline-flex' : 'none';
     if (!on) { $('wd-trim').disabled = false; $('wd-book-note').hidden = true; $('wd-save-status').textContent = ''; }
   }
+  var shownPid = '';                    // the book whose design and settings are on the page
   function openBook(pid, keepLocal) {
     bookUi(!!pid);
-    if (!pid) { savedJSON = null; currentBook = null; persist(); return regeometry(); }
+    shownPid = null;                      // nothing may be saved until this book has loaded
+    if (!pid) { savedJSON = null; currentBook = null; shownPid = ''; persist(); return regeometry(); }
     return fetch('/wrap-designer/project/' + encodeURIComponent(pid)).then(function (r) { return r.json(); })
       .then(function (b) {
         var s = b.settings;
@@ -1355,13 +1365,29 @@
         return fetchGeometry().then(function () {
           if (!keepLocal) design = b.design || starter(b, g);
           return loadFonts();
-        }).then(function () { render(); resetHistory(); });
+        }).then(function () {
+          render(); resetHistory();
+          if ($('wd-project').value === pid) shownPid = pid;
+        });
       });
   }
-  $('wd-project').addEventListener('change', function () { openBook(this.value, false); });
+  // the design on the page is the only working copy: switching books replaces it
+  function bookDirty() {
+    return savedJSON === null ? past.length > 0 || snapshot() !== lastSnap
+                              : JSON.stringify(design) !== savedJSON;
+  }
+  $('wd-project').addEventListener('change', function () {
+    if (shownPid !== null && this.value !== shownPid && bookDirty() &&
+        !confirm('Open another book? The design you have here has unsaved changes, and they will be lost.')) {
+      this.value = shownPid; return;
+    }
+    openBook(this.value, false);
+  });
   $('wd-save').addEventListener('click', function () {
     var pid = $('wd-project').value, st = $('wd-save-status');
     if (!pid) return;
+    // the design on the page belongs to the book that last finished loading
+    if (pid !== shownPid) { st.textContent = 'Still opening this book. Save again in a moment.'; return; }
     st.textContent = 'Saving…';
     post('/wrap-designer/project/' + encodeURIComponent(pid) + '/save',
          {design: design, settings: settings(), use_as_cover: $('wd-use-cover').checked})

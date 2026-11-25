@@ -139,6 +139,24 @@ def _tracked_centre(canv, cx, y, text, font, size, tracking=0.0):
     canv.drawText(to)
 
 
+def _break_overlong(lines, font, size, max_w, tracking=0.0):
+    """Lines with any still wider than max_w cut between letters: the last
+    resort for a word too long for its frame at the smallest size allowed,
+    which would otherwise print across the border."""
+    def wide(s):
+        return stringWidth(s, font, size) + tracking * max(len(s) - 1, 0)
+    out = []
+    for ln in lines:
+        while len(ln) > 1 and wide(ln) > max_w:
+            n = len(ln) - 1
+            while n > 1 and wide(ln[:n]) > max_w:
+                n -= 1
+            out.append(ln[:n])
+            ln = ln[n:].lstrip()
+        out.append(ln)
+    return out
+
+
 def _wrap_tracked(text, font, size, max_w, tracking=0.0):
     """Word-wrap text to max_w, honouring the tracking already applied."""
     out = []
@@ -786,11 +804,20 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
     title = (meta.get('title') or '').upper()
     last_y = yat(title_y)
     tsize = tt.get('size', 40)
+    if not tsize or tsize <= 0:          # a template saved with a size of 0
+        tt, tsize = dict(tt, size=40), 40
     if title:
         maxw = inner_w - 0.4 * inch
         trk = tt.get('tracking', 0.6)
         lines = _wrap_tracked(title, cf['display'], tsize, maxw, trk)
         while tsize > 14 and any(
+                stringWidth(ln, cf['display'], tsize) + trk * max(len(ln) - 1, 0) > maxw
+                for ln in lines):
+            tsize -= 1
+            lines = _wrap_tracked(title, cf['display'], tsize, maxw, trk)
+        # a single word too long for the frame even at 14 pt keeps shrinking,
+        # rather than print across the border; a title that fits is unchanged
+        while tsize > 6 and any(
                 stringWidth(ln, cf['display'], tsize) + trk * max(len(ln) - 1, 0) > maxw
                 for ln in lines):
             tsize -= 1
@@ -819,6 +846,7 @@ def _paint_cover_panel(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
             return y - orn.get('gap', 0.05) * h - orn.get('size', 2.4) * 1.25
 
         lines, tsize = _shrink_to_clear(title, cf['display'], tsize, maxw, trk, 14, bottom, floor)
+        lines = _break_overlong(lines, cf['display'], tsize, maxw, trk)
         leading = tt.get('leading', 46) * (tsize / tt.get('size', 40))
         canv.setFillColor(_pal_color(tpl, tt.get('color', 'gold')))
         yy = yat(title_y)
@@ -1717,7 +1745,7 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
     pad = min(0.42 * inch, w * 0.14)
     colw = w - 2 * pad
     if colw <= 24:                       # a flap too narrow to set type in
-        return
+        return False
     cx = x0 + w / 2.0
     size, lead = 9.5, 13.5
     canv.saveState()
@@ -1754,6 +1782,7 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
                 pass
         body = meta.get('cover_author_bio') or ''
 
+    low = top
     if body:
         canv.setFillColor(_pal_color(tpl, 'ink'))
         yy = top
@@ -1766,6 +1795,7 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
                 # PDF text state, so the tracking set by the line above would
                 # still be in force and the flap copy would run past its fold
                 _tracked_left(canv, x0 + pad, yy, ln, cf['serif'], size, 0.0)
+                low = yy
                 yy -= lead
 
     st = tpl.get('studio', {})
@@ -1776,6 +1806,10 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
                         cf['serif'], min(st.get('size', 8.5), 8.0),
                         st.get('tracking', 2.4))
     canv.restoreState()
+    # Whether the copy ran past its room - into the imprint, or off the flap -
+    # for the caller to warn about: the flap has no smaller size to fall back to
+    floor = y0 + (0.55 * inch + 12 if studio else 0.4 * inch)
+    return bool(body) and low - size * 0.25 < floor
 
 
 def _depth(font, size):
@@ -1959,9 +1993,12 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
     else:
         _paint_background(c, tpl, front_x, edge, pw, ph, bleed=front_bleed)
         _paint_cover_front(c, tpl, cf, meta, front_x, edge, pw, ph, bleed=front_bleed)
+    overflow = []
     if flap:
-        _paint_flap(c, tpl, cf, meta, edge, edge, flap, ph, 'back')
-        _paint_flap(c, tpl, cf, meta, front_x + pw, edge, flap, ph, 'front')
+        if _paint_flap(c, tpl, cf, meta, edge, edge, flap, ph, 'back'):
+            overflow.append('back flap')
+        if _paint_flap(c, tpl, cf, meta, front_x + pw, edge, flap, ph, 'front'):
+            overflow.append('front flap')
     if guides:
         folds = [edge, edge + flap, back_x + pw, spine_x, spine_x + sp,
                  front_x, front_x + pw, front_x + pw + flap]
@@ -1971,6 +2008,7 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
         c.save()
     return {'wrap_w': round(g['wrap_w'], 3), 'wrap_h': round(g['wrap_h'], 3),
             'spine_w': round(g['spine_w'], 4), 'spine_text': bool(drew_spine),
+            'overflow': overflow,
             'binding': g['binding'], 'front': 'image' if art else 'designed',
             'wrap': round(g['wrap'], 4), 'hinge': round(g['hinge'], 4),
             'flap': round(g['flap'], 4), 'panel_w': round(g['panel_w'], 4)}

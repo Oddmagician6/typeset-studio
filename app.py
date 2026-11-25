@@ -1701,6 +1701,14 @@ def _f(form, key, default):
     return v if math.isfinite(v) else default      # NaN would be written as JSON
 
 
+def _fsize(form, key, default):
+    """A type size from the cover editor: a size of 0 or less draws nothing and
+    broke the classic frame's shrink-to-fit (it scales by the size), so it falls
+    back to the template's own."""
+    v = _f(form, key, default)
+    return v if v > 0 else default
+
+
 # What each style number may be. The editor's page can't hold these back (its
 # `step`s made the browser refuse a saved 0.35 sink and half the standard trims,
 # so the form is `novalidate`); out of range is clamped here. Wide enough for
@@ -2133,41 +2141,41 @@ def _cover_fields(form):
             'corner_line': _f(form, 'bd_corner_line', d['border']['corner_line']),
         },
         'collection': {
-            'size':     _f(form, 'col_size', d['collection']['size']),
+            'size':     _fsize(form, 'col_size', d['collection']['size']),
             'tracking': _f(form, 'col_tracking', d['collection']['tracking']),
             'color':    form.get('col_color', 'gold'),
             'top':      _f(form, 'col_top', d['collection']['top']),
             'bottom':   _f(form, 'col_bottom', d['collection']['bottom']),
         },
         'kicker': {
-            'size':     _f(form, 'kick_size', d['kicker']['size']),
+            'size':     _fsize(form, 'kick_size', d['kicker']['size']),
             'tracking': _f(form, 'kick_tracking', d['kicker']['tracking']),
             'color':    form.get('kick_color', 'muted'),
             'y':        _f(form, 'kick_y', d['kicker']['y']),
         },
         'title': {
-            'size':     _f(form, 'title_size', d['title']['size']),
+            'size':     _fsize(form, 'title_size', d['title']['size']),
             'leading':  _f(form, 'title_leading', d['title']['leading']),
             'tracking': _f(form, 'title_tracking', d['title']['tracking']),
             'color':    form.get('title_color', 'gold'),
             'y':        _f(form, 'title_y', d['title']['y']),
         },
         'accent': {
-            'size':     _f(form, 'acc_size', d['accent']['size']),
+            'size':     _fsize(form, 'acc_size', d['accent']['size']),
             'tracking': _f(form, 'acc_tracking', d['accent']['tracking']),
             'color':    form.get('acc_color', 'teal'),
             'gap':      _f(form, 'acc_gap', d['accent']['gap']),
         },
         'ornament': {
             'color':    form.get('orn_color', 'gold'),
-            'size':     _f(form, 'orn_size', d['ornament']['size']),
+            'size':     _fsize(form, 'orn_size', d['ornament']['size']),
             'spacing':  _f(form, 'orn_spacing', d['ornament']['spacing']),
             'rule':     _f(form, 'orn_rule', d['ornament']['rule']),
             'rule_len': _f(form, 'orn_rule_len', d['ornament']['rule_len']),
             'gap':      _f(form, 'orn_gap', d['ornament']['gap']),
         },
         'epigraph': {
-            'size':     _f(form, 'epi_size', d['epigraph']['size']),
+            'size':     _fsize(form, 'epi_size', d['epigraph']['size']),
             'leading':  _f(form, 'epi_leading', d['epigraph']['leading']),
             'tracking': _f(form, 'epi_tracking', d['epigraph']['tracking']),
             'color':    form.get('epi_color', 'muted'),
@@ -2175,7 +2183,7 @@ def _cover_fields(form):
             'top':      _f(form, 'epi_top', d['epigraph']['top']),
         },
         'studio': {
-            'size':     _f(form, 'std_size', d['studio']['size']),
+            'size':     _fsize(form, 'std_size', d['studio']['size']),
             'tracking': _f(form, 'std_tracking', d['studio']['tracking']),
             'color':    form.get('std_color', 'muted'),
             'y':        _f(form, 'std_y', d['studio']['y']),
@@ -3424,6 +3432,10 @@ def wrap_designer_save(pid):
     proj['wrap_front_file'] = secure_filename(f'{pid}-wrap-front.jpg')
     if body.get('use_as_cover'):
         proj['cover_mode'] = 'wrap'
+    elif proj.get('cover_mode') == 'wrap':
+        # unticked: back to the cover the book had before, as Send to print reads it
+        proj['cover_mode'] = ('designed' if proj.get('cover_template_data')
+                              else 'image' if proj.get('cover_file') else 'none')
     front = os.path.join(PROJECT_MS_DIR, proj['wrap_front_file'])
     # rendered beside the real one and swapped in only once the book is saved:
     # the builds reuse that file while its size fits, so writing it first let a
@@ -4045,8 +4057,12 @@ def cover_wrap_preview():
             kind = 'paperback'
         info = (f"{dims['trim_w']:g}×{dims['trim_h']:g}\" {kind} · spine {res['spine_w']:g}\" · "
                 f"full {res['wrap_w']:g}×{res['wrap_h']:g}\" · {spine_txt}")
+        warnings = list(dims.get('warnings', []))
+        for where in res.get('overflow', []):
+            warnings.append(f'The {where} copy is too long to fit: it runs past the bottom '
+                            'of the flap. Shorten it.')
         return jsonify({'ok': True, 'image': f'data:image/png;base64,{b64}', 'info': info,
-                        'warnings': dims.get('warnings', [])})
+                        'warnings': warnings})
     except Exception as exc:
         logging.error('wrap preview failed: %s', traceback.format_exc())
         return jsonify({'ok': False, 'error': str(exc)})

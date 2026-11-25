@@ -134,9 +134,13 @@ def fill_rect(g, which):
     H = g['wrap_h']
     if g.get('page') and not g.get('spread'):
         return 0.0, 0.0, g['wrap_w'], H        # a page design: the page is the sheet
+    # on a jacket a panel stops at its flap's fold, as a template jacket's art
+    # does: past the fold is the flap, which folds in behind the cover
     if which == 'front':
-        return g['front_x'], 0.0, g['wrap_w'] - g['front_x'], H
+        return g['front_x'], 0.0, (g['panel_w'] if g.get('flap') else g['wrap_w'] - g['front_x']), H
     if which == 'back':
+        if g.get('flap'):
+            return g['back_x'], 0.0, g['panel_w'], H
         return 0.0, 0.0, g['back_x'] + g['panel_w'], H
     if which == 'spine':
         return g['spine_x'], 0.0, g['spine_w'], H
@@ -158,7 +162,7 @@ def text_layout(el):
     top-left. `words` is None, or for a justified line [(word, x offset)]: the
     line's words spread to fill the box."""
     face = pdfmetrics.getFont(font_name(el['font'])).face
-    size, lead = el['size'], el.get('leading', 1.2)
+    size, lead = el['size'], el.get('leading') or 1.2   # a cleared box: as the canvas draws it
     asc = face.ascent / 1000.0 * size
     box = el.get('w', 0) * 72.0
     blank = blank_of(el)
@@ -315,7 +319,7 @@ def draw_elements(c, design, g, H, live=None):
         elif kind == 'barcode' and w > 0 and h > 0:
             draw_barcode(c, el, X, Ytop, w * inch, h * inch)
         elif kind == 'image' and drawable_art(el.get('src')) and w > 0 and h > 0:
-            img = ImageReader(art_file(el['src']))
+            img = ImageReader(engine._upright(art_file(el['src'])))  # as the browser shows it
             iw, ih = img.getSize()
             turn = turn_of(el)
             if turn in (90, 270):
