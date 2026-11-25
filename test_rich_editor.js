@@ -251,6 +251,68 @@ f.onload = function () {
     loadMd('# One\n\nX.\n'); caret(q('.wb-para'), true); paste('<p>A&nbsp;B</p>'); return getMd();
   });
 
+  // ---- bug hunt 6: the round trip and the paste
+  run('verse-of-tildes', function () {
+    loadMd('# One\n\n~~~ poem\nFirst line\nLast line\n~~~\n\n# Two\n\nText\n');
+    caret(q('.wb-verse'), true); enter(); type('~~~'); return getMd();
+  });
+  run('table-cells-kept', function () {
+    loadMd('# One\n\n~~~ table\na_b | c_d\n~~~\n\nPara.\n');
+    caret(q('.wb-para'), true); type('!'); return getMd();
+  });
+  run('italic-then-bold', function () {
+    loadMd('# One\n\n_red_**blue**\n\nPara.\n');
+    caret(rich.querySelectorAll('.wb-para')[1], true); type('!'); return getMd();
+  });
+  run('accented-note-labels', function () {
+    loadMd('# One\n\nSee both.[^é][^ñ]\n\n[^é]: First.\n[^ñ]: Second.\n');
+    caret(q('.wb-para'), true); type('!'); return getMd();
+  });
+  run('poem-title-quotes', function () {
+    loadMd('# One\n\n~~~ poem title="The"\nverse\n~~~\n');
+    caret(q('.wb-poem-title'), true); type(' "Blue" Hour'); return getMd();
+  });
+  run('rejected-paste-keeps-selection', function () {
+    loadMd('# One\n\n~~~ poem\na red kite\n~~~\n');
+    rich.focus();
+    var t = q('.wb-verse').firstChild, r = d.createRange();
+    r.setStart(t, 2); r.setEnd(t, 5); sel().removeAllRanges(); sel().addRange(r);
+    paste('', '{{monster\n## Fox\n}}'); return getMd();
+  });
+  run('paste-lines-into-verse', function () {
+    loadMd('# One\n\n~~~ poem\nX\n~~~\n');
+    caret(q('.wb-verse'), true); paste('', 'First line\nSecond line\n\nThird line'); return getMd();
+  });
+  run('note-in-statblock', function () {
+    loadMd('# One\n\n~~~ statblock\nHit Points: 12\n~~~\n\n[^roll]: Roll again.\n');
+    caret(q('.wb-doc-para'), true); type('[^roll]'); return getMd();
+  });
+  run('attr-named-like-a-method', function () {
+    loadMd('# One\n\n~~~ quote hasOwnProperty="yes"\nWords.\n~~~\n'); return getMd();
+  });
+  run('enter-over-selected-verse-words', function () {
+    loadMd('# One\n\n~~~ poem\na red kite\n~~~\n');
+    rich.focus();
+    var t = q('.wb-verse').firstChild, r = d.createRange();
+    r.setStart(t, 2); r.setEnd(t, 5); sel().removeAllRanges(); sel().addRange(r);
+    enter(); return getMd();
+  });
+  run('outline-jumps-in-rich', function () {
+    loadMd('# One\n\nA.\n\n#* Interlude\n\nB.\n\n# Two\n\nC.\n'); getMd();
+    d.querySelectorAll('#outline a')[2].click();
+    var n = sel().anchorNode;
+    while (n && !(n.classList && n.classList.contains('wb'))) n = n.parentNode;
+    return n ? n.textContent : 'no caret';
+  });
+  run('replace-all-after-dotted-i', function () {
+    if (on()) toggle.click();
+    ta.value = 'İxa';
+    d.getElementById('f-find').value = 'x'; d.getElementById('f-repl').value = 'Y';
+    d.getElementById('f-case').checked = false;
+    d.getElementById('f-all').click();
+    var v = ta.value; toggle.click(); return v;
+  });
+
   run('paste-word-with-space', function () {
     loadMd('# One\n\nSay and go.\n'); var t = q('.wb-para').firstChild;
     var r = d.createRange(); r.setStart(t, 4); r.collapse(true); rich.focus();

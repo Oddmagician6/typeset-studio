@@ -439,6 +439,17 @@
         ta.scrollTop = Math.max(0, caretTop(offset) - pad - 8);
       }
 
+      // The outline's i-th entry in the rich surface: its headings and scene
+      // breaks, in order, are the outline's (a `####` isn't listed). Jumping in
+      // the hidden textarea instead left the rich editor where it was.
+      function jumpToRich(i){
+        var el = rich.querySelectorAll(':scope > .wb-chapter, :scope > .wb-part, ' +
+          ':scope > .wb-subhead:not([data-level="4"]), :scope > .wb-scene')[i];
+        if (!el) return;
+        el.scrollIntoView({block: 'start'});
+        placeCaret(el.classList.contains('wb-scene') ? (el.nextElementSibling || el) : el);
+      }
+
       function esc(s){
         return s.replace(/[&<>]/g, function(c){
           return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];
@@ -467,7 +478,7 @@
           // a fence's lines are its own (a stat block's `### Actions`)
           if (/^\s*~~~/.test(ln)) fence = !fence;
           var mPart = fence ? null : /^===\s*(.*)$/.exec(ln);
-          var mCh   = fence ? null : /^#\s+(.*)$/.exec(ln);
+          var mCh   = fence ? null : /^#\*?\s+(.*)$/.exec(ln);   // `#* Prologue` too
           var mSub  = fence ? null : /^##\s+(.*)$/.exec(ln);
           var mSec  = fence ? null : /^###\s+(.*)$/.exec(ln);
           if (mSec){
@@ -493,8 +504,10 @@
         }
         box.innerHTML = html ||
           '<span class="ol-empty">No chapters yet — add one with the Chapter button.</span>';
-        box.querySelectorAll('a').forEach(function(a){
-          a.addEventListener('click', function(){ jumpTo(parseInt(a.dataset.off, 10)); });
+        box.querySelectorAll('a').forEach(function(a, i){
+          a.addEventListener('click', function(){
+            if (richMode) jumpToRich(i); else jumpTo(parseInt(a.dataset.off, 10));
+          });
         });
       }
 
@@ -893,17 +906,21 @@
       var fRepl = document.getElementById('f-repl');
       var fCase = document.getElementById('f-case');
       var fCount = document.getElementById('f-count');
-      var matches = [], curMatch = -1;
+      var matches = [], matchEnds = [], curMatch = -1;
 
       function computeMatches(){
         var q = fFind.value;
-        matches = [];
+        matches = []; matchEnds = [];
         if (!q) return;
-        var ci = !fCase.checked;
-        var hay = ci ? ta.value.toLowerCase() : ta.value;
-        var ndl = ci ? q.toLowerCase() : q;
-        var i = hay.indexOf(ndl);
-        while (i !== -1){ matches.push(i); i = hay.indexOf(ndl, i + Math.max(ndl.length, 1)); }
+        // matched on the text itself: lowercasing it first can change its
+        // length (an `İ` lowercases to two characters), and the offsets found
+        // in the copy then replaced the wrong characters in the original
+        var rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                            fCase.checked ? 'gu' : 'giu');
+        var m;
+        while ((m = rx.exec(ta.value)) !== null){
+          matches.push(m.index); matchEnds.push(m.index + m[0].length);
+        }
       }
       function showCount(){
         if (!fFind.value){ fCount.textContent = ''; return; }
@@ -919,7 +936,6 @@
       function findStep(dir){
         computeMatches();
         if (!matches.length){ curMatch = -1; showCount(); return; }
-        var qlen = fFind.value.length;
         var pos = ta.selectionStart;
         var idx;
         if (dir > 0){
@@ -931,7 +947,7 @@
           if (idx === -1) idx = matches.length - 1;
         }
         curMatch = idx;
-        selectRange(matches[idx], matches[idx] + qlen);
+        selectRange(matches[idx], matchEnds[idx]);
         showCount();
       }
       function replaceCurrent(){
@@ -953,10 +969,10 @@
         if (!q) return;
         computeMatches();
         if (!matches.length){ showCount(); return; }
-        var rep = fRepl.value, qlen = q.length, out = '', last = 0;
+        var rep = fRepl.value, out = '', last = 0;
         for (var k = 0; k < matches.length; k++){
           out += ta.value.slice(last, matches[k]) + rep;
-          last = matches[k] + qlen;
+          last = matchEnds[k];
         }
         out += ta.value.slice(last);
         var n = matches.length;
@@ -1268,6 +1284,18 @@
       function splitVerse(verse){
         var sel = window.getSelection();
         var range = sel.getRangeAt(0);
+        // Enter replaces a selection, as anywhere else: split at its end, the
+        // selected words stayed put on the first line
+        if (!range.collapsed){
+          if (verse.contains(range.startContainer) && verse.contains(range.endContainer))
+            range.deleteContents();
+          else {
+            document.execCommand('delete');
+            range = sel.getRangeAt(0);
+            verse = closestClass(range.startContainer, 'wb-verse');
+            if (!verse) return;
+          }
+        }
         var tail = range.cloneRange();
         tail.selectNodeContents(verse);
         tail.setStart(range.endContainer, range.endOffset);
@@ -1307,7 +1335,8 @@
         var cd = e.clipboardData;
         if (!cd) return;
         e.preventDefault();
-        var blocks = WYS.pasteBlocks(cd.getData('text/html'), cd.getData('text/plain'));
+        var blocks = WYS.pasteBlocks(cd.getData('text/html'), cd.getData('text/plain'),
+                                     WYS.caretInVerse(rich));
         if (WYS.insertPaste(rich, blocks)) syncFromRich();
       });
 

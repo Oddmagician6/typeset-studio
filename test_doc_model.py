@@ -1009,7 +1009,56 @@ def test_vocabulary():
            and len({s["href"] for s in matter.SECTIONS}) == len(matter.SECTIONS))
 
 
+def test_bughunt6():
+    """Bug hunt 6: what the round trip used to change in a book."""
+    print("\n[bug hunt 6]")
+
+    def rt(md):
+        return doc_model.to_markdown(doc_model.from_markdown(md, smartquotes=False))
+
+    def same_book(label, md):
+        a, b = manuscript.parse_markdown(md), manuscript.parse_markdown(rt(md))
+        _check(label, a == b, repr(rt(md)))
+
+    # a verse of tildes is text, not a fence that ends the poem early
+    blocks = doc_model.from_markdown(
+        '# One\n\n~~~ poem\nFirst line\nLast line\n~~~\n\n# Two\n\nText\n', False)
+    blocks[1]["children"][0]["lines"].insert(1, {"runs": [doc_model._run("~~~")]})
+    md = doc_model.to_markdown(blocks)
+    chs = manuscript.parse_markdown(md)["chapters"]
+    _check("a verse of tildes stays in the poem",
+           [c["title"] for c in chs] == ["One", "Two"]
+           and chs[0]["blocks"][0][1] == [("para", "First line<br/>~~~<br/>Last line")], md)
+    _check("... and reads back as a verse", doc_model.from_markdown(md, False) == blocks)
+    _check("a \\~~~ line in a block is text to the typesetter",
+           manuscript.parse_markdown('# A\n\n~~~ list\n\\~~~\n~~~\n')["chapters"][0]["blocks"]
+           == [("doc_block", [("para", "~~~")], {"_type": "list"})])
+
+    same_book("table cells are read one at a time", '# C\n\n~~~ table\na_b | c_d\n~~~\n')
+    _check("... and written back as they were", rt('# C\n\n~~~ table\na_b | c_d\n~~~\n')
+           == '# C\n\n~~~ table\na_b | c_d\n~~~\n')
+    same_book("emphasis inside a cell survives", '# C\n\n~~~ table\n*a* | **b** | [c](https://x.example)\n~~~\n')
+    same_book("italic straight before bold", '# C\n\n_red_**blue**\n')
+    same_book("bold-italic straight before italic", '# C\n\n***red***_blue_\n')
+    same_book("bold straight before bold-italic", '# C\n\n**red**___blue___\n')
+
+    blocks = doc_model.from_markdown('# C\n\n~~~ poem title="x"\nA\n~~~\n', False)
+    blocks[1]["attrs"]["title"] = 'The "Blue" Hour'
+    got = manuscript.parse_markdown(doc_model.to_markdown(blocks))["chapters"][0]["blocks"][0][2]
+    _check("a quoted word in a poem title", got.get("title") == 'The "Blue" Hour', got)
+    _check("attributes still split one from the next",
+           manuscript.parse_attrs('a="x" b="y z"') == {"a": "x", "b": "y z"})
+    _check("stray words after a value read as before",
+           manuscript.parse_attrs('a="x" junk b="y"') == {"a": "x", "b": "y"})
+
+    blocks = doc_model.from_markdown('# C\n\n~~~ statblock\nHit Points: 12\n~~~\n', False)
+    blocks[1]["children"][0]["runs"].append(doc_model._note_run("roll"))
+    _check("a note in a stat block keeps its marker",
+           "Hit Points: 12[^roll]" in doc_model.to_markdown(blocks))
+
+
 if __name__ == "__main__":
+    test_bughunt6()
     test_roundtrips()
     test_adversarial()
     test_engine_escapes()

@@ -25,7 +25,14 @@ import re
 FENCE_RE = re.compile(r'^\s*~~~(.*)$')
 # straight or curly quotes, as the book reads them (manuscript._ATTR_RE): a
 # straight-only reading missed `src=“map”` the book places
-_ATTR_RE = re.compile(r'(\w+)=["“”]([^"“”]*)["“”]')
+_ATTR_RE = re.compile(
+    r'(\w+)=["“”]((?:(?!\s\w+=["“”]).)*?)["“”](?=\s+\w+=["“”]|\s*$)'
+    r'|(\w+)=["“”]([^"“”]*)["“”]')     # exactly manuscript._ATTR_RE
+
+
+def _attrs(text):
+    return {(m.group(1) or m.group(3)): (m.group(2) if m.group(1) else m.group(4))
+            for m in _ATTR_RE.finditer(text)}
 _SIDES = {'right': 'right', 'recto': 'right', 'left': 'left', 'verso': 'left'}
 
 # Picture-book page counts (#75b-2): KDP prints no fewer than 24 pages; 32 is
@@ -41,7 +48,7 @@ def _header(line):
     parts = (m.group(1) if m else '').strip().split(None, 1)
     if not parts:
         return '', {}
-    return parts[0].lower(), dict(_ATTR_RE.findall(parts[1])) if len(parts) > 1 else {}
+    return parts[0].lower(), _attrs(parts[1]) if len(parts) > 1 else {}
 
 
 def side_of(attrs):

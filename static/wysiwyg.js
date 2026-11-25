@@ -115,7 +115,7 @@
 
   function docHeadLabel(blockType, attrs) {
     var parts = [DOC_LABELS[blockType] || blockType || 'block'];
-    for (var k in attrs) if (attrs.hasOwnProperty(k)) parts.push(k + ': ' + attrs[k]);
+    for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) parts.push(k + ': ' + attrs[k]);
     return parts.join('  ·  ');
   }
 
@@ -167,7 +167,7 @@
     // title is edited inline; any other attrs ride along on data-attrs
     var other = {};
     for (var k in (b.attrs || {}))
-      if (b.attrs.hasOwnProperty(k) && k !== 'title') other[k] = b.attrs[k];
+      if (Object.prototype.hasOwnProperty.call(b.attrs, k) && k !== 'title') other[k] = b.attrs[k];
     el.dataset.attrs = JSON.stringify(other);
 
     var title = document.createElement('div');
@@ -348,7 +348,7 @@
   // Only what the engine reads as a link is kept as one — mirrors
   // manuscript.LINK_TARGET. Anything else (a pasted "/relative" or "javascript:")
   // would be written as [text](target) and printed as those literal brackets.
-  var LINK_TARGET_RE = /^(?:https?:\/\/[^\s)]+|mailto:[^\s)]+|#[A-Za-z0-9][\w\-]*)$/;
+  var LINK_TARGET_RE = /^(?:https?:\/\/[^\s)]+|mailto:[^\s)]+|#[A-Za-z0-9][\p{L}\p{N}_\-]*)$/u;
 
   // Anything a writing-aid extension (Grammarly, LanguageTool, ProWritingAid)
   // draws into the editor. They render their underlines and cards by injecting
@@ -433,7 +433,7 @@
   // a note is added in rich mode. Only the text just typed is looked at, so a
   // literal "[^label]" already on the page (a `\[^label]` in the Markdown) stays
   // literal. Returns true if it made one.
-  var TYPED_NOTE_RE = /\[\^([\w\-]+)\]$/;
+  var TYPED_NOTE_RE = /\[\^([\p{L}\p{N}_\-]+)\]$/u;
   function noteInputRule(root) {
     var sel = root.ownerDocument.getSelection();
     if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
@@ -455,8 +455,8 @@
   // same way; and `{#name}` a link target, `{page: name}` a page reference.
   // Returns true if it made one.
   var TYPED_INDEX_RE = /\{index:[ \t]*([^{}\[\]]*[^{}\[\]\s])[ \t]*\}$/;
-  var TYPED_ANCHOR_RE = /\{#([A-Za-z0-9][\w\-]*)\}$/;
-  var TYPED_PAGE_RE = /\{page:[ \t]*#?([A-Za-z0-9][\w\-]*)[ \t]*\}$/;
+  var TYPED_ANCHOR_RE = /\{#([A-Za-z0-9][\p{L}\p{N}_\-]*)\}$/u;
+  var TYPED_PAGE_RE = /\{page:[ \t]*#?([A-Za-z0-9][\p{L}\p{N}_\-]*)[ \t]*\}$/u;
   function indexInputRule(root) {
     var sel = root.ownerDocument.getSelection();
     if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
@@ -505,8 +505,9 @@
 
   // [{runs:[...]}, {scene:true}, ...] from clipboard HTML, or from plain text when
   // there is none. Plain text follows the manuscript's own rule: a blank line
-  // starts a paragraph, a single line break is a space.
-  function pasteBlocks(html, text) {
+  // starts a paragraph, a single line break is a space — except into a poem
+  // (`verse`, see caretInVerse), where every line break is kept.
+  function pasteBlocks(html, text, verse) {
     var blocks = [];
     // a Homebrewery stat block copied from its editor comes as plain text; it
     // is wrapped in a stat block fence and the text read as the manuscript is
@@ -541,7 +542,11 @@
             return;
           }
           if (child.nodeType !== 1) return;
-          if (child.tagName === 'BR') { cur.push({ text: ' ', bold: bold, italic: italic, link: link }); return; }
+          if (child.tagName === 'BR') {
+            if (verse) flush();                    // a line break is a new verse
+            else cur.push({ text: ' ', bold: bold, italic: italic, link: link });
+            return;
+          }
           if (child.dataset && child.dataset.note) {          // copied from this editor
             cur.push({ text: child.dataset.note, bold: bold, italic: italic, link: '', note: true });
             return;
@@ -574,6 +579,19 @@
       walk(doc.body, false, false, '', false);
       flush();
     }
+    if (!blocks.length && text && verse) {
+      // into a poem, each line of the text is a verse and a blank line a
+      // stanza break (an empty verse); run together as prose, the poem lost
+      // its lines
+      var gap = false;
+      text.replace(/\r\n?/g, '\n').trim().split('\n').forEach(function (ln) {
+        var t = ln.replace(/\s+/g, ' ').trim();
+        if (!t) { gap = true; return; }
+        if (gap && blocks.length) blocks.push({ runs: [] });
+        gap = false;
+        blocks.push({ runs: [{ text: t, bold: false, italic: false, link: '' }] });
+      });
+    }
     if (!blocks.length && text) {
       text.replace(/\r\n?/g, '\n').split(/\n\s*\n/).forEach(function (para) {
         var t = para.replace(/\s+/g, ' ').trim();
@@ -584,9 +602,10 @@
     // edge (a double-click takes the one after it), and dropping that glues the
     // word to its neighbour. The plain-text copy says whether there was one.
     var firstB = blocks[0], lastB = blocks[blocks.length - 1];
-    if (text && firstB && firstB.runs && /^[ \t]/.test(text) && !isMark(firstB.runs[0]))
+    if (text && firstB && firstB.runs && firstB.runs.length && /^[ \t]/.test(text)
+        && !isMark(firstB.runs[0]))
       firstB.runs[0].text = ' ' + firstB.runs[0].text;
-    if (text && lastB && lastB.runs && /[ \t]$/.test(text)) {
+    if (text && lastB && lastB.runs && lastB.runs.length && /[ \t]$/.test(text)) {
       var lr = lastB.runs[lastB.runs.length - 1];
       if (!isMark(lr)) lr.text += ' ';
     }
@@ -607,6 +626,14 @@
     return null;
   }
 
+  // True when the caret is in a verse of a poem, where a paste keeps its lines.
+  function caretInVerse(root) {
+    var sel = root.ownerDocument.getSelection();
+    if (!sel || !sel.rangeCount) return false;
+    var line = lineOf(root, sel.getRangeAt(0).startContainer);
+    return !!(line && line.classList && line.classList.contains('wb-verse'));
+  }
+
   // Insert pasted blocks at the caret. The first block joins the line the caret
   // is on, each further one becomes a new line of the same kind (a paragraph at
   // the top level, a verse in a poem, a line in a list), and whatever followed
@@ -615,13 +642,25 @@
   function insertPaste(root, blocks) {
     var doc = root.ownerDocument, sel = doc.getSelection();
     if (!sel || !sel.rangeCount || !blocks.length) return false;
-    if (!sel.isCollapsed) doc.execCommand('delete');   // replaces a selection, merging lines
     var range = sel.getRangeAt(0);
     var line = lineOf(root, range.startContainer);
     if (!line) return false;
     var c = line.classList, top = line.parentNode === root;
     var asText = c.contains('wb-chapter') || c.contains('wb-part') || c.contains('wb-poem-title');
     if (top && !(asText || c.contains('wb-para') || c.contains('wb-subhead'))) return false;
+    if (!top) blocks = blocks.filter(function (b) { return b.runs; });  // no scene inside a block
+    if (!blocks.length) return false;
+
+    // Only now is the selection replaced, once something is sure to take its
+    // place: deleted first, a paste with nothing that fits here (a stat block
+    // into a poem) left the selected words simply gone.
+    if (!sel.isCollapsed) {
+      doc.execCommand('delete');                           // merging lines
+      range = sel.getRangeAt(0);
+      line = lineOf(root, range.startContainer);
+      if (!line) return false;
+      c = line.classList; top = line.parentNode === root;
+    }
 
     if (asText) {
       var plain = blocks.filter(function (b) { return b.runs; }).map(function (b) {
@@ -630,8 +669,6 @@
       doc.execCommand('insertText', false, plain);
       return true;
     }
-    if (!top) blocks = blocks.filter(function (b) { return b.runs; });  // no scene inside a block
-    if (!blocks.length) return false;
     if (!blocks[0].runs) blocks.unshift({ runs: [] });   // a block can't join the caret's line
 
     var tail = doc.createRange();
@@ -690,7 +727,7 @@
     if (title) attrs.title = title;                      // title first (attr order)
     var other = {};
     try { other = JSON.parse(el.dataset.attrs || '{}'); } catch (e) { other = {}; }
-    for (var k in other) if (other.hasOwnProperty(k) && k !== 'title') attrs[k] = other[k];
+    for (var k in other) if (Object.prototype.hasOwnProperty.call(other, k) && k !== 'title') attrs[k] = other[k];
 
     var body = el.querySelector('.wb-poem-body');
     var stanzas = [], cur = [];
@@ -762,5 +799,5 @@
 
   global.WYS = { render: render, read: read, renderBlock: renderBlock, readInline: readInline,
                  noteInputRule: noteInputRule, indexInputRule: indexInputRule, pasteBlocks: pasteBlocks,
-                 insertPaste: insertPaste, lineOf: lineOf };
+                 insertPaste: insertPaste, lineOf: lineOf, caretInVerse: caretInVerse };
 })(typeof window !== 'undefined' ? window : this);

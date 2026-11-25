@@ -95,7 +95,19 @@ PART_RE        = re.compile(r'^\s*===\s*(.*)')
 # Straight or curly quotes: a value pasted from a word processor arrives as
 # `src=“map.png”`, and reading only straight ones dropped it without a word.
 # The round trip writes straight quotes back.
-_ATTR_RE       = re.compile(r'(\w+)=["“”]([^"“”]*)["“”]')
+# A value may itself hold quotes — a poem titled `The "Blue" Hour` — so it ends
+# at the quote that is followed by the next `key="` or the end of the line. A
+# header that doesn't read that way (stray words after a value) falls back to
+# ending each value at its first quote, as before.
+_ATTR_RE       = re.compile(
+    r'(\w+)=["“”]((?:(?!\s\w+=["“”]).)*?)["“”](?=\s+\w+=["“”]|\s*$)'
+    r'|(\w+)=["“”]([^"“”]*)["“”]')
+
+
+def parse_attrs(text):
+    """`key="value" …` -> {key: value}, in the order written."""
+    return {(m.group(1) or m.group(3)): (m.group(2) if m.group(1) else m.group(4))
+            for m in _ATTR_RE.finditer(text)}
 
 
 # Backslash escapes for literal emphasis / marker characters. A writer (or the
@@ -589,7 +601,7 @@ def _parse_block_header(header):
     if not parts:
         return '', {}
     block_type = parts[0].lower()
-    attrs = dict(_ATTR_RE.findall(parts[1])) if len(parts) > 1 else {}
+    attrs = parse_attrs(parts[1]) if len(parts) > 1 else {}
     return block_type, attrs
 
 
@@ -780,6 +792,11 @@ def parse_markdown(raw, smartquotes=True):
 
         # Inside a doc block: only paragraph text
         if in_block:
+            # `\~~~` is a line that reads `~~~` (a verse of tildes): unguarded,
+            # it closed the block, and the block's own closing fence then
+            # opened a new one that swallowed the next chapter
+            if line[:1] == _BSL and DOCBLOCK_RE.match(line[1:]):
+                line = line[1:]
             if block_type == 'statblock':
                 sb_lines.append(line)
             elif line.strip() == '':

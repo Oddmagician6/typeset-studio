@@ -187,6 +187,19 @@ EXPECT = {
     'paste-word-with-space': '# One\n\nSay hello and go.\n',
     'nbsp-survives': '# One\n\nMr. Smith came. Then left.\n',
     'nbsp-in-paste': '# One\n\nX.A B\n',
+    # bug hunt 6
+    'verse-of-tildes': '# One\n\n~~~ poem\nFirst line\n\\~~~\nLast line\n~~~\n\n# Two\n\nText\n',
+    'table-cells-kept': '# One\n\n~~~ table\na_b | c_d\n~~~\n\nPara.!\n',
+    'italic-then-bold': '# One\n\n_red_**blue**\n\nPara.!\n',
+    'accented-note-labels': '# One\n\nSee both.[^é][^ñ]!\n\n[^é]: First.\n\n[^ñ]: Second.\n',
+    'poem-title-quotes': '# One\n\n~~~ poem title="The "Blue" Hour"\nverse\n~~~\n',
+    'rejected-paste-keeps-selection': '# One\n\n~~~ poem\na red kite\n~~~\n',
+    'paste-lines-into-verse': '# One\n\n~~~ poem\nXFirst line\nSecond line\n\nThird line\n~~~\n',
+    'note-in-statblock': '# One\n\n~~~ statblock\nHit Points: 12[^roll]\n~~~\n\n[^roll]: Roll again.\n',
+    'attr-named-like-a-method': '# One\n\n~~~ quote hasOwnProperty="yes"\nWords.\n~~~\n',
+    'replace-all-after-dotted-i': 'İYa',
+    'enter-over-selected-verse-words': '# One\n\n~~~ poem\na\nkite\n~~~\n',
+    'outline-jumps-in-rich': 'Two',
 }
 
 
