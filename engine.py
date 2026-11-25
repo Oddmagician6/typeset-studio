@@ -5187,7 +5187,7 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     ncolor = _gb_color(sm, 'name_color') or base.textColor
     if name or count or cr:
         text = _caps_markup(name) if sm.get('name_caps', True) else name
-        if attrs.get('_ix') is not None:      # the block is in the index
+        if isinstance(attrs.get('_ix'), int):  # in the index (not a writer's own `_ix`)
             text = _index_tag(attrs['_ix']) + text
         if count:
             text += (f' <font name="{fonts["regular"]}">&#215;&#160;'

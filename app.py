@@ -5158,6 +5158,31 @@ PREVIEW_DEVICES = [
 _IMG_SRC_RE = re.compile(r'src="((?:images/|cover)[^"]+)"')
 
 
+def _preview_links(html_text, href, hrefs):
+    """One ebook document's links made to work in the preview, where every
+    document is joined into one page: `endnotes.xhtml#note-1-1` pointed at a
+    file the preview doesn't have. Ids are prefixed with the document's own
+    name (each chapter has its own `h1`), and links to a document or a place
+    in one point at the prefixed id instead."""
+    def key(h):
+        return re.sub(r'[^A-Za-z0-9_-]', '-', os.path.splitext(h)[0])
+    me = key(href)
+
+    def ids(m):
+        return f'{m.group(1)}id="{me}--{m.group(2)}"'
+
+    def links(m):
+        target = m.group(1)
+        doc, _, frag = target.partition('#')
+        if doc and doc not in hrefs:
+            return m.group(0)                      # outside the book: as it was
+        k = key(doc) if doc else me
+        return f'href="#{k}--{frag}"' if frag else f'href="#{k}"'
+    out = re.sub(r'(\s)id="([^"]+)"', ids, html_text)
+    out = re.sub(r'href="((?![a-z][a-z0-9+.-]*:)[^"]*)"', links, out)
+    return f'<span id="{me}"></span>' + out
+
+
 @app.route('/generate/epub-preview', methods=['POST'])
 def generate_epub_preview():
     """Show the *ebook*, not the page images — the other half of a book build.
@@ -5222,7 +5247,8 @@ def generate_epub_preview():
                     continue
                 raw = zf.read(full(href)).decode('utf-8', 'replace')
                 body = raw.split('<body>', 1)[-1].rsplit('</body>', 1)[0]
-                docs.append({'href': href, 'html': inline_images(body, href)})
+                docs.append({'href': href, 'html': _preview_links(
+                    inline_images(body, href), href, set(items.values()))})
 
         return jsonify({
             'ok': True,

@@ -1161,13 +1161,27 @@ def reaches_edge(design, g):
     return False
 
 
-def page_words(design):
+def page_words(design, trim_w=None, trim_h=None):
     """The words on a page design, top to bottom, for the ebook's alt text (a
-    spread's left page before its right)."""
+    spread's left page before its right). Given the trim, a spread's box is
+    placed by where it sits on the sheet: one dragged across the fold keeps
+    its old anchor, so the anchor alone can put it on the wrong page."""
     texts = [el for el in (design or {}).get('elements', [])
              if isinstance(el, dict) and el.get('type') == 'text' and not el.get('hidden')
              and str(el.get('text', '')).strip()]
-    side = (lambda el: 0 if el.get('anchor') == 'back' else 1) if is_spread(design) \
-        else (lambda el: 0)
-    texts.sort(key=lambda el: (side(el), el.get('y', 0), el.get('x', el.get('cx', 0))))
+    if trim_w and trim_h:
+        g = design_geometry(design, float(trim_w), float(trim_h))
+
+        def key(el):
+            try:
+                x, y, w, _ = el_rect(g, el)
+            except (TypeError, ValueError, KeyError):
+                return (1, 0, 0)
+            side = (0 if x + w / 2 < g['spine_x'] else 1) if is_spread(design) else 0
+            return (side, y, x)
+    else:
+        def key(el):
+            side = (0 if el.get('anchor') == 'back' else 1) if is_spread(design) else 0
+            return (side, el.get('y', 0), el.get('x', el.get('cx', 0)))
+    texts.sort(key=key)
     return ' '.join(' '.join(str(el['text']).split()) for el in texts)

@@ -226,7 +226,13 @@ def _apply_page_refs(chapters, meta, preset):
             name = m.group(1)
             if name not in labels:
                 return '??'
-            return f'<a href="#{name}">{html.escape(labels[name], quote=False)}</a>'
+            label = html.escape(labels[name], quote=False)
+            # inside a link already: its words only - a link in a link is not
+            # allowed in XHTML
+            before = m.string[:m.start()]
+            if len(re.findall(r'<a[\s>]', before)) > before.count('</a>'):
+                return label
+            return f'<a href="#{name}">{label}</a>'
         if '<anchor ' in text:
             text = _MS_ANCHOR_TAG_RE.sub(plant, text)
         if '<pageref ' in text:
@@ -327,26 +333,35 @@ def _md_emph_to_html(text):
     targets = []
 
     def _stash(m):
-        targets.append(m.group(2))
-        return f'\x00{len(targets) - 1}\x00{m.group(1)}\x01'
+        # the link is one opaque token while emphasis is matched: a span that
+        # began outside it and ended inside (`**[a**](u)`) crossed the tags,
+        # and the chapter was no longer well-formed XHTML
+        targets.append((m.group(2), m.group(1)))
+        return f'\x00{len(targets) - 1}\x01'
 
-    text = _LINK_RE.sub(_stash, text)
-    # Bold-italic first, and as one span — the same reason manuscript._inline
-    # does. Left to the ** and * passes below, ***x*** comes out cross-nested
-    # (<strong><em>x</strong></em>): not well-formed XHTML, so the page fails
-    # epubcheck and strict readers refuse it. ___x___ needs the same pass or its
-    # underscores survive into the text as literals.
-    text = re.sub(r'\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*', r'<strong><em>\1</em></strong>', text)
-    text = re.sub(r'___(?!\s)(.+?)(?<!\s)___', r'<strong><em>\1</em></strong>', text)
-    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
-    text = _sub_between_emph(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<em>\1</em>', text)
-    text = _sub_between_emph(r'_(?!\s)(.+?)(?<!\s)_', r'<em>\1</em>', text)
+    def _emph(t):
+        # Bold-italic first, and as one span — the same reason manuscript._inline
+        # does. Left to the ** and * passes below, ***x*** comes out cross-nested
+        # (<strong><em>x</strong></em>): not well-formed XHTML, so the page fails
+        # epubcheck and strict readers refuse it. ___x___ needs the same pass or its
+        # underscores survive into the text as literals.
+        t = re.sub(r'\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*', r'<strong><em>\1</em></strong>', t)
+        t = re.sub(r'___(?!\s)(.+?)(?<!\s)___', r'<strong><em>\1</em></strong>', t)
+        t = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', t)
+        t = _sub_between_emph(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)', r'<em>\1</em>', t)
+        t = _sub_between_emph(r'_(?!\s)(.+?)(?<!\s)_', r'<em>\1</em>', t)
+        return t
+
+    text = _emph(_LINK_RE.sub(_stash, text))
     if targets:
+        # the address was escaped with the rest of the text: undone first, or
+        # `?a=1&b=2` reached the shop as `&amp;b=2`
         text = re.sub(
-            r'\x00(\d+)\x00(.*?)\x01',
+            r'\x00(\d+)\x01',
             lambda m: '<a href="%s">%s</a>'
-                      % (html.escape(targets[int(m.group(1))], quote=True), m.group(2)),
-            text, flags=re.S)
+                      % (html.escape(html.unescape(targets[int(m.group(1))][0]), quote=True),
+                         _emph(targets[int(m.group(1))][1])),
+            text)
     return _resolve_anchors(text)
 
 
@@ -614,7 +629,9 @@ def chapter_headings(chapter):
     for block in chapter.get('blocks', []):
         level = _HEAD_LEVEL.get(block[0])
         if level:
-            text = ' '.join(html.unescape(re.sub(r'<[^>]+>', '', block[1])).split())
+            # (a note's number is no part of the heading's words)
+            text = ' '.join(html.unescape(re.sub(r'<[^>]+>', '', re.sub(
+                r'<sup class="noteref"[^>]*>.*?</sup>', '', block[1], flags=re.S))).split())
             out.append((f'h{len(out) + 1}', level, text))
     return out
 
@@ -646,7 +663,7 @@ def _toc_page_xhtml(chapters, preset):
         body += (f'    <li{indent}><a href="chapter{idx:03d}.xhtml">'
                  f'{_text_to_html(label)}</a></li>\n')
         for hid, level, text in chapter_headings(ch):
-            if level > depth:
+            if level > depth or not text:
                 continue
             pad = 1.5 * (level - 1) + (1.5 if ch_part_num is not None else 0)
             body += (f'    <li class="toc-sec" style="padding-left: {pad:g}em">'
@@ -810,7 +827,7 @@ def _render_pages(chapters, meta, preset, tmpdir):
             except Exception:
                 continue                     # left out, with a note where it stood
             found[name] = {'href': f'images/page{n:03d}.jpg', 'path': path,
-                           'id': f'page{n:03d}', 'words': wrap_design.page_words(d)}
+                           'id': f'page{n:03d}', 'words': wrap_design.page_words(d, trim['w'], trim['h'])}
     return found
 
 
@@ -931,8 +948,17 @@ def _chapter_art_html(preset, href, position):
     ca   = preset.get('chapter_art', {})
     frac = max(0.05, min(float(ca.get('width', 0.32) or 0.32), 1.0))
     cls  = 'chapter-art' + (' chapter-art-below' if position == 'below' else '')
+    # the style's height limit too, as the PDF keeps it, in ems of the body
+    # text so it scales with the reader's type: a tall picture at full width
+    # filled more than a screen. `contain` keeps its shape inside the box.
+    try:
+        max_in = float(ca.get('max_height', 1.6) or 1.6)
+        body_pt = float((preset.get('body') or {}).get('size') or 11.0)
+        cap = f';max-height:{max_in * 72 / body_pt:.2f}em;object-fit:contain'
+    except (TypeError, ValueError, ZeroDivisionError):
+        cap = ''
     return (f'  <p class="{cls}"><img src="{html.escape(href)}" alt="" '
-            f'role="presentation" style="width:{frac * 100:.1f}%"/></p>')
+            f'role="presentation" style="width:{frac * 100:.1f}%{cap}"/></p>')
 
 
 def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href=''):
@@ -999,8 +1025,12 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
                 numbered = (attrs.get('type', '') or '').lower().startswith('num')
                 tag = 'ol' if numbered else 'ul'
                 start = ''
-                if numbered and attrs.get('start', '').strip().isdigit():
-                    start = f' start="{attrs["start"].strip()}"'
+                if numbered:
+                    # as the PDF reads it: any whole number, a negative one too
+                    try:
+                        start = f' start="{int(str(attrs.get("start", "")).strip())}"'
+                    except ValueError:
+                        start = ''
                 lines.append(f'  <{tag} class="block-list"{start}>')
                 for _, text in val:
                     lines.append(f'    <li>{_markup_to_html(text)}</li>')
@@ -1033,7 +1063,10 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
                 lines.append('  </div>')
                 no_indent_next = True
                 continue
-            cls    = f'doc-block doc-block-{btype}' if btype else 'doc-block'
+            # a label of the writer's own (`~~~ Q&A`) as a class name: only the
+            # characters a class can hold - a bare `&` left the chapter unreadable
+            safe   = re.sub(r'[^a-z0-9_-]+', '-', btype.lower()).strip('-') if btype else ''
+            cls    = f'doc-block doc-block-{safe}' if safe else 'doc-block'
             lines.append(f'  <div class="{cls}">')
             # Per-type header element
             if btype == 'letter':
@@ -1085,6 +1118,13 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
                 # (and changed link targets), so the whole chapter failed to load
                 body_text = (html.escape(_plain_markup(btext).upper(), quote=False)
                              if btype == 'telegram' else _markup_to_html(btext))
+                if btype == 'telegram':
+                    # the anchors and index targets in it stay, as empty
+                    # spans before its words: dropped with the rest of the
+                    # markup, every link and index entry to them dangled
+                    keep = ''.join(f'<span id="{i}"></span>' for i in
+                                   re.findall(r'<\w+\b[^>]*\bid="([^"]+)"[^>]*>', btext))
+                    body_text = keep + body_text
                 cls_p = ' class="no-indent"' if bi == 0 else ''
                 lines.append(f'    <p{cls_p}>{body_text}</p>')
             lines.append('  </div>')
@@ -1131,8 +1171,11 @@ def _game_block_html(btype, paras, attrs):
             head += f' × {_text_to_html(count)}'
         if cr:
             head = f'<span class="sb-cr">CR {_text_to_html(cr)}</span>' + head
+        # it is in the index: `_ix` is the number the indexer gave it - a
+        # writer's own `_ix="7"` on the fence is text, and two of them made
+        # two elements with one id
         anchor = (f' id="{_index_id(attrs["_ix"])}"'
-                  if attrs.get('_ix') is not None else '')     # it is in the index
+                  if isinstance(attrs.get('_ix'), int) else '')
         out.append(f'    <p class="sb-name"{anchor}>{head}</p>')
     if m.get('meta'):
         out.append(f'    <p class="sb-meta">{_markup_to_html(m["meta"])}</p>')
@@ -1290,7 +1333,7 @@ def check(path):
 
         # --- every content document must actually parse ---
         docs = [i for i in items.values() if i['type'] == 'application/xhtml+xml']
-        broken, ids, imgs, no_alt, gone = [], {}, 0, [], []
+        broken, ids, imgs, no_alt, gone, no_page = [], {}, 0, [], [], []
         for d in docs:
             name = full(d['href'])
             if name not in names:
@@ -1309,10 +1352,12 @@ def check(path):
                 if 'figure-missing' in (p_.getAttribute('class') or '').split():
                     t = ''.join(n.data for n in p_.childNodes
                                 if n.nodeType == n.TEXT_NODE).strip().strip('[]')
-                    # (a page design the book lacks is a note of the same kind;
-                    # the print preflight names those)
+                    # (a page design the book lacks is a note of the same kind:
+                    # an EPUB-only book has no print preflight to name it)
                     if t.startswith('missing image: '):
                         gone.append(t[len('missing image: '):] or '?')
+                    elif t.startswith('missing page design: '):
+                        no_page.append(t[len('missing page design: '):] or '?')
             for img in dom.getElementsByTagName('img'):
                 imgs += 1
                 # a decorative image (the chapter ornament) is *supposed* to
@@ -1331,6 +1376,10 @@ def check(path):
             add('Figures', False, 'Printed as a "missing image" note, not a picture: '
                 + ', '.join(sorted(set(gone))[:4])
                 + ' - upload them on the Figures page')
+        if no_page:
+            add('Page designs', False, 'Printed as a "missing page design" note, not the page: '
+                + ', '.join(sorted(set(no_page))[:4])
+                + ' - design them in the page designer, or take the placement out')
 
         # a picture's bytes must be what its media type says: a BMP renamed
         # .png went in as image/png, which a reader may refuse to show
@@ -1557,7 +1606,9 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
         label = ch.get('title') or (num_fmt.format(n=_nums[idx - 1])
                                    if show_num and _nums[idx - 1] else f'Section {idx}')
         kids = [(f'chapter{idx:03d}.xhtml#{hid}', text, level)
-                for hid, level, text in chapter_headings(ch) if level <= depth]
+                # a heading with no words (`## {#signal}`) has no label to show:
+                # an empty one is invalid in the navigation document
+                for hid, level, text in chapter_headings(ch) if level <= depth and text]
         toc.append((f'chapter{idx:03d}.xhtml', label, kids))
 
     if has_notes:

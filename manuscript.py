@@ -198,6 +198,7 @@ PAGEREF_TAG_RE = re.compile(r'<pageref to="([\w\-]+)"/>')
 _PAGE_ALT_DROP_RE = re.compile(r'<anchor name="[\w\-]+"/>|<index item="[^"]*"/>'
                                r'|<note id="[\w\-]+"/>')
 _TAGS_RE = re.compile(r'<[^>]+>')
+_NOTEREF_SUP_RE = re.compile(r'<sup class="noteref"[^>]*>.*?</sup>', re.S)
 
 
 def _is_block_line(line):
@@ -951,7 +952,11 @@ def book_targets(chapters):
         for i, block in enumerate(ch.get('blocks', [])):
             if block[0] not in HEADING_KINDS:
                 continue
-            words = ' '.join(html.unescape(_TAGS_RE.sub('', block[1])).split())
+            # a note's number is not one of the heading's words: the ebook,
+            # which has set it as a superscript by now, named `## Guard
+            # Room[^1]` "guard-room1" and every reference to it dangled
+            words = ' '.join(html.unescape(_TAGS_RE.sub('', _NOTEREF_SUP_RE.sub(
+                '', block[1]))).split())
             base = slugify(words) or 'section'
             name, k = base, 2
             while name in out['where']:
