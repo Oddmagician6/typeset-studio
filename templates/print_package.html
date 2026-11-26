@@ -41,16 +41,19 @@
       <div class="eyebrow">Send to publish</div>
       <h1>Ready for the printer and the shop</h1>
       <p>Both editions were built from the same manuscript in one pass — the print files in
-         <code>print/</code>, the ebook in <code>ebook/</code>, and the one cover image serving
-         the store listing and the inside of the EPUB alike.
+         <code>print/</code>, the ebook in <code>ebook/</code>{% if info.cover_jpg %}, and the one
+         cover image serving the store listing and the inside of the EPUB alike{% else %}.
+         The cover image could not be rendered, so the EPUB has no cover and there is no
+         listing image — the checks below say why{% endif %}.
          <code>PUBLISH-SPEC.txt</code> in the package walks through both uploads to
          {{ info.retailer_label }}.</p>
     {% elif info.publish %}
       <div class="eyebrow">Send to publish</div>
       <h1>Ready for the printer</h1>
       <p>The ebook edition could not be built — the checks below say why — so this package
-         holds the print half only: the interior and the cover wrap in <code>print/</code>,
-         cut to the same page count as ever. <code>PUBLISH-SPEC.txt</code> walks through
+         holds the print half: the interior and the cover wrap in <code>print/</code>,
+         cut to the same page count as ever{% if info.cover_jpg %}, and the store-listing
+         cover JPG in <code>ebook/</code>{% endif %}. <code>PUBLISH-SPEC.txt</code> walks through
          the upload to {{ info.retailer_label }}.</p>
     {% else %}
       <div class="eyebrow">Send to print</div>

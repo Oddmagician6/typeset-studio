@@ -280,7 +280,8 @@ BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'preset
              'cover_template', 'cover_color', 'cover_collection', 'cover_kicker',
              'cover_accent', 'cover_epigraph', 'cover_studio', 'format', 'front_matter',
              'created', 'updated', 'last_pdf', 'last_epub', 'last_print_package',
-             'last_package_scope', 'last_screen_pdf', 'built', 'build_started')
+             'last_package_scope', 'last_screen_pdf', 'built', 'build_started',
+             'package_started')
 BOOK_FLAGS = ('include_toc', 'smartquotes', 'right_hand_starts', 'cover_overlay', 'press',
               'screen_pdf', 'index_statblocks', 'index_cr', 'link_pages', 'bleed',
               'picture_book')
@@ -995,6 +996,7 @@ _seed_defaults()
 PACKAGE_WORK_PREFIX = 'typeset-package-'
 UPLOAD_KEEP_DAYS = 14       # a staged upload outlives any Compose retry or save
 PACKAGE_KEEP_HOURS = 6      # a package build that old was cut off
+PACKAGE_PART = '.part'      # a package ZIP while it is written, beside its name
 
 
 def _sweep_stale(now=None):
@@ -1019,6 +1021,21 @@ def _sweep_stale(now=None):
                 if (fn.startswith(PACKAGE_WORK_PREFIX) and os.path.isdir(path)
                         and now - os.path.getmtime(path) > PACKAGE_KEEP_HOURS * 3600):
                     shutil.rmtree(path, ignore_errors=True)
+    except OSError:
+        pass
+    # a package ZIP cut off while it was written, and the empty file that
+    # held its name
+    try:
+        for fn in os.listdir(OUT_DIR):
+            if not fn.endswith('.zip' + PACKAGE_PART):
+                continue
+            path = os.path.join(OUT_DIR, fn)
+            with contextlib.suppress(OSError):
+                if now - os.path.getmtime(path) > PACKAGE_KEEP_HOURS * 3600:
+                    os.remove(path)
+                    final = path[:-len(PACKAGE_PART)]
+                    if os.path.isfile(final) and os.path.getsize(final) == 0:
+                        os.remove(final)
     except OSError:
         pass
 
@@ -1168,8 +1185,9 @@ _INGRAM_MARGINS = [(1,100,.375),(101,200,.5),(201,300,.625),(301,400,.75),(401,6
 # the retailer's own downloadable cover template for a given trim.
 WRAP_RETAILERS = {
     'kdp': {
-        'label': 'Amazon KDP', 'bleed': 0.125, 'spine_text_min': 100,
-        'note': 'KDP allows spine text at 100+ pages · 0.125" bleed. '
+        # KDP: "We only print spine text on books with more than 79 pages"
+        'label': 'Amazon KDP', 'bleed': 0.125, 'spine_text_min': 80,
+        'note': 'KDP allows spine text at 80+ pages · 0.125" bleed. '
                 'Confirm spine width with KDP’s cover template for your trim.',
         'hardcover_note': 'KDP case laminate: 0.625" wrap, 0.375" hinge each side of the '
                           'spine, white paper only, 75–550 pages, and five trims '
@@ -1250,21 +1268,45 @@ for _rid, _rc in WRAP_RETAILERS.items():
 _KDP_HARDCOVER_TRIMS = [(5.5, 8.5), (6.0, 9.0), (6.14, 9.21), (7.0, 10.0), (8.25, 11.0)]
 _KDP_HARDCOVER_PAGES = (75, 550)
 
-# KDP paperback page ranges by paper, for a regular trim and a large one (wider
-# than 6.12" or taller than 9"), from KDP's trim-size table. Standard colour is
-# the one stock with a higher minimum; the large-trim maxima are its 8.5x11 row.
+# KDP paperback page ranges by paper, from KDP's trim-size table, which has four
+# groups of maxima: every trim up to 8x10 (7x10 and 8x10 included) takes 828 on
+# white; the 8.25"-wide squares and landscapes 800; A4 (8.27x11.69) 780; and the
+# 8.5"-wide trims 590. Standard colour is 72-600 at every trim. Until 1.15 the
+# 590 row was applied to every trim past 6.12x9, failing a 700-page 7x10 book.
 _KDP_PAPERBACK_PAGES = {
-    'white':          ((24, 828), (24, 590)),
-    'cream':          ((24, 776), (24, 550)),
-    'color':          ((24, 828), (24, 590)),
-    'color_standard': ((72, 600), (72, 600)),
+    #                 up to 8x10   8.25 squares  A4           8.5 wide
+    'white':          ((24, 828), (24, 800), (24, 780), (24, 590)),
+    'cream':          ((24, 776), (24, 750), (24, 730), (24, 550)),
+    'color':          ((24, 828), (24, 800), (24, 590), (24, 590)),
+    'color_standard': ((72, 600), (72, 600), (72, 600), (72, 600)),
 }
 
 
 def kdp_page_range(paper, trim_w, trim_h):
     """(min, max) pages KDP prints a paperback in, on this paper at this trim."""
-    small, large = _KDP_PAPERBACK_PAGES.get(paper or 'white', _KDP_PAPERBACK_PAGES['white'])
-    return large if (trim_w > 6.12 + 1e-6 or trim_h > 9.0 + 1e-6) else small
+    rows = _KDP_PAPERBACK_PAGES.get(paper or 'white', _KDP_PAPERBACK_PAGES['white'])
+    e = 1e-6
+    if trim_w <= 8.0 + e and trim_h <= 10.0 + e:
+        return rows[0]
+    if trim_w <= 8.25 + e and trim_h <= 8.25 + e:
+        return rows[1]
+    if trim_w <= 8.27 + e and trim_h > 11.0 + e:
+        return rows[2]
+    return rows[3]
+
+
+def bound_pages(retailer, pages):
+    """The pages a printer binds for an interior of `pages` - what sizes the spine.
+
+    Every page is one side of a leaf, so an odd count gets a blank on the back
+    of the last page. IngramSpark also adds its own barcode page at the end of
+    every interior: an odd one gets that page as the blank, an even one a blank
+    and then the barcode page (their print file guidelines) - two more pages.
+    """
+    pages = max(int(pages or 0), 0)
+    if retailer == 'ingramspark':
+        return pages + (1 if pages % 2 else 2)
+    return pages + pages % 2
 
 
 def _min_inside(pages, table):
@@ -2113,6 +2155,31 @@ def _record_build(pid, done, started, created):
         # is newer than it, and the shelf says "changed since"
         done['built'] = started[:19]
         done['updated'] = max(str(proj.get('updated') or ''), started[:19])
+        proj.update(done)
+        save_project_file(pid, proj)
+    return proj
+
+
+def _record_package(pid, done, started, created):
+    """`_record_build` for a print/publish package; the book, or None.
+
+    The same two guards: a package for a book deleted and recreated under its
+    id lands nowhere, and one begun before the package already on the shelf
+    leaves it there. Its page count also yields to a regular build begun
+    later, whose interior is the newer book.
+    """
+    path = os.path.join(PROJECT_DIR, secure_filename(pid) + '.json')
+    with _PROJECT_LOCK:
+        if not os.path.exists(path):
+            return None
+        proj = upgrade_project(_damaged_as('book', pid, read_book, path))
+        if created and proj.get('created') and proj.get('created') != created:
+            return None                             # another book has this id now
+        if str(proj.get('package_started') or '') > started:
+            return proj                             # a newer package is on the shelf
+        done = dict(done, package_started=started)
+        if str(proj.get('build_started') or '') > started:
+            done.pop('last_page_count', None)       # a newer build counted the pages
         proj.update(done)
         save_project_file(pid, proj)
     return proj
@@ -3421,6 +3488,12 @@ def _cover_page_jpeg(preset, meta, jpg_path):
     """
     import fitz
     from PIL import Image
+    # No cover at all (a wrap design whose front would not render switches the
+    # book to 'none'): page 1 of the stub would be its "# Cover" chapter, and
+    # that went out as the store listing and the EPUB's cover.
+    if not ((meta.get('cover_mode') == 'designed' and meta.get('cover_template_data'))
+            or engine._front_art(meta)):
+        raise ValueError('the book has no cover to render')
     pdf_fd, pdf_path = tempfile.mkstemp(suffix='.pdf')
     os.close(pdf_fd)
     try:
@@ -3779,9 +3852,9 @@ def _wrap_dims(form, pages):
     # book, its trim lines off the PDF: clamped to what a printer can make
     trim_w = min(max(_f(form, 'wrap_trim_w', 6.0), 1.0), 30.0)
     trim_h = min(max(_f(form, 'wrap_trim_h', 9.0), 1.0), 30.0)
-    # every page is one side of a leaf, so a printer binds an odd count with a
-    # blank on the back of the last page; the spine is that leaf thicker
-    pages += pages % 2
+    # the spine is as thick as what is bound: an odd count's blank leaf, and
+    # IngramSpark's own barcode page (bound_pages)
+    pages = bound_pages(retailer, pages)
     # a case spine carries the boards as well as the paper — and a jacket wraps
     # that same case, so it takes the same spine
     spine_w = pages * ppi + (_f(form, 'wrap_board', HARDCOVER['board'])
@@ -4844,7 +4917,10 @@ def style_cover_specs_template(pid):
             data = f.read()
     finally:
         os.remove(tmp)
-    fn = f'{_slug_or_blank(name) or "cover"}-{spec["binding"]}-{spec["pages"]}pp-cover-template.pdf'
+    # every setting that changes the sheet's size is in the name, so templates
+    # for white and cream paper (or two printers) don't share a file name
+    fn = (f'{_slug_or_blank(name) or "cover"}-{spec["retailer"]}-{spec["binding"]}-'
+          f'{spec["pages"]}pp-{spec["paper"].replace("_", "-")}-cover-template.pdf')
     return Response(data, mimetype='application/pdf',
                     headers={'Content-Disposition': f'attachment; filename="{fn}"'})
 
@@ -7127,12 +7203,34 @@ def build_print_package(proj, scope='print'):
     work = tempfile.mkdtemp(prefix=PACKAGE_WORK_PREFIX)
     try:
         files = {}
+        if art:
+            # The uploaded art as it is now, for every file in the package: Edit
+            # can replace it at the same path while the interior lays out, and
+            # the wrap and the listing JPG came out with two different covers.
+            snap = os.path.join(work, 'cover-art' + (os.path.splitext(art)[1] or '.img'))
+            shutil.copyfile(art, snap)
+            art = snap
+            meta = dict(meta, cover_image=snap)
+            tpl = engine.image_wrap_template(art)
         interior = os.path.join(work, f'{base}-interior.pdf')
         built = engine.build_pdf(ms, preset, interior, dict(meta), press=True)
         pages = built['page_count']
         files[pdir + os.path.basename(interior)] = interior
 
         checks = _preflight(built, preset, pages, paper, binding, retailer)
+        # the inside margin the printer wants at this length: the regular build's
+        # print spec showed it, and the package that is actually uploaded didn't
+        # (a book under the table's shortest length - which the page-count
+        # check fails - is held to its first row rather than to nothing)
+        table = _INGRAM_MARGINS if retailer == 'ingramspark' else _KDP_MARGINS
+        need = (_min_inside(max(pages, table[0][0]), table)
+                if retailer != 'generic' else None)
+        if need:
+            inside = float(preset['margins']['inside'])
+            checks.append({'label': 'Inside margin', 'ok': inside >= need - 1e-6, 'detail': (
+                f'{inside:g}" — {WRAP_RETAILERS[retailer]["label"]} asks for at least '
+                f'{need:g}" at {pages} pages' + ('' if inside >= need - 1e-6 else
+                ': widen it in the style, or text may run into the binding'))})
         if built.get('press_error'):
             checks.insert(0, {
                 'label': 'Press-ready', 'ok': False,
@@ -7151,10 +7249,26 @@ def build_print_package(proj, scope='print'):
         # preset's, as page 1 does) for a designed cover.
         wrap = os.path.join(work, base + _WRAP_SUFFIX[binding] + '.pdf')
         if design:
+            # The front for the listing JPG and the EPUB, cut from this wrap: the
+            # book's cached front was sized from the last build's page count
+            # (the spine moves a sheet-anchored picture against the panel), and
+            # a cache that failed to refresh left the book with no cover at all.
+            fresh = os.path.join(work, 'wrap-front.jpg')
+            try:
+                wrap_design.render_front(
+                    design, {k: v for k, v in dims.items() if k != 'warnings'}, fresh)
+                meta = dict(meta, cover_image=fresh, cover_mode='image')
+            except Exception:
+                logging.exception('Rendering the wrap design front for the package failed')
+                meta = dict(meta, cover_image='', cover_mode='none')
             g = engine.wrap_geometry(dims)
             wrap_design.build_pdf(design, dims, wrap)
             wres = wrap_design.summary(g, design)
             checks += _missing_checks(design_missing=wrap_design.missing(design))
+            # what the designer warned of when it was saved: a bad ISBN prints
+            # no bars, and a short bleed a white sliver
+            for w in wrap_design.print_warnings(design, g):
+                checks.append({'label': 'Cover design', 'ok': False, 'detail': w})
             for w in _wrap_warnings({}, wrap_design.glyphs_missing(design)):
                 checks.append({'label': 'Cover lettering', 'ok': False, 'detail': w})
             # every picture measured at the size it is placed at, bleed included
@@ -7298,7 +7412,7 @@ def build_print_package(proj, scope='print'):
             'cover_art': art_res,
             'epub': (sorted(epub_checks, key=lambda c: c['ok']) if epub_checks
                      else epub_checks),
-            'cover_px': cover_px,
+            'cover_px': cover_px, 'cover_jpg': bool(cover_jpg),
             'ebook_fixed': fixed_epub.wanted(meta),
             'title': meta['title'] or proj.get('name', ''), 'author': meta['author'],
             'retailer': retailer, 'retailer_label': WRAP_RETAILERS[retailer]['label'],
@@ -7319,10 +7433,20 @@ def build_print_package(proj, scope='print'):
         import zipfile
         folder = f'{base}-{scope}'
         zip_name = _claim_out(f'{folder}-{stamp}.zip')
-        with zipfile.ZipFile(os.path.join(OUT_DIR, zip_name), 'w',
-                             zipfile.ZIP_DEFLATED) as z:
-            for name, path in files.items():
-                z.write(path, f'{folder}/{name}')
+        # written beside its name and moved onto it whole: a forced close
+        # mid-compression left a broken ZIP under the final name
+        final = os.path.join(OUT_DIR, zip_name)
+        part = final + PACKAGE_PART
+        try:
+            with zipfile.ZipFile(part, 'w', zipfile.ZIP_DEFLATED) as z:
+                for name, path in files.items():
+                    z.write(path, f'{folder}/{name}')
+            os.replace(part, final)
+        except BaseException:
+            for leftover in (part, final):
+                with contextlib.suppress(OSError):
+                    os.remove(leftover)
+            raise
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -7405,8 +7529,11 @@ def _print_spec_text(info, names):
         f'  Binding      {_BINDING_LABEL[info["binding"]]}',
         f'  Trim         {info["trim_w"]:g} x {info["trim_h"]:g} in',
         f'  Pages        {info["pages"]}' + (
-            f' (bound as {info["pages"] + 1}: a blank backs the last page)'
-            if info['pages'] % 2 else ''),
+            f' (bound as {bound_pages(info["retailer"], info["pages"])}: '
+            + ('IngramSpark adds its barcode page' + (', after a blank,'
+               if info['pages'] % 2 == 0 else '') + ' at the end; the spine is sized for it)'
+               if info['retailer'] == 'ingramspark' else 'a blank backs the last page)')
+            if bound_pages(info['retailer'], info['pages']) != info['pages'] else ''),
         f'  Paper        {info["paper_label"]}',
         f'  Spine        {w["spine_w"]:.4f} in',
         f'  Cover wrap   {w["wrap_w"]:g} x {w["wrap_h"]:g} in (bleed {info["bleed"]:g} in)',
@@ -7455,8 +7582,15 @@ def _print_spec_text(info, names):
     lines += ['', 'UPLOADING THE PRINT EDITION' if info.get('ebook') else 'UPLOADING']
     lines += [f'  {i}. {s}' for i, s in enumerate(_UPLOAD_STEPS[info['retailer']], 1)]
     if info.get('ebook'):
+        steps = _EBOOK_STEPS[info['retailer']]
+        if not info.get('cover_jpg'):
+            # no JPG in the package: don't send the writer looking for one
+            steps = [s for s in steps if 'cover JPG' not in s] + [
+                'The cover image could not be rendered (see the checks), so there is no '
+                'cover JPG here and the EPUB has none: add a cover in the shop before you '
+                'publish.']
         lines += ['', 'UPLOADING THE EBOOK EDITION']
-        lines += [f'  {i}. {s}' for i, s in enumerate(_EBOOK_STEPS[info['retailer']], 1)]
+        lines += [f'  {i}. {s}' for i, s in enumerate(steps, 1)]
     return '\n'.join(lines) + '\n'
 
 
@@ -7466,6 +7600,8 @@ def project_print_package(pid):
     scope = request.form.get('scope', 'print')
     if scope not in PACKAGE_SCOPES:
         scope = 'print'
+    started = datetime.now().isoformat(timespec='microseconds')
+    created = proj.get('created') or ''
     try:
         info = build_print_package(proj, scope)
     except PrintPackageError as exc:
@@ -7477,11 +7613,12 @@ def project_print_package(pid):
         return redirect(url_for('projects'))
     # One slot for "the last handoff package", whichever kind it was — the
     # projects page offers it back as a download, and either kind supersedes.
-    # Into the book as it is now: it may have been saved while this built.
+    # Into the book as it is now: it may have been saved while this built -
+    # and only if it is still that book and this is still its newest package.
     done = {'last_page_count': info['pages'], 'last_print_package': info['zip_name'],
             'last_package_scope': scope}
     proj.update(done)
-    proj.update(update_project(pid, done) or {})
+    proj.update(_record_package(pid, done, started, created) or {})
     return render_template('print_package.html', pid=pid, proj=proj, info=info)
 
 

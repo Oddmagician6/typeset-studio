@@ -105,7 +105,7 @@ for binding in ('paperback', 'hardcover', 'jacket'):
     check(f'the {binding} template downloads', ok, r.status_code)
     if not ok:
         continue
-    check(f'named for what it is', f'-{binding}-320pp-cover-template.pdf'
+    check(f'named for what it is', f'-ingramspark-{binding}-320pp-white-cover-template.pdf'
           in r.headers.get('Content-Disposition', ''), r.headers.get('Content-Disposition'))
     with fitz.open(stream=r.data, filetype='pdf') as doc:
         rect, text = doc[0].rect, doc[0].get_text()
