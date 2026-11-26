@@ -508,12 +508,14 @@ def wrap_unfenced(markdown):
                 i = j + 1
                 continue
         # the rule, then `> ## Name`: blank lines between them allowed (a
-        # paste often has one, and the monster was left as quoted text)
+        # paste often has one, and the monster was left as quoted text).
+        # Looked for only after a rule: from every line, a long run of blank
+        # lines was scanned again from each of them
+        is_rule = not in_fence and _RULE_RE.match(line.strip())
         k = i + 1
-        while k < len(lines) and not lines[k].strip():
+        while is_rule and k < len(lines) and not lines[k].strip():
             k += 1
-        if (not in_fence and _RULE_RE.match(line.strip())
-                and k < len(lines) and _LEGACY_HEAD_RE.match(lines[k])):
+        if is_rule and k < len(lines) and _LEGACY_HEAD_RE.match(lines[k]):
             j = k
             while j < len(lines) and lines[j].lstrip().startswith('>'):
                 j += 1

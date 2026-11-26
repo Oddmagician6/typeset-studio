@@ -572,7 +572,8 @@ def from_markdown(raw, smartquotes=True):
         block_attrs = {}
         in_block = False
 
-    for line in lines:
+    fence_ahead = manuscript.closed_ahead(lines)
+    for li, line in enumerate(lines):
         # `#> …` right after a chapter heading is its tagline (mirrors manuscript)
         if tag_ok and not in_block and line.strip():
             tag_ok = False
@@ -607,7 +608,7 @@ def from_markdown(raw, smartquotes=True):
                 in_block = True
             continue
 
-        if in_block and manuscript.CHAPTER_RE.match(line) and not (
+        if in_block and manuscript.CHAPTER_RE.match(line) and not fence_ahead[li] and not (
                 block_type == 'statblock' and not any(s.strip() for s in block_para_buf)):
             close_block()                        # a chapter: the ~~~ is missing
 

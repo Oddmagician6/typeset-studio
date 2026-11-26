@@ -139,8 +139,15 @@ os.makedirs(os.path.join(bundle, 'fonts')); os.makedirs(data_fonts)
 open(os.path.join(bundle, 'fonts', 'Andika-Regular.ttf'), 'wb').write(b'bundled andika')
 open(os.path.join(data_fonts, 'Andika-Regular.ttf'), 'wb').write(b'the user font')
 real_rp, real_fd = A.resource_path, A.FONT_DIR
+real_dirs = (A.PRESET_DIR, A.COVER_DIR, A.PROJECT_DIR)
 A.resource_path = lambda *p: os.path.join(bundle, *p)
 A.FONT_DIR = data_fonts
+# the styles, covers and books a set-aside font is renamed in (26.3): throwaway
+# ones, or this test rewrote the real presets and books
+for sub in ('presets', 'covers', 'projects'):
+    os.makedirs(os.path.join(TMP, 'seed-' + sub))
+A.PRESET_DIR, A.COVER_DIR, A.PROJECT_DIR = (os.path.join(TMP, 'seed-' + s)
+                                            for s in ('presets', 'covers', 'projects'))
 try:
     A._seed_defaults()
     check('the bundled face takes its name',
@@ -157,6 +164,7 @@ try:
           and not os.path.exists(os.path.join(data_fonts, 'Andika-Regular-own2.ttf')))
 finally:
     A.resource_path, A.FONT_DIR = real_rp, real_fd
+    A.PRESET_DIR, A.COVER_DIR, A.PROJECT_DIR = real_dirs
 os.remove(A.SETTINGS_PATH)
 
 # ---- 24.6 -------------------------------------------------------------------

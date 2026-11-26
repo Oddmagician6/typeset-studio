@@ -71,25 +71,38 @@ def split(text):
             items.append({'kind': 'text', 'text': '\n'.join(buf)})
         buf.clear()
 
+    import manuscript
+    fence_ahead = manuscript.closed_ahead(lines)
     i, n = 0, len(lines)
     while i < n:
         line = lines[i]
         if FENCE_RE.match(line):
-            # a block runs to the next ~~~ line, or to the end
-            j = i + 1
-            while j < n and not FENCE_RE.match(lines[j]):
+            kind, attrs = _header(line)
+            # a block runs to its closing ~~~, or - its ~~~ missing - to the
+            # next opening fence, a chapter heading or the end, where the
+            # parser closes it. Read to the chapter, the heading and the
+            # chapter's prose went into the page piece, and taking the page
+            # off the plan deleted the chapter
+            j, closed = i + 1, False
+            while j < n:
+                m = FENCE_RE.match(lines[j])
+                if m:
+                    closed = not m.group(1).strip()
+                    break
+                if manuscript.CHAPTER_RE.match(lines[j]) and not fence_ahead[j] and not (
+                        kind == 'statblock' and not any(s.strip() for s in lines[i + 1:j])):
+                    break
                 j += 1
-            if j < n:
-                block = lines[i:j + 1]
+            if closed:
+                block, nxt = lines[i:j + 1], j + 1
             else:
-                # one left open at the end gets its closing line: moved ahead
-                # of another fence, it would take that one's opening line as
-                # its own close and swallow the page
-                block = lines[i:]
+                # one left open gets its closing line: moved ahead of another
+                # fence, it would take that one's opening line as its own
+                # close and swallow the page
+                block, nxt = lines[i:j], j
                 while len(block) > 1 and not block[-1].strip():
                     block.pop()
                 block.append('~~~')
-            kind, attrs = _header(line)
             # a page fence that names no design is the book's own text, as the
             # typesetter reads it (manuscript: a plain block); counted as an
             # empty placement, it made every page plan edit look unsafe
@@ -99,7 +112,7 @@ def split(text):
                               'side': side_of(attrs), 'text': '\n'.join(block)})
             else:
                 buf.extend(block)
-            i = j + 1
+            i = nxt
             continue
         buf.append(line)
         i += 1
@@ -157,6 +170,21 @@ def readable(text, items=None):
     except Exception:
         return False
     return mine == theirs
+
+
+def outline(text):
+    """The book apart from its page placements: each chapter's title and how
+    many other blocks it holds. A plan edit only moves page fences, so this
+    must come out the same - checked before a rewrite, so a piece read wrong
+    (a chapter carried inside a page piece) can never take text with it."""
+    import manuscript
+    out = []
+    for ch in manuscript.parse_markdown(text, smartquotes=False)['chapters']:
+        others = [b for b in ch['blocks'] if not (
+            b[0] == 'doc_block' and len(b) >= 3 and b[2].get('_type') == 'page'
+            and (b[2].get('src') or '').strip())]
+        out.append((ch.get('title'), len(others)))
+    return [o for o in out if o != (None, 0)]
 
 
 def layout(items, designs, find, is_spread):

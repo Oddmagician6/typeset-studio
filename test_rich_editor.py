@@ -217,6 +217,8 @@ EXPECT = {
                                '~~~ statblock\n{{monster,frame\n## Bog-Thrall\n**AC** :: 9\n}}\n~~~\n'),
     'bh22-wrap-legacy-blank': ('~~~ statblock\n___\n> ## Ash Drake\n> *Large dragon*\n> - **AC** 15\n'
                                '~~~\n\nAfter.\n'),
+    'bh26-poem-hash-line': '# One\n\n~~~ poem\nA line\n\\# 7 on the door\nB line\n~~~\n\nAfter.\n',
+    'bh26-blank-run': 'fast 50001',
 }
 
 
