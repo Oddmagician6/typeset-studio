@@ -285,6 +285,21 @@ check('the same version is not newer', not A.is_newer('1.14.2', 'v1.14.2'))
 check('a beta of the next minor is newer', A.is_newer('1.15.0-beta.1', '1.14.9'))
 
 shutil.rmtree(TMP, ignore_errors=True)
+# ---- TS_PORT ------------------------------------------------------------------
+print('TS_PORT names the port an installed copy tries first')
+old = os.environ.get('TS_PORT')
+for val, want in (('5099', 5099), ('', 5050), ('nope', 5050), ('70000', 5050)):
+    os.environ['TS_PORT'] = val
+    check(f'TS_PORT={val!r} -> {want}', A._env_port() == want, A._env_port())
+if old is None:
+    os.environ.pop('TS_PORT', None)
+else:
+    os.environ['TS_PORT'] = old
+main_src = open(os.path.join(HERE, 'app.py'), encoding='utf-8').read().split("if __name__ == '__main__':")[-1]
+check('both installed-copy paths bind _env_port()',
+      main_src.count('_bind_port(_env_port())') + main_src.count('_bind_port(want)') == 2
+      and '_bind_port(5050)' not in main_src)
+
 # ---- first start of an installed copy ---------------------------------------
 # The installed app's first start (or first after an upgrade) records the
 # seeded fonts in a brand-new settings.json while app.py is still importing,

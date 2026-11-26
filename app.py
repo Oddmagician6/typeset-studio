@@ -7421,6 +7421,15 @@ def _bind_port(preferred=5050):
     raise OSError('no free port for Typeset Studio')
 
 
+def _env_port():
+    """The port to try first: TS_PORT when it names one, else 5050."""
+    try:
+        port = int(os.environ.get('TS_PORT') or 5050)
+    except ValueError:
+        return 5050
+    return port if 0 < port < 65536 else 5050
+
+
 def _server_on(sock):
     """The app's server on a socket _bind_port() holds."""
     from werkzeug.serving import make_server
@@ -7501,7 +7510,7 @@ if __name__ == '__main__':
         # native window: serve in a background thread, show the app in an OS
         # webview on the main thread. Closing the window quits (server is a
         # daemon thread). Falls back to the browser if the window can't start.
-        sock = _bind_port(5050)
+        sock = _bind_port(_env_port())
         port = sock.getsockname()[1]
         url = f'http://127.0.0.1:{port}/'
         threading.Thread(target=_serve, args=(sock,), daemon=True).start()
@@ -7531,10 +7540,13 @@ if __name__ == '__main__':
         # wander to a different port from the one the browser was opened on.
         dev = not IS_FROZEN
         if not dev:
-            # no reloader: the port is held from the moment it is chosen
-            sock = _bind_port(5050)
+            # no reloader: the port is held from the moment it is chosen.
+            # TS_PORT still names the one to try first (the release smoke test
+            # runs the build on 5099 beside a copy on 5050).
+            want = _env_port()
+            sock = _bind_port(want)
             port = sock.getsockname()[1]
-            if port != 5050:
+            if port != want:
                 print(f'Port 5050 is in use (another copy of Typeset Studio?), '
                       f'so this one is at http://127.0.0.1:{port}/')
             threading.Timer(1.0, _open_browser, args=(port,)).start()
