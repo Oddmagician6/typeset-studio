@@ -270,7 +270,9 @@ def test_epub():
     files = {n: z.read(n).decode('utf-8') for n in z.namelist() if n.endswith('.xhtml')}
     ch1, ch2 = files['OEBPS/chapter001.xhtml'], files['OEBPS/chapter002.xhtml']
     check('a heading holds its target',
-          '<h3 id="h1"><span id="at-area-1-qx1q"></span>Area 1 Qx1q</h3>' in ch2, ch2[:600])
+          # (a chapter's first `###` is an h2 now, styled by its class: round 5, 23.10)
+          '<h2 id="h1" class="hd-section"><span id="at-area-1-qx1q"></span>Area 1 Qx1q</h2>' in ch2,
+          ch2[:600])
     check('a spot is an empty span', '<span id="at-t1"></span>' in ch2)
     check('a page reference links to the spot by the heading above it',
           'Rx1r <a href="chapter002.xhtml#at-t1">Area 1 Qx1q</a>' in ch1, ch1[:900])
