@@ -1930,8 +1930,17 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
             if thh > room_h > 0:
                 tw, thh = tw * room_h / thh, room_h
             icx = cx
+            # The barcode box is painted white over whatever is under it, so a
+            # picture that reaches across it sits above it instead - made
+            # smaller if the room above the box is too short for it.
+            floor = by0 + gap
+            if icx + tw / 2.0 > bxr:
+                floor = byr + bh + 0.1 * inch
+                above = (by1 - gap) - floor
+                if thh > above > 0:
+                    tw, thh = tw * above / thh, above
             icy = y0 + h * min(max(meta.get('cover_back_image_y', 0.4), 0.0), 1.0)
-            icy = min(max(icy, by0 + gap + thh / 2.0), by1 - gap - thh / 2.0)
+            icy = min(max(icy, floor + thh / 2.0), by1 - gap - thh / 2.0)
             canv.drawImage(ir, icx - tw / 2.0, icy - thh / 2.0, width=tw, height=thh,
                            preserveAspectRatio=True, mask='auto')
             _BACK_IMG.size = (tw / inch, thh / inch)

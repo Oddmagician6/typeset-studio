@@ -1022,6 +1022,48 @@ def placed_images(design, g):
     return out
 
 
+def print_warnings(design, g):
+    """The designer's print warnings a package must carry too (its checks list,
+    static/wrap_designer.js pictureChecks and the barcode error): a barcode
+    whose ISBN can't be used prints no bars, and a picture or shape that reaches
+    the trim but stops short of the bleed shows a sliver where the cut wanders."""
+    out = []
+    e, W, H = g['edge'], g['wrap_w'], g['wrap_h']
+    near, sheet = 0.02, 0.005
+    short = []
+
+    def label(el):
+        if el.get('label'):
+            return str(el['label'])
+        if el.get('type') == 'image':
+            return f'Picture: {el.get("src")}'
+        return 'Ellipse' if el.get('type') == 'ellipse' else 'Shape'
+
+    for el in design.get('elements', []):
+        if el.get('hidden'):
+            continue
+        t = el.get('type')
+        if t == 'barcode':
+            _, _, w, h = el_rect(g, el)
+            err = barcode_parts(el, max(w, 0.2), max(h, 0.2)).get('error')
+            if err:
+                out.append(f'Barcode: {err} The box prints with no bars - fix the ISBN '
+                           'in the Wrap designer.')
+            continue
+        if t not in ('image', 'rect', 'ellipse'):
+            continue
+        x0, y0, w, h = el_rect(g, el)
+        x1, y1 = x0 + w, y0 + h
+        if ((e + near > x0 > sheet and x1 > e) or (W - e - near < x1 < W - sheet and x0 < W - e)
+                or (e + near > y0 > sheet and y1 > e)
+                or (H - e - near < y1 < H - sheet and y0 < H - e)):
+            short.append(label(el))
+    if short:
+        out.append('Reaches the edge but stops short of the bleed, so a sliver of what is '
+                   'underneath may show where it is cut: ' + ', '.join(short))
+    return out
+
+
 def render_front(design, dims, out_path, dpi=300):
     """The front cover of a design as a JPG: page 1 of the book, the ebook's cover
     and the store listing all use it, the way they use uploaded cover art."""
