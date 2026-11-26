@@ -537,7 +537,15 @@ def _settings_file_lock(timeout=10):
     """Held across processes (a second copy of the app shares the data
     folder): a lock file made with O_EXCL. One left by a crash is taken over
     once it is older than _SETTINGS_LOCK_STALE."""
-    path = SETTINGS_PATH + '.lock'
+    with _file_lock(SETTINGS_PATH + '.lock', 'settings.json', timeout) as still_mine:
+        yield still_mine
+
+
+@contextlib.contextmanager
+def _file_lock(path, what, timeout=10):
+    """A lock file made with O_EXCL at `path`, held across copies of the app;
+    yields `still_mine()`. One older than _SETTINGS_LOCK_STALE was left by a
+    crash and is taken over."""
     token = f'{os.getpid()} {uuid.uuid4().hex}'.encode()
     deadline = time.time() + timeout
     while True:
@@ -554,7 +562,7 @@ def _settings_file_lock(timeout=10):
                     os.remove(path)
                     continue
             if time.time() > deadline:
-                raise OSError('settings.json is locked by another copy of the app')
+                raise OSError(f'{what} is locked by another copy of the app')
             time.sleep(0.02)
     def still_mine():
         try:
@@ -5958,11 +5966,13 @@ EDIT_CHOICES = {
 def project_edit(pid):
     proj = load_project(pid)
     presets = list_presets()
+    before = copy.deepcopy(proj)       # what this request read (see the save below)
 
     if request.method == 'POST':
         form = request.form
         problems = []          # uploads refused; the rest of the form still saves
         stale = []             # replaced files, dropped once the book is saved
+        took = set()           # file keys this request replaced (maybe under the same name)
 
         # Optional manuscript replacement
         up = request.files.get('manuscript')
@@ -5999,6 +6009,7 @@ def project_edit(pid):
                 _replace_file(pid, data, pid + ext, proj.get('manuscript_file', ''), stale)
                 proj['manuscript_file'] = pid + ext
                 proj['manuscript_type'] = 'file'
+                took |= {'manuscript_file', 'manuscript_type'}
 
         # Optional cover replacement, and the back-cover image for the print wrap
         for field, suffix, key, what in (('cover', '-cover', 'cover_file', 'cover'),
@@ -6019,11 +6030,13 @@ def project_edit(pid):
                 continue
             _replace_file(pid, data, pid + suffix + ext, proj.get(key, ''), stale)
             proj[key] = pid + suffix + ext
+            took.add(key)
         back = request.files.get('print_back_image')
         if 'print_back_clear' in form and not (back and back.filename) \
                 and proj.get('print_back_file'):
             stale.append(proj['print_back_file'])
             proj['print_back_file'] = ''
+            took.add('print_back_file')
 
         def choice(key, allowed, default):
             return _choice(form, key, allowed, proj.get(key, default), default)
@@ -6074,7 +6087,24 @@ def project_edit(pid):
             'cover_studio':     form.get('cover_studio', '').strip(),
             'updated':          datetime.now().isoformat(timespec='seconds'),
         })
-        save_project_file(pid, proj)
+        # Only what this form changed is written, onto the book as it is now. A
+        # cover upload can keep this request going for seconds, and saving the
+        # copy read at its start wrote back whatever that copy held: a
+        # manuscript save made meanwhile (a Word book's first one points the
+        # book at its new .md and deletes the .docx) was undone, and the book
+        # pointed at a file that was gone.
+        mine = {k: v for k, v in proj.items()
+                if k in took or k not in before or before[k] != v}
+        with _PROJECT_LOCK:
+            now = load_project(pid)
+            for key in ('manuscript_file', 'cover_file', 'print_back_file'):
+                theirs = now.get(key) or ''
+                # replaced here and meanwhile there: theirs is the stale one
+                if (key in mine and theirs and theirs != before.get(key)
+                        and os.path.normcase(theirs) != os.path.normcase(mine[key] or '')):
+                    stale.append(theirs)
+            now.update(mine)
+            save_project_file(pid, now)
         _drop_files(stale)
         if problems:
             for msg in problems:
@@ -6240,17 +6270,24 @@ def list_snapshots(pid):
     return out
 
 
-def _thin_snapshots(pid):
+def _thin_snapshots(pid, protect=''):
     """Keep recent history dense and old history sparse.
 
     Everything from the last hour, then one an hour for a day, then one a day —
     and never more than HISTORY_KEEP files. A writer wants the last few minutes
     in detail and last Tuesday at all; keeping every autosave forever would do
     neither well.
+
+    `protect` is the snapshot just written, which is always kept. Snapshots
+    stamped in the future (the clock was put back since) count after the
+    present ones: newest-first by stamp, the copy kept just before a restore
+    sorted below 40 "future" ones and was pruned before the restore ran.
     """
     folder = _history_folder(pid)
-    snaps = sorted(_snapshot_stamps(folder), reverse=True)
     now = datetime.now()
+    soon = (now + timedelta(minutes=1)).strftime('%Y%m%d-%H%M%S')
+    snaps = sorted(_snapshot_stamps(folder), reverse=True)
+    snaps = [st for st in snaps if st <= soon] + [st for st in snaps if st > soon]
     keep, seen = [], set()
     for stamp in snaps:
         when = datetime.strptime(stamp, '%Y%m%d-%H%M%S')
@@ -6265,7 +6302,10 @@ def _thin_snapshots(pid):
             continue
         seen.add(bucket)
         keep.append(stamp)
-    keep = set(keep[:HISTORY_KEEP])
+    keep = keep[:HISTORY_KEEP]
+    if protect and protect in snaps and protect not in keep:
+        keep = keep[:HISTORY_KEEP - 1] + [protect]
+    keep = set(keep)
     for fn in os.listdir(folder) if os.path.isdir(folder) else []:
         m = _SNAP_RE.match(fn)
         if m and m.group(1) not in keep:
@@ -6338,7 +6378,7 @@ def snapshot_manuscript(pid, text, reason='edit', force=False):
             finally:
                 with contextlib.suppress(OSError):
                     os.remove(claim)
-        _thin_snapshots(pid)
+        _thin_snapshots(pid, protect=stamp)
         return stamp
 
 
@@ -6419,9 +6459,20 @@ def _store_manuscript(pid, proj, text):
         _drop_files([old])
 
 
+@contextlib.contextmanager
+def _manuscript_lock(pid):
+    """Held from reading a book's manuscript to writing it back (a save, a
+    restore), in this copy of the app and across copies. Checked and written
+    separately, two saves from two tabs both passed the revision check against
+    the same text and the second quietly wrote over the first."""
+    lock = os.path.join(PROJECT_MS_DIR, f'.{secure_filename(pid)}.mslock')
+    with _PROJECT_LOCK, _file_lock(lock, "This book's manuscript"):
+        yield
+
+
 @app.route('/project/<pid>/write/save', methods=['POST'])
 def project_write_save(pid):
-    proj = load_project(pid)
+    load_project(pid)                     # 404s for an unknown project
     if 'text' not in request.form:
         # never write an empty manuscript because a request came without one
         return jsonify({'ok': False, 'error': 'Nothing to save.'}), 400
@@ -6430,6 +6481,20 @@ def project_write_save(pid):
     # text-mode write then turns each of those into CR CR LF — so every autosave
     # grew the file another carriage return. Both halves are fixed here.
     text = _norm_newlines(request.form['text'])
+    with _manuscript_lock(pid):           # a failed write: the OSError handler answers
+        answer = _write_save(pid, text)
+    if answer is not None:
+        return answer
+    parsed = manuscript.parse_markdown(text, smartquotes=False)
+    return jsonify({'ok': True, 'saved_at': datetime.now().strftime('%H:%M:%S'),
+                    'rev': _ms_rev(text),
+                    'words': _wordcount(text), 'chapters': len(parsed['chapters'])})
+
+
+def _write_save(pid, text):
+    """The editor's save, under `_manuscript_lock`: None once written, else
+    the refusal to send back."""
+    proj = load_project(pid)              # as it is now, not as the request began
     # Saved from an older copy of the manuscript than the one on disk? Then
     # something else changed it since this page loaded (another tab, the Edit
     # page), and writing would throw that away. Refuse, but keep what this page
@@ -6450,10 +6515,7 @@ def project_write_save(pid):
                             'snapshots': list_snapshots(pid)}), 409
         snapshot_manuscript(pid, current, reason='overwritten', force=True)
     _store_manuscript(pid, proj, text)
-    parsed = manuscript.parse_markdown(text, smartquotes=False)
-    return jsonify({'ok': True, 'saved_at': datetime.now().strftime('%H:%M:%S'),
-                    'rev': _ms_rev(text),
-                    'words': _wordcount(text), 'chapters': len(parsed['chapters'])})
+    return None
 
 
 @app.route('/project/<pid>/history')
@@ -6481,10 +6543,26 @@ def project_history_restore(pid, stamp):
     replaced is snapshotted first (forced past the interval). Going back is
     always undoable by restoring the snapshot this just made.
     """
+    load_project(pid)
+    # the draft is snapshotted and replaced as one step: a save landing in
+    # between was replaced without being kept
+    with _manuscript_lock(pid):
+        text = _write_restore(pid, stamp)
+    if text is None:
+        return jsonify({'ok': False, 'error': 'That version is no longer kept.'}), 404
+    parsed = manuscript.parse_markdown(text, smartquotes=False)
+    return jsonify({'ok': True, 'text': text, 'rev': _ms_rev(text),
+                    'words': _wordcount(text),
+                    'chapters': len(parsed['chapters']),
+                    'snapshots': list_snapshots(pid)})
+
+
+def _write_restore(pid, stamp):
+    """Put a version back, under `_manuscript_lock`; its text, or None."""
     proj = load_project(pid)
     text = read_snapshot(pid, stamp)
     if text is None:
-        return jsonify({'ok': False, 'error': 'That version is no longer kept.'}), 404
+        return None
     current = _project_manuscript_text(proj, report_import=False)
     snapshot_manuscript(pid, current, reason='restore', force=True)
     # pages renamed since that version: place them by the name they have now
@@ -6500,11 +6578,7 @@ def project_history_restore(pid, stamp):
     proj['manuscript_type'] = 'markdown'
     proj['updated'] = datetime.now().isoformat(timespec='seconds')
     save_project_file(pid, proj)
-    parsed = manuscript.parse_markdown(text, smartquotes=False)
-    return jsonify({'ok': True, 'text': text, 'rev': _ms_rev(text),
-                    'words': _wordcount(text),
-                    'chapters': len(parsed['chapters']),
-                    'snapshots': list_snapshots(pid)})
+    return text
 
 
 @app.route('/project/<pid>/write/preview', methods=['POST'])

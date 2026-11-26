@@ -397,8 +397,16 @@
       var rev = "{{ rev }}";           // the version on disk this page is working from
       var saving = null;               // the save in flight, one at a time
       var conflict = false, leaving = false;
+      var savedText = ta.value;        // the text last confirmed on disk
 
       function status(t){ document.getElementById('save-status').textContent = t; }
+      // Typing stops while the page is being left or a version is going back:
+      // a sentence typed then landed after the save that was meant to carry
+      // it (Typeset built without it), or was wiped by the restored text.
+      function lockEditing(on){
+        ta.readOnly = on;
+        rich.setAttribute('contenteditable', on ? 'false' : 'true');
+      }
       // as the server counts (`\b[\w'’-]+\b`): every run of letters, digits,
       // apostrophes and hyphens with a letter or digit in it. JS's \w is ASCII
       // only, so Cyrillic or Greek counted as no words at all until a reload
@@ -535,6 +543,7 @@
             try { j = await r.json(); } catch(e){}
             if (j && j.ok){
               rev = j.rev;
+              savedText = text;
               status('Saved ' + j.saved_at);
               document.getElementById('st-ch').textContent = j.chapters;
               if (ta.value === text) document.getElementById('st-words').textContent = j.words;
@@ -574,9 +583,20 @@
         // then load what is on disk.
         if (richPending){ richPending = false; dirty = true; }
         richToTextarea();
-        if (dirty){
+        // Reloaded only once that is confirmed: kept (saved, or kept as a
+        // conflict copy). A failed send reloaded anyway and lost the words.
+        if (dirty && ta.value !== savedText){
           var fd = new FormData(); fd.append('text', ta.value); fd.append('base', rev);
-          try { await fetch(SAVE_URL, {method:'POST', body:fd}); } catch(e){}
+          var j = null;
+          try {
+            var r = await fetch(SAVE_URL, {method:'POST', body:fd});
+            try { j = await r.json(); } catch(e){}
+          } catch(e){}
+          if (!(j && (j.ok || j.conflict))){
+            status('Not reloaded: the latest edits could not be kept - ' +
+                   ((j && j.error) || 'is Typeset Studio still running?'));
+            return;
+          }
         }
         leaving = true;
         location.reload();
@@ -587,7 +607,13 @@
       });
 
       // Everything typed so far is on disk (true), or it couldn't be (false).
-      function flush(){ clearTimeout(richSyncTimer); return save(); }
+      // Typing that came in while a save was on its way is saved too.
+      function flush(){
+        clearTimeout(richSyncTimer);
+        return save().then(function(ok){
+          return ok && (richPending || (dirty && ta.value !== savedText)) ? flush() : ok;
+        });
+      }
 
       // -- history: the versions kept behind this draft
       var HIST_URL = "{{ url_for('project_history', pid=pid) }}";
@@ -639,23 +665,25 @@
             }
             clearTimeout(armed); armed = null;
             btn.textContent = 'Restoring…';
-            // what's typed but not yet saved goes to disk first (and so to
-            // History, which keeps the text a restore replaces), not into the void
-            if (!(await flush())){ btn.textContent = 'Restore'; btn.classList.remove('armed'); return; }
+            lockEditing(true);
             try {
+              // what's typed but not yet saved goes to disk first (and so to
+              // History, which keeps the text a restore replaces), not into the void
+              if (!(await flush())){ btn.textContent = 'Restore'; btn.classList.remove('armed'); return; }
               var r = await fetch(HIST_URL + '/' + s.stamp + '/restore', {method: 'POST'});
               var j = await r.json();
               if (!j.ok){ status(j.error || 'Restore failed'); return; }
               clearTimeout(timer); dirty = false;      // don't autosave over it
               clearTimeout(richSyncTimer); richPending = false;
               rev = j.rev;
-              ta.value = j.text;
+              savedText = ta.value = j.text;
               if (richMode) renderRich();     // repaint the rich surface too
               updateStats(); buildOutline(); scheduleHighlight();
               document.getElementById('st-ch').textContent = j.chapters;
               status('Went back to ' + s.when);
               renderHistory(j.snapshots, true);
             } catch(e){ status('Restore failed'); }
+            finally { lockEditing(false); }
           });
           row.appendChild(when); row.appendChild(words); row.appendChild(btn);
           histBox.appendChild(row);
@@ -769,9 +797,9 @@
       // Designed pages (#74 Phase 6b): the book's page designs, fetched fresh
       // each time (one may have just been saved in the designer's own tab),
       // then placed as `~~~ page src="name" side="…"`.
-      var pagePick = document.getElementById('pagepick'), pageThen = null;
+      var pagePick = document.getElementById('pagepick'), pageThen = null, pageMode = false;
       function openPagePick(then){
-        pageThen = then;
+        pageThen = then; pageMode = richMode;    // which editor `then` writes to
         var sel = document.getElementById('pp-name');
         sel.innerHTML = '<option value="">Loading…</option>';
         document.getElementById('pp-insert').disabled = true;
@@ -801,7 +829,7 @@
       document.getElementById('pp-name').addEventListener('change', sidePick);
       document.getElementById('pp-insert').addEventListener('click', function(){
         var sel = document.getElementById('pp-name'), name = sel.value;
-        if (!name || !pageThen) return;
+        if (!name || !pageThen || pageMode !== richMode) return;
         pagePick.hidden = true;
         var o = sel.options[sel.selectedIndex];
         pageThen(name, o && o.dataset.spread ? '' : document.getElementById('pp-side').value);
@@ -824,6 +852,12 @@
         var cd = e.clipboardData;
         var text = cd && (cd.getData('text/plain') || '').replace(/\r\n?/g, '\n');
         if (!text) return;
+        // inside a block already (a stat block's own fences): pasted as it is,
+        // its fences added there closed the block early and the old closing
+        // fence then opened one that took in the prose after it
+        var before = ta.value.slice(0, ta.selectionStart).split('\n'), open = false;
+        for (var i = 0; i < before.length - 1; i++) if (/^\s*~~~/.test(before[i])) open = !open;
+        if (open) return;
         var wrapped = DocModel.wrapUnfenced(text);
         if (wrapped === text) return;
         e.preventDefault();
@@ -849,20 +883,30 @@
         a.addEventListener('click', async function(e){
           if (e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;   // a new tab
           e.preventDefault();
-          if (await flush()){ leaving = true; location.href = a.href; }
+          leaveAfterSave(function(){ location.href = a.href; });
         });
       });
       var tsForm = document.getElementById('typeset-form');
-      tsForm.addEventListener('submit', async function(e){
+      tsForm.addEventListener('submit', function(e){
         if (leaving) return;
         e.preventDefault();
-        if (await flush()){ leaving = true; tsForm.submit(); }
+        leaveAfterSave(function(){ tsForm.submit(); });
       });
-      // Any other way out (the menu, closing the tab): send what's unsaved as a
-      // beacon - but a browser refuses one over 64 KB, which a whole book is
-      // past by chapter three, and that lost the edit without a word. So when
-      // the beacon can't carry it, or a save is still on its way, or the page
-      // is in a clash, the browser asks before leaving.
+      async function leaveAfterSave(go){
+        lockEditing(true);
+        if (await flush()){ leaving = true; go(); }
+        else lockEditing(false);
+      }
+      // Back to this page from the browser's back-forward cache: it is being
+      // edited again, so leaving is guarded again
+      window.addEventListener('pageshow', function(e){
+        if (e.persisted){ leaving = false; lockEditing(false); }
+      });
+      // Any other way out (the menu, closing the tab) with unsaved words: the
+      // browser asks, and a real save starts while it does. A beacon goes too as
+      // the page goes, but it is only a hope: the browser queueing one says
+      // nothing about it reaching the disk, and treating it as saved lost the
+      // edit without a word when the write then failed.
       function sendBeacon(){
         if (!navigator.sendBeacon || conflict) return false;
         var fd = new FormData(); fd.append('text', ta.value); fd.append('base', rev);
@@ -875,15 +919,16 @@
       window.addEventListener('beforeunload', function(e){
         if (leaving) return;
         catchUpRich();
+        if (!saving && ta.value === savedText) return;   // typed and taken back
         if (!dirty && !saving) return;
-        if (!saving && sendBeacon()){ dirty = false; return; }
+        if (!saving && !conflict) save();
         e.preventDefault();
         e.returnValue = '';
       });
       window.addEventListener('pagehide', function(){
         if (leaving) return;
         catchUpRich();
-        if (dirty && sendBeacon()) dirty = false;
+        if (ta.value !== savedText) sendBeacon();
       });
 
       // page preview
@@ -957,7 +1002,7 @@
       }
       function replaceCurrent(){
         var q = fFind.value;
-        if (!q) return;
+        if (!q || richMode) return;          // the textarea is hidden (see enterRich)
         var s = ta.selectionStart, e = ta.selectionEnd;
         var sel = ta.value.slice(s, e);
         var eq = fCase.checked ? (sel === q) : (sel.toLowerCase() === q.toLowerCase());
@@ -971,7 +1016,7 @@
       }
       function replaceAll(){
         var q = fFind.value;
-        if (!q) return;
+        if (!q || richMode) return;
         computeMatches();
         if (!matches.length){ showCount(); return; }
         var rep = fRepl.value, out = '', last = 0;
@@ -1115,6 +1160,11 @@
       }
 
       function enterRich(){
+        // Find and the page picker work on the Markdown: left open over the
+        // rich editor, Replace All and Insert changed the hidden text, which
+        // the next save then rebuilt from the rich editor without them
+        findbar.hidden = true;
+        pagePick.hidden = true;
         renderRich();
         richMode = true;
         try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch(e){}
@@ -1128,6 +1178,7 @@
         // an edit not yet synced is committed here: once out of rich mode
         // nothing else would notice it before the page was left
         var pend = richPending;
+        pagePick.hidden = true;            // opened for the rich editor (see enterRich)
         clearTimeout(richSyncTimer); richPending = false;
         richToTextarea();
         if (pend) changed();
