@@ -12,6 +12,7 @@ import json
 import html
 import difflib
 import collections
+import threading
 
 # ---------------------------------------------------------------------------
 # Shared utilities
@@ -43,12 +44,27 @@ def _chapter_paras(chapter: dict) -> list:
     return texts
 
 
+_NUMBERS = threading.local()
+
+
+def _numbers(chapters):
+    """`chapter_numbers` for the book being checked, worked out once: every
+    location asked for it again, which was quadratic in a book of thousands of
+    short chapters. Kept per thread (the server checks two books at once) and
+    with the list itself, so its id can't be reused; `run_tier1` starts
+    afresh, so a list changed between checks is counted again."""
+    from manuscript import chapter_numbers
+    held = getattr(_NUMBERS, 'held', None)
+    if held is None or held[0] is not chapters or len(held[1]) != len(chapters):
+        held = _NUMBERS.held = (chapters, chapter_numbers(chapters))
+    return held[1]
+
+
 def _num_label(parsed: dict, ch_idx: int) -> str:
     """'Chapter N' as the book prints it: an unnumbered chapter (`#*`, a
     prologue) takes no number, so counting by position called the first
     numbered chapter after a prologue Chapter 2."""
-    from manuscript import chapter_numbers
-    n = chapter_numbers(parsed['chapters'])[ch_idx]
+    n = _numbers(parsed['chapters'])[ch_idx]
     return f'Chapter {n}' if n is not None else 'Unnumbered chapter'
 
 
@@ -132,13 +148,15 @@ def _check_name_variants(parsed: dict) -> list:
     token_first_loc: dict = {}
 
     for ch_idx, ch in enumerate(parsed['chapters']):
-        loc = _loc(ch_idx, ch, parsed)
+        loc = None                  # worked out when a name needs it
         for para in _chapter_paras(ch):
             for word in _CAP_WORD_RE.findall(para):
                 if word.lower() in _STOPWORDS:
                     continue
                 token_count[word] += 1
                 if word not in token_first_loc:
+                    if loc is None:
+                        loc = _loc(ch_idx, ch, parsed)
                     token_first_loc[word] = loc
 
     # Only examine tokens that appear 2+ times to reduce sentence-start noise.
@@ -180,6 +198,7 @@ _MAX_VARIANTS = 25
 _VARIANT_RATIO = 0.85
 _MAX_GROUP = 300
 _MAX_CANDIDATES = 400_000
+_MAX_KEYS = 1_000_000
 
 
 def _deletions(word, k):
@@ -204,12 +223,18 @@ def _similar_pairs(words, ratio):
     """
     index = collections.defaultdict(set)
     long_words = []
+    keys = 0
     for w in words:
         low = w.lower()
-        if len(low) > 16:
+        if len(low) > 16 or keys > _MAX_KEYS:
+            # past the budget a word is measured against all, like a long
+            # one, under the same cap: 10,000 different 16-letter names made
+            # 25 million keys, gigabytes, before the cap below was reached
             long_words.append(w)
             continue
-        for key in _deletions(low, int(0.27 * len(low))):
+        dels = _deletions(low, int(0.27 * len(low)))
+        keys += len(dels)
+        for key in dels:
             index[key].add(w)
     # A key shared by hundreds of words says nothing about any two of them,
     # and expanding every such group to its pairs (10,000 look-alike tokens
@@ -232,7 +257,9 @@ def _similar_pairs(words, ratio):
         if al == bl:
             continue
         sm.set_seqs(al, bl)
-        if sm.ratio() >= ratio:
+        # the quick ratios are upper bounds of the real one, and cheap
+        if (sm.real_quick_ratio() >= ratio and sm.quick_ratio() >= ratio
+                and sm.ratio() >= ratio):
             out.append((a, b))
     return out
 
@@ -325,6 +352,7 @@ def _check_repeated_sentences(parsed: dict) -> list:
 
 def run_tier1(parsed: dict) -> list:
     """Run all rule-based checks. Returns a list of issue dicts."""
+    _NUMBERS.held = None
     issues = []
     issues += _check_thin_chapters(parsed)
     issues += _check_duplicate_titles(parsed)

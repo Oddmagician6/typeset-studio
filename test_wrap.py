@@ -200,9 +200,10 @@ form = {'name': 'Test', 'wrap_binding': 'hardcover', 'wrap_retailer': 'kdp',
 res, dims = A._wrap_from_form(form, PDF)
 check('the spine carries the boards as well as the paper',
       abs(dims['spine_w'] - (200 * 0.002252 + 0.06)) < 1e-9, dims['spine_w'])
-check('and the wrap comes out at the published size', res['wrap_w'] == 14.76, res['wrap_w'])
+# KDP's case: the art 0.51" past each edge, no bleed on top, 0.4" hinges
+check('and the wrap comes out at the published size', res['wrap_w'] == 14.33, res['wrap_w'])
 check('the defaults come from the documented allowances',
-      dims['wrap'] == A.HARDCOVER['wrap'] and dims['hinge'] == A.HARDCOVER['hinge'], dims)
+      dims['wrap'] == 0.51 and dims['hinge'] == 0.4 and dims['bleed'] == 0.0, dims)
 
 pb = A._wrap_from_form(dict(form, wrap_binding='paperback'), PDF)
 check('a paperback spine is paper alone',
@@ -268,8 +269,8 @@ check('and .125 + board height + .125 down', abs(g['wrap_h'] - (8.75 + 0.25 + 0.
       g['wrap_h'])
 kdp = engine.wrap_geometry(A._wrap_dims({'wrap_retailer': 'kdp', 'wrap_binding': 'hardcover',
                                          'wrap_trim_w': 5.75, 'wrap_trim_h': 8.75}, 320))
-check('a KDP case keeps the shared defaults',
-      abs(kdp['wrap_w'] - kdp['spine_w'] - 13.75) < 1e-9 and kdp['panel_w'] == 5.75, kdp)
+check("a KDP case takes KDP's own allowances, its boards the trim's size",
+      abs(kdp['wrap_w'] - kdp['spine_w'] - 13.32) < 1e-9 and kdp['panel_w'] == 5.75, kdp)
 
 os.remove(PDF)
 
@@ -291,7 +292,7 @@ check('the retailer notes reach the page as data',
       'hardcover_note' in page)
 
 # 200 white pages is a 0.4504" paper spine, plus the boards on the hardcover
-for binding, expect_w in (('paperback', 12.7), ('hardcover', 14.76), ('jacket', 20.76)):
+for binding, expect_w in (('paperback', 12.7), ('hardcover', 14.33), ('jacket', 20.76)):
     r = client.post('/cover/wrap/preview', data=dict(form, wrap_binding=binding))
     j = r.get_json()
     check(f'the {binding} wrap previews', j.get('ok'), j.get('error'))

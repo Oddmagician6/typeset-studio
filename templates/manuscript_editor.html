@@ -1395,6 +1395,34 @@
                                      WYS.caretInVerse(rich));
         if (WYS.insertPaste(rich, blocks)) syncFromRich();
       });
+      // Text dragged in from another page or program goes through the same
+      // cleanup as a paste: dropped as it was, it brought its own markup (a
+      // web page's spans, a Word list) straight into the editor. A drag
+      // inside the editor still moves its words as the browser does it.
+      var dragInside = false;
+      rich.addEventListener('dragstart', function(){ dragInside = true; });
+      document.addEventListener('dragend', function(){ dragInside = false; });
+      rich.addEventListener('drop', function(e){
+        var dt = e.dataTransfer;
+        if (dragInside || !dt) return;
+        if (rich.getAttribute('contenteditable') !== 'true'){ e.preventDefault(); return; }
+        var html = dt.getData('text/html'), plain = dt.getData('text/plain');
+        if (!html && !plain) return;
+        e.preventDefault();
+        var r = document.caretRangeFromPoint
+          ? document.caretRangeFromPoint(e.clientX, e.clientY) : null;
+        if (!r && document.caretPositionFromPoint){
+          var cp = document.caretPositionFromPoint(e.clientX, e.clientY);
+          if (cp){ r = document.createRange(); r.setStart(cp.offsetNode, cp.offset); }
+        }
+        if (!r || !rich.contains(r.startContainer)) return;
+        r.collapse(true);
+        var sel = window.getSelection();
+        sel.removeAllRanges(); sel.addRange(r);
+        var blocks = WYS.pasteBlocks(html, plain.replace(/\r\n?/g, '\n'),
+                                     WYS.caretInVerse(rich));
+        if (WYS.insertPaste(rich, blocks)) syncFromRich();
+      });
 
       rich.addEventListener('keydown', function(e){
         if ((e.key === 'Backspace' || e.key === 'Delete') && !e.ctrlKey && !e.metaKey){

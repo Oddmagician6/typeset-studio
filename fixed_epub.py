@@ -346,10 +346,10 @@ def words_html(design, g, fonts, shift_x=0.0, page_w=None):
     return out
 
 
-def _page_doc(title, vw, vh, body):
+def _page_doc(title, vw, vh, body, lang='en'):
     return ('<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n'
             '<html xmlns="http://www.w3.org/1999/xhtml" '
-            'xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en" lang="en">\n'
+            f'xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{lang}" lang="{lang}">\n'
             f'<head>\n<meta charset="utf-8"/>\n<title>{html.escape(title)}</title>\n'
             f'<meta name="viewport" content="width={vw}, height={vh}"/>\n'
             '<link rel="stylesheet" type="text/css" href="fxl.css"/>\n</head>\n'
@@ -402,7 +402,7 @@ def _render_art(design, trim_w, trim_h, tmpdir, stem, background=None):
 
 
 def _opf(uid, meta, manifest, spine, modified, vw, vh):
-    from epub import _text_to_html, dc_title_creator_date
+    from epub import _text_to_html, dc_title_creator_date, book_lang
     items = '\n'.join(
         f'    <item id="{i["id"]}" href="{i["href"]}" media-type="{i["type"]}"'
         + (f' properties="{i["props"]}"' if i.get('props') else '') + '/>'
@@ -420,11 +420,11 @@ def _opf(uid, meta, manifest, spine, modified, vw, vh):
                                  'are live text over its illustration, in reading order.')))
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"'
-            ' unique-identifier="uid" xml:lang="en">\n'
+            f' unique-identifier="uid" xml:lang="{book_lang(meta)}">\n'
             '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
             f'    <dc:identifier id="uid">{uid}</dc:identifier>\n'
             + dc_title_creator_date(meta) +
-            '    <dc:language>en</dc:language>\n'
+            f'    <dc:language>{book_lang(meta)}</dc:language>\n'
             f'    <meta property="dcterms:modified">{modified}</meta>\n'
             '    <meta property="rendition:layout">pre-paginated</meta>\n'
             '    <meta property="rendition:orientation">auto</meta>\n'
@@ -443,21 +443,29 @@ def _opf(uid, meta, manifest, spine, modified, vw, vh):
             '</package>\n')
 
 
-def _nav(has_cover, first_href, pages):
+def _nav(has_cover, first_href, pages, lang='en'):
     toc = []
     if has_cover:
         toc.append('<li><a href="cover.xhtml">Cover</a></li>')
     if first_href:
         toc.append(f'<li><a href="{first_href}">Beginning</a></li>')
     plist = ''.join(f'<li><a href="{href}">{n}</a></li>' for n, href in pages)
+    # the cover and the first page by their role too (23.13)
+    marks = ([('cover', 'cover.xhtml', 'Cover')] if has_cover else []) + \
+        [('toc', 'nav.xhtml#toc', 'Contents')] + \
+        ([('bodymatter', first_href, 'Beginning')] if first_href else [])
+    landmarks = ('<nav epub:type="landmarks" hidden="hidden"><ol>'
+                 + ''.join(f'<li><a epub:type="{t}" href="{h}">{label}</a></li>'
+                           for t, h, label in marks) + '</ol></nav>\n')
     return ('<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n'
             '<html xmlns="http://www.w3.org/1999/xhtml" '
-            'xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en" lang="en">\n'
+            f'xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{lang}" lang="{lang}">\n'
             '<head><meta charset="utf-8"/><title>Contents</title></head>\n<body>\n'
             '<nav epub:type="toc" id="toc"><h1>Contents</h1><ol>'
             + (''.join(toc) or '<li><a href="nav.xhtml">Contents</a></li>') + '</ol></nav>\n'
             + (f'<nav epub:type="page-list" hidden="hidden"><ol>{plist}</ol></nav>\n'
                if plist else '')
+            + landmarks
             + '</body>\n</html>\n')
 
 
@@ -465,6 +473,8 @@ def build(ms, preset, out_path, meta):
     """Write the page-by-page EPUB to out_path. Returns out_path."""
     import wrap_design as W
     from PIL import Image
+    from epub import book_lang
+    lang = book_lang(meta)
     trim = (preset or {}).get('trim') or {'w': 6.0, 'h': 9.0}
     tw, th = float(trim['w']), float(trim['h'])
     vw, vh = round(tw * PX), round(th * PX)
@@ -501,7 +511,7 @@ def build(ms, preset, out_path, meta):
         title = meta.get('title') or 'Cover'
         docs['cover.xhtml'] = _page_doc('Cover', cvw, cvh, [
             f'<img class="cover" src="images/cover{ext}" width="{cvw}" height="{cvh}" '
-            f'style="width:{cvw}px;height:{cvh}px" alt="{html.escape(title)}"/>'])
+            f'style="width:{cvw}px;height:{cvh}px" alt="{html.escape(title)}"/>'], lang)
         spine.append(('cover', 'rendition:page-spread-center'))
 
     tmp = tempfile.mkdtemp(prefix='ts-fxl-')
@@ -549,7 +559,7 @@ def build(ms, preset, out_path, meta):
                         if img else [])
                 body += words
                 first_href = first_href or href
-            docs[href] = _page_doc(f'Page {n}', vw, vh, body)
+            docs[href] = _page_doc(f'Page {n}', vw, vh, body, lang)
             manifest.append({'id': pid, 'href': href, 'type': 'application/xhtml+xml'})
             spine.append((pid, side))
             plist.append((n, href))
@@ -563,7 +573,7 @@ def build(ms, preset, out_path, meta):
             from epub import _container_xml
             zf.writestr('META-INF/container.xml', _container_xml())
             zf.writestr('OEBPS/content.opf', _opf(uid, meta, manifest, spine, modified, vw, vh))
-            zf.writestr('OEBPS/nav.xhtml', _nav(has_cover, first_href, plist))
+            zf.writestr('OEBPS/nav.xhtml', _nav(has_cover, first_href, plist, lang))
             zf.writestr('OEBPS/fxl.css', _css(fonts))
             for f in fonts:
                 zf.write(W.font_file(f), f'OEBPS/fonts/{os.path.basename(f)}')

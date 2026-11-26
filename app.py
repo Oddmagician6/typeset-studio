@@ -275,7 +275,8 @@ def _fit(ref, data):
 # What kind of value each of a book's settings is, where the pages show it as
 # it is (a name that was a number took the whole Projects page down). Drawn
 # from every book written by 1.0.0-1.3.0; a setting missing here isn't checked.
-BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'preset',
+BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'language',
+             'preset',
              'manuscript_file', 'manuscript_type', 'cover_file', 'cover_mode',
              'cover_template', 'cover_color', 'cover_collection', 'cover_kicker',
              'cover_accent', 'cover_epigraph', 'cover_studio', 'format', 'front_matter',
@@ -1189,9 +1190,19 @@ WRAP_RETAILERS = {
         'label': 'Amazon KDP', 'bleed': 0.125, 'spine_text_min': 80,
         'note': 'KDP allows spine text at 80+ pages · 0.125" bleed. '
                 'Confirm spine width with KDP’s cover template for your trim.',
-        'hardcover_note': 'KDP case laminate: 0.625" wrap, 0.375" hinge each side of the '
-                          'spine, white paper only, 75–550 pages, and five trims '
-                          '(5.5×8.5, 6×9, 6.14×9.21, 7×10, 8.25×11).',
+        'hardcover_note': 'KDP case laminate: the art runs 0.51" past each edge (the wrap, '
+                          'with no bleed on top), a 0.4" hinge each side of the spine, white '
+                          'paper only, 75–550 pages, and five trims '
+                          '(5.5×8.5, 6×9, 6.14×9.21, 7×10, 8.25×11). Confirm the spine '
+                          'with KDP’s cover calculator.',
+        # KDP's "Create a Hardcover Cover": images extend 0.51" (15 mm) past
+        # the edge of the front cover, wrapped round the board and glued
+        # inside; a 0.4" (10 mm) hinge between the spine and each cover. Until
+        # 1.16 a KDP case took the shared 0.625" wrap, 0.125" bleed past it and
+        # 0.375" hinges, a quarter inch too wide all round.
+        'allowances': {
+            'hardcover': {'wrap': 0.51, 'hinge': 0.4, 'bleed': 0.0},
+        },
     },
     'ingramspark': {
         'label': 'IngramSpark', 'bleed': 0.125, 'spine_text_min': 48, 'cover_cmyk': True,
@@ -1225,9 +1236,9 @@ WRAP_RETAILERS = {
     },
 }
 
-# Case-laminate allowances, shared because both retailers document the same
-# numbers: the turn-in glued around the boards, the crease each side of the
-# spine, and the board thickness a hardcover spine carries on top of the paper.
+# Case-laminate defaults (each retailer's own numbers in `allowances` above):
+# the turn-in glued around the boards, the crease each side of the spine, and
+# the board thickness a hardcover spine carries on top of the paper.
 # Every one of them is editable on the form — this is the starting point, not a
 # promise about a particular printer.
 HARDCOVER = {'wrap': 0.625, 'hinge': 0.375, 'board': 0.06}
@@ -5430,6 +5441,7 @@ def generate():
         'author': form.get('author', '').strip(),
         'year': form.get('year', '').strip() or str(datetime.now().year),
         'publisher': form.get('publisher', '').strip(),
+        'language': epub.book_lang(form),
         'front_matter': form.get('front_matter', 'full'),
         'right_hand_starts': 'right_hand_starts' in form,
         'cover_image': cover_path,
@@ -5627,6 +5639,7 @@ def _book_from_compose_form(tmp_files, toc_stubs=False):
         'author': form.get('author', '').strip(),
         'year': form.get('year', '').strip() or str(datetime.now().year),
         'publisher': form.get('publisher', '').strip(),
+        'language': epub.book_lang(form),
         'front_matter': form.get('front_matter', 'full'),
         'right_hand_starts': 'right_hand_starts' in form,
         'cover_image': cover_path,
@@ -5918,6 +5931,7 @@ def project_create():
         'author': form.get('author', '').strip(),
         'year': form.get('year', '').strip(),
         'publisher': form.get('publisher', '').strip(),
+        'language': epub.book_lang(form),
         'front_matter': form.get('front_matter', 'full'),
         'right_hand_starts': form.get('right_hand_starts') == '1',
         'cover_overlay': form.get('cover_overlay') == '1',
@@ -6177,6 +6191,10 @@ def project_edit(pid):
             'author':           form.get('author', '').strip(),
             'year':             form.get('year', '').strip(),
             'publisher':        form.get('publisher', '').strip(),
+            # written once it is set or changed: an unchanged save of a book
+            # from before the setting is the same book
+            **({'language': epub.book_lang(form)}
+               if 'language' in proj or epub.book_lang(form) != 'en' else {}),
             'right_hand_starts': 'right_hand_starts' in form,
             'cover_overlay':    'cover_overlay' in form,
             'cover_template':   choice('cover_template',
@@ -6697,6 +6715,7 @@ def project_write_preview(pid):
         'author': proj.get('author', ''),
         'year': proj.get('year', '') or str(datetime.now().year),
         'publisher': proj.get('publisher', ''),
+        'language': epub.book_lang(proj),
         'front_matter': proj.get('front_matter', 'full'),
         'right_hand_starts': proj.get('right_hand_starts', True),
         'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
@@ -7020,6 +7039,7 @@ def _project_meta(proj):
         'author':           proj.get('author', ''),
         'year':             proj.get('year', '') or str(datetime.now().year),
         'publisher':        proj.get('publisher', ''),
+        'language':         epub.book_lang(proj),
         'front_matter':     proj.get('front_matter', 'full'),
         'right_hand_starts': proj.get('right_hand_starts', True),
         'cover_image':   cover_path,

@@ -4,6 +4,7 @@ Stdlib-only (zipfile, uuid, datetime) — no extra dependencies.
 Reuses the same parsed manuscript structure as engine.py.
 """
 
+import bisect
 import html
 import os
 import re
@@ -239,17 +240,37 @@ def _apply_page_refs(chapters, meta, preset):
                 return '??'
             label = html.escape(labels[name], quote=False)
             # inside a link already: its words only - a link in a link is not
-            # allowed in XHTML
-            before = m.string[:m.start()]
-            if len(re.findall(r'<a[\s>]', before)) > before.count('</a>'):
+            # allowed in XHTML. The links are found once per text: counting
+            # them again in everything before each reference was quadratic in
+            # a paragraph of thousands of them.
+            at = m.start()
+            if bisect.bisect_left(opens, at) > bisect.bisect_left(closes, at):
                 return label
             return f'<a href="#{name}">{label}</a>'
         if '<anchor ' in text:
             text = _MS_ANCHOR_TAG_RE.sub(plant, text)
         if '<pageref ' in text:
+            opens = [a.start() for a in re.finditer(r'<a[\s>]', text)]
+            closes = [a.start() for a in re.finditer('</a>', text)]
             text = _MS_PAGEREF_TAG_RE.sub(ref, text)
         return text
     return _ms_map_texts(out, render), hrefs
+
+
+# The book's language (23.5): every book said it was English, so a French one
+# was read aloud with English rules. A tag of letters and hyphens (`fr`,
+# `pt-BR`, `zh-Hant`), anything else being taken as English.
+_LANG_RE = re.compile(r'^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$')
+
+
+def book_lang(meta):
+    """The language tag a book's files carry: its `language` setting, or `en`."""
+    v = str((meta or {}).get('language') or '').strip().replace('_', '-')
+    return v if _LANG_RE.match(v) else 'en'
+
+
+def _lang():
+    return getattr(_BUILD, 'lang', 'en')
 
 
 # In-book links (`[see](#the-salt-road)`) carry a bare fragment, which in a
@@ -638,7 +659,7 @@ def _xhtml(title, body_content, css_href='style.css'):
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE html>\n'
-        '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">\n'
+        f'<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{_lang()}" lang="{_lang()}">\n'
         '<head>\n'
         '  <meta charset="UTF-8"/>\n'
         f'  <title>{_text_to_html(title)}</title>\n'
@@ -1580,7 +1601,7 @@ def check(path):
     return out
 
 
-def _a11y_meta(manifest_items, all_alt=True):
+def _a11y_meta(manifest_items, all_alt=True, animated=False):
     """Accessibility metadata for the OPF.
 
     This is what ACE (and, increasingly, the retailers) look for, and what the
@@ -1604,12 +1625,21 @@ def _a11y_meta(manifest_items, all_alt=True):
         lines.append(f'    <meta property="schema:accessibilityFeature">{feature}</meta>')
     if has_images and all_alt:
         lines.append('    <meta property="schema:accessibilityFeature">alternativeText</meta>')
-    # no known hazards: no flashing, sound or motion in a typeset book
-    lines.append('    <meta property="schema:accessibilityHazard">none</meta>')
+    # no known hazards: no flashing, sound or motion in a typeset book - unless
+    # it carries an animated picture (23.12), which nothing here can measure
+    # for flashing: then the flashing and motion are unknown, not none
+    if animated:
+        for h in ('unknownFlashingHazard', 'unknownMotionSimulationHazard', 'noSoundHazard'):
+            lines.append(f'    <meta property="schema:accessibilityHazard">{h}</meta>')
+    else:
+        lines.append('    <meta property="schema:accessibilityHazard">none</meta>')
     summary = 'Reflowable text with a full navigation document and reading order.'
     if has_images:
         summary += (' All illustrations carry alternative text.' if all_alt else
                     ' Some illustrations have no text alternative.')
+    if animated:
+        summary += (' Some illustrations are animated and have not been checked'
+                    ' for flashing.')
     lines.append(f'    <meta property="schema:accessibilitySummary">{summary}</meta>')
     return '\n'.join(lines) + '\n'
 
@@ -1628,7 +1658,8 @@ def dc_title_creator_date(meta):
     return out
 
 
-def _content_opf(uid, meta, manifest_items, spine_items, modified, all_alt=True):
+def _content_opf(uid, meta, manifest_items, spine_items, modified, all_alt=True,
+                 animated=False):
 
     def _item(i):
         props = f' properties="{i["props"]}"' if i.get('props') else ''
@@ -1648,13 +1679,13 @@ def _content_opf(uid, meta, manifest_items, spine_items, modified, all_alt=True)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"'
-        ' unique-identifier="uid" xml:lang="en">\n'
+        f' unique-identifier="uid" xml:lang="{book_lang(meta)}">\n'
         '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
         f'    <dc:identifier id="uid">{uid}</dc:identifier>\n'
         + dc_title_creator_date(meta) +
-        '    <dc:language>en</dc:language>\n'
+        f'    <dc:language>{book_lang(meta)}</dc:language>\n'
         f'    <meta property="dcterms:modified">{modified}</meta>\n'
-        + _a11y_meta(manifest_items, all_alt) +
+        + _a11y_meta(manifest_items, all_alt, animated) +
         cover_meta_xml +
         '  </metadata>\n'
         '  <manifest>\n'
@@ -1690,6 +1721,30 @@ def _nav_li(href, label, kids=()):
             out += f'<li><a href="{k_href}">{_text_to_html(k_label)}</a>'
         out += '</li></ol>' * len(stack)
     return out + '</li>'
+
+
+def _landmarks(chapters, has_cover, meta, has_notes, has_index):
+    """The landmarks list (23.13): where a reading system finds the cover, the
+    contents, the start of the story, the notes and the index by their role,
+    for its "go to beginning" and the like. Hidden: the contents show them."""
+    marks = []
+    if has_cover:
+        marks.append(('cover', 'cover.xhtml', 'Cover'))
+    marks.append(('toc', 'toc.xhtml' if meta.get('include_toc') else 'nav.xhtml#toc',
+                  'Contents'))
+    if chapters:
+        part = chapters[0].get('part')
+        marks.append(('bodymatter', f'part{part["number"]:03d}.xhtml' if part
+                      else 'chapter001.xhtml', 'Start of content'))
+    if has_notes:
+        marks.append(('endnotes', 'endnotes.xhtml', 'Notes'))
+    if has_index:
+        marks.append(('index', 'bookindex.xhtml', 'Index'))
+    return ('<nav epub:type="landmarks" id="landmarks" hidden="hidden">\n'
+            '  <h2>Landmarks</h2>\n  <ol>\n'
+            + ''.join(f'    <li><a epub:type="{t}" href="{h}">{label}</a></li>\n'
+                      for t, h, label in marks)
+            + '  </ol>\n</nav>\n')
 
 
 def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=False,
@@ -1748,12 +1803,13 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
         + items + '\n'
         '  </ol>\n'
         '</nav>\n'
+        + _landmarks(chapters, has_cover, meta, has_notes, has_index)
     )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE html>\n'
         '<html xmlns="http://www.w3.org/1999/xhtml"'
-        ' xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en">\n'
+        f' xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{_lang()}" lang="{_lang()}">\n'
         '<head>\n'
         '  <meta charset="UTF-8"/>\n'
         '  <title>Contents</title>\n'
@@ -1772,6 +1828,16 @@ FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
 
 _FIG_MIME = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
              '.gif': 'image/gif', '.svg': 'image/svg+xml'}
+
+
+def _animated(path):
+    """Whether a picture moves: an animated GIF, PNG or WebP."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return bool(getattr(im, 'is_animated', False))
+    except Exception:
+        return False
 
 
 def _as_png(path):
@@ -1858,6 +1924,7 @@ def build_epub(manuscript, preset, out_path, meta):
     rendered pictures are removed however the build ends: a failure between
     rendering them and zipping them left the folder in the temp directory."""
     _BUILD.tmpdirs = []
+    _BUILD.lang = book_lang(meta)
     # written beside its name and renamed into place: a build cut off part way
     # (the app closed mid-export) left a broken .epub under the real name
     part = out_path + EPUB_PART
@@ -1874,6 +1941,7 @@ def build_epub(manuscript, preset, out_path, meta):
         for d in getattr(_BUILD, 'tmpdirs', None) or []:
             shutil.rmtree(d, ignore_errors=True)
         _BUILD.tmpdirs = []
+        _BUILD.lang = 'en'
 
 
 def _build_epub(manuscript, preset, out_path, meta):
@@ -2079,6 +2147,8 @@ def _build_epub(manuscript, preset, out_path, meta):
         # last: its accessibility claims depend on the pages written above
         zf.writestr('OEBPS/content.opf',
                     _content_opf(uid, meta, manifest_items, spine_items, modified,
-                                 all_alt=not zf.unlabelled))
+                                 all_alt=not zf.unlabelled,
+                                 animated=any(_animated(f['path'])
+                                              for f in figures.values())))
 
     return out_path

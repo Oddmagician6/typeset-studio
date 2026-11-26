@@ -99,9 +99,11 @@ PART_RE        = re.compile(r'^\s*===\s*(.*)')
 # at the quote that is followed by the next `key="` or the end of the line. A
 # header that doesn't read that way (stray words after a value) falls back to
 # ending each value at its first quote, as before.
+# A key starts a word (`(?<!\w)`): tried from inside a long bare token, the
+# word match ran to its end from every letter, quadratic in its length.
 _ATTR_RE       = re.compile(
-    r'(\w+)=["“”]((?:(?!\s\w+=["“”]).)*?)["“”](?=\s+\w+=["“”]|\s*$)'
-    r'|(\w+)=["“”]([^"“”]*)["“”]')
+    r'(?<!\w)(\w+)=["“”]((?:(?!\s\w+=["“”]).)*?)["“”](?=\s+\w+=["“”]|\s*$)'
+    r'|(?<!\w)(\w+)=["“”]([^"“”]*)["“”]')
 
 
 def parse_attrs(text):
@@ -298,6 +300,57 @@ def _emph_span(tag):
 _GROUP_RE = re.compile('\x14(\\d+)\x15')
 
 
+# An emphasis marker that no closing marker follows made its pattern scan to
+# the end of the line from every opener: a paragraph of `*word *word ...` took
+# seconds per 10,000 words. A match can only end at a closing marker, so
+# nothing after the line's last one can match, and the search stops there
+# (`endpos`: a lookahead at the cut sees the end, which passes as the real next
+# character does). Keyed by pattern; each entry is (closer, its length).
+_CLOSERS = {
+    r'\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*': (re.compile(r'(?<=\S)(?=\*\*\*)'), 3),
+    r'___(?!\s)(.+?)(?<!\s)___': (re.compile(r'(?<=\S)(?=___)'), 3),
+    r'\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*|___(?!\s)(.+?)(?<!\s)___':
+        (re.compile(r'(?<=\S)(?=\*\*\*|___)'), 3),
+    r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)': (re.compile(r'(?<=\S)\*(?!\*)'), 1),
+    r'_(?!\s)(.+?)(?<!\s)_': (re.compile(r'(?<=\S)_'), 1),
+}
+
+
+def emph_finditer(rx, s):
+    """`rx.finditer(s)`, the same matches, without the scan past the last
+    closing marker of each line (patterns in `_CLOSERS`; others as they are)."""
+    closer = _CLOSERS.get(rx.pattern)
+    if closer is None:
+        yield from rx.finditer(s)
+        return
+    crx, n = closer
+    start = 0
+    while True:
+        nl = s.find('\n', start)
+        end = len(s) if nl < 0 else nl
+        last = -1
+        for c in crx.finditer(s, start, end):
+            last = c.start()
+        if last >= 0:
+            yield from rx.finditer(s, start, last + n)
+        if nl < 0:
+            return
+        start = nl + 1
+
+
+def _esub(pattern, repl, s):
+    """`re.sub(pattern, repl, s)` by way of `emph_finditer`."""
+    out, pos = [], 0
+    for m in emph_finditer(re.compile(pattern), s):
+        out.append(s[pos:m.start()])
+        out.append(repl(m) if callable(repl) else m.expand(repl))
+        pos = m.end()
+    if not pos:
+        return s
+    out.append(s[pos:])
+    return ''.join(out)
+
+
 def _sub_level(pattern, repl, pieces):
     """`pieces` (text, and (open, inner, close) tagged spans) with the
     substitution made over them: a tagged span is one opaque stand-in, so a
@@ -310,7 +363,7 @@ def _sub_level(pattern, repl, pieces):
             flat.append(f'\x14{len(groups) - 1}\x15')
         else:
             flat.append(p)
-    done = re.sub(pattern, repl, ''.join(flat))
+    done = _esub(pattern, repl, ''.join(flat))
     return _GROUP_RE.sub(lambda m: groups[int(m.group(1))], done)
 
 
@@ -337,10 +390,10 @@ def _sub_between_tags(pattern, repl, text):
     if opens is None or opens:
         out, pos = [], 0
         for m in _EMPH_TAG_RE.finditer(text):
-            out.append(re.sub(pattern, repl, text[pos:m.start()]))
+            out.append(_esub(pattern, repl, text[pos:m.start()]))
             out.append(m.group(0))
             pos = m.end()
-        out.append(re.sub(pattern, repl, text[pos:]))
+        out.append(_esub(pattern, repl, text[pos:]))
         return ''.join(out)
     stack[-1].append(text[pos:])
     return _sub_level(pattern, repl, stack[0])
@@ -425,7 +478,7 @@ def _inline(text, smartquotes=True):
     # comes out cross-nested (`<b><i>x</b></i>`), which is not well-formed: it
     # aborts the whole PDF build in ReportLab's parser, and makes the EPUB's
     # XHTML invalid. Matching the triple marker up front keeps the tags nested.
-    text = re.sub(r'\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*', r'<b><i>\1</i></b>', text)
+    text = _esub(r'\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*', r'<b><i>\1</i></b>', text)
     # the later passes stay between the tags the earlier ones made: a `**`
     # inside a bold-italic span pairing with one after it (`***bold **a*** b**`)
     # crossed the tags again, which no XHTML parser (or ReportLab) accepts
@@ -1019,14 +1072,18 @@ def book_anchors(chapters):
     the first, and the other could not be linked at all. The first keeps the
     plain slug; a later one is `slug-2`, `slug-3`.
     """
-    taken, out = set(), []
+    # `nxt` remembers where a name's suffixes got to: starting again at -2 for
+    # every repeat made a thousand chapters called "Interlude" quadratic.
+    # Everything below it is taken, so the names come out as they always did.
+    taken, out, nxt = set(), [], {}
     for idx, ch in enumerate(chapters, 1):
         names = []
         for name in chapter_anchors(ch, idx):
             if name in taken:
-                n = 2
+                n = nxt.get(name, 2)
                 while f'{name}-{n}' in taken:
                     n += 1
+                nxt[name] = n + 1
                 name = f'{name}-{n}'
             taken.add(name)
             names.append(name)
@@ -1062,6 +1119,7 @@ def book_targets(chapters):
         if name not in out['where']:
             out['where'][name] = n
             out['own'].append(name)
+    nxt = {}                        # as in book_anchors
     for n, ch in enumerate(chapters, 1):
         names = {}
         for i, block in enumerate(ch.get('blocks', [])):
@@ -1073,9 +1131,13 @@ def book_targets(chapters):
             words = ' '.join(html.unescape(_TAGS_RE.sub('', _NOTEREF_SUP_RE.sub(
                 '', block[1]))).split())
             base = slugify(words) or 'section'
-            name, k = base, 2
-            while name in out['where']:
-                name, k = f'{base}-{k}', k + 1
+            name, k = base, nxt.get(base, 2)
+            if name in out['where']:
+                name = f'{base}-{k}'
+                while name in out['where']:
+                    k += 1
+                    name = f'{base}-{k}'
+                nxt[base] = k + 1
             out['where'][name] = n
             names[i] = name
         out['headings'].append(names)

@@ -261,7 +261,7 @@ def _emphasis_runs(text):
     # first two stars of a *** marker and strand the third as literal text.
     outer = []                                           # (is_bothemph, str)
     pos = 0
-    for m in _BOLDITAL_RE.finditer(text):
+    for m in manuscript.emph_finditer(_BOLDITAL_RE, text):
         if m.start() > pos:
             outer.append((False, text[pos:m.start()]))
         outer.append((True, m.group(1) if m.group(1) is not None else m.group(2)))
@@ -303,7 +303,7 @@ def _split_italics(seg):
     """Yield (is_italic, str) for a non-bold segment: *...* then _..._ ."""
     out = []
     pos = 0
-    for m in _ITALIC_STAR.finditer(seg):
+    for m in manuscript.emph_finditer(_ITALIC_STAR, seg):
         if m.start() > pos:
             out.append((False, seg[pos:m.start()]))
         out.append((True, m.group(1)))
@@ -317,7 +317,7 @@ def _split_italics(seg):
             final.append((True, piece))
             continue
         p2 = 0
-        for m in _ITALIC_UNDER.finditer(piece):
+        for m in manuscript.emph_finditer(_ITALIC_UNDER, piece):
             if m.start() > p2:
                 final.append((False, piece[p2:m.start()]))
             final.append((True, m.group(1)))
