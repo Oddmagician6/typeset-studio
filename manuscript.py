@@ -1552,6 +1552,33 @@ def _cell_md(cell, report, notes=None, stem='', figs=None):
     return ' '.join(' '.join(parts).split())
 
 
+# Word allows a table 63 columns wide; nothing real spans more.
+DOCX_MAX_COLS = 63
+
+# An imported Word file, unpacked: its pictures may be large, but its text
+# parts are read whole into memory, so both are bounded (a small file can
+# declare gigabytes once decompressed).
+DOCX_MAX_UNPACKED = 2 * 1024 ** 3
+DOCX_MAX_XML = 256 * 1024 ** 2
+
+
+def _check_docx_size(path):
+    """Refuse a Word file that would unpack past the limits above. A file that
+    isn't a ZIP is left for python-docx to refuse in its own words."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as zf:
+            infos = zf.infolist()
+    except (zipfile.BadZipFile, OSError):
+        return
+    total = sum(i.file_size for i in infos)
+    xml = sum(i.file_size for i in infos
+              if i.filename.lower().endswith(('.xml', '.rels')))
+    if total > DOCX_MAX_UNPACKED or xml > DOCX_MAX_XML:
+        raise ValueError('it unpacks to more than this app will read '
+                         f'({total // 1024 ** 2} MB)')
+
+
 def _row_cells(row, report, notes=None, stem='', figs=None):
     """A row's cells, one per column of the table's grid: a cell merged across
     columns is its text then blanks (collapsing it moved the next value into
@@ -1566,7 +1593,13 @@ def _row_cells(row, report, notes=None, stem='', figs=None):
             from docx.table import _Cell
             text = _cell_md(_Cell(tc, row.table), report, notes, stem, figs)
         out.append(text.replace('|', '/'))
-        out.extend([''] * (max(1, tc.grid_span) - 1))
+        # a span is only ever as wide as the table's grid: a declared span of
+        # millions (a broken or hostile file) filled memory with blank cells
+        try:
+            span = int(tc.grid_span)
+        except (TypeError, ValueError):
+            span = 1
+        out.extend([''] * (min(max(1, span), DOCX_MAX_COLS) - 1))
     return out
 
 
@@ -1692,6 +1725,7 @@ def import_docx(path, report=None, stem=None):
     rep = report if report is not None else {}
     rep.update({k: v for k, v in _new_report().items() if k not in rep})
 
+    _check_docx_size(path)
     doc = Document(path)
     # pictures are named for the file: a caller importing a temporary copy
     # names the real one, so the same pictures aren't saved again

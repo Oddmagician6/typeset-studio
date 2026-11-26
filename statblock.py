@@ -376,7 +376,9 @@ def _finish_scores(cells):
     five_e = sorted(names) == sorted(FIVE_E)
     written = any(c['mod'] for c in cells)
     for c in cells:
-        if not c['mod'] and five_e and c['score'].isdigit():
+        # a score of more than a few digits is a typo, not a score: printed as
+        # written (Python refuses to read a number thousands of digits long)
+        if not c['mod'] and five_e and c['score'].isdigit() and len(c['score']) <= 6:
             c['mod'] = modifier(c['score'])
     return five_e and not written
 

@@ -1023,11 +1023,11 @@ def _sweep_stale(now=None):
                     shutil.rmtree(path, ignore_errors=True)
     except OSError:
         pass
-    # a package ZIP cut off while it was written, and the empty file that
-    # held its name
+    # a package ZIP or an EPUB cut off while it was written, and the empty
+    # file that held its name
     try:
         for fn in os.listdir(OUT_DIR):
-            if not fn.endswith('.zip' + PACKAGE_PART):
+            if not fn.endswith(('.zip' + PACKAGE_PART, '.epub' + epub.EPUB_PART)):
                 continue
             path = os.path.join(OUT_DIR, fn)
             with contextlib.suppress(OSError):
@@ -5255,6 +5255,26 @@ class _PreviewError(Exception):
     """A message meant for the user, not a stack trace."""
 
 
+# The most an uploaded manuscript may be. A million-word novel is about 6 MB
+# of text; a Word file carries its pictures too. Read whole, anything larger
+# could take the app's memory with it (Flask's form cap leaves files alone).
+MANUSCRIPT_MAX_BYTES = {'.docx': 512 * 1024 * 1024}
+MANUSCRIPT_TEXT_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _read_manuscript_upload(up, ext):
+    """An uploaded manuscript's bytes, or None when it is over the limit -
+    read no further than the limit, so a huge file is never held whole."""
+    cap = MANUSCRIPT_MAX_BYTES.get(ext, MANUSCRIPT_TEXT_MAX_BYTES)
+    data = up.read(cap + 1)
+    return None if len(data) > cap else data
+
+
+def _too_big_words(ext):
+    cap = MANUSCRIPT_MAX_BYTES.get(ext, MANUSCRIPT_TEXT_MAX_BYTES)
+    return f'is larger than {cap // (1024 * 1024)} MB'
+
+
 def _manuscript_upload(up, folder):
     """Store an uploaded manuscript in `folder` under a name of its own and read
     it. Returns (path, text); raises _PreviewError with what to do instead.
@@ -5268,7 +5288,9 @@ def _manuscript_upload(up, folder):
     if ext not in MANUSCRIPT_EXTS:
         raise _PreviewError(f'“{up.filename}” isn\'t a manuscript - use a .docx, '
                             '.md or .txt file.')
-    data = up.read()
+    data = _read_manuscript_upload(up, ext)
+    if data is None:
+        raise _PreviewError(f'“{up.filename}” {_too_big_words(ext)} - too big to read as a manuscript.')
     if ext != '.docx':
         text = _norm_newlines(_decode_text(data))
         if not text.strip():
@@ -6053,10 +6075,13 @@ def project_edit(pid):
         # Optional manuscript replacement
         up = request.files.get('manuscript')
         if up and up.filename:
-            ext, data = _upload_ext(up), up.read()
+            ext = _upload_ext(up)
+            data = _read_manuscript_upload(up, ext) if ext in MANUSCRIPT_EXTS else b''
             why = ''
             if ext not in MANUSCRIPT_EXTS:
                 why = "isn't a manuscript - use a .docx, .md or .txt file"
+            elif data is None:
+                why = _too_big_words(ext)
             elif ext == '.docx':
                 fd, tmp = tempfile.mkstemp(suffix='.docx', dir=PROJECT_MS_DIR)
                 with os.fdopen(fd, 'wb') as f:

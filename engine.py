@@ -577,6 +577,37 @@ def _upright(path):
     return path
 
 
+# A figure needs no more pixels than this many per inch of its printed size.
+# Past half again that, it is scaled down before ReportLab gets it: a 12,000 px
+# photo placed two inches wide made ReportLab hold the whole raster (and copies
+# of it) for each one, enough to fail a build of a well-illustrated book.
+FIGURE_MAX_DPI = 600
+
+
+def _sized(path, w, h):
+    """`_upright(path)`, scaled down when it has far more pixels than a
+    w x h pt placement can use (see FIGURE_MAX_DPI)."""
+    src = _upright(path)
+    if not _HAVE_PIL or w <= 0 or h <= 0:
+        return src
+    im = None
+    try:
+        im = PILImage.open(src) if isinstance(src, str) else src
+        need = (int(w / 72.0 * FIGURE_MAX_DPI) + 1, int(h / 72.0 * FIGURE_MAX_DPI) + 1)
+        if im.size[0] <= need[0] * 1.5 and im.size[1] <= need[1] * 1.5:
+            if im is not src:
+                im.close()
+            return src
+        if im.format == 'JPEG':
+            im.draft(im.mode, need)          # decode at a fraction of full size
+        im.thumbnail(need, PILImage.LANCZOS)
+        return im
+    except Exception:
+        if im is not None and im is not src:
+            im.close()
+        return src
+
+
 def _draw_image_cover(canv, path, x0, y0, w, h):
     """Draw an image cover-fit (fill then crop) into (x0,y0,w,h), clipped to the rect.
     Shared by the full-bleed background and the postcard family's inset panel."""
@@ -4306,7 +4337,7 @@ class FigureImage(Flowable):
         if self.path:
             try:
                 from reportlab.lib.utils import ImageReader
-                c.drawImage(ImageReader(_upright(self.path)), x, 0,
+                c.drawImage(ImageReader(_sized(self.path, self._w, self._h)), x, 0,
                             width=self._w, height=self._h, mask='auto')
                 return
             except Exception:
@@ -4382,6 +4413,7 @@ class BleedPlate(Flowable):
                 iw, ih = ir.getSize()
                 s = max(bw / iw, bh / ih)
                 w, h = iw * s, ih * s
+                ir = ImageReader(_sized(self.path, w, h))
                 c.drawImage(ir, bx + (bw - w) / 2, by + (bh - h) / 2,
                             width=w, height=h, mask='auto')
                 drawn = True

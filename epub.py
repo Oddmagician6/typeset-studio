@@ -1383,7 +1383,7 @@ def check(path):
         except Exception as exc:
             add('Package document', False, f'container.xml unreadable: {exc}')
             return out
-        if opf_path not in names:
+        if opf_path not in infos:
             add('Package document', False, f'container.xml points at {opf_path}, which is missing')
             return out
 
@@ -1409,7 +1409,7 @@ def check(path):
             return posixpath.normpath(posixpath.join(base, href)) if base else href
 
         # --- manifest <-> zip must agree in both directions ---
-        missing = [i['href'] for i in items.values() if full(i['href']) not in names]
+        missing = [i['href'] for i in items.values() if full(i['href']) not in infos]
         add('Manifest', not missing,
             f'{len(items)} items, all present'
             if not missing else 'Missing from the file: ' + ', '.join(missing[:4]))
@@ -1440,7 +1440,7 @@ def check(path):
         broken, ids, imgs, no_alt, gone, no_page = [], {}, 0, [], [], []
         for d in docs:
             name = full(d['href'])
-            if name not in names:
+            if name not in infos:
                 continue
             try:
                 dom = minidom.parseString(zf.read(name))
@@ -1489,9 +1489,10 @@ def check(path):
         # .png went in as image/png, which a reader may refuse to show
         wrong = []
         for i in items.values():
-            if not i['type'].startswith('image/') or full(i['href']) not in names:
+            if not i['type'].startswith('image/') or full(i['href']) not in infos:
                 continue
-            head = zf.read(full(i['href']))[:16]
+            with zf.open(full(i['href'])) as fh:     # the header, not the whole picture
+                head = fh.read(16)
             kind = ('image/png' if head.startswith(b'\x89PNG') else
                     'image/jpeg' if head.startswith(b'\xff\xd8') else
                     'image/gif' if head[:4] == b'GIF8' else
@@ -1512,7 +1513,7 @@ def check(path):
         dangling = []
         for d in docs:
             name = full(d['href'])
-            if name not in names:
+            if name not in infos:
                 continue
             body = zf.read(name).decode('utf-8', 'replace')
             for href in re.findall(r'<a\s[^>]*href="([^"]+)"', body):
@@ -1520,7 +1521,7 @@ def check(path):
                     continue
                 target, _, frag = href.partition('#')
                 target = target or d['href']
-                if full(target) not in names:
+                if full(target) not in infos:
                     dangling.append(href)
                 elif frag and frag not in ids.get(target, set()):
                     dangling.append(href)
@@ -1553,7 +1554,7 @@ def check(path):
             for s in spine:
                 d = items.get(s)
                 if not d or d['type'] != 'application/xhtml+xml' \
-                        or full(d['href']) not in names:
+                        or full(d['href']) not in infos:
                     continue
                 head = zf.read(full(d['href'])).decode('utf-8', 'replace')
                 if not re.search(r'<meta\s+name="viewport"\s+content="width=\d+,\s*'
@@ -1564,13 +1565,13 @@ def check(path):
                 'No size (viewport) on: ' + ', '.join(no_size[:4]))
             lost = []
             for d in items.values():
-                if d['type'] != 'text/css' or full(d['href']) not in names:
+                if d['type'] != 'text/css' or full(d['href']) not in infos:
                     continue
                 css = zf.read(full(d['href'])).decode('utf-8', 'replace')
                 for url in re.findall(r"url\(['\"]?([^'\")]+)['\"]?\)", css):
                     target = posixpath.normpath(posixpath.join(
                         posixpath.dirname(full(d['href'])), url))
-                    if target not in names or target not in manifested:
+                    if target not in infos or target not in manifested:
                         lost.append(url)
             add('Fonts', not lost,
                 'Every typeface the pages use is in the book' if not lost else
@@ -1835,14 +1836,40 @@ def _collect_figures(chapters, extra=()):
 
 
 # ---------------------------------------------------------------- public API
+EPUB_PART = '.part'         # an EPUB while it is written, beside its name
+
+
+def _replace_retrying(src, dst, tries=20):
+    """os.replace, waiting a moment while Windows has `dst` open elsewhere
+    (a reader or a virus scanner on the reserved name)."""
+    import time
+    for i in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.1)
+
+
 def build_epub(manuscript, preset, out_path, meta):
     """Write the reflowable EPUB (see `_build_epub`). The designed pages'
     rendered pictures are removed however the build ends: a failure between
     rendering them and zipping them left the folder in the temp directory."""
     _BUILD.tmpdirs = []
+    # written beside its name and renamed into place: a build cut off part way
+    # (the app closed mid-export) left a broken .epub under the real name
+    part = out_path + EPUB_PART
     try:
-        return _build_epub(manuscript, preset, out_path, meta)
+        _build_epub(manuscript, preset, part, meta)
+        _replace_retrying(part, out_path)
+        return out_path
     finally:
+        try:
+            os.remove(part)
+        except OSError:
+            pass
         import shutil
         for d in getattr(_BUILD, 'tmpdirs', None) or []:
             shutil.rmtree(d, ignore_errors=True)
