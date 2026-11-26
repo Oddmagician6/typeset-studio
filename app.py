@@ -275,7 +275,8 @@ def _fit(ref, data):
 # What kind of value each of a book's settings is, where the pages show it as
 # it is (a name that was a number took the whole Projects page down). Drawn
 # from every book written by 1.0.0-1.3.0; a setting missing here isn't checked.
-BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'preset',
+BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'language',
+             'preset',
              'manuscript_file', 'manuscript_type', 'cover_file', 'cover_mode',
              'cover_template', 'cover_color', 'cover_collection', 'cover_kicker',
              'cover_accent', 'cover_epigraph', 'cover_studio', 'format', 'front_matter',
@@ -5430,6 +5431,7 @@ def generate():
         'author': form.get('author', '').strip(),
         'year': form.get('year', '').strip() or str(datetime.now().year),
         'publisher': form.get('publisher', '').strip(),
+        'language': epub.book_lang(form),
         'front_matter': form.get('front_matter', 'full'),
         'right_hand_starts': 'right_hand_starts' in form,
         'cover_image': cover_path,
@@ -5627,6 +5629,7 @@ def _book_from_compose_form(tmp_files, toc_stubs=False):
         'author': form.get('author', '').strip(),
         'year': form.get('year', '').strip() or str(datetime.now().year),
         'publisher': form.get('publisher', '').strip(),
+        'language': epub.book_lang(form),
         'front_matter': form.get('front_matter', 'full'),
         'right_hand_starts': 'right_hand_starts' in form,
         'cover_image': cover_path,
@@ -5918,6 +5921,7 @@ def project_create():
         'author': form.get('author', '').strip(),
         'year': form.get('year', '').strip(),
         'publisher': form.get('publisher', '').strip(),
+        'language': epub.book_lang(form),
         'front_matter': form.get('front_matter', 'full'),
         'right_hand_starts': form.get('right_hand_starts') == '1',
         'cover_overlay': form.get('cover_overlay') == '1',
@@ -6177,6 +6181,10 @@ def project_edit(pid):
             'author':           form.get('author', '').strip(),
             'year':             form.get('year', '').strip(),
             'publisher':        form.get('publisher', '').strip(),
+            # written once it is set or changed: an unchanged save of a book
+            # from before the setting is the same book
+            **({'language': epub.book_lang(form)}
+               if 'language' in proj or epub.book_lang(form) != 'en' else {}),
             'right_hand_starts': 'right_hand_starts' in form,
             'cover_overlay':    'cover_overlay' in form,
             'cover_template':   choice('cover_template',
@@ -6697,6 +6705,7 @@ def project_write_preview(pid):
         'author': proj.get('author', ''),
         'year': proj.get('year', '') or str(datetime.now().year),
         'publisher': proj.get('publisher', ''),
+        'language': epub.book_lang(proj),
         'front_matter': proj.get('front_matter', 'full'),
         'right_hand_starts': proj.get('right_hand_starts', True),
         'cover_image': '', 'cover_overlay': False, 'cover_color': 'light',
@@ -7020,6 +7029,7 @@ def _project_meta(proj):
         'author':           proj.get('author', ''),
         'year':             proj.get('year', '') or str(datetime.now().year),
         'publisher':        proj.get('publisher', ''),
+        'language':         epub.book_lang(proj),
         'front_matter':     proj.get('front_matter', 'full'),
         'right_hand_starts': proj.get('right_hand_starts', True),
         'cover_image':   cover_path,

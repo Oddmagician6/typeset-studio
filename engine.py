@@ -3318,6 +3318,9 @@ class BookDoc(BaseDocTemplate):
                       leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
         full = Frame(0, 0, pw, ph, id='full',
                      leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
+        # the PDF says its language too (23.5), for a screen reader's voice
+        from epub import book_lang
+        kw.setdefault('lang', book_lang(meta))
         super().__init__(filename, pagesize=(pw + bleed, ph + 2 * bleed), **kw)
         templates = []
         if self._cover.get('path') or self._cover.get('mode') == 'designed':
