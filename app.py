@@ -487,6 +487,39 @@ def _read_settings():
     return data
 
 
+def _atomic_write_text(path, text):
+    """Write a file so that an interrupted write cannot destroy the old one.
+
+    A plain `open(path, 'w')` truncates first: a crash, a full disk or a killed
+    process between that and the write leaves an empty manuscript. Writing a
+    temporary file in the same folder and then `os.replace`-ing it is atomic on
+    both Windows and POSIX — after it, the file is either wholly the old text or
+    wholly the new one.
+    """
+    _atomic_write_bytes(path, text.encode('utf-8'))
+
+
+def _atomic_write_bytes(path, data):
+    """`_atomic_write_text` for bytes: an uploaded file, a book's settings."""
+    folder = os.path.dirname(os.path.abspath(path)) or '.'
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())      # the bytes, not just the buffer
+        os.replace(tmp, path)
+    except BaseException as exc:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        if isinstance(exc, OSError):
+            exc.filename = path     # the file being saved, not the temporary one
+        raise
+
+
 def save_settings(data):
     _atomic_write_text(SETTINGS_PATH, json.dumps(data, indent=2))
 
@@ -6036,39 +6069,6 @@ def _read_text_file(path):
 SNAPSHOT_GAP   = 180     # seconds between autosave snapshots of the same project
 HISTORY_KEEP   = 40      # hard cap on snapshots per project
 _SNAP_RE = re.compile(r'^(\d{8}-\d{6})-(\w+)\.md$')
-
-
-def _atomic_write_text(path, text):
-    """Write a file so that an interrupted write cannot destroy the old one.
-
-    A plain `open(path, 'w')` truncates first: a crash, a full disk or a killed
-    process between that and the write leaves an empty manuscript. Writing a
-    temporary file in the same folder and then `os.replace`-ing it is atomic on
-    both Windows and POSIX — after it, the file is either wholly the old text or
-    wholly the new one.
-    """
-    _atomic_write_bytes(path, text.encode('utf-8'))
-
-
-def _atomic_write_bytes(path, data):
-    """`_atomic_write_text` for bytes: an uploaded file, a book's settings."""
-    folder = os.path.dirname(os.path.abspath(path)) or '.'
-    os.makedirs(folder, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=folder, suffix='.tmp')
-    try:
-        with os.fdopen(fd, 'wb') as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())      # the bytes, not just the buffer
-        os.replace(tmp, path)
-    except BaseException as exc:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        if isinstance(exc, OSError):
-            exc.filename = path     # the file being saved, not the temporary one
-        raise
 
 
 def _history_folder(pid):

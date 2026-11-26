@@ -285,6 +285,26 @@ check('the same version is not newer', not A.is_newer('1.14.2', 'v1.14.2'))
 check('a beta of the next minor is newer', A.is_newer('1.15.0-beta.1', '1.14.9'))
 
 shutil.rmtree(TMP, ignore_errors=True)
+# ---- first start of an installed copy ---------------------------------------
+# The installed app's first start (or first after an upgrade) records the
+# seeded fonts in a brand-new settings.json while app.py is still importing,
+# so everything that write needs must already be defined by then. A 1.15.0
+# build crashed here; the dev tests never saw it because the repo's own
+# settings already list the fonts.
+print('first start of an installed copy')
+fresh = tempfile.mkdtemp()
+run = subprocess.run(
+    [sys.executable, '-c',
+     'import sys, logging; logging.disable(logging.CRITICAL); sys.frozen = True\n'
+     'import app; print(len(app.load_settings().get("seeded_fonts", [])))'],
+    cwd=HERE, capture_output=True, text=True, timeout=120,
+    env={**os.environ, 'APPDATA': fresh, 'XDG_DATA_HOME': fresh})
+check('a fresh data folder imports without error', run.returncode == 0,
+      run.stderr.strip().splitlines()[-1:] if run.stderr else run.returncode)
+check('and records the seeded fonts', run.stdout.strip().isdigit()
+      and int(run.stdout.strip()) > 0, run.stdout)
+shutil.rmtree(fresh, ignore_errors=True)
+
 print()
 print('FAILED: ' + ', '.join(fails) if fails else 'all passed')
 sys.exit(1 if fails else 0)
