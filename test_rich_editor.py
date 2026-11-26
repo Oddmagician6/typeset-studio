@@ -200,6 +200,23 @@ EXPECT = {
     'replace-all-after-dotted-i': 'İYa',
     'enter-over-selected-verse-words': '# One\n\n~~~ poem\na\nkite\n~~~\n',
     'outline-jumps-in-rich': 'Two',
+    # bug hunt round 5, section 22 (the Python side is test_gameblocks_bughunt.py)
+    'bh22-unclosed-block': ('# One\n\n~~~ statblock\n## Ash Drake\nAC: 15\n~~~\n\n# Next Room\n\n'
+                            'Prose here.\n\n~~~ sidebar title="Pacing" style="note"\nKeep it moving.\n'
+                            '~~~\n\nAfter.\n'),
+    'bh22-paste-fenced-statblock': ('# One\n\nBefore.\n\n~~~ statblock name="Ash Drake" cr="2"\n'
+                                    'AC: 15\nHP: 30\n~~~\n'),
+    'bh22-statblock-blank-line': ('# One\n\n~~~ statblock\n## Ash Drake\nSTR DEX CON INT WIS CHA\n\n'
+                                  '14 8 15 3 8 5\n~~~\n'),
+    'bh22-statblock-link': ('# One\n\n~~~ statblock\n## Ash Drake\n'
+                            'Languages: Common, [Aquan](https://example.com/aquan)\n~~~\n'),
+    'bh22-markdown-paste-midline': ('# One\n\nThe door opens.\n\n~~~ statblock\n{{monster,frame\n'
+                                    '## Bog-Thrall\n**AC** :: 9\n}}\n~~~\n\n It is dark.\n\n# Two\n\n'
+                                    'Text.\n'),
+    'bh22-wrap-unterminated': ('{{monster,frame\n## Ash Drake\n**AC** :: 15\n\nSome prose between.\n\n'
+                               '~~~ statblock\n{{monster,frame\n## Bog-Thrall\n**AC** :: 9\n}}\n~~~\n'),
+    'bh22-wrap-legacy-blank': ('~~~ statblock\n___\n> ## Ash Drake\n> *Large dragon*\n> - **AC** 15\n'
+                               '~~~\n\nAfter.\n'),
 }
 
 
@@ -274,9 +291,11 @@ def main():
     print('[corpus: a rich-mode round trip reads as the same book]')
     for name, md in corpus.items():
         after = result['roundtrip'].get(name)
+        # the book itself: a block left open in the source comes back closed,
+        # so only the source's `blocks_unclosed` note may differ
         same = after is not None and all(
-            manuscript.parse_markdown(md, smartquotes=s)
-            == manuscript.parse_markdown(after, smartquotes=s) for s in (True, False))
+            manuscript.parse_markdown(md, smartquotes=s)['chapters']
+            == manuscript.parse_markdown(after, smartquotes=s)['chapters'] for s in (True, False))
         check(name, same)
     import statblock
     formats = corpus['test_fixtures/ttrpg/statblock_formats.md']

@@ -1257,7 +1257,9 @@ def _game_block_html(btype, paras, attrs):
         out.append(f'  <aside class="{cls}">' if btype == 'sidebar'
                    else f'  <div class="{cls}">')
         if title:
-            out.append(f'    <p class="block-title">{_text_to_html(title)}</p>')
+            # its emphasis and links read as the PDF reads them (_ms_inline):
+            # escaped as plain text, `*The Watch*` showed its asterisks
+            out.append(f'    <p class="block-title">{_md_emph_to_html(title, False)}</p>')
         for _, text in paras:
             out.append(f'    <p>{_markup_to_html(text)}</p>')
         out.append('  </aside>' if btype == 'sidebar' else '  </div>')
@@ -1270,9 +1272,9 @@ def _game_block_html(btype, paras, attrs):
     if name or cr or count:
         head = _markup_to_html(name)
         if count:
-            head += f' × {_text_to_html(count)}'
+            head += f' × {_md_emph_to_html(count, False)}'
         if cr:
-            head = f'<span class="sb-cr">CR {_text_to_html(cr)}</span>' + head
+            head = f'<span class="sb-cr">CR {_md_emph_to_html(cr, False)}</span>' + head
         # it is in the index: `_ix` is the number the indexer gave it - a
         # writer's own `_ix="7"` on the fence is text, and two of them made
         # two elements with one id

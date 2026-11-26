@@ -72,7 +72,8 @@ _INLINE_CELL_RE = re.compile(
     r'(' + _NAME + r')\s+' + _SCORE +
     r'(?:\s*' + _MOD_PAREN + r'|\s+(' + _SIGNED + r')\s+(' + _SIGNED + r'))?')
 _NAMES_LINE_RE = re.compile(r'^' + _NAME + r'(?:\s+' + _NAME + r')+$')
-_VALUE_RE = re.compile(r'(\d+)(?:\s*' + _MOD_PAREN + r')?')
+# a score in a values row: a number, or the dash a template leaves (as _SCORE)
+_VALUE_RE = re.compile(_SCORE + r'(?:\s*' + _MOD_PAREN + r')?')
 
 _RULE_RE = re.compile(r'^_{3,}$')
 _SECTION_RE = re.compile(r'^-{3,}(?:\s+(.*?))?\s*$')
@@ -234,6 +235,24 @@ def _bold_fields(s):
     return fields
 
 
+def _split_plain_fields(field):
+    """A plain-text field whose value runs on into another known one - the 2024
+    `AC 15  Initiative +2 (12)` - split into both. A label starts a field after
+    two spaces, or after one for Initiative with its signed number; otherwise
+    the value is left whole (an AC's "natural armor" stays in it)."""
+    out, value = [], field['value']
+    labels = '|'.join(re.escape(k) for k in sorted(KNOWN_LABELS, key=len, reverse=True))
+    pat = re.compile(r'(?:\s{2,}|\s(?=Initiative\s+[+\-−–]\d))(' + labels + r')\b:?\s*')
+    label = field['label']
+    while True:
+        m = pat.search(value)
+        if not m:
+            out.append({'label': label, 'value': value.strip()})
+            return out
+        out.append({'label': label, 'value': value[:m.start()].strip()})
+        label, value = m.group(1), value[m.end():]
+
+
 def _known_field(s):
     for lab in KNOWN_LABELS:
         if s == lab:
@@ -312,7 +331,7 @@ def classify(line, at='head'):
                     return {'kind': 'fields', 'fields': pieces}
             f = _colon_field(s) or _known_field(s)
             if f:
-                return {'kind': 'fields', 'fields': [f]}
+                return {'kind': 'fields', 'fields': _split_plain_fields(f)}
     e = entry(s)
     return {'kind': 'entry', 'name': e['name'], 'text': e['text']}
 
@@ -383,7 +402,11 @@ def read(lines, name='', meta=''):
         reading = classify(content[0], 'head')
         is_name = (m is not None or _BOLD_ONLY_RE.match(s)
                    or (reading['kind'] == 'entry' and not reading['name']))
-        if (is_name and bare.strip() and len(bare.split()) <= 8
+        # the word limit is for a plain line that might be prose; a heading or
+        # a bold line is the name at any length ("The Keeper of the Seven
+        # Gates Beneath the Salt Sea" turned the whole header into entries)
+        marked = m is not None or bool(_BOLD_ONLY_RE.match(s))
+        if (is_name and bare.strip() and (marked or len(bare.split()) <= 8)
                 and bare.strip() not in KNOWN_SECTIONS
                 and not bare.strip().rstrip(':') in KNOWN_LABELS):
             model['name'] = bare.strip()
@@ -470,21 +493,31 @@ def wrap_unfenced(markdown):
             i += 1
             continue
         if not in_fence and _V3_OPEN_RE.match(line):
+            # to its `}}` - but not past another monster's opening, a fence or
+            # a chapter heading: a monster missing its `}}` took everything to
+            # the next one's, prose and second monster with it. Left unwrapped,
+            # the complete one after it is still wrapped on its own.
             j = i + 1
             while j < len(lines) and lines[j].strip() != '}}':
-                if re.match(r'^\s*~~~', lines[j]):
+                if re.match(r'^\s*~~~', lines[j]) or _V3_OPEN_RE.match(lines[j]) \
+                        or re.match(r'^#\s', lines[j]):
                     break
                 j += 1
             if j < len(lines) and lines[j].strip() == '}}':
                 out += ['~~~ statblock'] + lines[i:j + 1] + ['~~~']
                 i = j + 1
                 continue
+        # the rule, then `> ## Name`: blank lines between them allowed (a
+        # paste often has one, and the monster was left as quoted text)
+        k = i + 1
+        while k < len(lines) and not lines[k].strip():
+            k += 1
         if (not in_fence and _RULE_RE.match(line.strip())
-                and i + 1 < len(lines) and _LEGACY_HEAD_RE.match(lines[i + 1])):
-            j = i + 1
+                and k < len(lines) and _LEGACY_HEAD_RE.match(lines[k])):
+            j = k
             while j < len(lines) and lines[j].lstrip().startswith('>'):
                 j += 1
-            out += ['~~~ statblock'] + lines[i:j] + ['~~~']
+            out += ['~~~ statblock', line] + lines[k:j] + ['~~~']
             i = j
             continue
         out.append(line)

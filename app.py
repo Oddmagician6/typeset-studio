@@ -1242,6 +1242,17 @@ def _preflight(build_result, preset, page_count, paper=None, binding=None, retai
                        'page. For a print upload, build press-ready (no cover) and '
                        'send the cover as a separate wrap')})
 
+    unclosed = build_result.get('blocks_unclosed') or []
+    if unclosed:
+        where = ', '.join(f'a {kind} block at line {line}' for line, kind in unclosed[:4])
+        more = len(unclosed) - 4
+        checks.append({
+            'label': 'Blocks', 'ok': False,
+            'detail': (f'{len(unclosed)} block(s) have no closing ~~~: {where}'
+                       + (f' (+{more} more)' if more > 0 else '') +
+                       '. Each was ended at the next block, chapter heading or the end of '
+                       'the book - add its closing ~~~ where it should end.')})
+
     dead = build_result.get('dead_links') or []
     if dead:
         shown = ', '.join(sorted(set(dead))[:4])

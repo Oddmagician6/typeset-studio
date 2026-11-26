@@ -352,8 +352,10 @@ def test_epub():
     ch = z.read('OEBPS/chapter001.xhtml').decode('utf-8')
     _check("`###` is an h3 and `####` an h4, with ids",
            # each holds the empty target a link to it lands on (#74 Phase 5b)
-           '<h3 id="h2"><span id="at-a1-the-porch"></span>A1. The Porch</h3>' in ch
-           and '<h4 id="h3"><span id="at-hazards"></span>Hazards</h4>' in ch, ch[:1200])
+           # (its kind as a class: the tag never skips a level, round 5 23.10)
+           '<h3 id="h2" class="hd-section"><span id="at-a1-the-porch"></span>A1. The Porch</h3>' in ch
+           and '<h4 id="h3" class="hd-subsection"><span id="at-hazards"></span>Hazards</h4>' in ch,
+           ch[:1200])
     _check("the tagline is under the title",
            '<p class="chapter-tagline">Where the bells still ring below the water.</p>' in ch)
     nav = z.read('OEBPS/nav.xhtml').decode('utf-8')

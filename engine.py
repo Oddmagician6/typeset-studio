@@ -5192,10 +5192,21 @@ class _GbTable(Table):
             while k and (k - 1) in keep:
                 k -= 1
             if k == 0:
-                # nothing but headings would stay: the block goes over whole.
-                # On a fresh page (anything this tall) the split stands, so a
-                # block can never be refused for good.
-                if availHeight < 2 * inch:
+                # nothing but headings would stay. First, split inside the row
+                # after them, so the title keeps the first lines of its text:
+                # ReportLab tries the split between rows first, and with room
+                # to spare a long first paragraph left the title alone at the
+                # foot of a column over a blank space.
+                inrow = self._splitRows(availHeight, doInRowSplit=1)
+                if len(inrow) == 2 and len(inrow[0]._cellvalues) > n0:
+                    parts = inrow
+                    n0 = len(parts[0]._cellvalues)
+                    clean = n0 + len(parts[1]._cellvalues) == total
+                    shift = n0 if clean else n0 - 1
+                # Otherwise the block goes over whole. On a fresh page
+                # (anything this tall) the split stands, so a block can never
+                # be refused for good.
+                elif availHeight < 2 * inch:
                     return []
             else:
                 again = Table.split(self, availWidth,
@@ -7637,6 +7648,9 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         'fonts_embedded': not fonts['fallback'] and not unembedded,
         'fonts_unembedded': unembedded or [],
         'figures_missing': figures_missing(manuscript, preset),
+        # blocks whose closing ~~~ is missing: [(line, type)] (closed at the
+        # next opening fence or chapter heading, or the end of the book)
+        'blocks_unclosed': list(manuscript.get('blocks_unclosed') or []),
         'scene_image_missing': scene_image_missing(preset),
         # a page background printed only with bleed (or on screen): its
         # picture gone or unreadable leaves the colour, or white, unannounced

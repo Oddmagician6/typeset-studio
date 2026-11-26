@@ -452,10 +452,15 @@ def _table_row_md(runs):
     return '|'.join(_runs_to_md(c) for c in cells)
 
 
-def _in_block(line):
-    r"""A line inside a fenced block, guarded if it would read as a fence:
-    `\~~~` is text, where a bare `~~~` closed the block early."""
-    return _BSL + line if manuscript.DOCBLOCK_RE.match(line) else line
+def _in_block(line, name_ok=False):
+    r"""A line inside a fenced block, guarded if it would end the block:
+    `\~~~` is text, where a bare `~~~` closed the block early, and `\# …`
+    where a chapter heading now closes a block whose fence is missing.
+    `name_ok`: a stat block's first line, where `# Name` is its name."""
+    if manuscript.DOCBLOCK_RE.match(line) or (
+            not name_ok and manuscript.CHAPTER_RE.match(line)):
+        return _BSL + line
+    return line
 
 
 def _statblock_line(runs):
@@ -466,9 +471,12 @@ def _statblock_line(runs):
            and not _is_mark(r) for r in runs):
         return "".join(r["text"] for r in runs)
     # a note, index marker, anchor or page reference is written as its marker:
-    # its text alone is only the label, and the reference was lost
-    return "".join(_emph_md([r]) if (r["bold"] or r["italic"] or _is_mark(r))
-                   else r["text"] for r in runs)
+    # its text alone is only the label, and the reference was lost. A link is
+    # written `[label](address)`: its label alone lost the address.
+    def one(r):
+        text = _emph_md([r]) if (r["bold"] or r["italic"] or _is_mark(r)) else r["text"]
+        return f'[{text}]({r["link"]})' if r.get("link") else text
+    return "".join(one(r) for r in runs)
 
 
 def _block_collision(line):
@@ -520,10 +528,21 @@ def from_markdown(raw, smartquotes=True):
                 # run per line: its formats use `___` rules, `::` and `|` that
                 # the emphasis layer would rewrite, and `--- Actions` must still
                 # be a section after an edit. statblock.py reads the lines.
+                # Its blank lines are kept too (one for a run of them): they
+                # are what keeps a names line apart from a values line that
+                # would otherwise be read as one ability table.
+                prev_blank = True
                 for s in block_para_buf:
                     if s.strip():
                         block_children.append({"type": "para",
                                                "runs": [_run(s.strip())]})
+                        prev_blank = False
+                    elif not prev_blank:
+                        block_children.append({"type": "para", "runs": []})
+                        prev_blank = True
+                while block_children and block_children[-1]["runs"] == [] \
+                        and block_type == 'statblock':
+                    block_children.pop()
             elif block_type == 'table':
                 for s in block_para_buf:                 # one row per line
                     if s.strip():
@@ -577,6 +596,8 @@ def from_markdown(raw, smartquotes=True):
                 continue
 
         m_doc = manuscript.DOCBLOCK_RE.match(line)
+        if m_doc and in_block and m_doc.group(1).strip():
+            close_block()                        # its ~~~ is missing (as manuscript)
         if m_doc:
             if in_block:
                 close_block()
@@ -586,10 +607,15 @@ def from_markdown(raw, smartquotes=True):
                 in_block = True
             continue
 
+        if in_block and manuscript.CHAPTER_RE.match(line) and not (
+                block_type == 'statblock' and not any(s.strip() for s in block_para_buf)):
+            close_block()                        # a chapter: the ~~~ is missing
+
         if in_block:
-            if line[:1] == _BSL and manuscript.DOCBLOCK_RE.match(line[1:]):
-                line = line[1:]                  # `\~~~`: a line of text (see _in_block)
-            if line.strip() == '':
+            if line[:1] == _BSL and (manuscript.DOCBLOCK_RE.match(line[1:])
+                                     or manuscript.CHAPTER_RE.match(line[1:])):
+                line = line[1:]                  # `\~~~`, `\# `: text (see _in_block)
+            if line.strip() == '' and block_type != 'statblock':
                 flush_block_para()
             else:
                 block_para_buf.append(line)
@@ -682,8 +708,8 @@ def to_markdown(blocks):
                     for ln in stanza["lines"]:
                         out.append(_in_block(_runs_to_md(ln["runs"])))
             elif b["block_type"] == "statblock":
-                for kid in kids:                         # source lines, as written
-                    out.append(_in_block(_statblock_line(kid["runs"])))
+                for i, kid in enumerate(kids):           # source lines, as written
+                    out.append(_in_block(_statblock_line(kid["runs"]), name_ok=i == 0))
             elif b["block_type"] == "table":
                 for kid in kids:                         # one row per line
                     out.append(_in_block(_table_row_md(kid["runs"])))

@@ -675,6 +675,8 @@ def parse_markdown(raw, smartquotes=True):
     block_type     = ''
     block_attrs    = {}
     sb_lines       = []                    # a stat block's raw lines, read at its end
+    unclosed       = []                    # [(line no., type)] of blocks a missing ~~~ ran on
+    block_line     = 0                     # where the open block opened
 
     def flush_note():
         nonlocal note_label, note_buf
@@ -769,7 +771,7 @@ def parse_markdown(raw, smartquotes=True):
 
     tag_ok = False                         # the line after `# Title` may be `#> …`
 
-    for line in lines:
+    for i, line in enumerate(lines):
         # `#> …` right after a chapter heading is its tagline. Any other line
         # that isn't blank ends the chance, so a later `#>` line is just text.
         if tag_ok and not in_block and line.strip():
@@ -821,6 +823,13 @@ def parse_markdown(raw, smartquotes=True):
 
         # ~~~ fence — toggle doc-block mode; optional type + attrs on opening line
         m_doc = DOCBLOCK_RE.match(line)
+        if m_doc and in_block and m_doc.group(1).strip():
+            # an opening fence (it names a type) inside a block: blocks don't
+            # nest, so the block before it lost its closing ~~~. It is closed
+            # here, and this one opens - read as a close, it lost its type and
+            # attributes and its own closing fence opened a block that ran on
+            unclosed.append((block_line, block_type or 'block'))
+            close_block()
         if m_doc:
             if in_block:
                 close_block()
@@ -830,14 +839,24 @@ def parse_markdown(raw, smartquotes=True):
                     new_chapter(None)
                 block_type, block_attrs = _parse_block_header(m_doc.group(1))
                 in_block = True
+                block_line = i + 1
             continue
+
+        # a chapter heading inside a block: the block's closing ~~~ is missing
+        # (no block holds a chapter). Closed here, the chapter is kept - the
+        # one exception a stat block's `# Name` before any of its lines.
+        if in_block and CHAPTER_RE.match(line) and not (
+                block_type == 'statblock' and not any(s.strip() for s in sb_lines)):
+            unclosed.append((block_line, block_type or 'block'))
+            close_block()
 
         # Inside a doc block: only paragraph text
         if in_block:
             # `\~~~` is a line that reads `~~~` (a verse of tildes): unguarded,
             # it closed the block, and the block's own closing fence then
-            # opened a new one that swallowed the next chapter
-            if line[:1] == _BSL and DOCBLOCK_RE.match(line[1:]):
+            # opened a new one that swallowed the next chapter. `\# …` is a
+            # line that starts `# ` in the same way.
+            if line[:1] == _BSL and (DOCBLOCK_RE.match(line[1:]) or CHAPTER_RE.match(line[1:])):
                 line = line[1:]
             if block_type == 'statblock':
                 sb_lines.append(line)
@@ -872,13 +891,17 @@ def parse_markdown(raw, smartquotes=True):
 
     # close any unclosed block
     if in_block:
+        unclosed.append((block_line, block_type or 'block'))
         close_block()
     flush_para()
 
     chapters = [c for c in chapters if c['blocks'] or c['title']]
     for c in chapters:
         _number_notes(c)
-    return {'chapters': chapters}
+    out = {'chapters': chapters}
+    if unclosed:
+        out['blocks_unclosed'] = unclosed
+    return out
 
 
 # ---------------------------------------------------------------- .docx import
@@ -1854,6 +1877,25 @@ _IMP_NOTEDEF_RE = re.compile(r'^\[\^[^\]]+\]:')
 _IMP_LORE_RE = re.compile(r'^\*{2,3}lore\.?\*{2,3}$', re.I)
 
 
+def _attr_quoted(value):
+    """A block attribute value, quoted. parse_attrs reads straight quotes
+    inside a value (`title="The "Silent" Door"`), so it is written as it is -
+    a quoted title used to be dropped altogether - unless it holds what would
+    read as the start of another attribute (` key="`), whose quotes are made
+    curly."""
+    if re.search(r'\s\w+=["\u201c\u201d]', value):
+        out, open_ = [], True
+        for ch in value:
+            if ch == '"':
+                out.append('\u201c' if open_ else '\u201d')
+                open_ = not open_
+            else:
+                out.append(ch)
+        value = ''.join(out)
+        value = re.sub(r'(\s\w+)=', lambda m: m.group(1) + '\u2009=', value)
+    return f'"{value}"'
+
+
 def _imp_score_row(lines, i):
     """`~~~ table` at lines[i] holding only ability scores -> (row, end) or None.
     One row of `STR 11 (+0) | …`, or a row of names over a row of values."""
@@ -1915,9 +1957,18 @@ def _imp_statblocks(lines, rep):
                 k -= 1
                 continue
             break
+        named = start is not None
         if start is None:
             start = k
         head = [ln.strip() for ln in out[start:] if ln.strip()]
+        # a creature around it - its name, or its fields (AC, HP) over the
+        # scores - or it is an ordinary table: a character-creation chapter's
+        # STR..CHA table took the paragraphs after it into a stat block
+        if not named and not any(statblock.classify(ln, 'head')['kind'] == 'fields'
+                                 for ln in head):
+            out.append(lines[i])
+            i += 1
+            continue
         del out[start:]
         # on to the end: the next name, a heading, a fence, a scene break or
         # the Lore paragraph that follows a creature
@@ -1961,7 +2012,7 @@ def _imp_boxes(lines, rep):
             # the heading is the box's label ("Read Aloud", "Read Aloud: The
             # Inn"), so it stays as written, as the title
             title = lines[i].strip().lstrip('#').strip().strip('*').strip()
-            header = '~~~ readaloud' + (f' title="{title}"' if '"' not in title else '')
+            header = '~~~ readaloud' + (f' title={_attr_quoted(title)}' if title else '')
             rep['readalouds'] = rep.get('readalouds', 0) + 1
         else:
             header = f'~~~ sidebar title="{pa.group(1).title()}" style="note"'

@@ -245,8 +245,11 @@ def test_round_trip():
         for sq in (True, False):
             m = doc_model.from_markdown(md, sq)
             back = doc_model.to_markdown(m)
+            # the book itself: a block left open in the source is written back
+            # closed, so only the source's `blocks_unclosed` note may differ
             _check(f"{name} (smart quotes {'on' if sq else 'off'}): fidelity and stability",
-                   manuscript.parse_markdown(md, sq) == manuscript.parse_markdown(back, sq)
+                   manuscript.parse_markdown(md, sq)['chapters']
+                   == manuscript.parse_markdown(back, sq)['chapters']
                    and doc_model.from_markdown(back, sq) == m)
     md = _load('statblock_formats.md')
     body = md[md.index('\n~~~ statblock\n') + 1:md.index('## Format 3')]
