@@ -242,15 +242,17 @@ def _smarten(text):
     # double quotes
     # opening: preceded by start-of-string, whitespace, open bracket, a dash
     # (em or en: `stopped –"Wait."`), or the emphasis marker the quotation
-    # opens inside (`*"wait"*`, which this runs before)
-    text = re.sub(r'(^|[\s(\[{—–*_])"', r'\1“', text, flags=re.MULTILINE)
+    # opens inside (`*"wait"*`, which this runs before) - a marker that itself
+    # opens, after one of those: one closing a word (`*fox*'s`, `*no*"`) is
+    # followed by an apostrophe or a closing quote
+    text = re.sub(r'((?:^|[\s(\[{—–])[*_]*)"', r'\1“', text, flags=re.MULTILINE)
     text = text.replace('"', '”')                         # remaining → closing
     # single quotes / apostrophes
     text = re.sub(r"(\w)'(\w)", r'\1’\2', text)          # contractions first
     # a word's lost opening letters are an apostrophe, not a quotation
     # (`'Tis`, `'twas`, `rock 'n' roll`, `the '90s`)
     text = _ELISION_RE.sub('’', text)
-    text = re.sub(r"(^|[\s(\[{—–*_])'", r'\1‘', text, flags=re.MULTILINE)
+    text = re.sub(r"((?:^|[\s(\[{—–])[*_]*)'", r'\1‘', text, flags=re.MULTILINE)
     text = text.replace("'", '’')                         # remaining → closing/apostrophe
     # collapse multiple spaces
     text = re.sub(r'  +', ' ', text)
@@ -293,15 +295,55 @@ def _emph_span(tag):
     return repl
 
 
+_GROUP_RE = re.compile('\x14(\\d+)\x15')
+
+
+def _sub_level(pattern, repl, pieces):
+    """`pieces` (text, and (open, inner, close) tagged spans) with the
+    substitution made over them: a tagged span is one opaque stand-in, so a
+    match may hold it whole but never start or end inside it."""
+    groups = []
+    flat = []
+    for p in pieces:
+        if isinstance(p, tuple):
+            groups.append(''.join(p))
+            flat.append(f'\x14{len(groups) - 1}\x15')
+        else:
+            flat.append(p)
+    done = re.sub(pattern, repl, ''.join(flat))
+    return _GROUP_RE.sub(lambda m: groups[int(m.group(1))], done)
+
+
 def _sub_between_tags(pattern, repl, text):
-    """Apply an emphasis substitution to the stretches between <b>/<i> tags."""
-    out, pos = [], 0
+    """Apply an emphasis substitution at every level of the <b>/<i> tags,
+    never across one: inside each tagged span, and around it, where a span
+    may hold a whole tagged span. Run only on the stretches between tags,
+    `**The ___Moon___ Gate**` printed its asterisks: the bold could not take
+    in the bold-italic already made inside it."""
+    stack, opens, pos = [[]], [], 0
     for m in _EMPH_TAG_RE.finditer(text):
-        out.append(re.sub(pattern, repl, text[pos:m.start()]))
-        out.append(m.group(0))
+        stack[-1].append(text[pos:m.start()])
         pos = m.end()
-    out.append(re.sub(pattern, repl, text[pos:]))
-    return ''.join(out)
+        tag = m.group(0)
+        if tag[1] != '/':
+            opens.append(tag)
+            stack.append([])
+        elif opens and opens[-1] == tag.replace('/', ''):
+            inner = _sub_level(pattern, repl, stack.pop())
+            stack[-1].append((opens.pop(), inner, tag))
+        else:
+            opens = None            # not nested as passes make them: old way
+            break
+    if opens is None or opens:
+        out, pos = [], 0
+        for m in _EMPH_TAG_RE.finditer(text):
+            out.append(re.sub(pattern, repl, text[pos:m.start()]))
+            out.append(m.group(0))
+            pos = m.end()
+        out.append(re.sub(pattern, repl, text[pos:]))
+        return ''.join(out)
+    stack[-1].append(text[pos:])
+    return _sub_level(pattern, repl, stack[0])
 
 
 def _inline(text, smartquotes=True):
@@ -642,6 +684,21 @@ def _parse_block_header(header):
     return block_type, attrs
 
 
+def closed_ahead(lines):
+    """closed[i]: whether the first fence line at or after line i is a bare
+    closing `~~~`. A chapter heading inside a block ends the block only when
+    it isn't: a block whose own closing fence still lies ahead holds the line
+    as text (`# 7 on the door` in a poem), where reading it as a missing-fence
+    chapter split the poem and turned its real closing fence into an opener."""
+    out, nxt = [False] * len(lines), False
+    for k in range(len(lines) - 1, -1, -1):
+        m = DOCBLOCK_RE.match(lines[k])
+        if m:
+            nxt = not m.group(1).strip()
+        out[k] = nxt
+    return out
+
+
 def parse_markdown(raw, smartquotes=True):
     """Return {'chapters': [{'title': str|None, 'byline': str|None, 'part': dict|None, 'blocks': [...] }]}.
 
@@ -656,6 +713,7 @@ def parse_markdown(raw, smartquotes=True):
     """
     lines = _CONTROL_RE.sub('', raw.replace('\r\n', '\n').replace('\r', '\n')
                             .replace('\f', '\n').replace('\v', '\n')).split('\n')
+    fence_ahead = closed_ahead(lines)
     chapters  = []
     cur       = None
     para_buf  = []
@@ -845,7 +903,7 @@ def parse_markdown(raw, smartquotes=True):
         # a chapter heading inside a block: the block's closing ~~~ is missing
         # (no block holds a chapter). Closed here, the chapter is kept - the
         # one exception a stat block's `# Name` before any of its lines.
-        if in_block and CHAPTER_RE.match(line) and not (
+        if in_block and CHAPTER_RE.match(line) and not fence_ahead[i] and not (
                 block_type == 'statblock' and not any(s.strip() for s in sb_lines)):
             unclosed.append((block_line, block_type or 'block'))
             close_block()

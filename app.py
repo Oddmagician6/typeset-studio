@@ -20,6 +20,7 @@ import logging
 import time
 import tempfile
 import threading
+import uuid
 import traceback
 import webbrowser
 import contextlib
@@ -537,11 +538,15 @@ def _settings_file_lock(timeout=10):
     folder): a lock file made with O_EXCL. One left by a crash is taken over
     once it is older than _SETTINGS_LOCK_STALE."""
     path = SETTINGS_PATH + '.lock'
+    token = f'{os.getpid()} {uuid.uuid4().hex}'.encode()
     deadline = time.time() + timeout
     while True:
         try:
             fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
+            try:
+                os.write(fd, token)
+            finally:
+                os.close(fd)
             break
         except FileExistsError:
             with contextlib.suppress(OSError):
@@ -551,11 +556,24 @@ def _settings_file_lock(timeout=10):
             if time.time() > deadline:
                 raise OSError('settings.json is locked by another copy of the app')
             time.sleep(0.02)
+    def still_mine():
+        try:
+            with open(path, 'rb') as f:
+                return f.read() == token
+        except OSError:
+            return False
+
     try:
-        yield
+        # the holder checks it still holds the lock before it writes: one
+        # paused past _SETTINGS_LOCK_STALE has had it taken over, and writing
+        # then would put back its stale copy over the other copy's change
+        yield still_mine
     finally:
-        with contextlib.suppress(OSError):
-            os.remove(path)
+        # and only its own lock is removed: removed by name, a lock taken
+        # over meanwhile was deleted from under its new holder
+        if still_mine():
+            with contextlib.suppress(OSError):
+                os.remove(path)
 
 
 @contextlib.contextmanager
@@ -565,16 +583,25 @@ def settings_change():
     in place; it is written only when it changed. A file that can't be read is
     never written over (OSError reaches the caller); one that isn't valid JSON
     is kept beside it as settings.json.damaged before a fresh one is written."""
-    with _SETTINGS_LOCK, _settings_file_lock():
+    with _SETTINGS_LOCK, _settings_file_lock() as still_mine:
         try:
             settings = _read_settings()
         except ValueError:
-            logging.warning('settings.json is damaged; keeping it as settings.json.damaged')
-            shutil.copy2(SETTINGS_PATH, SETTINGS_PATH + '.damaged')
+            # a second recovery keeps the first one's copy: settings.json.damaged,
+            # then .damaged-2, -3, …
+            keep, n = SETTINGS_PATH + '.damaged', 1
+            while os.path.exists(keep):
+                n += 1
+                keep = f'{SETTINGS_PATH}.damaged-{n}'
+            logging.warning('settings.json is damaged; keeping it as %s', os.path.basename(keep))
+            shutil.copy2(SETTINGS_PATH, keep)
             settings = {}
         before = json.dumps(settings, sort_keys=True)
         yield settings
         if json.dumps(settings, sort_keys=True) != before:
+            if not still_mine():
+                raise OSError('settings.json was changed by another copy of the app '
+                              'meanwhile; this change was not saved')
             save_settings(settings)
 
 
@@ -848,8 +875,65 @@ def _set_aside(path):
             logging.warning('Kept your font %s as %s: a bundled font now has its name',
                             os.path.basename(path), os.path.basename(new))
         except OSError:
-            pass
+            return
+        _repoint_font(os.path.basename(path), os.path.basename(new))
         return
+
+
+def _repoint_font(old, new):
+    """After a user's font is set aside, what of theirs names it names the new
+    file: their styles, cover templates, and books' wrap designs and designed
+    pages. Left naming the old file, they were drawn in the bundled face that
+    took the name, and a book could repaginate. The bundled styles and covers
+    keep the name: they are drawn in the bundled face. Runs at start-up, so
+    plain file reads and writes; a file that can't be read is left alone."""
+    def same(v):
+        return isinstance(v, str) and os.path.basename(v).lower() == old.lower()
+
+    def fix_dict(d):
+        hit = False
+        for k, v in list(d.items()) if isinstance(d, dict) else []:
+            if same(v):
+                d[k] = new
+                hit = True
+        return hit
+
+    def fix_elements(design):
+        hit = False
+        els = design.get('elements') if isinstance(design, dict) else None
+        for e in els if isinstance(els, list) else []:
+            if isinstance(e, dict) and same(e.get('font')):
+                e['font'] = new
+                hit = True
+        return hit
+
+    for folder, kind in ((PRESET_DIR, 'presets'), (COVER_DIR, 'covers'), (PROJECT_DIR, None)):
+        bundled = _bundled_ids(kind) if kind else set()
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for fn in names:
+            ident, ext = os.path.splitext(fn)
+            if ext.lower() != '.json' or ident in bundled:
+                continue
+            path = os.path.join(folder, fn)
+            try:
+                data = read_json(path)
+            except Exception:
+                continue
+            if kind == 'presets':
+                hit = fix_dict(data.get('font_files'))
+            elif kind == 'covers':
+                hit = fix_dict(data.get('fonts'))
+            else:
+                hit = fix_elements(data.get('wrap_design'))
+                pages = data.get('page_designs')
+                for page in pages if isinstance(pages, list) else []:
+                    hit = fix_elements(page) or hit
+            if hit:
+                with contextlib.suppress(OSError):
+                    _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
 def _seed_copy(s, d):
@@ -3946,13 +4030,26 @@ def wrap_designer_save(pid):
     proj['wrap_design_saved'] = datetime.now().isoformat(timespec='seconds')
     proj['wrap_front_file'] = secure_filename(f'{pid}-wrap-front.jpg')
     if body.get('use_as_cover'):
+        if proj.get('cover_mode') != 'wrap':
+            # kept, so unticking brings back exactly this cover
+            proj['cover_mode_before_wrap'] = proj.get('cover_mode', 'none')
         proj['cover_mode'] = 'wrap'
     elif proj.get('cover_mode') == 'wrap':
         # unticked: back to the cover the book had before, as Send to print reads it
         # (the saved book names its template by id; the template's data is
-        # only put together for a build)
-        proj['cover_mode'] = ('designed' if load_cover_template(proj.get('cover_template', ''))
-                              else 'image' if proj.get('cover_file') else 'none')
+        # only put together for a build). Compose saves a template id beside
+        # an uploaded image, so with no record of the mode before, an uploaded
+        # image wins: preferring the template put a cover the book never used
+        # on it
+        before = proj.pop('cover_mode_before_wrap', '')
+        has_template = bool(load_cover_template(proj.get('cover_template', '')))
+        has_image = bool(proj.get('cover_file'))
+        if before == 'designed' and has_template or before == 'image' and has_image \
+                or before == 'none':
+            proj['cover_mode'] = before
+        else:
+            proj['cover_mode'] = ('image' if has_image
+                                  else 'designed' if has_template else 'none')
     front = os.path.join(PROJECT_MS_DIR, proj['wrap_front_file'])
     # rendered beside the real one and swapped in only once the book is saved:
     # the builds reuse that file while its size fits, so writing it first let a
@@ -4354,6 +4451,10 @@ def _plan_write(pid, proj, rev, build):
     if text != _norm_newlines(current):
         if not text.strip():
             return jsonify(ok=False, error='That would leave the manuscript empty.')
+        if page_plan.outline(text) != page_plan.outline(current):
+            return jsonify(ok=False, error='That change would have moved or removed some of the '
+                                           'manuscript\'s text, so nothing was changed. Move the '
+                                           'page blocks in the manuscript editor instead.')
         _store_manuscript(pid, proj, text)
     return jsonify(_plan_data(pid, proj, text))
 
@@ -5131,6 +5232,15 @@ def _cover_upload(cov, folder):
     return path
 
 
+def _under_folder(path, folder):
+    """Does `path` name a place inside `folder` (whether or not a file is there)?"""
+    try:
+        real, top = os.path.realpath(path), os.path.realpath(folder)
+        return os.path.commonpath([real, top]) == top and real != top
+    except (ValueError, OSError):
+        return False
+
+
 def _in_folder(path, folder):
     """Is `path` a file inside `folder`? (Save as project is handed paths by the
     page, and copied whatever file it was given.)"""
@@ -5474,16 +5584,24 @@ def generate_preview():
         os.close(fd)
         tmp_files.append(tmp_pdf)
         if meta.get('format') == 'epub' and meta.get('screen_pdf'):
-            engine.build_pdf(ms, preset, tmp_pdf, meta, screen=True)
+            res = engine.build_pdf(ms, preset, tmp_pdf, meta, screen=True)
         else:
-            engine.build_pdf(ms, preset, tmp_pdf, meta, press=meta.get('press', False))
+            res = engine.build_pdf(ms, preset, tmp_pdf, meta, press=meta.get('press', False))
+        # the chapters past the preview's are laid out empty, only so the
+        # contents list them: their openers are not the book's pages, so the
+        # preview stops where the first of them starts
+        stop = PREVIEW_MAX_PAGES
+        if truncated:
+            first_stub = ((res or {}).get('chapter_pages') or {}).get(PREVIEW_MAX_CHAPTERS + 1)
+            if first_stub:
+                stop = min(stop, first_stub - 1)
 
         doc = fitz.open(tmp_pdf)
         try:
             built_pages = doc.page_count
             images = []
             for i, page in enumerate(doc):
-                if i >= PREVIEW_MAX_PAGES:
+                if i >= stop:
                     break
                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)  # ~144 dpi
                 b64 = base64.b64encode(pix.tobytes('png')).decode()
@@ -5661,12 +5779,24 @@ def project_create():
     if ms_type not in ('file', 'pasted', 'sample'):
         ms_type = 'file'
     ms_file = ''
+    cover_src = form.get('cover_path', '')
+    # a result tab left open past UPLOAD_KEEP_DAYS names staged files the
+    # start-up sweep has removed: saved anyway, the project had no manuscript
+    # (or cover) and the save still said it worked
+    gone = [what for what, src, ok in (
+                ('manuscript', ms_src, ms_type != 'sample'), ('cover image', cover_src, True))
+            if ok and src and _under_folder(src, UPLOAD_DIR) and not os.path.isfile(src)]
+    if gone:
+        flash(f'This book could not be saved as a project: its {" and ".join(gone)} '
+              f'from Compose {"were" if len(gone) > 1 else "was"} cleared away '
+              f'(staged files are kept for {UPLOAD_KEEP_DAYS} days). '
+              f'Compose the book again, then save it.')
+        return redirect(url_for('projects'))
     if ms_type != 'sample' and ms_src and _in_folder(ms_src, UPLOAD_DIR):
         ext = os.path.splitext(ms_src)[1].lower()
         ms_file = proj_id + ext
         shutil.copy2(ms_src, os.path.join(PROJECT_MS_DIR, ms_file))
 
-    cover_src  = form.get('cover_path', '')
     cover_file = ''
     if cover_src and _in_folder(cover_src, UPLOAD_DIR):
         ext = os.path.splitext(cover_src)[1]
@@ -7389,7 +7519,10 @@ def _free_port(preferred=5050):
     rather than on a random high port.
     """
     import socket
-    for p in [preferred] + [preferred + i for i in range(1, 10)] + [0]:
+    # the next nine stop at 65535: TS_PORT=65535 busy tried 65536, which
+    # raises OverflowError (not OSError) and ended startup
+    for p in [preferred] + [preferred + i for i in range(1, 10)
+                            if preferred + i < 65536] + [0]:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.bind(('127.0.0.1', p))
@@ -7408,7 +7541,10 @@ def _bind_port(preferred=5050):
     port and letting it go left that gap). Exclusive on Windows, where
     SO_REUSEADDR would let a second copy bind the same port."""
     import socket
-    for p in [preferred] + [preferred + i for i in range(1, 10)] + [0]:
+    # the next nine stop at 65535: TS_PORT=65535 busy tried 65536, which
+    # raises OverflowError (not OSError) and ended startup
+    for p in [preferred] + [preferred + i for i in range(1, 10)
+                            if preferred + i < 65536] + [0]:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):

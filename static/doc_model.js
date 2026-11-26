@@ -454,6 +454,14 @@
       blockChildren = []; blockType = ''; blockAttrs = {}; inBlock = false;
     }
 
+    // closedAhead[i]: the first fence at or after line i is a bare closing
+    // `~~~` (manuscript.closed_ahead): a `# ` line then is text in its block
+    var closedAhead = new Array(lines.length), nextBare = false;
+    for (var ck = lines.length - 1; ck >= 0; ck--) {
+      var cm = DOCBLOCK_RE.exec(lines[ck]);
+      if (cm) nextBare = !cm[1].trim();
+      closedAhead[ck] = nextBare;
+    }
     var tagOk = false;                 // the line after `# Title` may be `#> …`
     for (var li = 0; li < lines.length; li++) {
       var line = lines[li];
@@ -482,7 +490,7 @@
       // an opening fence inside a block: its ~~~ is missing (as manuscript)
       if (mDoc && inBlock && mDoc[1].trim()) closeBlock();
       // a chapter heading inside a block likewise, but for a stat block's `# Name`
-      if (!mDoc && inBlock && CHAPTER_RE.test(line) && !(blockType === 'statblock'
+      if (!mDoc && inBlock && CHAPTER_RE.test(line) && !closedAhead[li] && !(blockType === 'statblock'
           && !blockParaBuf.some(function (s) { return s.trim(); }))) closeBlock();
       if (mDoc) {
         if (inBlock) { closeBlock(); }
@@ -628,11 +636,12 @@
           continue;
         }
       }
-      // the rule, then `> ## Name`: blank lines between them allowed
+      // the rule, then `> ## Name`: blank lines between them allowed (looked
+      // for only after a rule: a long blank run was rescanned from every line)
+      var isRule = !inFence && /^_{3,}$/.test(line.trim());
       var k = i + 1;
-      while (k < lines.length && !lines[k].trim()) k++;
-      if (!inFence && /^_{3,}$/.test(line.trim()) && k < lines.length
-          && LEGACY_HEAD_RE.test(lines[k])) {
+      while (isRule && k < lines.length && !lines[k].trim()) k++;
+      if (isRule && k < lines.length && LEGACY_HEAD_RE.test(lines[k])) {
         j = k;
         while (j < lines.length && /^\s*>/.test(lines[j])) j++;
         out = out.concat(['~~~ statblock', line], lines.slice(k, j), ['~~~']);

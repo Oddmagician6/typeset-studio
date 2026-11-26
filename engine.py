@@ -7590,6 +7590,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             unsettled = (has_refs or has_index) and (index != listed or refs != printed)
         page_count = doc2.page
         unplaced_notes.extend(_notes_not_drawn(fn_flow, doc2._fn_drawn))
+        final_doc = doc2
     else:
         index = refs = None
         if has_index or has_refs:
@@ -7624,6 +7625,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
             unsettled = (has_refs or has_index) and (index != listed or refs != printed)
         page_count = doc.page
         unplaced_notes.extend(_notes_not_drawn(fn_flow, doc._fn_drawn))
+        final_doc = doc
     if cover_path:
         try:
             os.remove(cover_path)
@@ -7639,6 +7641,10 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         # cover's own file at the printer, not a leaf of the book
         'interior_pages': max(page_count - (2 if cover else 0), 0),
         'notes_unplaced': len(set(unplaced_notes)),
+        # where each chapter opens (its 1-based place: page), for the preview
+        # to stop before chapters it lays out only for the contents' sake
+        'chapter_pages':  {e['idx']: e['page'] for e in final_doc._toc_entries
+                           if e.get('idx') is not None and 'heading' not in e},
         # the page references or the index still moved on the last pass
         'refs_unsettled': unsettled,
         'dead_links':     dead_links + dead_refs + sorted(_matter_dead),

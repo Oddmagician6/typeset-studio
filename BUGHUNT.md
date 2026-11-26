@@ -115,6 +115,17 @@ Code the first eight sections didn't cover.
 | 23 | EPUB validity & accessibility | `epub.py`, `fixed_epub.py`, nav/opf generation | epubcheck errors (ids, links, manifest, metadata, XHTML), alt text, lang, landmarks, page-list |
 | 24 | App startup, data dir & settings | Startup and seeding, `settings.json`, update check, pruning and housekeeping, frozen paths | First-run/upgrade clobbering user files, settings corruption, version compare, pruning in-use files |
 
+### Round 6 (started 2026-11-25, after 1.15.0)
+
+The 1.15.0 smoke test caught a round-5 regression the suite missed: the installed app crashed on its first start (an import-time call to a helper defined further down `app.py`), and the frozen build ignored `TS_PORT`. Both fixed before release; section 26 looks for more of the same.
+
+| # | Section | Main files | What to look for |
+|---|---|---|---|
+| 25 | Send to print, re-checked | Package/publish routes, `print_package.html`, `cover_specs.html`, `wrap_convert.py`, spine/bleed maths | Package contents vs the page, spec sheet vs the packaged PDF, stale files, unsafe names |
+| 26 | Regressions from rounds 4–5 | Non-test changes in `v1.14.2..v1.15.0` | Import-time order, frozen-only paths, locks, O_EXCL/link on odd drives, one-path-only fixes |
+| 27 | Manuscript editor & autosave | `manuscript_editor.html`, `wysiwyg.js`, save/autosave/history routes | Lost edits on races and mode switches, two tabs overwriting, undo across modes, failed saves shown as saved |
+| 28 | Scale & pathological input | Parsers, layout loops, regexes, uploads | Catastrophic backtracking, quadratic loops, recursion limits, passes that never settle, no size limits |
+
 ## After each section
 
 1. **Triage.** Claude sorts every finding as confirmed, false positive or needs a repro, and gives the user a short list.
@@ -145,4 +156,12 @@ Code the first eight sections didn't cover.
 | 17 | Regressions from the fixes | 11 (+2 spec.) | 11 confirmed; print changes OK'd | All 11 on bughunt-round4 (`test_regressions_bughunt.py`); a proof's cover is now a whole leaf (cover and its blank inside), so its count is the interior's; both speculatives left open | – |
 | 18 | Build pipeline & outputs | 14 (+1 spec.) | 14 confirmed | All 14 and the spec. on bughunt-round4 (`test_pipeline_bughunt.py`): builds record only their own newest edition, one cover snapshot per build, PDFs laid out beside their name, scratch files go however a build ends | – |
 | 19 | Ornaments & matter end to end | 13 (+1 spec.) | 13 confirmed; print and EPUB changes OK'd | All 13 on bughunt-round4 (`test_matter_bughunt.py`, 19.7 in `test_fixed_layout.py`); found while fixing: an `&` in a link address was escaped twice. Night-mode ornament ink (spec.) left open | – |
-| 20 | Fonts, glyphs & unusual text | 15 (+1 spec.) | 15 confirmed; 20.2 (right-to-left PDF text), 20.9 (astral characters in copied PDF text) and 20.12 (fonts in the reflowable EPUB) are features, left open | The other 12 on bughunt-round4 (`test_glyphs_bughunt.py`; 20.3, 20.4, 20.6–20.8 landed with section 17) | – |
+| 20 | Fonts, glyphs & unusual text | 15 (+1 spec.) | 15 confirmed; 20.2 (right-to-left PDF text), 20.9 (astral characters in copied PDF text) and 20.12 (fonts in the reflowable EPUB) are features, left open | The other 12 on bughunt-round4 (`test_glyphs_bughunt.py`; 20.3, 20.4, 20.6–20.8 landed with section 17) | Released in 1.15.0 |
+| 21 | Page designer & Page Plan UI | 14 (+1 spec.) | 14 confirmed | All 14 on bughunt-round5 (`test_pagedesigner_bughunt.py`) | Released in 1.15.0 |
+| 22 | Stat blocks & game blocks | 14 (+1 spec.) | 14 confirmed | All 14 on bughunt-round5 (`test_gameblocks_bughunt.py`, 7 rich-editor scenarios); an unclosed block ends at the next fence or chapter and preflight names it | Released in 1.15.0 |
+| 23 | EPUB validity & accessibility | 14 (+1 spec.) | 14 confirmed; 23.5 (language setting), 23.11 (page-list), 23.12 (hazard metadata), 23.13 (landmarks) are features, left open | The other 10 on bughunt-round5 (`test_epubvalid_bughunt.py`) | Released in 1.15.0 |
+| 24 | App startup, data dir & settings | 14 (+1 spec.) | 14 confirmed; 24.1 shipped two uploaded photos inside the installers | All 14 on bughunt-round5 (`test_lifecycle_bughunt.py`); the 1.14.2 release (the last one carrying the photos) was deleted when 1.15.0 shipped. Two regressions found by the release smoke test fixed before release | Released in 1.15.0 |
+| 25 | Send to print, re-checked | 13 (+1 spec.) | Triaged; 25.5, 25.9, 25.10 rest on retailer rules to verify first | Not picked yet | – |
+| 26 | Regressions from rounds 4–5 | 12 (+2 spec.) | 12 confirmed (5 reproduced); print changes OK'd | All 12 on bughunt-round6 (`test_regressions6_bughunt.py`, 2 rich-editor scenarios): a `# ` line ends a block only when its closing fence isn't ahead; Page Plan reads blocks as the parser does and refuses a rewrite that changes the chapters; emphasis may hold a whole emphasised span; set-aside fonts are renamed in the user's styles, templates and designs. Speculatives left open | – |
+| 27 | Manuscript editor & autosave | 13 (+2 spec.) | Triaged | Not picked yet | – |
+| 28 | Scale & pathological input | 15 (+2 spec.) | Triaged | Not picked yet | – |

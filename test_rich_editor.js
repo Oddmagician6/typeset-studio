@@ -421,6 +421,19 @@ f.onload = function () {
     return w.DocModel.wrapUnfenced('{{monster,frame\n## Ash Drake\n**AC** :: 15\n\nSome prose between.\n\n'
                                    + '{{monster,frame\n## Bog-Thrall\n**AC** :: 9\n}}\n');
   });
+
+  // ---- bug hunt round 6, section 26: regressions from rounds 4-5
+  run('bh26-poem-hash-line', function () {
+    // a `# ` line in a poem whose closing ~~~ is there stays a verse
+    loadMd('# One\n\n~~~ poem\nA line\n# 7 on the door\nB line\n~~~\n\nAfter.\n');
+    return getMd();
+  });
+  run('bh26-blank-run', function () {
+    // a long run of blank lines is not scanned again from every line
+    var t0 = Date.now();
+    var out = w.DocModel.wrapUnfenced('Prose.' + new Array(50001).join('\n') + 'More.');
+    return (Date.now() - t0 < 2000 ? 'fast ' : 'SLOW ') + out.split('\n').length;
+  });
   run('bh22-wrap-legacy-blank', function () {
     return w.DocModel.wrapUnfenced('___\n\n> ## Ash Drake\n> *Large dragon*\n> - **AC** 15\n\nAfter.\n');
   });
