@@ -92,7 +92,8 @@
     var s = {};
     SETTINGS.forEach(function (id) { s[id] = $(id).value; });
     var keep = {design: design, settings: s};
-    if (PAGE) keep.page = {pid: PAGE.pid, name: PAGE.name};
+    if (PAGE) keep.page = {pid: PAGE.pid, name: PAGE.name, base: PAGE.base || '',
+                           dirty: typeof pageDirty === 'function' && PAGE.info ? pageDirty() : !!(saved && saved.page && saved.page.dirty)};
     try { localStorage.setItem(STORE, JSON.stringify(keep)); } catch (e) {}
   }
   function settings() {
@@ -1053,8 +1054,11 @@
       add('Name (boxes with one name share what is typed)', 'name', 'text');
       var kindSel = add('Kind', 'kind', 'select', [['line', 'Text line'], ['area', 'Text area (several lines)'],
                                                    ['check', 'Checkbox']], true);
+      var kindBefore = el.kind;
       kindSel.addEventListener('change', function () {
-        commit();
+        // the input handler has set the new kind already: the step undo goes
+        // back to is the field before it, kind and size together
+        var to = el.kind; el.kind = kindBefore; commit(); el.kind = to; kindBefore = to;
         if (el.kind === 'check') { el.w = el.h = round(Math.min(el.w || 0.2, el.h || 0.2)); }
         else if ((el.w || 0) < 0.6) el.w = 2;
         showProps(); render(); commit();
@@ -1233,7 +1237,10 @@
       // its ground: a colour, or (after Customise) a drawn vector filling the
       // panel - the art goes above the last of them, or it would sit underneath
       var bg = -1;
-      design.elements.forEach(function (e, i) { if (e.type !== 'image' && e.fill === where) bg = i; });
+      // (on a spread a ground filling the whole sheet is under both pages)
+      design.elements.forEach(function (e, i) {
+        if (e.type !== 'image' && (e.fill === where || (e.fill === 'sheet' && where !== 'sheet'))) bg = i;
+      });
       var img = {id:'image-' + (++seq), type:'image', fill:where, src:src};
       design.elements.splice(bg + 1, 0, img); choose(img.id); showProps();
     }
@@ -1542,9 +1549,15 @@
         if ((mid < sg.spine_x) !== (a === 'back')) { gone.push(label(el)); return; }
         el = Object.assign({}, el, {anchor: 'front', y: round((el.y || 0) - sg.edge)});
         if ('x' in el) el.x = round(el.x - origin(a)[0]);
-      } else if (on === a) {
-        el = Object.assign({}, el, {anchor: 'front'});
-      } else { gone.push(label(el)); return; }
+      } else {
+        // a page's element goes by where it is drawn too, not the page it was
+        // put on: one dragged across the fold was offered to the wrong side
+        var eb = bbox(el), side = (eb[0] + eb[2] / 2) < sg.spine_x ? 'back' : 'front';
+        if (side !== a) { gone.push(label(el)); return; }
+        var moved = {anchor: 'front'};
+        if ('x' in el && on !== a) moved.x = round(el.x + origin(on)[0] - origin(a)[0]);
+        el = Object.assign({}, el, moved);
+      }
       keep.push(el);
     });
     return {elements: keep, gone: gone};
@@ -1594,18 +1607,34 @@
     pickEl.value = PAGE.name;
     $('wd-page-delete').disabled = !PAGE.name;
   }
+  var draftRecovered = false, openGen = 0;
   function openPage(name, keepLocal) {
     var d = PAGE.info.designs.find(function (x) { return x.name === name; });
     PAGE.name = d ? name : '';
+    PAGE.base = d ? (d.saved || '') : '';
+    openGen++;
     $('wd-page-name').value = PAGE.name;
     savedJSON = d ? JSON.stringify(pageDoc(d)) : null;
+    // a new page's draft brought back from this browser is unsaved work,
+    // though it has no history yet: switching away asked nothing and lost it
+    draftRecovered = !!(keepLocal && !d);
     if (!keepLocal) design = d ? JSON.parse(JSON.stringify(pageDoc(d))) : pageStarter(PAGE.info.geometry);
+    // the address names the page that is open, so a reload opens it again
+    // (the picker left the first one in it, and its draft was thrown away)
+    try {
+      var u = new URL(location.href);
+      if (PAGE.name) u.searchParams.set('design', PAGE.name); else u.searchParams.delete('design');
+      history.replaceState(history.state, '', u.toString());
+    } catch (e) {}
     $('wd-page-status').textContent = d ? (d.saved ? 'Saved ' + d.saved.replace('T', ' ') : '')
                                         : 'Not saved to this book yet';
     fillPicker(); choose(null); showProps();
     return loadFonts().then(function () { render(); resetHistory(); kindUi(); });
   }
-  function pageDirty() { return savedJSON === null ? past.length > 0 : JSON.stringify(pageDoc(design)) !== savedJSON; }
+  function pageDirty() {
+    return savedJSON === null ? (past.length > 0 || draftRecovered)
+                              : JSON.stringify(pageDoc(design)) !== savedJSON;
+  }
   if (PAGE) {
     $('wd-page-kind').addEventListener('change', function () { setKind(this.value); });
     $('wd-art-left').addEventListener('click', function () { useArt('back'); });
@@ -1618,14 +1647,24 @@
     $('wd-page-save').addEventListener('click', function () {
       var st = $('wd-page-status');
       st.textContent = 'Saving…';
+      // what was sent, and which opening of a page it was sent from: an answer
+      // that comes back after another page was opened (or more was drawn)
+      // must not mark that as saved, nor put this page's name on it
+      var sentDoc = JSON.stringify(pageDoc(design)), gen = openGen;
       post(pageBase + '/save', {name: $('wd-page-name').value, was: PAGE.name, design: design}).then(function (res) {
-        if (!res.ok) { st.textContent = res.error; return; }
-        PAGE.info.designs = res.designs; PAGE.name = res.name;
+        if (!res.ok) { if (gen === openGen) st.textContent = res.error; return; }
+        PAGE.info.designs = res.designs;
+        if (gen !== openGen) { fillPicker(); return; }
+        PAGE.name = res.name; PAGE.base = res.saved; draftRecovered = false;
         $('wd-page-name').value = res.name;
-        savedJSON = JSON.stringify(pageDoc(design));
+        savedJSON = sentDoc;
         fillPicker(); persist();
+        try {
+          var u = new URL(location.href); u.searchParams.set('design', res.name);
+          history.replaceState(history.state, '', u.toString());
+        } catch (e) {}
         st.textContent = 'Saved ' + res.saved.replace('T', ' ') + ' · place it with ~~~ page src="' + res.name + '"';
-      }).catch(function () { st.textContent = 'Not saved: no answer from the app.'; });
+      }).catch(function () { if (gen === openGen) st.textContent = 'Not saved: no answer from the app.'; });
     });
     // the page alone at trim size, its boxes live: a handout to download
     $('wd-sheet-btn').addEventListener('click', function () {
@@ -1663,9 +1702,21 @@
         PAGE.info = info;
         $('wd-page-book').value = info.title || '';
         return fetchGeometry().then(function () {
-          var known = info.designs.some(function (x) { return x.name === PAGE.name; });
-          if (!known) PAGE.name = '';
-          return openPage(PAGE.name, !!saved);
+          var d = info.designs.find(function (x) { return x.name === PAGE.name; });
+          if (!d) PAGE.name = '';
+          var keep = !!saved;
+          // the working copy began from an older save than the book now holds
+          // (saved again in another browser): without changes of its own it
+          // simply gives way; with them, the writer chooses
+          // (a copy kept before this was recorded has no `base`: kept, as it was)
+          if (keep && d && saved.page.base !== undefined && (saved.page.base || '') !== (d.saved || '')) {
+            keep = saved.page.dirty
+              ? confirm('The page "' + d.name + '" was saved again elsewhere after your unsaved changes here ' +
+                        'were made.\n\nOK keeps your changes (saving them replaces the newer version). ' +
+                        'Cancel opens the newer saved version.')
+              : false;
+          }
+          return openPage(PAGE.name, keep);
         });
       });
     }

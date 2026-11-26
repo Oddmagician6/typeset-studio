@@ -1238,8 +1238,15 @@ def page_words(design, trim_w=None, trim_h=None):
             side = (0 if x + w / 2 < g['spine_x'] else 1) if is_spread(design) else 0
             return (side, y, x)
     else:
+        def num(v):
+            # a hand-edited "2" beside a 1 made the sort compare str and float
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return 0.0
+
         def key(el):
             side = (0 if el.get('anchor') == 'back' else 1) if is_spread(design) else 0
-            return (side, el.get('y', 0), el.get('x', el.get('cx', 0)))
+            return (side, num(el.get('y', 0)), num(el.get('x', el.get('cx', 0))))
     texts.sort(key=key)
     return ' '.join(' '.join(str(el['text']).split()) for el in texts)

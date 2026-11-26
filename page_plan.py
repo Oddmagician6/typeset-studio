@@ -124,8 +124,9 @@ def rename(text, old, new, key=lambda s: s):
             # the src the reader found, by the same pattern (a value may hold
             # quotes of the other kind: `src="The “Map” Page"`); written back
             # straight
-            m = next((m for m in _ATTR_RE.finditer(line)
-                      if (m.group(1) or m.group(3)) == 'src'), None)
+            # (the last, as the reader takes the last of a repeated attribute)
+            ms = [m for m in _ATTR_RE.finditer(line) if (m.group(1) or m.group(3)) == 'src']
+            m = ms[-1] if ms else None
             if m:
                 lines[i] = line[:m.start()] + f'src="{new}"' + line[m.end():]
                 changed = True

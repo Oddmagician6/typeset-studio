@@ -4048,6 +4048,10 @@ def _page_designs(proj):
     for d in proj.get('page_designs') or []:
         if isinstance(d, dict) and wrap_design.page_name(d.get('name')) \
                 and isinstance(d.get('elements'), list):
+            # an element that isn't an object (a hand-edited `null`) is left
+            # out: the designer threw reading it and the page would not open
+            if not all(isinstance(e, dict) for e in d['elements']):
+                d = dict(d, elements=[e for e in d['elements'] if isinstance(e, dict)])
             out.append(d)
     return out
 
@@ -4093,11 +4097,24 @@ def page_designer_save(pid):
         els = (body.get('design') or {}).get('elements') if isinstance(body.get('design'), dict) else None
         big = _design_too_big([e for e in els if isinstance(e, dict)]) if isinstance(els, list) else ''
         return jsonify(ok=False, error=big or 'That design could not be read.')
-    was = wrap_design.page_name(body.get('was')) or name
+    # read again under the lock, changed and written before it is let go: two
+    # saves at once (two tabs, two designs) each wrote back the book as they
+    # had read it, and the second undid the first
+    with _PROJECT_LOCK:
+        return _page_designer_save(pid, body, name, design)
+
+
+def _page_designer_save(pid, body, name, design):
+    proj = load_project(pid)
+    # `was` is the page the designer had open; '' for a new page, which must
+    # not take an existing page's name (its placements would all print the new
+    # art). A caller that sends no `was` at all saves by name, as before.
+    was = wrap_design.page_name(body.get('was')) if 'was' in body else name
     designs = _page_designs(proj)
     if name != was and wrap_design.find_page(designs, name):
         return jsonify(ok=False, error=f'This book already has a page called "{name}". '
                                        'Pick another name.')
+    was = was or name
     saved = datetime.now().isoformat(timespec='seconds')
     entry = {'name': name, 'elements': design['elements'], 'saved': saved}
     if wrap_design.is_spread(body.get('design')):
@@ -4136,18 +4153,19 @@ def page_designer_save(pid):
 
 @app.route('/page-designer/<pid>/delete', methods=['POST'])
 def page_designer_delete(pid):
-    proj = load_project(pid)
     name = wrap_design.page_name((request.get_json(silent=True) or {}).get('name'))
-    designs = _page_designs(proj)
-    gone = wrap_design.find_page(designs, name)
-    if gone is not None:
-        designs.remove(gone)
-        if designs:
-            proj['page_designs'] = designs
-        else:
-            proj.pop('page_designs', None)
-        proj['updated'] = datetime.now().isoformat(timespec='seconds')
-        save_project_file(pid, proj)
+    with _PROJECT_LOCK:                 # read, changed and written as one (see save)
+        proj = load_project(pid)
+        designs = _page_designs(proj)
+        gone = wrap_design.find_page(designs, name)
+        if gone is not None:
+            designs.remove(gone)
+            if designs:
+                proj['page_designs'] = designs
+            else:
+                proj.pop('page_designs', None)
+            proj['updated'] = datetime.now().isoformat(timespec='seconds')
+            save_project_file(pid, proj)
     return jsonify(ok=True, designs=_page_info(proj)['designs'])
 
 
@@ -4213,9 +4231,21 @@ PLAN_THUMB_DPI = 36
 
 def _plan_numbered(proj):
     """Whether the plan can number pages: nothing generated comes before the
-    first design (front matter, contents, a dedication or other extra)."""
+    first design (front matter, contents, a dedication or other extra), and
+    the style puts no chapter-opening art in (it takes the first page, and
+    every design after it moved one on while the plan still said page 1)."""
+    try:
+        art = engine.chapter_art_src(load_preset(proj.get('preset', '')))
+    except Exception:
+        art = ''
     return (proj.get('front_matter', 'full') == 'none' and not proj.get('include_toc')
-            and not matter.present(proj, 'front'))
+            and not matter.present(proj, 'front') and not art)
+
+
+def _plan_total_known(proj):
+    """Whether the plan's page total is the book's: back matter (an
+    Acknowledgments page, About the Author) is added after the last design."""
+    return not matter.present(proj, 'back')
 
 
 def _plan_data(pid, proj, text=None):
@@ -4227,6 +4257,8 @@ def _plan_data(pid, proj, text=None):
     if not numbered:
         slots = [{'item': i, 'pages': []} for i in range(len(items))]
         pages = None
+    elif not _plan_total_known(proj):
+        pages = None                    # the designs' numbers stand; the total doesn't
     placed = set()
     out = []
     for i, it in enumerate(items):
@@ -4331,9 +4363,13 @@ def page_plan_save(pid):
     return _plan_write(pid, proj, body.get('rev'), build)
 
 
-def _next_page_name(designs, stem):
+def _next_page_name(designs, stem, taken=()):
+    """`stem-n` for the first n no design has and no placement names
+    (`taken`): reusing the name of a deleted design whose fence is still in
+    the manuscript made that old spot print the new page."""
+    taken = {wrap_design.page_name(t) for t in taken}
     n = 1
-    while wrap_design.find_page(designs, f'{stem}-{n}') is not None:
+    while wrap_design.find_page(designs, f'{stem}-{n}') is not None or f'{stem}-{n}' in taken:
         n += 1
     return f'{stem}-{n}'
 
@@ -4352,7 +4388,13 @@ def page_plan_add(pid):
     body = request.get_json(silent=True) or {}
     spread = body.get('kind') == 'spread'
     designs = _page_designs(proj)
-    name = _next_page_name(designs, 'spread' if spread else 'page')
+    try:
+        placed = [it['src'] for it in page_plan.split(
+            _project_manuscript_text(proj, report_import=False)) if it['kind'] == 'page']
+    except Exception:
+        placed = []
+    placed += list((proj.get('page_renames') or {}).keys())
+    name = _next_page_name(designs, 'spread' if spread else 'page', placed)
     at = body.get('at')
     made = {}
 
