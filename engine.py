@@ -6966,14 +6966,24 @@ def make_parchment(path, w=1275, h=1650, seed=74):
                            edge.point(lambda v: v * 0.6))
     tone = tone.point(lambda v: 150 + v * 0.41)
     img = ImageOps.colorize(tone, black='#6e5230', white='#f8f0dc')
-    img.save(path, 'JPEG', quality=86)
+    # written beside it and renamed into place: a start cut off mid-write
+    # must not leave half a JPEG that every later start takes as made
+    tmp = path + '.part'
+    try:
+        img.save(tmp, 'JPEG', quality=86)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     return path
 
 
 def ensure_parchment():
     """The bundled parchment's path in the figure library, made if it is missing."""
     path = os.path.join(FIGURE_DIR, PARCHMENT)
-    if not os.path.exists(path):
+    # made again when missing or unreadable (left half-written by an older
+    # version cut off mid-write): it is the app's own file, never the user's
+    if not os.path.exists(path) or picture_unreadable(path):
         os.makedirs(FIGURE_DIR, exist_ok=True)
         make_parchment(path)
     return path

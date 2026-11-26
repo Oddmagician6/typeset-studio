@@ -464,14 +464,27 @@ SETTINGS_PATH = os.path.join(DATA_DIR, 'settings.json')
 
 
 def load_settings():
+    """The settings, for reading. Anything wrong with the file reads as no
+    settings; a change goes through settings_change(), which never writes over
+    a file it could not read."""
     try:
-        with open(SETTINGS_PATH, encoding='utf-8') as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            return data
+        return _read_settings()
     except (OSError, ValueError):
-        pass
-    return {}
+        return {}
+
+
+def _read_settings():
+    """The settings file as a dict ({} when there is none). Raises OSError
+    when it can't be read and ValueError when it isn't a settings object. A
+    byte-order mark (a file saved by Notepad) is fine."""
+    try:
+        with open(SETTINGS_PATH, encoding='utf-8-sig') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError('settings.json does not hold a settings object')
+    return data
 
 
 def save_settings(data):
@@ -482,6 +495,54 @@ def save_settings(data):
 # runs in its own thread, and its write must not undo a toggle or a deletion
 # written meanwhile.
 _SETTINGS_LOCK = threading.RLock()
+_SETTINGS_LOCK_STALE = 30           # seconds: a lock older than this was left by a crash
+
+
+@contextlib.contextmanager
+def _settings_file_lock(timeout=10):
+    """Held across processes (a second copy of the app shares the data
+    folder): a lock file made with O_EXCL. One left by a crash is taken over
+    once it is older than _SETTINGS_LOCK_STALE."""
+    path = SETTINGS_PATH + '.lock'
+    deadline = time.time() + timeout
+    while True:
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            break
+        except FileExistsError:
+            with contextlib.suppress(OSError):
+                if time.time() - os.path.getmtime(path) > _SETTINGS_LOCK_STALE:
+                    os.remove(path)
+                    continue
+            if time.time() > deadline:
+                raise OSError('settings.json is locked by another copy of the app')
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+
+
+@contextlib.contextmanager
+def settings_change():
+    """Read, change and write settings.json as one step, in this process
+    (threads) and across copies of the app. Yields the settings dict to change
+    in place; it is written only when it changed. A file that can't be read is
+    never written over (OSError reaches the caller); one that isn't valid JSON
+    is kept beside it as settings.json.damaged before a fresh one is written."""
+    with _SETTINGS_LOCK, _settings_file_lock():
+        try:
+            settings = _read_settings()
+        except ValueError:
+            logging.warning('settings.json is damaged; keeping it as settings.json.damaged')
+            shutil.copy2(SETTINGS_PATH, SETTINGS_PATH + '.damaged')
+            settings = {}
+        before = json.dumps(settings, sort_keys=True)
+        yield settings
+        if json.dumps(settings, sort_keys=True) != before:
+            save_settings(settings)
 
 
 def update_checks_on():
@@ -489,9 +550,20 @@ def update_checks_on():
 
 
 def _version_tuple(v):
-    """'v1.10.2' -> (1, 10, 2). Numeric parts only, so 1.10 sorts above 1.9."""
-    parts = re.findall(r'\d+', (v or '').strip().lstrip('vV'))
-    return tuple(int(p) for p in parts[:4]) or (0,)
+    """'v1.10.2' -> (1, 10, 2, 0, 1, 0), so 1.10 sorts above 1.9. A
+    pre-release ('1.14.10rc1', '1.14.10-beta.2') sorts below its final
+    release: its suffix becomes (0, n) where a final release has (1, 0)."""
+    v = (v or '').strip().lstrip('vV')
+    m = re.match(r'(\d+(?:\.\d+){0,3})(.*)$', v)
+    if not m:
+        return (0,)
+    nums = [int(p) for p in m.group(1).split('.')]
+    nums += [0] * (4 - len(nums))
+    rest = m.group(2)
+    if re.search(r'[A-Za-z]', rest):
+        n = re.search(r'\d+', rest)
+        return tuple(nums) + (0, int(n.group()) if n else 0)
+    return tuple(nums) + (1, 0)
 
 
 def is_newer(candidate, current=None):
@@ -567,24 +639,22 @@ def check_for_update(force=False, fetch=None):
     except Exception:
         data = None
     found = _pick_release(data)
-    with _SETTINGS_LOCK:
-        settings = load_settings()
-        if not force and not settings.get('update_check', UPDATE_CHECK_DEFAULT):
-            # turned off while the request was out: off forgets, so this
-            # answer must not be written back after the toggle cleared it
-            return None
-        if not found:
-            # remembered, or every page asked again (and waited) while offline
-            settings['update_failed_at'] = time.time()
-        else:
-            settings.update({'update_checked_at': time.time(), 'update_latest': found[0],
-                             'update_url': found[1]})
-            settings.pop('update_failed_at', None)
-        try:
-            save_settings(settings)
-        except OSError:
-            # a full or locked settings folder: the answer still stands
-            logging.warning('Could not save the update check result', exc_info=True)
+    try:
+        with settings_change() as settings:
+            if not force and not settings.get('update_check', UPDATE_CHECK_DEFAULT):
+                # turned off while the request was out: off forgets, so this
+                # answer must not be written back after the toggle cleared it
+                return None
+            if not found:
+                # remembered, or every page asked again (and waited) while offline
+                settings['update_failed_at'] = time.time()
+            else:
+                settings.update({'update_checked_at': time.time(), 'update_latest': found[0],
+                                 'update_url': found[1]})
+                settings.pop('update_failed_at', None)
+    except OSError:
+        # a full, locked or unreadable settings folder: the answer still stands
+        logging.warning('Could not save the update check result', exc_info=True)
     if not found:
         return None
     latest, url = found
@@ -647,13 +717,11 @@ def _deleted_defaults(name):
 
 
 def _set_deleted_defaults(name, ids):
-    with _SETTINGS_LOCK:
-        settings = load_settings()
+    with settings_change() as settings:
         got = settings.get('deleted_defaults')
         got = got if isinstance(got, dict) else {}
         got[name] = sorted(ids)
         settings['deleted_defaults'] = got
-        save_settings(settings)
 
 
 def _bundled_ids(name):
@@ -670,8 +738,14 @@ def note_default_deleted(name, ident):
     start doesn't copy it back. The user decided (2026-10-06): a delete sticks,
     and "Restore defaults" brings them back."""
     if ident in _bundled_ids(name):
-        with _SETTINGS_LOCK:
-            _set_deleted_defaults(name, _deleted_defaults(name) | {ident})
+        # read inside the lock, so a deletion made by another copy of the app
+        # since this one last looked isn't written away
+        with settings_change() as settings:
+            got = settings.get('deleted_defaults')
+            got = got if isinstance(got, dict) else {}
+            ids = got.get(name) if isinstance(got.get(name), list) else []
+            got[name] = sorted({i for i in ids if isinstance(i, str)} | {ident})
+            settings['deleted_defaults'] = got
 
 
 def restorable_defaults(name):
@@ -699,22 +773,132 @@ def _seed_defaults():
         if os.path.abspath(src) == os.path.abspath(dst) or not os.path.isdir(src):
             continue
         skip = {i + '.json' for i in _deleted_defaults(name)} if name != 'fonts' else set()
+        checked = _seeded_fonts() if name == 'fonts' else set()
         for fn in os.listdir(src):
             s, d = os.path.join(src, fn), os.path.join(dst, fn)
-            if os.path.isfile(s) and not os.path.exists(d) and fn not in skip:
-                # copied under a temporary name and renamed into place, so a
-                # start interrupted mid-copy leaves no half a font or style
-                # that every later start would take as already there
-                tmp = d + '.seeding'
-                try:
-                    shutil.copy2(s, tmp)
-                    os.replace(tmp, d)
-                except OSError:
-                    with contextlib.suppress(OSError):
-                        os.remove(tmp)
+            if not os.path.isfile(s) or fn in skip:
+                continue
+            if name == 'fonts' and fn not in checked and os.path.isfile(d) \
+                    and not _same_file_bytes(s, d):
+                # a font of the user's own under a name a later release ships
+                # (their Andika-Regular.ttf before Early Reader came with one):
+                # theirs is kept under a new name, and the bundled face, which
+                # the bundled styles are drawn in, takes the name
+                _set_aside(d)
+            if not os.path.exists(d):
+                _seed_copy(s, d)
+        if name == 'fonts':
+            _note_seeded_fonts({fn for fn in os.listdir(src)
+                                if os.path.isfile(os.path.join(src, fn))})
+
+
+def _same_file_bytes(a, b):
+    try:
+        if os.path.getsize(a) != os.path.getsize(b):
+            return False
+        with open(a, 'rb') as fa, open(b, 'rb') as fb:
+            return fa.read() == fb.read()
+    except OSError:
+        return True             # can't tell: leave the file alone
+
+
+def _set_aside(path):
+    """Rename a user's file out of the way as `<stem>-own<ext>` (numbered if
+    taken). Never fails the start: on an error the file just stays."""
+    stem, ext = os.path.splitext(path)
+    for n in range(1, 100):
+        new = f'{stem}-own{ext}' if n == 1 else f'{stem}-own{n}{ext}'
+        if os.path.exists(new):
+            continue
+        try:
+            os.rename(path, new)
+            logging.warning('Kept your font %s as %s: a bundled font now has its name',
+                            os.path.basename(path), os.path.basename(new))
+        except OSError:
+            pass
+        return
+
+
+def _seed_copy(s, d):
+    """Copy a bundled file to `d` unless something is there by then. Copied
+    under a temporary name and renamed into place, so a start cut off mid-copy
+    leaves no half a font or style that every later start takes as already
+    there; the rename never replaces a file, so a second copy of the app
+    starting at the same moment can't put the bundled one back over a style
+    the user has edited in the first."""
+    tmp = f'{d}.seeding-{os.getpid()}'
+    try:
+        shutil.copy2(s, tmp)
+        try:
+            os.link(tmp, d)             # fails when d exists, on every system
+        except FileExistsError:
+            pass
+        except OSError:
+            # no hard links here (FAT, some network drives): Windows' rename
+            # refuses an existing target too; elsewhere look first
+            if os.name == 'nt' or not os.path.exists(d):
+                with contextlib.suppress(FileExistsError):
+                    os.rename(tmp, d)
+    except OSError:
+        pass
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+
+
+def _seeded_fonts():
+    """The bundled font file names a start has already put (or found) in the
+    font library: a later difference there is the user's change, not theirs
+    being in the way."""
+    got = load_settings().get('seeded_fonts')
+    return {f for f in got if isinstance(f, str)} if isinstance(got, list) else set()
+
+
+def _note_seeded_fonts(names):
+    if names <= _seeded_fonts():
+        return
+    with contextlib.suppress(OSError):
+        with settings_change() as settings:
+            got = settings.get('seeded_fonts')
+            got = {f for f in got if isinstance(f, str)} if isinstance(got, list) else set()
+            settings['seeded_fonts'] = sorted(got | names)
 
 
 _seed_defaults()
+
+
+PACKAGE_WORK_PREFIX = 'typeset-package-'
+UPLOAD_KEEP_DAYS = 14       # a staged upload outlives any Compose retry or save
+PACKAGE_KEEP_HOURS = 6      # a package build that old was cut off
+
+
+def _sweep_stale(now=None):
+    """Remove what a session left behind: staged uploads (Compose copies a
+    book's files into the project when it is saved; the staged ones were never
+    reclaimed) older than UPLOAD_KEEP_DAYS, and package work folders a forced
+    close left in the temp folder, holding a whole interior PDF."""
+    now = now or time.time()
+    try:
+        for fn in os.listdir(UPLOAD_DIR):
+            path = os.path.join(UPLOAD_DIR, fn)
+            with contextlib.suppress(OSError):
+                if os.path.isfile(path) and now - os.path.getmtime(path) > UPLOAD_KEEP_DAYS * 86400:
+                    os.remove(path)
+    except OSError:
+        pass
+    tmp = tempfile.gettempdir()
+    try:
+        for fn in os.listdir(tmp):
+            path = os.path.join(tmp, fn)
+            with contextlib.suppress(OSError):
+                if (fn.startswith(PACKAGE_WORK_PREFIX) and os.path.isdir(path)
+                        and now - os.path.getmtime(path) > PACKAGE_KEEP_HOURS * 3600):
+                    shutil.rmtree(path, ignore_errors=True)
+    except OSError:
+        pass
+
+
+_sweep_stale()
 
 # the engine resolves font (and scene-break ornament) filenames against the same
 # writable font library, and cover-art assets against the cover asset dir
@@ -2477,13 +2661,17 @@ def about():
 def about_updates():
     """Turn the version check on or off. Off also forgets what it learned."""
     on = request.form.get('update_check') == '1'
-    with _SETTINGS_LOCK:
-        settings = load_settings()
-        settings['update_check'] = on
-        if not on:
-            for k in ('update_checked_at', 'update_latest', 'update_url', 'update_failed_at'):
-                settings.pop(k, None)
-        save_settings(settings)
+    try:
+        with settings_change() as settings:
+            settings['update_check'] = on
+            if not on:
+                for k in ('update_checked_at', 'update_latest', 'update_url', 'update_failed_at'):
+                    settings.pop(k, None)
+    except OSError:
+        logging.warning('Could not save the update setting', exc_info=True)
+        flash('Could not save that setting: settings.json could not be read or written. '
+              'Nothing was changed.')
+        return redirect(url_for('about'))
     flash('Update checks are on. Typeset Studio will look once a day.' if on else
           'Update checks are off. Nothing leaves this machine.')
     return redirect(url_for('about'))
@@ -5834,6 +6022,18 @@ def _history_folder(pid):
     return os.path.join(HISTORY_DIR, secure_filename(pid))
 
 
+def _snapshot_stamps(folder):
+    """Every snapshot stamp with a file in the folder, read or not: pruning and
+    picking a free stamp go by the files, so one that can't be read just now
+    is neither deleted as unknown nor written over."""
+    stamps = set()
+    for fn in os.listdir(folder) if os.path.isdir(folder) else []:
+        m = _SNAP_RE.match(fn)
+        if m:
+            stamps.add(m.group(1))
+    return stamps
+
+
 def list_snapshots(pid):
     """Every kept snapshot of a project's manuscript, newest first."""
     folder = _history_folder(pid)
@@ -5866,13 +6066,13 @@ def _thin_snapshots(pid):
     neither well.
     """
     folder = _history_folder(pid)
-    snaps = sorted((s['stamp'] for s in list_snapshots(pid)), reverse=True)
+    snaps = sorted(_snapshot_stamps(folder), reverse=True)
     now = datetime.now()
     keep, seen = [], set()
     for stamp in snaps:
         when = datetime.strptime(stamp, '%Y%m%d-%H%M%S')
         age = (now - when).total_seconds()
-        if age <= 3600:
+        if age <= 3600:                 # (negative after the clock went back)
             bucket = ('minute', stamp)                    # keep them all
         elif age <= 86400:
             bucket = ('hour', when.strftime('%Y%m%d-%H'))
@@ -5924,19 +6124,37 @@ def snapshot_manuscript(pid, text, reason='edit', force=False):
             if not force:
                 age = (datetime.now()
                        - datetime.strptime(newest['stamp'], '%Y%m%d-%H%M%S')).total_seconds()
-                if age < SNAPSHOT_GAP:
+                # a newest snapshot "in the future" (the clock went back an
+                # hour) doesn't hold every later one off until it is reached
+                if 0 <= age < SNAPSHOT_GAP:
                     return ''
         # The stamp is the identity a restore is asked for by, so it has to be
         # unique: two snapshots in the same second (an autosave and a forced copy
         # before a restore) would otherwise both answer to it, and a restore could
         # hand back the wrong one. Step forward a second until it is free.
-        taken = {s['stamp'] for s in existing}
-        when = datetime.now()
-        while when.strftime('%Y%m%d-%H%M%S') in taken:
-            when += timedelta(seconds=1)
-        stamp = when.strftime('%Y%m%d-%H%M%S')
+        # A second copy of the app has its own _HISTORY_LOCK, so a stamp is
+        # also claimed on disk (O_EXCL) and the folder looked at again once
+        # it is held: its file is there before its claim is let go.
         reason = re.sub(r'\W+', '', reason) or 'edit'
-        _atomic_write_text(os.path.join(folder, f'{stamp}-{reason}.md'), text)
+        when = datetime.now()
+        while True:
+            stamp = when.strftime('%Y%m%d-%H%M%S')
+            when += timedelta(seconds=1)
+            if stamp in _snapshot_stamps(folder):
+                continue
+            claim = os.path.join(folder, f'.{stamp}.claim')
+            try:
+                os.close(os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            except FileExistsError:
+                continue
+            try:
+                if stamp in _snapshot_stamps(folder):
+                    continue
+                _atomic_write_text(os.path.join(folder, f'{stamp}-{reason}.md'), text)
+                break
+            finally:
+                with contextlib.suppress(OSError):
+                    os.remove(claim)
         _thin_snapshots(pid)
         return stamp
 
@@ -6647,7 +6865,9 @@ def build_print_package(proj, scope='print'):
     pdir = 'print/' if publish else ''
     edir = 'ebook/'
 
-    work = tempfile.mkdtemp()
+    # named, so a start after a forced close can find and remove one this
+    # process never got to (_sweep_stale)
+    work = tempfile.mkdtemp(prefix=PACKAGE_WORK_PREFIX)
     try:
         files = {}
         interior = os.path.join(work, f'{base}-interior.pdf')
@@ -7128,9 +7348,36 @@ def _free_port(preferred=5050):
     return preferred
 
 
-def _serve(port):
+def _bind_port(preferred=5050):
+    """A listening socket on the preferred port, else one of the next nine,
+    else any: bound here and kept, so two copies started together can't both
+    find 5050 free and the slower one open the faster one's pages (probing a
+    port and letting it go left that gap). Exclusive on Windows, where
+    SO_REUSEADDR would let a second copy bind the same port."""
+    import socket
+    for p in [preferred] + [preferred + i for i in range(1, 10)] + [0]:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            s.bind(('127.0.0.1', p))
+            s.listen(128)
+            return s
+        except OSError:
+            s.close()
+    raise OSError('no free port for Typeset Studio')
+
+
+def _server_on(sock):
+    """The app's server on a socket _bind_port() holds."""
+    from werkzeug.serving import make_server
+    return make_server('127.0.0.1', sock.getsockname()[1], app, threaded=True,
+                       fd=sock.fileno())
+
+
+def _serve(sock):
     """Run the server (no reloader) — used as the background thread for the window."""
-    app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False, threaded=True)
+    _server_on(sock).serve_forever()
 
 
 def _want_window():
@@ -7201,9 +7448,10 @@ if __name__ == '__main__':
         # native window: serve in a background thread, show the app in an OS
         # webview on the main thread. Closing the window quits (server is a
         # daemon thread). Falls back to the browser if the window can't start.
-        port = _free_port(5050)
+        sock = _bind_port(5050)
+        port = sock.getsockname()[1]
         url = f'http://127.0.0.1:{port}/'
-        threading.Thread(target=_serve, args=(port,), daemon=True).start()
+        threading.Thread(target=_serve, args=(sock,), daemon=True).start()
         try:
             import webview
             win = webview.create_window('Typeset Studio', url,
@@ -7229,6 +7477,16 @@ if __name__ == '__main__':
         # choice through TS_PORT rather than choosing again, so a restart can't
         # wander to a different port from the one the browser was opened on.
         dev = not IS_FROZEN
+        if not dev:
+            # no reloader: the port is held from the moment it is chosen
+            sock = _bind_port(5050)
+            port = sock.getsockname()[1]
+            if port != 5050:
+                print(f'Port 5050 is in use (another copy of Typeset Studio?), '
+                      f'so this one is at http://127.0.0.1:{port}/')
+            threading.Timer(1.0, _open_browser, args=(port,)).start()
+            _server_on(sock).serve_forever()
+            sys.exit(0)
         if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
             port = int(os.environ.get('TS_PORT') or _free_port(5050))
             os.environ['TS_PORT'] = str(port)

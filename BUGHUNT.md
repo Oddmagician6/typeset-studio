@@ -106,6 +106,15 @@ Code the first eight sections didn't cover.
 | 19 | Ornaments & matter end to end | `ornaments.py`, `matter.py` and their readers in PDF and EPUB | Matter missing or reordered between outputs, ornament size/position, page parity, heads and folios on matter pages |
 | 20 | Fonts, glyphs & unusual text | Font registration and embedding, text measurement (Python and `wrap_text.js`), smart quotes | Missing glyphs with no warning, JS/Python measurement mismatch, wrong apostrophes, case changes |
 
+### Round 5 (started 2026-11-25, after round 4 merge)
+
+| # | Section | Main files | What to look for |
+|---|---|---|---|
+| 21 | Page designer & Page Plan UI | `/page-designer/*` routes, `wrap_design.py` and `wrap_designer.js` page mode, `page_plan.html`, `page_plan.py` | Designs lost on rename/delete, spreads on the wrong side, plan drifting from the PDF, PDF vs fixed EPUB placement |
+| 22 | Stat blocks & game blocks | `statblock.py`, block handling in `manuscript.py`, `engine.py`, `epub.py`, doc model | Fields dropped or misplaced, wrong modifiers, PDF/EPUB differences, unterminated blocks, Homebrewery variants |
+| 23 | EPUB validity & accessibility | `epub.py`, `fixed_epub.py`, nav/opf generation | epubcheck errors (ids, links, manifest, metadata, XHTML), alt text, lang, landmarks, page-list |
+| 24 | App startup, data dir & settings | Startup and seeding, `settings.json`, update check, pruning and housekeeping, frozen paths | First-run/upgrade clobbering user files, settings corruption, version compare, pruning in-use files |
+
 ## After each section
 
 1. **Triage.** Claude sorts every finding as confirmed, false positive or needs a repro, and gives the user a short list.

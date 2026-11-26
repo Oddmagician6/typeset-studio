@@ -40,13 +40,12 @@ try:
 except Exception:
     APP_VERSION = '0.0.0'
 
-datas = [
-    ('templates', 'templates'),
-    ('static', 'static'),
-    ('sample', 'sample'),
-    ('presets', 'presets'),
-    ('covers', 'covers'),
-    ('fonts', 'fonts'),
+# Only files git tracks: a used checkout also holds uploaded cover art
+# (covers/assets/), user styles and fonts, which must never reach an installer.
+sys.path.insert(0, os.path.abspath('.'))
+from bundle_files import tracked_datas
+datas = tracked_datas(['templates', 'static', 'sample', 'presets', 'covers', 'fonts'])
+datas += [
     ('app.ico', '.'),
     ('VERSION', '.'),        # the About page reports the build it is running
 ]

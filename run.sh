@@ -40,8 +40,20 @@ if [ ! -x ".venv/bin/python" ]; then
     echo "On Debian/Ubuntu: sudo apt install python3-venv"
     exit 1
   fi
-  .venv/bin/python -m pip install --upgrade pip >/dev/null
-  .venv/bin/pip install -r requirements.txt
+fi
+
+# The marker is written only once the requirements installed, so a first run
+# cut off (offline, Ctrl-C) tries again next time instead of starting an app
+# whose packages never arrived.
+if [ ! -f ".venv/deps-installed" ]; then
+  echo "Installing the packages Typeset Studio needs..."
+  .venv/bin/python -m pip install --upgrade pip >/dev/null || true
+  if ! .venv/bin/pip install -r requirements.txt; then
+    echo
+    echo "The packages could not be installed. Check the internet connection and run this file again."
+    exit 1
+  fi
+  echo ok > .venv/deps-installed
 fi
 
 cat <<'MSG'
