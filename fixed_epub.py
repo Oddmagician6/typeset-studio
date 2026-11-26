@@ -293,20 +293,35 @@ def words_html(design, g, fonts, shift_x=0.0, page_w=None):
     import wrap_design as W
     k = PX / 72.0
     out = []
-    for el in design.get('elements', []):
+    # In reading order, top to bottom then left to right: the layer list is
+    # the order they were added, and a reader follows the markup. Each keeps
+    # its layer as a z-index, so the page looks as it did.
+    texts = []
+    for z, el in enumerate(design.get('elements', []), start=1):
         if not isinstance(el, dict) or el.get('type') != 'text' or el.get('hidden') \
                 or el.get('font') not in fonts or not str(el.get('text', '')):
             continue
+        x, y, w, _ = W.el_rect(g, el)
+        texts.append((round(y, 3), round(x, 3), z, el))
+    texts.sort(key=lambda t: t[:3])
+    for _y, _x, z, el in texts:
         fam, asc, desc = fonts[el['font']]
         x, y, w, _ = W.el_rect(g, el)
+        layout = W.text_layout(el)
         if page_w and not el.get('rotate'):      # a turned box: kept on both, clipped
+            # where the words are drawn, not just the box: a right-aligned or
+            # centred line in a box of no width runs out to the left of it
+            reach = [(dx, dx + W.line_width(line, el)) for line, dx, _b, _w in layout
+                     if line.strip()]
+            lo = min([0.0] + [a / 72.0 for a, _ in reach])
+            hi = max([w] + [b / 72.0 for _, b in reach])
             left = x - g['bleed'] - shift_x
-            if left >= page_w or left + w <= 0:
+            if left + lo >= page_w or left + hi <= 0:
                 continue
         X, Y = (x - g['bleed'] - shift_x) * PX, (y - g['bleed']) * PX
         size = el['size'] * k
         spans = []
-        for line, dx, base, words in W.text_layout(el):
+        for line, dx, base, words in layout:
             top = base * k - size * asc / 1000.0
             for run, rx in (words or [(line, dx)]):
                 if run:
@@ -314,7 +329,8 @@ def words_html(design, g, fonts, shift_x=0.0, page_w=None):
                                  f'{html.escape(run, quote=False)}</span>')
         if not spans:
             continue
-        style = [f'left:{_num(X)}px', f'top:{_num(Y)}px', f"font-family:'{fam}'",
+        style = [f'left:{_num(X)}px', f'top:{_num(Y)}px', f'z-index:{z}',
+                 f"font-family:'{fam}'",
                  f'font-size:{_num(size)}px',
                  f'line-height:{_num(size * (asc + desc) / 1000.0)}px',
                  f'color:{el.get("color") or "#000000"}']
@@ -386,7 +402,7 @@ def _render_art(design, trim_w, trim_h, tmpdir, stem, background=None):
 
 
 def _opf(uid, meta, manifest, spine, modified, vw, vh):
-    from epub import _text_to_html
+    from epub import _text_to_html, dc_title_creator_date
     items = '\n'.join(
         f'    <item id="{i["id"]}" href="{i["href"]}" media-type="{i["type"]}"'
         + (f' properties="{i["props"]}"' if i.get('props') else '') + '/>'
@@ -407,10 +423,8 @@ def _opf(uid, meta, manifest, spine, modified, vw, vh):
             ' unique-identifier="uid" xml:lang="en">\n'
             '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
             f'    <dc:identifier id="uid">{uid}</dc:identifier>\n'
-            f'    <dc:title>{_text_to_html(meta.get("title") or "Untitled")}</dc:title>\n'
-            f'    <dc:creator>{_text_to_html(meta.get("author", ""))}</dc:creator>\n'
+            + dc_title_creator_date(meta) +
             '    <dc:language>en</dc:language>\n'
-            f'    <dc:date>{_text_to_html(meta.get("year", ""))}</dc:date>\n'
             f'    <meta property="dcterms:modified">{modified}</meta>\n'
             '    <meta property="rendition:layout">pre-paginated</meta>\n'
             '    <meta property="rendition:orientation">auto</meta>\n'
@@ -504,10 +518,13 @@ def build(ms, preset, out_path, meta):
                 d = pg['design']
                 if id(d) not in art:
                     stem = f'art{len(art) + 1:03d}'
+                    # a failure stops the export with the page it was on: caught
+                    # here it made a blank page that no check could see
                     try:
                         paths = _render_art(d, tw, th, tmp, stem, background)
-                    except Exception:
-                        paths = []
+                    except Exception as exc:
+                        raise RuntimeError(f'The art for page {n} ("{pg.get("name") or "page"}") '
+                                           f'could not be drawn: {exc}') from exc
                     hrefs = []
                     for path in paths:
                         h = 'images/' + os.path.basename(path)
@@ -520,12 +537,17 @@ def build(ms, preset, out_path, meta):
                 img = hrefs[1 if pg['half'] == 'right' and len(hrefs) > 1 else 0] \
                     if hrefs else ''
                 alt = html.escape(pg['alt'], quote=True)
-                body = ([f'<img class="art" src="{img}" width="{vw}" height="{vh}" '
-                         f'style="width:{vw}px;height:{vh}px" alt="{alt}"'
-                         + ('' if alt else ' role="presentation"') + '/>'] if img else [])
                 g = W.design_geometry(d, tw, th)
-                body += words_html(d, g, fonts, shift_x=tw if pg['half'] == 'right' else 0.0,
+                words = words_html(d, g, fonts, shift_x=tw if pg['half'] == 'right' else 0.0,
                                    page_w=tw if pg['half'] else None)
+                # undescribed art is decorative only beside the page's own
+                # words; a picture-only page without a description is left
+                # unmarked, so the EPUB check names it rather than hiding it
+                role = '' if alt or not words else ' role="presentation"'
+                body = ([f'<img class="art" src="{img}" width="{vw}" height="{vh}" '
+                         f'style="width:{vw}px;height:{vh}px" alt="{alt}"{role}/>']
+                        if img else [])
+                body += words
                 first_href = first_href or href
             docs[href] = _page_doc(f'Page {n}', vw, vh, body)
             manifest.append({'id': pid, 'href': href, 'type': 'application/xhtml+xml'})
@@ -534,7 +556,8 @@ def build(ms, preset, out_path, meta):
 
         uid = 'urn:uuid:' + str(uuid.uuid4())
         modified = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        with zipfile.ZipFile(out_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+        from epub import EpubZip
+        with EpubZip(out_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
             zf.writestr(zipfile.ZipInfo('mimetype'), 'application/epub+zip',
                         compress_type=zipfile.ZIP_STORED)
             from epub import _container_xml

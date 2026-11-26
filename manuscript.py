@@ -384,8 +384,11 @@ def _inline(text, smartquotes=True):
     # aborts the whole PDF build in ReportLab's parser, and makes the EPUB's
     # XHTML invalid. Matching the triple marker up front keeps the tags nested.
     text = re.sub(r'\*\*\*(?!\s)(.+?)(?<!\s)\*\*\*', r'<b><i>\1</i></b>', text)
-    text = re.sub(r'___(?!\s)(.+?)(?<!\s)___', r'<b><i>\1</i></b>', text)
-    text = re.sub(r'\*\*(.+?)\*\*', _emph_span('b'), text)
+    # the later passes stay between the tags the earlier ones made: a `**`
+    # inside a bold-italic span pairing with one after it (`***bold **a*** b**`)
+    # crossed the tags again, which no XHTML parser (or ReportLab) accepts
+    text = _sub_between_tags(r'___(?!\s)(.+?)(?<!\s)___', r'<b><i>\1</i></b>', text)
+    text = _sub_between_tags(r'\*\*(.+?)\*\*', _emph_span('b'), text)
     # The italic passes run on text that already carries <b>…</b>, and an
     # unpaired asterisk earlier in the line would otherwise pair with one inside
     # a bold span — `a*b **a *b* c**` giving `a<i>b <b>a *b</i> c</b>`. Emphasis

@@ -290,6 +290,41 @@ def _markup_to_html(text):
     return _resolve_anchors(_ms_strip_index(text))
 
 
+# Characters XML 1.0 forbids outright (C0 controls but tab/newline/CR, the two
+# non-characters, lone surrogates). One pasted into the title or About the
+# Author made content.opf or a page unreadable to every reader; the manuscript
+# parser drops them, but book settings never pass through it.
+_XML_ILLEGAL_RE = re.compile('[\x00-\x08\x0b\x0c\x0e-\x1f￾￿\ud800-\udfff]')
+
+
+def xml_safe(text):
+    return _XML_ILLEGAL_RE.sub('', text)
+
+
+_IMG_TAG_RE = re.compile(r'<img\b[^>]*>')
+_ALT_RE = re.compile(r'\balt="([^"]*)"')
+
+
+class EpubZip(zipfile.ZipFile):
+    """The EPUB's zip: every text document written into it is made XML-safe,
+    and every picture a page shows without a text alternative (an empty alt
+    that isn't marked decorative) is noted in `unlabelled`, so the OPF only
+    claims what the book has."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.unlabelled = []
+
+    def writestr(self, zinfo_or_arcname, data, *args, **kwargs):
+        if isinstance(data, str):
+            data = xml_safe(data)
+            for tag in _IMG_TAG_RE.findall(data):
+                m = _ALT_RE.search(tag)
+                if 'role="presentation"' not in tag and not (m and m.group(1).strip()):
+                    self.unlabelled.append(tag)
+        return super().writestr(zinfo_or_arcname, data, *args, **kwargs)
+
+
 def _text_to_html(text):
     """Escape a raw plain-text string for XHTML: a title, a byline, a heading.
 
@@ -406,8 +441,8 @@ def _style_css(preset=None):
         except (TypeError, ValueError):
             pt = 0.0
         em = round(pt / body_pt, 3) if pt > 0 and body_pt > 0 else 1
-        rules.append('%s { font-size: %sem; text-align: %s; %s margin: 1.2em 0 0.4em; }'
-                     % (tag, f'{em:g}', align,
+        rules.append('%s, .hd-%s { font-size: %sem; text-align: %s; %s margin: 1.2em 0 0.4em; }'
+                     % (tag, key, f'{em:g}', align,
                         _weight.get(hd.get(key + '_style'), _weight[dflt])))
     return '\n'.join(rules) + '\n' + """\
 body {
@@ -704,10 +739,12 @@ def _part_xhtml(part_num, title, preset):
     return _xhtml(title or f'Part {part_num}', body)
 
 
-def _cover_xhtml(img_filename):
+def _cover_xhtml(img_filename, title=''):
+    alt = html.escape(f'Cover: {title.strip()}' if (title or '').strip() else 'Cover',
+                      quote=True)
     body = (
         '<div class="cover-page">\n'
-        f'  <img src="{img_filename}" alt="Cover"/>\n'
+        f'  <img src="{img_filename}" alt="{alt}"/>\n'
         '</div>\n'
     )
     return _xhtml('Cover', body)
@@ -779,7 +816,12 @@ def _figure_html(caption_paras, attrs, figures):
     """<figure> for a ~~~ figure block. `figures` maps src -> in-zip href."""
     src   = (attrs.get('src', '') or '').strip()
     href  = (figures or {}).get(src)
-    alt   = html.escape(attrs.get('alt', '') or src, quote=True)
+    # its own alt, else its caption's words; never the file name, which says
+    # nothing and passed every check. With neither it is left empty, and the
+    # EPUB check names it.
+    alt = (attrs.get('alt', '') or '').strip() or html.unescape(_strip_tags(
+        ' '.join(t for _, t in caption_paras if t))).strip()
+    alt   = html.escape(alt, quote=True)
     width = (attrs.get('width', '') or '').strip()
     style = ''
     if width:
@@ -1049,6 +1091,7 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
     opened         = False
     no_indent_next = False
     n_head         = 0              # heading ids: see chapter_headings
+    head_level     = 1              # the chapter title is the h1
 
     for block in chapter.get('blocks', []):
         kind = block[0]
@@ -1060,8 +1103,13 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
             no_indent_next = True
         elif kind in _HEAD_LEVEL:
             n_head += 1
-            tag = f'h{_HEAD_LEVEL[kind]}'
-            lines.append(f'  <{tag} id="h{n_head}">{_markup_to_html(val)}</{tag}>')
+            # never deeper than one below the heading before it: a `###` as a
+            # chapter's first heading went h1 -> h3, a level a screen reader's
+            # heading list skips. Its kind stays in the class, which styles it.
+            head_level = min(_HEAD_LEVEL[kind], head_level + 1)
+            tag = f'h{head_level}'
+            lines.append(f'  <{tag} id="h{n_head}" class="hd-{kind}">'
+                         f'{_markup_to_html(val)}</{tag}>')
             no_indent_next = True
         elif kind == 'doc_block':
             meta   = block[2] if len(block) > 2 else {}
@@ -1529,7 +1577,7 @@ def check(path):
     return out
 
 
-def _a11y_meta(manifest_items):
+def _a11y_meta(manifest_items, all_alt=True):
     """Accessibility metadata for the OPF.
 
     This is what ACE (and, increasingly, the retailers) look for, and what the
@@ -1543,25 +1591,41 @@ def _a11y_meta(manifest_items):
     lines = []
     for m in modes:
         lines.append(f'    <meta property="schema:accessMode">{m}</meta>')
-    # text alone is enough to read the whole book, images being illustrative
-    lines.append('    <meta property="schema:accessModeSufficient">textual</meta>')
+    # text alone is enough to read the whole book, images being illustrative -
+    # but only when every picture has its words: one shown without them may
+    # carry what the text doesn't
+    text_enough = all_alt or not has_images
+    lines.append('    <meta property="schema:accessModeSufficient">'
+                 + ('textual' if text_enough else 'textual,visual') + '</meta>')
     for feature in ('structuralNavigation', 'tableOfContents', 'readingOrder'):
         lines.append(f'    <meta property="schema:accessibilityFeature">{feature}</meta>')
-    if has_images:
+    if has_images and all_alt:
         lines.append('    <meta property="schema:accessibilityFeature">alternativeText</meta>')
     # no known hazards: no flashing, sound or motion in a typeset book
     lines.append('    <meta property="schema:accessibilityHazard">none</meta>')
-    summary = ('Reflowable text with a full navigation document and reading order. '
-               'All illustrations carry alternative text.' if has_images else
-               'Reflowable text with a full navigation document and reading order.')
+    summary = 'Reflowable text with a full navigation document and reading order.'
+    if has_images:
+        summary += (' All illustrations carry alternative text.' if all_alt else
+                    ' Some illustrations have no text alternative.')
     lines.append(f'    <meta property="schema:accessibilitySummary">{summary}</meta>')
     return '\n'.join(lines) + '\n'
 
 
-def _content_opf(uid, meta, manifest_items, spine_items, modified):
-    title  = meta.get('title', 'Untitled')
-    author = meta.get('author', '')
-    year   = meta.get('year', '')
+def dc_title_creator_date(meta):
+    """The dc:title, dc:creator and dc:date lines of an OPF. EPUB wants every
+    Dublin Core element it carries to have a value: an empty title is
+    'Untitled', and a creator or date left blank is left out, not written
+    empty (which epubcheck rejects)."""
+    title = xml_safe(str(meta.get('title') or '')).strip() or 'Untitled'
+    out = f'    <dc:title>{_text_to_html(title)}</dc:title>\n'
+    for tag, key in (('creator', 'author'), ('date', 'year')):
+        val = xml_safe(str(meta.get(key) or '')).strip()
+        if val:
+            out += f'    <dc:{tag}>{_text_to_html(val)}</dc:{tag}>\n'
+    return out
+
+
+def _content_opf(uid, meta, manifest_items, spine_items, modified, all_alt=True):
 
     def _item(i):
         props = f' properties="{i["props"]}"' if i.get('props') else ''
@@ -1584,12 +1648,10 @@ def _content_opf(uid, meta, manifest_items, spine_items, modified):
         ' unique-identifier="uid" xml:lang="en">\n'
         '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
         f'    <dc:identifier id="uid">{uid}</dc:identifier>\n'
-        f'    <dc:title>{_text_to_html(title)}</dc:title>\n'
-        f'    <dc:creator>{_text_to_html(author)}</dc:creator>\n'
+        + dc_title_creator_date(meta) +
         '    <dc:language>en</dc:language>\n'
-        f'    <dc:date>{_text_to_html(year)}</dc:date>\n'
         f'    <meta property="dcterms:modified">{modified}</meta>\n'
-        + _a11y_meta(manifest_items) +
+        + _a11y_meta(manifest_items, all_alt) +
         cover_meta_xml +
         '  </metadata>\n'
         '  <manifest>\n'
@@ -1709,6 +1771,23 @@ _FIG_MIME = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
              '.gif': 'image/gif', '.svg': 'image/svg+xml'}
 
 
+def _as_png(path):
+    """A PNG copy of a picture, in the build's scratch folder, or None."""
+    import tempfile
+    try:
+        from PIL import Image
+        tmp = tempfile.mkdtemp(prefix='ts-epub-fig-')
+        _tmpdirs = getattr(_BUILD, 'tmpdirs', None)
+        if _tmpdirs is not None:
+            _tmpdirs.append(tmp)
+        out = os.path.join(tmp, 'figure.png')
+        with Image.open(path) as im:
+            im.save(out, 'PNG')
+        return out
+    except Exception:
+        return None
+
+
 def _collect_figures(chapters, extra=()):
     """Find every ~~~ figure src="…" that resolves to a real file.
 
@@ -1728,10 +1807,17 @@ def _collect_figures(chapters, extra=()):
         if not os.path.exists(path):
             return                                # _figure_html writes a note
         ext = os.path.splitext(path)[1].lower()
+        if ext not in _FIG_MIME:
+            # a WebP (or anything else) went in under its own bytes, labelled
+            # image/png: converted instead, or left out (a "missing" note)
+            path = _as_png(path)
+            if not path:
+                return
+            ext = '.png'
         n = len(found) + 1
         found[src] = {'path': path, 'href': f'images/fig{n:03d}{ext}',
                       'id': f'fig{n:03d}',
-                      'mime': _FIG_MIME.get(ext, 'image/png')}
+                      'mime': _FIG_MIME[ext]}
 
     for ch in chapters:
         for block in ch.get('blocks', []):
@@ -1782,6 +1868,11 @@ def _build_epub(manuscript, preset, out_path, meta):
         legacy = os.path.join(FONT_DIR, scene_src)
         if os.path.exists(legacy):
             scene_src = legacy
+    # the scene-break picture only when the book breaks a scene: shipped
+    # unused, it sat unreferenced in the manifest and made a text-only book
+    # claim a visual access mode
+    if scene_src and not any(b[0] == 'scene' for ch in chapters for b in ch.get('blocks', [])):
+        scene_src = ''
     figures  = _collect_figures(chapters, extra=[s for s in (art_src, scene_src) if s])
     fig_href = {src: f['href'] for src, f in figures.items()}
     scene_href = fig_href.get(scene_src, '') if scene_src else ''
@@ -1891,13 +1982,11 @@ def _build_epub(manuscript, preset, out_path, meta):
                                 'type': 'application/xhtml+xml'})
         spine_items.append('bookindex')
 
-    with zipfile.ZipFile(out_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
+    with EpubZip(out_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
         # mimetype must be first and stored uncompressed
         zf.writestr(zipfile.ZipInfo('mimetype'), 'application/epub+zip',
                     compress_type=zipfile.ZIP_STORED)
         zf.writestr('META-INF/container.xml', _container_xml())
-        zf.writestr('OEBPS/content.opf',
-                    _content_opf(uid, meta, manifest_items, spine_items, modified))
         zf.writestr('OEBPS/nav.xhtml',
                     _nav_xhtml(chapters, has_cover, has_front, preset, meta=meta,
                                has_notes=has_notes, has_index=has_index))
@@ -1909,7 +1998,7 @@ def _build_epub(manuscript, preset, out_path, meta):
 
         if has_cover:
             zf.write(cover_src, f'OEBPS/{cover_img_fn}')
-            zf.writestr('OEBPS/cover.xhtml', _cover_xhtml(cover_img_fn))
+            zf.writestr('OEBPS/cover.xhtml', _cover_xhtml(cover_img_fn, meta.get('title') or ''))
 
         for f in figures.values():
             zf.write(f['path'], f'OEBPS/{f["href"]}')
@@ -1957,5 +2046,10 @@ def _build_epub(manuscript, preset, out_path, meta):
         if has_index:
             zf.writestr('OEBPS/bookindex.xhtml',
                         _index_xhtml(chapters, ix_marks, meta, preset))
+
+        # last: its accessibility claims depend on the pages written above
+        zf.writestr('OEBPS/content.opf',
+                    _content_opf(uid, meta, manifest_items, spine_items, modified,
+                                 all_alt=not zf.unlabelled))
 
     return out_path
