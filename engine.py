@@ -3658,6 +3658,44 @@ class BookDoc(BaseDocTemplate):
                     y = self._ph - inset - s if fy else inset
                     _draw_ornament(canv, corner['id'], x, y, s, s, color=ink, fx=fx, fy=fy)
 
+    def _fit_head(self, txt, size, tw):
+        """A running head cut to the text measure: a long title or chapter
+        name is cut at a word, with an ellipsis (it was centred whole and ran
+        off the trim), and a word too long alone is cut within it.
+
+        Worked out once per label and measure, and by halving rather than one
+        word or letter at a time: a title thousands of characters long was
+        measured whole again for every letter on every page. A longer cut is
+        never narrower, so the halving finds what the loops found."""
+        key = (txt, size, tw)
+        memo = self.__dict__.setdefault('_head_fits', {})
+        if key in memo:
+            return memo[key]
+        font = self.head_font
+
+        def fits(t):
+            return stringWidth(t, font, size) <= tw
+
+        def longest(lo, hi, ok):
+            # the largest n in [lo, hi] with ok(n), or lo if there is none
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if ok(mid):
+                    lo = mid
+                else:
+                    hi = mid - 1
+            return lo
+
+        out = txt
+        if not fits(txt):
+            words = txt.split()
+            n = longest(1, len(words), lambda j: fits(' '.join(words[:j]) + '…'))
+            base = ' '.join(words[:n]).rstrip(',;:.—–-')
+            k = longest(0, len(base), lambda j: fits(base[:j] + '…'))
+            out = base[:k] + '…'
+        memo[key] = out
+        return out
+
     def _furniture(self, canv, doc):
         p = self.preset
         page = canv.getPageNumber()
@@ -3689,17 +3727,7 @@ class BookDoc(BaseDocTemplate):
             txt = self._running_head(recto)
             if rh.get('caps'):
                 txt = txt.upper()
-            # a long title or chapter name is cut at a word, with an ellipsis,
-            # to the text measure: it was centred whole and ran off the trim
-            if stringWidth(txt, self.head_font, rh['size']) > tw:
-                words = txt.split()
-                while len(words) > 1 and stringWidth(
-                        ' '.join(words) + '…', self.head_font, rh['size']) > tw:
-                    words.pop()
-                txt = ' '.join(words).rstrip(',;:.—–-') + '…'
-                while len(txt) > 1 and stringWidth(txt, self.head_font, rh['size']) > tw:
-                    txt = txt[:-2] + '…'
-            canv.drawCentredString(cx, y, txt)
+            canv.drawCentredString(cx, y, self._fit_head(txt, rh['size'], tw))
 
         self._draw_footnotes(canv, page)
 

@@ -4,6 +4,7 @@ Stdlib-only (zipfile, uuid, datetime) — no extra dependencies.
 Reuses the same parsed manuscript structure as engine.py.
 """
 
+import bisect
 import html
 import os
 import re
@@ -239,14 +240,18 @@ def _apply_page_refs(chapters, meta, preset):
                 return '??'
             label = html.escape(labels[name], quote=False)
             # inside a link already: its words only - a link in a link is not
-            # allowed in XHTML
-            before = m.string[:m.start()]
-            if len(re.findall(r'<a[\s>]', before)) > before.count('</a>'):
+            # allowed in XHTML. The links are found once per text: counting
+            # them again in everything before each reference was quadratic in
+            # a paragraph of thousands of them.
+            at = m.start()
+            if bisect.bisect_left(opens, at) > bisect.bisect_left(closes, at):
                 return label
             return f'<a href="#{name}">{label}</a>'
         if '<anchor ' in text:
             text = _MS_ANCHOR_TAG_RE.sub(plant, text)
         if '<pageref ' in text:
+            opens = [a.start() for a in re.finditer(r'<a[\s>]', text)]
+            closes = [a.start() for a in re.finditer('</a>', text)]
             text = _MS_PAGEREF_TAG_RE.sub(ref, text)
         return text
     return _ms_map_texts(out, render), hrefs
