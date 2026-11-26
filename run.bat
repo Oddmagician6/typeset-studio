@@ -16,11 +16,22 @@ if errorlevel 1 (
 if not exist ".venv\Scripts\activate.bat" (
   echo First run: setting up a private workspace. This happens once and takes a minute...
   python -m venv .venv
-  call ".venv\Scripts\activate.bat"
+)
+call ".venv\Scripts\activate.bat"
+rem The marker is written only once the requirements installed, so a first
+rem run cut off (offline, closed) tries again next time instead of starting
+rem an app whose packages never arrived.
+if not exist ".venv\deps-installed" (
+  echo Installing the packages Typeset Studio needs...
   python -m pip install --upgrade pip >nul
   pip install -r requirements.txt
-) else (
-  call ".venv\Scripts\activate.bat"
+  if errorlevel 1 (
+    echo.
+    echo The packages could not be installed. Check the internet connection and run this file again.
+    pause
+    exit /b 1
+  )
+  echo ok> ".venv\deps-installed"
 )
 
 echo.

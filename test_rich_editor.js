@@ -385,6 +385,46 @@ f.onload = function () {
     caret(q('.wb-para'), true); type(' now'); return getMd();
   });
 
+  // ---- bug hunt round 5, section 22: game blocks in the editor
+  run('bh22-unclosed-block', function () {
+    // a stat block missing its ~~~ ends at the chapter after it; the sidebar
+    // further on keeps its type and attributes
+    loadMd('# One\n\n~~~ statblock\n## Ash Drake\nAC: 15\n\n# Next Room\n\nProse here.\n\n'
+           + '~~~ sidebar title="Pacing" style="note"\nKeep it moving.\n~~~\n\nAfter.\n');
+    return getMd();
+  });
+  run('bh22-paste-fenced-statblock', function () {
+    loadMd('# One\n\nBefore.\n'); caret(q('.wb-para'), true); enter();
+    paste('', '~~~ statblock name="Ash Drake" cr="2"\nAC: 15\nHP: 30\n~~~');
+    return getMd();
+  });
+  run('bh22-statblock-blank-line', function () {
+    loadMd('# One\n\n~~~ statblock\n## Ash Drake\nSTR DEX CON INT WIS CHA\n\n14 8 15 3 8 5\n~~~\n');
+    return getMd();
+  });
+  run('bh22-statblock-link', function () {
+    loadMd('# One\n\n~~~ statblock\n## Ash Drake\nLanguages: Common\n~~~\n');
+    var lines = rich.querySelectorAll('.wb-doc-para'); caret(lines[1], true); type(', ');
+    paste('<a href="https://example.com/aquan">Aquan</a>', 'Aquan');
+    return getMd();
+  });
+  run('bh22-markdown-paste-midline', function () {
+    if (on()) toggle.click();
+    ta.value = '# One\n\nThe door opens. It is dark.\n\n# Two\n\nText.\n';
+    ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.indexOf(' It is dark.');
+    var dt = new w.DataTransfer();
+    dt.setData('text/plain', '{{monster,frame\n## Bog-Thrall\n**AC** :: 9\n}}');
+    ta.dispatchEvent(new w.ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true}));
+    var v = ta.value; toggle.click(); return v;
+  });
+  run('bh22-wrap-unterminated', function () {
+    return w.DocModel.wrapUnfenced('{{monster,frame\n## Ash Drake\n**AC** :: 15\n\nSome prose between.\n\n'
+                                   + '{{monster,frame\n## Bog-Thrall\n**AC** :: 9\n}}\n');
+  });
+  run('bh22-wrap-legacy-blank', function () {
+    return w.DocModel.wrapUnfenced('___\n\n> ## Ash Drake\n> *Large dragon*\n> - **AC** 15\n\nAfter.\n');
+  });
+
   var x = new XMLHttpRequest();
   x.open('POST', '/_rich_result', false); x.send(JSON.stringify(out));
 };

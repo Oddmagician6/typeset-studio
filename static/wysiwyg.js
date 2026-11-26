@@ -513,7 +513,12 @@
     // is wrapped in a stat block fence and the text read as the manuscript is
     var plainText = (text || '').replace(/\r\n?/g, '\n');
     var wrapped = plainText && DocModel.wrapUnfenced(plainText);
-    if (wrapped && wrapped !== plainText) {
+    // text that already holds a typed block (`~~~ statblock …` to its `~~~`,
+    // copied from the Markdown view) is read the same way: flattened, the
+    // block became one line of prose
+    var fenced = /^\s*~~~[ \t]*[A-Za-z]/m.test(plainText)
+      && (plainText.match(/^\s*~~~/gm) || []).length >= 2;
+    if (wrapped && (wrapped !== plainText || fenced)) {
       DocModel.fromMarkdown(wrapped).forEach(function (b) {
         if (b.type === 'docblock') blocks.push({ doc: b });
         else if (b.type === 'scene') blocks.push({ scene: true });

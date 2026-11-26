@@ -827,8 +827,13 @@
         var wrapped = DocModel.wrapUnfenced(text);
         if (wrapped === text) return;
         e.preventDefault();
-        var s = ta.selectionStart, v = ta.value;
-        ta.value = v.slice(0, s) + wrapped + v.slice(ta.selectionEnd);
+        var s = ta.selectionStart, v = ta.value, after = v.slice(ta.selectionEnd);
+        // the fences have to start lines of their own: pasted mid-line, the
+        // opening one joined the prose before it (so it wasn't a fence) and
+        // the closing one opened a block that ran on through the book
+        if (s > 0 && v.charAt(s - 1) !== '\n') wrapped = '\n\n' + wrapped;
+        if (after && after.charAt(0) !== '\n') wrapped += '\n\n';
+        ta.value = v.slice(0, s) + wrapped + after;
         ta.selectionStart = ta.selectionEnd = s + wrapped.length;
         changed();
       });

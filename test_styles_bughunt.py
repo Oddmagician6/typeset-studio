@@ -253,9 +253,10 @@ p = json.loads(json.dumps(base))
 p['body']['size'] = 12.0
 p['headings'] = dict(p.get('headings') or {}, section_size=24, subsection_size=14)
 css = epub._style_css(p)
-check('### is twice the body', re.search(r'h3 \{ font-size: 2em', css), css[:300])
-check('#### is in proportion', re.search(r'h4 \{ font-size: 1\.167em', css), css[:300])
-check('unset sizes stay at the body', 'h3 { font-size: 1em' in epub._style_css(base))
+# (the rule also names the heading's class: round 5, 23.10)
+check('### is twice the body', re.search(r'h3, \.hd-section \{ font-size: 2em', css), css[:300])
+check('#### is in proportion', re.search(r'h4, \.hd-subsection \{ font-size: 1\.167em', css), css[:300])
+check('unset sizes stay at the body', 'h3, .hd-section { font-size: 1em' in epub._style_css(base))
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()

@@ -339,7 +339,11 @@
   }
   // A line inside a fenced block, guarded if it would read as a fence: `\~~~`
   // is text, where a bare `~~~` closed the block early. Mirrors doc_model._in_block.
-  function inBlockLine(line) { return DOCBLOCK_RE.test(line) ? BSL + line : line; }
+  // guarded when it would end the block: a fence, or a `# ` chapter heading
+  // (not a stat block's first line, where `# Name` is its name)
+  function inBlockLine(line, nameOk) {
+    return DOCBLOCK_RE.test(line) || (!nameOk && CHAPTER_RE.test(line)) ? BSL + line : line;
+  }
 
   function sameRuns(a, b) {
     if (a.length !== b.length) return false;
@@ -418,9 +422,15 @@
         } else if (blockType === 'statblock') {
           // A stat block's source is kept exactly as written, one plain run per
           // line (its `___` rules and `--- Actions` must survive an edit).
+          // Its blank lines are kept too, one for a run of them (as doc_model):
+          // they keep a names line apart from a values line.
+          var prevBlank = true;
           blockParaBuf.forEach(function (s) {
-            if (s.trim()) blockChildren.push({ type: 'para', runs: [run(s.trim())] });
+            if (s.trim()) { blockChildren.push({ type: 'para', runs: [run(s.trim())] }); prevBlank = false; }
+            else if (!prevBlank) { blockChildren.push({ type: 'para', runs: [] }); prevBlank = true; }
           });
+          while (blockChildren.length && !blockChildren[blockChildren.length - 1].runs.length)
+            blockChildren.pop();
         } else if (blockType === 'table') {
           blockParaBuf.forEach(function (s) {            // one row per line
             if (s.trim()) blockChildren.push({ type: 'para', runs: tableRow(s.trim()) });
@@ -469,6 +479,11 @@
         }
       }
       var mDoc = DOCBLOCK_RE.exec(line);
+      // an opening fence inside a block: its ~~~ is missing (as manuscript)
+      if (mDoc && inBlock && mDoc[1].trim()) closeBlock();
+      // a chapter heading inside a block likewise, but for a stat block's `# Name`
+      if (!mDoc && inBlock && CHAPTER_RE.test(line) && !(blockType === 'statblock'
+          && !blockParaBuf.some(function (s) { return s.trim(); }))) closeBlock();
       if (mDoc) {
         if (inBlock) { closeBlock(); }
         else {
@@ -480,8 +495,9 @@
       }
       if (inBlock) {
         // `\~~~` is a line of text (inBlockLine)
-        if (line.charAt(0) === BSL && DOCBLOCK_RE.test(line.slice(1))) line = line.slice(1);
-        if (line.trim() === '') flushBlockPara();
+        if (line.charAt(0) === BSL && (DOCBLOCK_RE.test(line.slice(1))
+            || CHAPTER_RE.test(line.slice(1)))) line = line.slice(1);
+        if (line.trim() === '' && blockType !== 'statblock') flushBlockPara();
         else blockParaBuf.push(line);
         continue;
       }
@@ -527,7 +543,9 @@
     return runs.map(function (r) {
       // a note, index marker, anchor or page reference is written as its
       // marker: its text alone is only the label
-      return (r.bold || r.italic || isMark(r)) ? emphMd([r], false) : r.text;
+      // a link is written [label](address) (as doc_model): its label alone lost it
+      var text = (r.bold || r.italic || isMark(r)) ? emphMd([r], false) : r.text;
+      return r.link ? '[' + text + '](' + r.link + ')' : text;
     }).join('');
   }
 
@@ -564,7 +582,8 @@
             kids[si].lines.forEach(function (ln) { out.push(inBlockLine(runsToMd(ln.runs))); });
           }
         } else if (b.block_type === 'statblock') {
-          for (var sl = 0; sl < kids.length; sl++) out.push(inBlockLine(statblockLine(kids[sl].runs)));
+          for (var sl = 0; sl < kids.length; sl++)
+            out.push(inBlockLine(statblockLine(kids[sl].runs), sl === 0));
         } else if (b.block_type === 'table') {
           for (var tr = 0; tr < kids.length; tr++) out.push(inBlockLine(tableRowMd(kids[tr].runs)));
         } else if (LINE_BLOCKS.indexOf(b.block_type) !== -1) {
@@ -599,18 +618,24 @@
       if (FENCE_RE.test(line)) { inFence = !inFence; out.push(line); i++; continue; }
       if (!inFence && V3_OPEN_RE.test(line)) {
         j = i + 1;
-        while (j < lines.length && lines[j].trim() !== '}}' && !FENCE_RE.test(lines[j])) j++;
+        // not past another monster's opening, a fence or a chapter heading
+        // (as statblock.wrap_unfenced)
+        while (j < lines.length && lines[j].trim() !== '}}' && !FENCE_RE.test(lines[j])
+               && !V3_OPEN_RE.test(lines[j]) && !/^#\s/.test(lines[j])) j++;
         if (j < lines.length && lines[j].trim() === '}}') {
           out = out.concat(['~~~ statblock'], lines.slice(i, j + 1), ['~~~']);
           i = j + 1;
           continue;
         }
       }
-      if (!inFence && /^_{3,}$/.test(line.trim()) && i + 1 < lines.length
-          && LEGACY_HEAD_RE.test(lines[i + 1])) {
-        j = i + 1;
+      // the rule, then `> ## Name`: blank lines between them allowed
+      var k = i + 1;
+      while (k < lines.length && !lines[k].trim()) k++;
+      if (!inFence && /^_{3,}$/.test(line.trim()) && k < lines.length
+          && LEGACY_HEAD_RE.test(lines[k])) {
+        j = k;
         while (j < lines.length && /^\s*>/.test(lines[j])) j++;
-        out = out.concat(['~~~ statblock'], lines.slice(i, j), ['~~~']);
+        out = out.concat(['~~~ statblock', line], lines.slice(k, j), ['~~~']);
         i = j;
         continue;
       }
