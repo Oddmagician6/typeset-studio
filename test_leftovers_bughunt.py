@@ -228,6 +228,23 @@ except Exception as e:                                     # refused by the pars
     err = None if 'depth' in str(e).lower() else e
 check('300 deep is refused by the parser, not a recursion error', err is None, repr(err))
 
+# ---- KDP hardcover allowances (spec) -----------------------------------------
+print('spec: KDP case laminate')
+import app as A
+g = engine.wrap_geometry(A._wrap_dims({'wrap_retailer': 'kdp', 'wrap_binding': 'hardcover',
+                                       'wrap_trim_w': '6', 'wrap_trim_h': '9'}, 200))
+check('the art runs 0.51" past each edge, with no bleed on top', abs(g['edge'] - 0.51) < 1e-9,
+      g['edge'])
+check('a 0.4" hinge each side of the spine', abs(g['hinge'] - 0.4) < 1e-9, g['hinge'])
+ig = engine.wrap_geometry(A._wrap_dims({'wrap_retailer': 'ingramspark',
+                                        'wrap_binding': 'hardcover'}, 200))
+check('IngramSpark keeps its own', abs(ig['edge'] - 0.625) < 1e-9 and abs(ig['hinge'] - 0.5)
+      < 1e-9, (ig['edge'], ig['hinge']))
+gen = engine.wrap_geometry(A._wrap_dims({'wrap_retailer': 'generic',
+                                         'wrap_binding': 'hardcover'}, 200))
+check('and other printers the shared defaults', abs(gen['edge'] - 0.75) < 1e-9
+      and abs(gen['hinge'] - 0.375) < 1e-9, (gen['edge'], gen['hinge']))
+
 # ---- 27 drop ----------------------------------------------------------------
 print('\n27 text dropped into the rich editor, in a browser')
 import app as A

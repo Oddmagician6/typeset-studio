@@ -1190,9 +1190,19 @@ WRAP_RETAILERS = {
         'label': 'Amazon KDP', 'bleed': 0.125, 'spine_text_min': 80,
         'note': 'KDP allows spine text at 80+ pages · 0.125" bleed. '
                 'Confirm spine width with KDP’s cover template for your trim.',
-        'hardcover_note': 'KDP case laminate: 0.625" wrap, 0.375" hinge each side of the '
-                          'spine, white paper only, 75–550 pages, and five trims '
-                          '(5.5×8.5, 6×9, 6.14×9.21, 7×10, 8.25×11).',
+        'hardcover_note': 'KDP case laminate: the art runs 0.51" past each edge (the wrap, '
+                          'with no bleed on top), a 0.4" hinge each side of the spine, white '
+                          'paper only, 75–550 pages, and five trims '
+                          '(5.5×8.5, 6×9, 6.14×9.21, 7×10, 8.25×11). Confirm the spine '
+                          'with KDP’s cover calculator.',
+        # KDP's "Create a Hardcover Cover": images extend 0.51" (15 mm) past
+        # the edge of the front cover, wrapped round the board and glued
+        # inside; a 0.4" (10 mm) hinge between the spine and each cover. Until
+        # 1.16 a KDP case took the shared 0.625" wrap, 0.125" bleed past it and
+        # 0.375" hinges, a quarter inch too wide all round.
+        'allowances': {
+            'hardcover': {'wrap': 0.51, 'hinge': 0.4, 'bleed': 0.0},
+        },
     },
     'ingramspark': {
         'label': 'IngramSpark', 'bleed': 0.125, 'spine_text_min': 48, 'cover_cmyk': True,
@@ -1226,9 +1236,9 @@ WRAP_RETAILERS = {
     },
 }
 
-# Case-laminate allowances, shared because both retailers document the same
-# numbers: the turn-in glued around the boards, the crease each side of the
-# spine, and the board thickness a hardcover spine carries on top of the paper.
+# Case-laminate defaults (each retailer's own numbers in `allowances` above):
+# the turn-in glued around the boards, the crease each side of the spine, and
+# the board thickness a hardcover spine carries on top of the paper.
 # Every one of them is editable on the form — this is the starting point, not a
 # promise about a particular printer.
 HARDCOVER = {'wrap': 0.625, 'hinge': 0.375, 'board': 0.06}

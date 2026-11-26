@@ -141,9 +141,9 @@ try:
     files = unpack(A.load_project(PID)['last_print_package'])
     check('the wrap is named for a case', 'the-salt-road-case-wrap.pdf' in files, sorted(files))
     _, ww, _ = pdf_info(files['the-salt-road-case-wrap.pdf'])
-    H = A.HARDCOVER
-    want_w = (2 * (H['wrap'] + 0.125) + 2 * tw + 2 * H['hinge']
-              + pages * A._PAPER['cream']['ppi'] + H['board'])
+    H = A._allowances('kdp', 'hardcover')        # KDP's own: 0.51" wrap, no bleed, 0.4" hinges
+    want_w = (2 * (H['wrap'] + H['bleed']) + 2 * tw + 2 * H['hinge']
+              + pages * A._PAPER['cream']['ppi'] + A.HARDCOVER['board'])
     check('its width takes the turn-in, hinges and board', abs(ww - want_w) < 0.01,
           (ww, want_w))
     check('KDP’s hardcover limits are flagged, not enforced',
