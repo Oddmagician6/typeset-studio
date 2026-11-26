@@ -8,6 +8,65 @@ line here.
 
 ---
 
+## 1.15.1 — 26 November 2026
+
+A bug-fix release: round six of the bug hunt, covering regressions from the
+last two rounds, the writing page's autosave, Send to print, and very large or
+unusual input. Nothing new to learn.
+
+### Fixed
+
+**Writing and saving**
+
+- Two saves at once, a Book settings save during a manuscript save, or a
+  restore while you type no longer lose an edit; leaving the page waits for
+  typing that arrived mid-save, and "Open the saved version" reloads only once
+  your latest edits are kept.
+- Typing something and undoing it no longer counts as unsaved, and Find,
+  Replace and the page picker act on the editor you can see.
+- Pasting blocks over a chapter title keeps the title, and a paste inside a
+  block's own fences adds no extra fences.
+
+**Printed interior and covers**
+
+- A heading-like line inside a closed poem no longer starts a chapter, and
+  removing an unclosed designed page in Page Plan can't delete the chapter
+  after it.
+- `**The ___Moon___ Gate**` keeps its emphasis, and a quote or apostrophe
+  after closing emphasis (`The *fox*'s paw`) is no longer an opening quote.
+- A font of yours set aside as `<name>-own` is renamed in your styles and
+  designs too, so they keep using it.
+- Unticking the wrap brings back an uploaded cover rather than a template.
+- Very large illustrations are scaled to their printed size before they are
+  drawn, so a well-illustrated book no longer runs out of memory.
+
+**Send to print**
+
+- A package is recorded only onto the book that started it, and the wrap,
+  listing image and ebook always share one version of uploaded cover art.
+- IngramSpark spines count the barcode page it adds; KDP page maxima follow
+  its four trim groups (7 x 10 takes 828 pages), and KDP spine text starts at
+  80 pages.
+- A back-cover photo sits above the barcode box, and designer warnings (a bad
+  ISBN, short bleed) and the inside-margin check reach the package.
+- Cover template downloads name their printer and paper.
+
+**Ebooks and files**
+
+- An ebook is written beside its name and moved in only when finished, as
+  print packages now are; the start-up sweep clears one a forced close left.
+- Checking an ebook with many large pictures no longer stalls.
+
+**Imports and limits**
+
+- Manuscript uploads are refused above 64 MB of text or 512 MB of Word file,
+  and a Word file that would unpack to gigabytes is refused before it is read.
+- Absurd stat-block numbers and Word tables print or import instead of
+  stopping the build.
+- Saving a result whose uploads were cleared says so instead of saving a book
+  with no manuscript, and a damaged settings file is never written over a
+  copy kept earlier.
+
 ## 1.15.0 — 25 November 2026
 
 A bug-fix release: rounds four and five of the bug hunt, covering the build
