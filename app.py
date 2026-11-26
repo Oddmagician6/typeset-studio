@@ -722,6 +722,7 @@ engine.FONT_DIR = FONT_DIR
 engine.COVER_ASSET_DIR = COVER_ASSET_DIR
 engine.FIGURE_DIR = FIGURE_DIR
 epub.FIGURE_DIR = FIGURE_DIR
+epub.FONT_DIR = FONT_DIR            # a scene-break picture kept with the fonts
 manuscript.FIGURE_DIR = FIGURE_DIR    # where .docx images are extracted to
 try:
     engine.ensure_parchment()         # the page background the app ships (#74)

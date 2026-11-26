@@ -179,6 +179,19 @@ def covered_words(design, trim_w, trim_h):
     return False
 
 
+def _generated_front(meta):
+    """The pages the print book sets before the first chapter on its own, as
+    its front matter setting and Contents ask (engine `_build_story`)."""
+    level = meta.get('front_matter', 'full')
+    level = {True: 'full', False: 'none'}.get(level, level)
+    out = {'full': ['Half-title page', 'Title page', 'Copyright page'],
+           'title': ['Title page', 'Copyright page'],
+           'copyright': ['Copyright page']}.get(level, [])
+    if meta.get('include_toc'):
+        out.append('Contents')
+    return out
+
+
 def notes(ms, meta, preset):
     """The page-by-page ebook's own rows for the ebook checks: what it left
     out, what it couldn't find, and pages whose words sit under art."""
@@ -188,9 +201,21 @@ def notes(ms, meta, preset):
     import matter
     # a dedication, acknowledgments… from Book settings print as pages of
     # their own; the page-by-page ebook holds only designed pages
-    left_out = [s['key'].replace('_', ' ').capitalize()
-                for s in matter.present(meta or {}, 'front')] + left_out         + [s['key'].replace('_', ' ').capitalize() for s in matter.present(meta or {}, 'back')]
+    left_out = ([s['key'].replace('_', ' ').capitalize()
+                 for s in matter.present(meta or {}, 'front')] + left_out
+                + [s['key'].replace('_', ' ').capitalize()
+                   for s in matter.present(meta or {}, 'back')])
     rows = []
+    # and so do the title pages and contents the print book sets itself: the
+    # first design is a page or more further on in print, maybe on the other side
+    gen = _generated_front(meta or {})
+    if gen:
+        rows.append({'label': 'Front pages', 'ok': False,
+                     'detail': ('The print book opens with ' + ', '.join(gen).lower()
+                                + ', which the page-by-page ebook leaves out - so its '
+                                'designed pages start earlier, and may fall on the '
+                                'other side of a spread. Design them as pages if the '
+                                'ebook should have them.')})
     if left_out:
         shown = ', '.join(f'“{t}”' for t in left_out[:3])
         more = f' and {len(left_out) - 3} more' if len(left_out) > 3 else ''

@@ -73,6 +73,38 @@ FRONT = [s for s in SECTIONS if s['where'] == 'front']
 BACK = [s for s in SECTIONS if s['where'] == 'back']
 
 
+# a line starting with one of these is a quotation's source
+ATTR_MARKS = ('—', '–', '--', '-')
+
+
+def blocks(text, style='body'):
+    """A section's text as the paragraphs its page sets, for the PDF and the
+    EPUB alike (they split it differently: the ebook ran an Also By list into
+    one paragraph and styled only the last Praise source).
+
+    Blank lines part paragraphs. Also By sets one title per line, blank line or
+    not; an epigraph or Praise block whose last line starts with a dash gives
+    that line a paragraph of its own (the source)."""
+    raw = [[l.strip() for l in b.split('\n') if l.strip()]
+           for b in (text or '').replace('\r\n', '\n').split('\n\n')]
+    if style == 'also_by':
+        raw = [[l] for b in raw for l in b]
+    elif style == 'epigraph':
+        split = []
+        for b in raw:
+            if len(b) > 1 and b[-1].startswith(ATTR_MARKS):
+                split += [b[:-1], b[-1:]]
+            else:
+                split.append(b)
+        raw = split
+    return [x for x in (' '.join(b).strip() for b in raw) if x]
+
+
+def is_source(block):
+    """Whether a paragraph is a quotation's source line."""
+    return block.startswith(ATTR_MARKS)
+
+
 def heading(section, author=''):
     """The page heading for a section, with `{author}` filled in.
 

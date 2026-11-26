@@ -2523,21 +2523,39 @@ def _draw_ornament(canv, oid, x0, y0, w, h, color=None, fx=False, fy=False):
 
 class SceneBreak(Flowable):
     def __init__(self, glyph, font, size, gap, image_path=None,
-                 ornament=None, ornament_width=0.0):
+                 ornament=None, ornament_width=0.0, max_h=0.0):
         super().__init__()
         self.glyph, self.font, self.size, self.gap = glyph, font, size, gap
         self.image_path = image_path
         self.ornament = ornament
         self.ornament_width = ornament_width
         self.orn_size = (0.0, 0.0)
+        self.max_h = max_h          # the page's text height: a mark fits a page
+        self.glyph_size = size
 
     def wrap(self, w, h):
         self.width = w
         mark_h = self.size
         if self.ornament:
-            self.orn_size = _orn.size(self.ornament, w, self.ornament_width)
+            ow, oh = _orn.size(self.ornament, w, self.ornament_width)
+            # a width that fits the measure can still be taller than the page
+            # (a square star across a landscape trim): scaled down, shape kept,
+            # rather than a frame that can never hold it and a failed build
+            room = (self.max_h - 2 * self.gap) * 0.9 if self.max_h else 0
+            if room > 0 and oh > room:
+                ow, oh = ow * room / oh, room
+            self.orn_size = (ow, oh)
             if self.orn_size[1]:
                 mark_h = self.orn_size[1]
+        # a text mark wider than the measure is set smaller to fit, not
+        # centred off both edges of the trim
+        self.glyph_size = self.size
+        try:
+            gw = stringWidth(self.glyph or '', self.font, self.size)
+            if w and gw > w:
+                self.glyph_size = self.size * w / gw
+        except Exception:
+            pass
         self.height = self.gap * 2 + mark_h
         return (w, self.height)
 
@@ -2568,7 +2586,7 @@ class SceneBreak(Flowable):
             except Exception:
                 pass
         # Fallback: text glyph
-        self.canv.setFont(self.font, self.size)
+        self.canv.setFont(self.font, self.glyph_size)
         self.canv.drawCentredString(self.width / 2.0, self.gap, self.glyph)
 
 
@@ -3533,8 +3551,15 @@ class BookDoc(BaseDocTemplate):
         if foot:
             h = tw / foot['aspect']
             fo = self.preset['folio']
-            top_of_folio = self._bottom - fo['gap'] * inch + fo['size'] * 0.75
-            y = (self._bottom + top_of_folio) / 2 - h / 2
+            if fo.get('show', True):
+                top_of_folio = self._bottom - fo['gap'] * inch + fo['size'] * 0.75
+                y = (self._bottom + top_of_folio) / 2 - h / 2
+            else:
+                # no folio to sit above: the middle of the foot margin (the
+                # hidden folio's gap put the band below the page edge)
+                y = self._bottom / 2 - h / 2
+            # and never past the trim, whatever the gap
+            y = min(max(y, 0.0), max(self._bottom - h, 0.0))
             _draw_ornament(canv, foot['id'], text_left, y, tw, h, color=ink)
         corner = _orn.furniture(fu.get('corner'), 'corner')
         if corner:
@@ -5971,25 +5996,9 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body', unlink=Non
     anchor left stale by a renamed chapter is fatal to ReportLab, so it has to be
     caught here as well or the whole PDF dies on the front matter.
     """
-    # Split on blank lines into raw paragraph strings
-    raw = [[l.strip() for l in b.split('\n') if l.strip()]
-           for b in text.replace('\r\n', '\n').split('\n\n')]
-    _attr = ('—', '–', '--', '-')
-    if style == 'also_by':
-        # one title per line, as the field asks, blank line or not
-        raw = [[l] for b in raw for l in b]
-    elif style == 'epigraph':
-        # a last line starting with a dash is the source, set as its own line
-        # (it was run on into the quotation unless a blank line came first)
-        split = []
-        for b in raw:
-            if len(b) > 1 and b[-1].startswith(_attr):
-                split += [b[:-1], b[-1:]]
-            else:
-                split.append(b)
-        raw = split
-    blocks = [' '.join(b).strip() for b in raw]
-    blocks = [b for b in blocks if b]
+    # paragraphs as matter.blocks splits them, for the EPUB too
+    blocks = _matter.blocks(text, style)
+    _attr = _matter.ATTR_MARKS
     # the heading is plain text and may carry the author's name ("Also by …")
     heading = _esc_markup(heading or '')
 
@@ -6282,6 +6291,16 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 need += st['chap_num'].leading + 0.12 * inch
             if ch['title']:
                 need += st['chap_title'].leading
+            if art and art_pos == 'above':
+                # the art over the number is on the opener too: room for it
+                # alone took the heading over to the next page, and the
+                # contents pointed at an ornament
+                for f in art:
+                    try:
+                        need += (f.wrap(avail_w, text_h)[1] + f.getSpaceBefore()
+                                 + f.getSpaceAfter())
+                    except Exception:
+                        pass
             # (a sink deeper than the page itself is still refused outright:
             # that style can't be set, and the preview says so)
             sink = c['sink'] * inch
@@ -6354,9 +6373,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 sb = preset['scene_break']
                 img_path = scene_image_path(preset)
                 orn = sb.get('ornament', '') if sb.get('type') == 'ornament' else ''
+                orn = orn if _orn.scene(orn) else ''     # furniture is no scene break
                 story.append(SceneBreak(glyph, head_font, sb['size'], sb['gap'],
                                         image_path=img_path, ornament=orn,
-                                        ornament_width=sb.get('ornament_width', 0.0)))
+                                        ornament_width=sb.get('ornament_width', 0.0),
+                                        max_h=text_h))
                 flush_next = True
             elif kind == 'subhead':
                 story.append(_heading_para(val, st['subhead'], 2))
@@ -6394,20 +6415,29 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     _author = meta.get('author', '')
     _bm_first = True   # only the first back-matter page gets recto-forced
 
+    def _bm_break(first):
+        # a page break only where the page has something on it: a chapter
+        # ending in a full-page figure has already broken, and a second break
+        # left a numbered empty page and put the section on the other side
+        if first and rhs:
+            return [RectoBreak()]
+        return [PageBreak()] if _page_open(story) else []
+
     # Notes come first in the back matter, right after the last chapter — they
     # belong to the text in a way acknowledgments and author bios don't.
     if (any(ch.get('notes') for ch in manuscript['chapters'])
             and preset.get('endnotes', {}).get('placement', 'end') != 'foot'):
-        story.append(RectoBreak() if rhs else PageBreak())
+        story.extend(_bm_break(True))
         _bm_first = False
         story.append(RunningHeadMarker(_esc_markup(
             preset.get('endnotes', {}).get('heading', 'Notes'))))
         story.extend(_endnotes_page(manuscript['chapters'], fonts, st, preset))
 
     for _sec in _matter.present(meta, 'back'):
-        story.append((RectoBreak() if rhs else PageBreak()) if _bm_first else PageBreak())
+        story.extend(_bm_break(_bm_first))
         _bm_first = False
-        story.append(RunningHeadMarker(_matter.heading(_sec, _author)))
+        # markup, as the marker reads it: plain, `R. Vale <Pen Name>` lost its <…>
+        story.append(RunningHeadMarker(_esc_markup(_matter.heading(_sec, _author))))
         story.extend(_matter_page(_matter.heading(_sec, _author),
                                   meta[_sec['key']].strip(),
                                   fonts, st, sq, _sec['style'],
@@ -6416,7 +6446,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     # The index closes the book: nothing follows it, so its own length moves
     # no page it lists.
     if index is not None and _bookindex.wanted(ix_marks, meta):
-        story.append((RectoBreak() if rhs else PageBreak()) if _bm_first else PageBreak())
+        story.extend(_bm_break(_bm_first))
         story.append(RunningHeadMarker(_bookindex.HEADING))
         story.extend(_index_page(ix_marks, index, meta, preset, fonts, st))
 

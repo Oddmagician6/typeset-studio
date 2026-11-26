@@ -30,7 +30,9 @@ from manuscript import (book_anchors as _ms_book_anchors, LINK_RE as _LINK_RE,
                         PAGE_RE as _MS_PAGE_SRC_RE,
                         ANCHOR_TAG_RE as _MS_ANCHOR_TAG_RE,
                         PAGEREF_TAG_RE as _MS_PAGEREF_TAG_RE,
-                        CELL_SEP as _MS_CELL)
+                        CELL_SEP as _MS_CELL,
+                        NOTE_REF_RE as _MS_NOTE_REF_RE,
+                        _inline as _ms_inline)
 
 
 def _num_label(fmt, n):
@@ -324,7 +326,7 @@ def _sub_between_emph(pattern, repl, text):
     return ''.join(out)
 
 
-def _md_emph_to_html(text):
+def _md_emph_to_html(text, smartquotes=None):
     """Escape XML, then convert Markdown links and emphasis to HTML.
 
     Mirrors manuscript._inline (links carved out first, then bold-italic, bold,
@@ -337,6 +339,12 @@ def _md_emph_to_html(text):
     # and so do an anchor and a page reference there
     for rx in (_MS_INDEX_SRC_RE, _MS_ANCHOR_SRC_RE, _MS_PAGE_SRC_RE):
         text = re.sub(r'(?<!\\)' + rx.pattern, '', text)
+    if smartquotes is not None:
+        # the same pass the PDF runs this text through (engine._matter_page):
+        # a mirror of it here missed the backslash escapes (`\*keep\*` came
+        # out emphasised, its backslashes printed) and smart punctuation
+        text = re.sub(r'(?<!\\)' + _MS_NOTE_REF_RE.pattern, '', text)
+        return _markup_to_html(_ms_inline(text, smartquotes))
     text = html.escape(text, quote=False)
 
     targets = []
@@ -734,17 +742,19 @@ def _front_xhtml(meta):
     return _xhtml(title or 'Front Matter', body)
 
 
-def _matter_xhtml(heading, text, css_class):
-    """XHTML page for a front/back matter section."""
-    blocks = [b.strip() for b in text.replace('\r\n', '\n').split('\n\n') if b.strip()]
+def _matter_xhtml(heading, text, css_class, style='body', smartquotes=True):
+    """XHTML page for a front/back matter section: its paragraphs split as
+    the PDF splits them (`matter.blocks`), and set through the same inline pass."""
+    blocks = _matter.blocks(text, style)
     body   = f'<div class="{css_class}">\n'
     if heading:
         body += f'  <h1 class="matter-head">{_text_to_html(heading)}</h1>\n'
-    _attr_markers = ('—', '–', '--', '-')
     for i, b in enumerate(blocks):
         cls = ''
         if css_class == 'matter-epigraph':
-            if i == len(blocks) - 1 and any(b.startswith(m) for m in _attr_markers):
+            # every source line, as the PDF sets them (a Praise page has one
+            # per quotation, not just the last)
+            if _matter.is_source(b):
                 cls = ' class="attr"'
         elif css_class == 'matter-body' and i == 0:
             cls = ' class="no-indent"'
@@ -758,9 +768,9 @@ def _matter_xhtml(heading, text, css_class):
             md = '**' + name.strip() + '**'
             if bio.strip():
                 md += ' — ' + bio.strip()
-            body += f'  <p>{_md_emph_to_html(md)}</p>\n'
+            body += f'  <p>{_md_emph_to_html(md, smartquotes)}</p>\n'
             continue
-        body += f'  <p{cls}>{_md_emph_to_html(b)}</p>\n'
+        body += f'  <p{cls}>{_md_emph_to_html(b, smartquotes)}</p>\n'
     body += '</div>\n'
     return _xhtml(heading or 'Front Matter', body)
 
@@ -912,7 +922,7 @@ def scene_ornament(preset):
     if sb.get('type') != 'ornament':
         return ''
     oid = (sb.get('ornament') or '').strip()
-    return oid if _orn.get(oid) else ''
+    return oid if _orn.scene(oid) else ''
 
 
 def _scene_orn_html(preset, oid):
@@ -923,7 +933,7 @@ def _scene_orn_html(preset, oid):
     manifest item — and one file serves every break in the book.
     """
     sb   = preset.get('scene_break', {})
-    frac = sb.get('ornament_width', 0.0) or _orn.get(oid)['width']
+    frac = sb.get('ornament_width', 0.0) or _orn.get(oid).get('width', 0.3)
     pct  = max(0.02, min(float(frac), 1.0)) * 100.0
     return (f'  <p class="scene-break"><img class="scene-orn" '
             f'src="{SCENE_ORN_HREF}" alt="Scene break" '
@@ -966,11 +976,45 @@ def _chapter_art_html(preset, href, position):
         cap = f';max-height:{max_in * 72 / body_pt:.2f}em;object-fit:contain'
     except (TypeError, ValueError, ZeroDivisionError):
         cap = ''
-    return (f'  <p class="{cls}"><img src="{html.escape(href)}" alt="" '
+    # the style's alignment and space, as the PDF sets them (the space in ems
+    # of the body, so it scales with the reader's type)
+    align = (ca.get('align', 'center') or 'center').lower()
+    align = {'centre': 'center'}.get(align, align)
+    align = align if align in ('left', 'center', 'right') else 'center'
+    try:
+        gap_em = float(ca.get('gap', 0.16) or 0.0) * 72 / float(
+            (preset.get('body') or {}).get('size') or 11.0)
+    except (TypeError, ValueError, ZeroDivisionError):
+        gap_em = 1.0
+    side = 'margin-top' if position == 'below' else 'margin-bottom'
+    return (f'  <p class="{cls}" style="text-align:{align};{side}:{gap_em:.2f}em">'
+            f'<img src="{html.escape(href)}" alt="" '
             f'role="presentation" style="width:{frac * 100:.1f}%{cap}"/></p>')
 
 
-def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href=''):
+def scene_image_src(preset):
+    """As engine.scene_image_src: the picture a style marks scene breaks with,
+    or ''."""
+    sb = preset.get('scene_break')
+    sb = sb if isinstance(sb, dict) else {}
+    return str(sb.get('image') or '').strip() if sb.get('type') == 'image' else ''
+
+
+def _scene_image_html(preset, href):
+    """The style's own scene-break picture, at its height in the PDF (in ems
+    of the body text) and never wider than the text."""
+    sb = preset.get('scene_break') or {}
+    try:
+        h_em = float(sb.get('size') or 14) / float((preset.get('body') or {}).get('size') or 11.0)
+    except (TypeError, ValueError, ZeroDivisionError):
+        h_em = 1.3
+    return (f'  <p class="scene-break"><img class="scene-orn" src="{html.escape(href)}" '
+            f'alt="Scene break" style="height:{h_em:.2f}em;max-width:100%;'
+            f'object-fit:contain"/></p>')
+
+
+def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
+                   scene_href=''):
     c          = preset.get('chapter', {})
     show_num   = c.get('show_number', True)
     num_fmt    = c.get('number_format', 'Chapter {n}')
@@ -1011,6 +1055,7 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
         val  = block[1]
         if kind == 'scene':
             lines.append(_scene_orn_html(preset, scene_orn) if scene_orn else
+                         _scene_image_html(preset, scene_href) if scene_href else
                          f'  <p class="scene-break">{_text_to_html(scene_glyph)}</p>')
             no_indent_next = True
         elif kind in _HEAD_LEVEL:
@@ -1658,6 +1703,7 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
 # Interior figures live here; app.py points this at the writable data dir. Kept
 # as a module global (like engine.FIGURE_DIR) so this stays import-free of app.
 FIGURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figures')
+FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
 
 _FIG_MIME = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
              '.gif': 'image/gif', '.svg': 'image/svg+xml'}
@@ -1727,8 +1773,18 @@ def _build_epub(manuscript, preset, out_path, meta):
     chapters, ix_marks = _apply_index_markers(chapters, meta)
     has_index = _bookindex.wanted(ix_marks, meta)
     art_src  = chapter_art_src(preset)
-    figures  = _collect_figures(chapters, extra=[art_src] if art_src else [])
+    # the style's own scene-break picture is packaged like the chapter art (the
+    # ebook used to print the fallback glyph where the PDF drew it); a style
+    # from before the figure library keeps it in the font folder
+    scene_src = scene_image_src(preset)
+    if scene_src and not os.path.isabs(scene_src) \
+            and not os.path.exists(os.path.join(FIGURE_DIR, scene_src)):
+        legacy = os.path.join(FONT_DIR, scene_src)
+        if os.path.exists(legacy):
+            scene_src = legacy
+    figures  = _collect_figures(chapters, extra=[s for s in (art_src, scene_src) if s])
     fig_href = {src: f['href'] for src, f in figures.items()}
+    scene_href = fig_href.get(scene_src, '') if scene_src else ''
     # '' when the style names a file that isn't there — the ebook simply opens
     # without the ornament, where the PDF proof draws its placeholder box
     art_href = fig_href.get(art_src, '')
@@ -1871,7 +1927,8 @@ def _build_epub(manuscript, preset, out_path, meta):
             zf.writestr(f'OEBPS/{_sec["href"]}',
                         _matter_xhtml(_matter.heading(_sec, _author) or None,
                                       meta[_sec['key']].strip(),
-                                      _MATTER_CSS.get(_sec['style'], 'matter-body')))
+                                      _MATTER_CSS.get(_sec['style'], 'matter-body'),
+                                      _sec['style'], meta.get('smartquotes', True)))
 
         current_part_num = None
         _numbers = _ms_numbers(chapters)
@@ -1885,7 +1942,7 @@ def _build_epub(manuscript, preset, out_path, meta):
             zf.writestr(f'OEBPS/chapter{idx:03d}.xhtml',
                         _chapter_xhtml(idx, ch, preset, figures=fig_href,
                                        number=_numbers[idx - 1],
-                                       art_href=art_href))
+                                       art_href=art_href, scene_href=scene_href))
 
         if has_notes:
             zf.writestr('OEBPS/endnotes.xhtml', _endnotes_xhtml(chapters, preset))
@@ -1894,7 +1951,8 @@ def _build_epub(manuscript, preset, out_path, meta):
             zf.writestr(f'OEBPS/{_sec["href"]}',
                         _matter_xhtml(_matter.heading(_sec, _author),
                                       meta[_sec['key']].strip(),
-                                      _MATTER_CSS.get(_sec['style'], 'matter-body')))
+                                      _MATTER_CSS.get(_sec['style'], 'matter-body'),
+                                      _sec['style'], meta.get('smartquotes', True)))
 
         if has_index:
             zf.writestr('OEBPS/bookindex.xhtml',

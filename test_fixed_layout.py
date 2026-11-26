@@ -302,9 +302,15 @@ def test_notes():
     check('words a shape is drawn over: that page only', 'cv' in wa and ' un' not in wa
           and 'far' not in wa, wa)
     check('none of them passes', all(not r['ok'] for r in rows.values()))
-    clean = F.notes(manuscript.parse_markdown(fence('un') + '\n'), {'page_designs': designs},
-                    PRESET)
+    clean = F.notes(manuscript.parse_markdown(fence('un') + '\n'),
+                    {'page_designs': designs, 'front_matter': 'none'}, PRESET)
     check('a clean book has no notes', clean == [], clean)
+    # (bug hunt 19.7) the title pages print sets itself are named too
+    fm = {r['label']: r for r in F.notes(manuscript.parse_markdown(fence('un') + '\n'),
+                                         {'page_designs': designs, 'front_matter': 'copyright',
+                                          'include_toc': True}, PRESET)}
+    check('a copyright page and contents the ebook leaves out are named',
+          'copyright page, contents' in fm.get('Front pages', {}).get('detail', ''), fm)
     # what print has and the ebook drops, though it holds no words of the
     # manuscript's: Book settings pages, a figure without a caption
     lost = F.notes(manuscript.parse_markdown(fence('un') + '\n\n~~~ figure src="pond.jpg" '

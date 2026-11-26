@@ -301,8 +301,25 @@ def _inline(text, smartquotes=True):
     """
     text = _park_escapes(text)
     if smartquotes:
-        text = _smarten(text)
-    text = html.escape(text, quote=False)
+        # a link's address is not prose: smart punctuation turned the `--` in
+        # `https://example.test/tide--ash` into a dash and the `...` of a
+        # query into an ellipsis, and the link went somewhere else. Only its
+        # words are smartened.
+        held = []
+
+        def _hold(m):
+            held.append((_smarten(m.group(1)), m.group(2)))
+            return f'\x12{len(held) - 1}\x13'
+
+        text = _smarten(LINK_RE.sub(_hold, text))
+        text = html.escape(text, quote=False)
+        if held:
+            text = re.sub(r'\x12(\d+)\x13',
+                          lambda m: '[{}]({})'.format(
+                              *(html.escape(x, quote=False) for x in held[int(m.group(1))])),
+                          text)
+    else:
+        text = html.escape(text, quote=False)
 
     # Pull link targets out before the emphasis passes: a URL may contain
     # underscores or asterisks, which would otherwise be read as markup.
@@ -370,7 +387,9 @@ def _inline(text, smartquotes=True):
         # the link text keeps whatever emphasis it was given
         text = re.sub(
             r'\x00(\d+)\x00(.*?)\x01',
-            lambda m: f'<a href="{html.escape(targets[int(m.group(1))], quote=True)}">'
+            # (the address was escaped with the line: escaped again, an `&` in
+            # a query string came out `&amp;` in the link itself)
+            lambda m: f'<a href="{html.escape(html.unescape(targets[int(m.group(1))]), quote=True)}">'
                       f'{m.group(2)}</a>',
             text, flags=re.S)
     if labels:
