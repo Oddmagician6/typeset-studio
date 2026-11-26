@@ -58,8 +58,8 @@ def cr_order(cr):
         num, _, den = m.group(0).partition('/')
         try:
             return (0, int(num) / int(den) if den.strip() else float(num), '')
-        except (ValueError, ZeroDivisionError):
-            pass
+        except (ValueError, ZeroDivisionError, OverflowError):
+            pass           # a fraction too big for a float sorts with the words
     return (1, 0.0, cr.casefold())
 
 
