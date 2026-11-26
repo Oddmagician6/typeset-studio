@@ -419,6 +419,8 @@
         return JSON.stringify(out);
       }
       var start = state(), leaving = false;
+      // back here from the back-forward cache after leaving: guarded again
+      window.addEventListener('pageshow', function(e){ if (e.persisted) leaving = false; });
       function changed(){ return state() !== start; }
       form.addEventListener('submit', function(){ leaving = true; });
       document.getElementById('pe-cancel').addEventListener('click', function(){ leaving = true; });

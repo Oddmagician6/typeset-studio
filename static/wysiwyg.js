@@ -655,6 +655,11 @@
     if (top && !(asText || c.contains('wb-para') || c.contains('wb-subhead'))) return false;
     if (!top) blocks = blocks.filter(function (b) { return b.runs; });  // no scene inside a block
     if (!blocks.length) return false;
+    // a title takes the pasted words only: a paste of nothing but blocks (a
+    // stat block over a selected chapter title) has none, and deleted the title
+    if (asText && !blocks.some(function (b) {
+      return b.runs && b.runs.some(function (r) { return r.text; });
+    })) return false;
 
     // Only now is the selection replaced, once something is sure to take its
     // place: deleted first, a paste with nothing that fits here (a stat block
