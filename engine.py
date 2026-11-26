@@ -7159,6 +7159,58 @@ def build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         _FLOOR.size = float(preset.get('min_text_size') or 0)
     except (TypeError, ValueError):
         _FLOOR.size = 0
+    # Laid out beside the real name and moved over it once the last pass is
+    # done: the passes rewrite the file, and a download (or a reader opening
+    # it from the folder) mid-build got an empty or half-made edition.
+    part = out_path + '.part'
+    _SCRATCH.files = []
+    try:
+        res = _build_pdf_variant(manuscript, preset, part, meta, press, screen)
+        _replace_retrying(part, out_path)
+        return res
+    finally:
+        # the passes' scratch PDFs and the cropped cover, which a pass that
+        # failed (a layout error in the contents pass) left in the temp folder
+        for f in [part] + (getattr(_SCRATCH, 'files', None) or []):
+            try:
+                if f:
+                    os.remove(f)
+            except OSError:
+                pass
+        _SCRATCH.files = []
+
+
+_SCRATCH = threading.local()
+
+
+def _scratch_add(path):
+    """A temp file this build made, removed when it ends however it ends."""
+    if path:
+        if getattr(_SCRATCH, 'files', None) is None:
+            _SCRATCH.files = []
+        _SCRATCH.files.append(path)
+
+
+def _scratch_mkstemp(suffix):
+    fd, tmp = tempfile.mkstemp(suffix=suffix)
+    _scratch_add(tmp)
+    return fd, tmp
+
+
+def _replace_retrying(src, dst, tries=20):
+    """os.replace, waiting a moment while Windows has `dst` open elsewhere."""
+    import time
+    for i in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.1)
+
+
+def _build_pdf_variant(manuscript, preset, out_path, meta, press, screen):
     try:
         if screen:
             return _build_pdf(manuscript, _screen_preset(preset), out_path, meta,
@@ -7216,6 +7268,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
                  'fonts': _register_cover_fonts(ctpl, fonts)}
     else:
         cover_path = _prepare_cover(meta, preset)
+        _scratch_add(cover_path)
         if cover_path:
             cover = {'mode': 'image',
                      'path': cover_path,
@@ -7273,7 +7326,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         probe = {}
 
         def _measure(reserve, assign):
-            fd, tmp = tempfile.mkstemp(suffix='.pdf')
+            fd, tmp = _scratch_mkstemp('.pdf')
             os.close(fd)
             probe.clear()
             story = _build_story(manuscript, preset, meta, fonts, st, head_font,
@@ -7310,7 +7363,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
 
     if meta.get('include_toc'):
         # Pass 1 — no TOC, just capture chapter positions
-        fd, tmp = tempfile.mkstemp(suffix='.pdf')
+        fd, tmp = _scratch_mkstemp('.pdf')
         os.close(fd)
         story1 = _build_story(manuscript, preset, meta, fonts, st, head_font,
                               has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
@@ -7369,7 +7422,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         if has_index or has_refs:
             # a pass to learn each marker's page; the index is the last thing
             # in the book, so the pass that sets it puts them where this did
-            fd, tmp = tempfile.mkstemp(suffix='.pdf')
+            fd, tmp = _scratch_mkstemp('.pdf')
             os.close(fd)
             probe_doc = _make_doc(tmp)
             probe_doc.build(_build_story(manuscript, preset, meta, fonts, st, head_font,

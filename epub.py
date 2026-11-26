@@ -1702,6 +1702,20 @@ def _collect_figures(chapters, extra=()):
 
 # ---------------------------------------------------------------- public API
 def build_epub(manuscript, preset, out_path, meta):
+    """Write the reflowable EPUB (see `_build_epub`). The designed pages'
+    rendered pictures are removed however the build ends: a failure between
+    rendering them and zipping them left the folder in the temp directory."""
+    _BUILD.tmpdirs = []
+    try:
+        return _build_epub(manuscript, preset, out_path, meta)
+    finally:
+        import shutil
+        for d in getattr(_BUILD, 'tmpdirs', None) or []:
+            shutil.rmtree(d, ignore_errors=True)
+        _BUILD.tmpdirs = []
+
+
+def _build_epub(manuscript, preset, out_path, meta):
     """Write an EPUB 3 file to out_path. Returns out_path."""
     import fixed_epub
     if fixed_epub.wanted(meta):        # a picture book, page by page (#75c)
@@ -1759,6 +1773,7 @@ def build_epub(manuscript, preset, out_path, meta):
     # designed pages (#74 Phase 6b), each rendered once to a picture
     import tempfile, shutil
     page_tmp = tempfile.mkdtemp(prefix='ts-epub-pages-')
+    _BUILD.tmpdirs.append(page_tmp)
     pages = _render_pages(chapters, meta, preset, page_tmp)
     _BUILD.pages = {n: (p['href'], p['words']) for n, p in pages.items()}
     for p in pages.values():
