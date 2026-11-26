@@ -8,6 +8,73 @@ line here.
 
 ---
 
+## 1.15.0 — 25 November 2026
+
+A bug-fix release: rounds four and five of the bug hunt, covering the build
+pipeline, ornaments and matter, unusual characters, the page designer and Page
+Plan, stat blocks, ebook validity and accessibility, and how the app starts up
+and keeps its settings. The installer is also cleaner: it now carries only the
+app's own files.
+
+### Fixed
+
+**Printed interior and covers**
+
+- Letters the body or heading face lacks now fail preflight, and cover text
+  drops invisible characters, keeps no-break spaces and checks italic lines in
+  their italic face.
+- Smart quotes handle elisions ('Tis, '90s) and quotes after emphasis or a
+  dash; `***bold **a*** b**` no longer tangles its emphasis.
+- Chapter art over the number leaves room for the heading, a closing
+  full-page figure leaves no empty page before the back matter, and tall
+  scene ornaments are scaled to fit.
+- A proof copy's cover is a whole leaf, so its page count sizes the spine
+  correctly.
+- Spread backgrounds stop at the fold, and unticking the wrap cover brings the
+  template cover back.
+
+**Builds**
+
+- A PDF is written beside its name and moved in only when finished, scratch
+  files are cleaned up however a build ends, and a build that made nothing
+  fails instead of reporting success.
+- A save made while a build runs shows the edition as "changed since".
+
+**Page designer and Page Plan**
+
+- Saving under a name already taken is refused, a reload reopens the page you
+  were on, and a recovered new-page draft counts as unsaved.
+- Renames, spreads and chapter-opening art number and place pages as the
+  typesetter does.
+
+**Stat blocks and game blocks**
+
+- A block missing its closing `~~~` ends at the next block or chapter and
+  preflight names it, instead of swallowing the rest of the book.
+- Homebrewery and Word pastes, dash scores, long names, links and blank lines
+  inside stat blocks all come through intact.
+
+**Ebooks**
+
+- Headings never skip a level, every picture carries a description (its own or
+  its caption, never a file name), and the title and author are never left
+  empty.
+- WebP pictures are converted, characters ebooks can't hold are removed, and a
+  page-by-page ebook stops with a clear message rather than shipping a blank
+  page.
+- Matter pages, links and the scene-break picture match the printed book.
+
+**Startup and settings**
+
+- Two copies of the app no longer overwrite each other's settings or history,
+  and a damaged settings file is kept aside instead of written over.
+- A font of yours that shares a name with a newly bundled one is kept as
+  `<name>-own`.
+- Stale uploads and package folders are swept, and an interrupted first-run
+  install is retried.
+- The installer no longer includes cover art uploaded while the app was being
+  developed.
+
 ## 1.14.2 — 25 November 2026
 
 A bug-fix release: two more rounds of the bug hunt, covering the interior
