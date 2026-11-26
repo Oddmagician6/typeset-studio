@@ -156,6 +156,7 @@ def _source(canv, role=None, text='', **kw):
 
 def _tracked_centre(canv, cx, y, text, font, size, tracking=0.0):
     """Draw letterspaced text centred on cx at baseline y."""
+    text = cover_clean(text or '')
     if not text:
         return
     bounds = getattr(_FRONT, 'bounds', None)
@@ -205,11 +206,26 @@ def _break_overlong(lines, font, size, max_w, tracking=0.0):
     return out
 
 
+# Characters a cover line is set without: a soft hyphen, zero-width space or
+# joiner and a stray byte-order mark have no width and no business printing,
+# and ReportLab drew them as they came (a soft hyphen as a visible `-`)
+INVISIBLE_CHARS = '\u00ad\u200b\u2060\ufeff'
+_INVISIBLE_RE = re.compile('[' + INVISIBLE_CHARS + ']')
+# where a cover line may break: white space, but not the no-break spaces
+# (`10\u00a0kg` stays together, and keeps its own width)
+_BREAK_RE = re.compile(r'[^\S\u00a0\u2007\u202f]+')
+
+
+def cover_clean(text):
+    """Cover text with the invisible characters taken out."""
+    return _INVISIBLE_RE.sub('', str(text))
+
+
 def _wrap_tracked(text, font, size, max_w, tracking=0.0):
     """Word-wrap text to max_w, honouring the tracking already applied."""
     out = []
-    for para in (str(text).splitlines() or ['']):
-        words = para.split()
+    for para in (cover_clean(text).splitlines() or ['']):
+        words = [w for w in _BREAK_RE.split(para) if w]
         if not words:
             out.append('')
             continue
@@ -350,10 +366,18 @@ def figures_missing(ms, preset):
     return out + (['(no src)'] if no_src else [])
 
 
+def _section(preset, key):
+    """A style's settings group as a dict: a damaged style's `null` (or any
+    other non-object) reads as empty, so the library-wide checks that ask every
+    style what it names (deleting a figure) never fail on one bad style."""
+    v = (preset or {}).get(key)
+    return v if isinstance(v, dict) else {}
+
+
 def scene_image_src(preset):
     """The picture a style marks scene breaks with, or '' (another type)."""
-    sb = preset.get('scene_break', {}) or {}
-    return (sb.get('image') or '').strip() if sb.get('type') == 'image' else ''
+    sb = _section(preset, 'scene_break')
+    return str(sb.get('image') or '').strip() if sb.get('type') == 'image' else ''
 
 
 def scene_image_path(preset):
@@ -416,6 +440,9 @@ def cover_glyphs_missing(meta, cf):
                                                     'cover_author_bio', 'cover_studio',
                                                     'publisher', 'cover_epigraph',
                                                     'cover_collection', 'author')),
+        # the kicker, tagline and epigraph are set in the italic face
+        'italic': ' '.join(meta.get(k) or '' for k in ('cover_kicker', 'cover_epigraph',
+                                                     'epigraph')),
     }
     missing = set()
     for role, text in words.items():
@@ -432,6 +459,51 @@ def cover_glyphs_missing(meta, cf):
                 continue
             if ord(ch) not in cmap:
                 missing.add(ch)
+    return ''.join(sorted(missing))
+
+
+def _face_cmap(name):
+    """The code points an embedded TrueType face has, or None (a standard PDF
+    font, or one that can't be read: not checked)."""
+    from reportlab.pdfbase import pdfmetrics as _pm
+    try:
+        return getattr(getattr(_pm.getFont(name), 'face', None), 'charToGlyph', None) or None
+    except Exception:
+        return None
+
+
+def text_glyphs_missing(manuscript, fonts, head_font=None):
+    """Characters of the book's text that its body face has no letter for, and
+    of its chapter titles that the heading face lacks: ReportLab draws the
+    face's empty glyph (a box, or nothing), and the font checks only asked
+    whether the font loaded. Emphasis set in a bold or italic file that does
+    have the letter is not told apart: the body face is the one most text is in."""
+    import html as _html
+    tag = re.compile(r'<[^>]*>')
+    body, heads = set(), set()
+
+    def add(into, s):
+        into.update(_html.unescape(tag.sub('', s or '')))
+    chapters = (manuscript or {}).get('chapters') or []
+    for ch in chapters:
+        for key in ('title', 'byline', 'tagline'):
+            add(heads if key == 'title' else body, ch.get(key) or '')
+        part = ch.get('part') or {}
+        add(heads, part.get('title') or '')
+        for n in ch.get('notes') or []:
+            add(body, n.get('text') if isinstance(n, dict) else str(n))
+    _ms_map_texts(chapters, lambda t, _ch: (add(body, t), t)[1])
+    missing = set()
+    for chars, face in ((body, fonts.get('regular')), (heads, head_font or fonts.get('regular'))):
+        cmap = _face_cmap(face)
+        if not cmap:
+            continue
+        for ch in chars:
+            if ch.isspace() or ord(ch) < 32 or ch in INVISIBLE_CHARS or ord(ch) in cmap:
+                continue
+            if 0xE000 <= ord(ch) <= 0xF8FF:      # the parser's own private markers
+                continue
+            missing.add(ch)
     return ''.join(sorted(missing))
 
 
@@ -1159,6 +1231,7 @@ def _design_photographic(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
 
 def _tracked_left(canv, x, y, text, font, size, tracking=0.0):
     """Draw letterspaced text left-aligned from x at baseline y."""
+    text = cover_clean(text or '')
     if not text:
         return
     bounds = getattr(_FRONT, 'bounds', None)
@@ -1772,6 +1845,11 @@ def _paint_cover_front(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
         _FRONT.bounds = None
 
 
+# the back-cover photo's printed size, set where it is drawn, for the wrap's
+# result (Send to print measures its resolution at that size)
+_BACK_IMG = threading.local()
+
+
 def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
     """Back cover: border, collection line, blurb, studio footer, and a barcode zone.
 
@@ -1856,6 +1934,7 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
             icy = min(max(icy, by0 + gap + thh / 2.0), by1 - gap - thh / 2.0)
             canv.drawImage(ir, icx - tw / 2.0, icy - thh / 2.0, width=tw, height=thh,
                            preserveAspectRatio=True, mask='auto')
+            _BACK_IMG.size = (tw / inch, thh / inch)
         except Exception:
             pass
 
@@ -1931,6 +2010,7 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
                 thh = tw * (ih / iw) if iw else tw
                 canv.drawImage(ir, cx - tw / 2.0, top - thh, width=tw, height=thh,
                                preserveAspectRatio=True, mask='auto')
+                _BACK_IMG.size = (tw / inch, thh / inch)
                 top -= thh + 14
             except Exception:
                 pass
@@ -2145,6 +2225,7 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
         panel_meta.pop('cover_back_image', None)
         if not (meta.get('cover_jacket_blurb') or '').strip():
             panel_meta.pop('cover_blurb', None)
+    _BACK_IMG.size = None
     back_over = _paint_back_panel(c, tpl, cf, panel_meta, back_x, edge, pw, ph)
     drew_spine = _paint_spine(c, tpl, cf, meta, spine_x, edge, sp, ph, draw_text=draw_spine)
     art = _front_art(meta)
@@ -2177,6 +2258,9 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
             'spine_w': round(g['spine_w'], 4), 'spine_text': bool(drew_spine),
             'overflow': overflow,
             'glyphs_missing': cover_glyphs_missing(meta, cf),
+            # the author photo as drawn (inches): fitted to its panel or flap,
+            # which can be smaller than the width asked for
+            'back_image_in': getattr(_BACK_IMG, 'size', None),
             'binding': g['binding'], 'front': 'image' if art else 'designed',
             'wrap': round(g['wrap'], 4), 'hinge': round(g['hinge'], 4),
             'flap': round(g['flap'], 4), 'panel_w': round(g['panel_w'], 4)}
@@ -2484,21 +2568,39 @@ def _draw_ornament(canv, oid, x0, y0, w, h, color=None, fx=False, fy=False):
 
 class SceneBreak(Flowable):
     def __init__(self, glyph, font, size, gap, image_path=None,
-                 ornament=None, ornament_width=0.0):
+                 ornament=None, ornament_width=0.0, max_h=0.0):
         super().__init__()
         self.glyph, self.font, self.size, self.gap = glyph, font, size, gap
         self.image_path = image_path
         self.ornament = ornament
         self.ornament_width = ornament_width
         self.orn_size = (0.0, 0.0)
+        self.max_h = max_h          # the page's text height: a mark fits a page
+        self.glyph_size = size
 
     def wrap(self, w, h):
         self.width = w
         mark_h = self.size
         if self.ornament:
-            self.orn_size = _orn.size(self.ornament, w, self.ornament_width)
+            ow, oh = _orn.size(self.ornament, w, self.ornament_width)
+            # a width that fits the measure can still be taller than the page
+            # (a square star across a landscape trim): scaled down, shape kept,
+            # rather than a frame that can never hold it and a failed build
+            room = (self.max_h - 2 * self.gap) * 0.9 if self.max_h else 0
+            if room > 0 and oh > room:
+                ow, oh = ow * room / oh, room
+            self.orn_size = (ow, oh)
             if self.orn_size[1]:
                 mark_h = self.orn_size[1]
+        # a text mark wider than the measure is set smaller to fit, not
+        # centred off both edges of the trim
+        self.glyph_size = self.size
+        try:
+            gw = stringWidth(self.glyph or '', self.font, self.size)
+            if w and gw > w:
+                self.glyph_size = self.size * w / gw
+        except Exception:
+            pass
         self.height = self.gap * 2 + mark_h
         return (w, self.height)
 
@@ -2529,7 +2631,7 @@ class SceneBreak(Flowable):
             except Exception:
                 pass
         # Fallback: text glyph
-        self.canv.setFont(self.font, self.size)
+        self.canv.setFont(self.font, self.glyph_size)
         self.canv.drawCentredString(self.width / 2.0, self.gap, self.glyph)
 
 
@@ -3240,7 +3342,8 @@ class BookDoc(BaseDocTemplate):
         # book and the cover going to the printer carry the same title
         _paint_cover_overlay(canv, self.meta.get('title', ''),
                              self.meta.get('author', ''),
-                             cv.get('title_font', self.head_font), self.head_font,
+                             cv.get('title_font', self.head_font),
+                             cv.get('author_font', self.head_font),
                              0, 0, self._pw, self._ph,
                              light=cv.get('color', 'light') == 'light')
 
@@ -3494,8 +3597,15 @@ class BookDoc(BaseDocTemplate):
         if foot:
             h = tw / foot['aspect']
             fo = self.preset['folio']
-            top_of_folio = self._bottom - fo['gap'] * inch + fo['size'] * 0.75
-            y = (self._bottom + top_of_folio) / 2 - h / 2
+            if fo.get('show', True):
+                top_of_folio = self._bottom - fo['gap'] * inch + fo['size'] * 0.75
+                y = (self._bottom + top_of_folio) / 2 - h / 2
+            else:
+                # no folio to sit above: the middle of the foot margin (the
+                # hidden folio's gap put the band below the page edge)
+                y = self._bottom / 2 - h / 2
+            # and never past the trim, whatever the gap
+            y = min(max(y, 0.0), max(self._bottom - h, 0.0))
             _draw_ornament(canv, foot['id'], text_left, y, tw, h, color=ink)
         corner = _orn.furniture(fu.get('corner'), 'corner')
         if corner:
@@ -3759,8 +3869,8 @@ def _opening_para(text, st, preset, fonts, hyph=None):
         lead, rest = ' '.join(words[:n]), ' '.join(words[n:])
         big   = int(st['first'].fontSize * 1.05)
         rest  = _hyphenate_markup(rest, hyph) if hyph else rest
-        return marks + [Paragraph(f'<font size="{big}">{lead.upper()}</font> {rest}',
-                                  st['first'])]
+        return marks + [Paragraph(f'<font size="{big}">{_upper_text(lead, st["first"].fontName)}'
+                                  f'</font> {rest}', st['first'])]
     text_h = _hyphenate_markup(text, hyph) if hyph else text
     return [Paragraph(text_h, st['first'])]
 
@@ -4511,7 +4621,7 @@ def chapter_art_src(preset):
     it — the renderer draws its placeholder, so a lost illustration shows up in
     the proof instead of disappearing.
     """
-    return (preset.get('chapter_art', {}).get('image', '') or '').strip()
+    return str(_section(preset, 'chapter_art').get('image') or '').strip()
 
 
 def chapter_art_position(preset):
@@ -4674,6 +4784,63 @@ def _table_rows(block_paras):
     return [r + [''] * (cols - len(r)) for r in rows]
 
 
+def _markup_runs(markup, fonts, bold=False, italic=False):
+    """ReportLab markup as [(plain text, face)]: `<b>` and `<i>` switch to the
+    family's bold, italic or bold-italic file, as the paragraph sets them."""
+    import html as _html
+    from reportlab.lib.fonts import ps2tt, tt2ps
+    try:
+        family = ps2tt(fonts['regular'])[0]      # the lookup a Paragraph makes
+    except Exception:
+        family = None
+
+    def face(b, i):
+        try:
+            return tt2ps(family, int(b), int(i))
+        except Exception:
+            return ((fonts.get('bold') if b else fonts.get('italic') if i else None)
+                    or fonts['regular'])
+    runs, b, i, pos = [], int(bold), int(italic), 0
+    for m in re.finditer(r'<(/?)(b|i|strong|em)\b[^>]*>|<[^>]*>', markup or ''):
+        if m.start() > pos:
+            runs.append((_html.unescape(markup[pos:m.start()]), face(b > 0, i > 0)))
+        if m.group(2):
+            step = -1 if m.group(1) else 1
+            if m.group(2) in ('b', 'strong'):
+                b = max(0, b + step)
+            else:
+                i = max(0, i + step)
+        pos = m.end()
+    if pos < len(markup or ''):
+        runs.append((_html.unescape(markup[pos:]), face(b > 0, i > 0)))
+    return [r for r in runs if r[0]]
+
+
+def _as_runs(cell):
+    """A measured cell: runs, or the (text, face) pair callers used to pass."""
+    if isinstance(cell, tuple) and len(cell) == 2 and isinstance(cell[0], str):
+        return [cell]
+    return cell
+
+
+def _word_widths(runs, size):
+    """The width of each word across a cell's runs (a word may change face
+    partway: `**bold**ly`)."""
+    out, cur, any_ = [], 0.0, False
+    for text, f in runs:
+        for ch in text:
+            if ch.isspace():
+                if any_:
+                    out.append(cur)
+                cur, any_ = 0.0, False
+            else:
+                cur += stringWidth(ch, f, size)
+                any_ = True
+    if any_:
+        out.append(cur)
+    return out
+
+
 def _table_widths(measured, attrs, target_w, size, pad):
     """Column widths in points, summing to target_w.
 
@@ -4703,12 +4870,12 @@ def _table_widths(measured, attrs, target_w, size, pad):
 
     nat, minw = [], []
     for c in range(cols):
-        col = [row[c] for row in measured]
-        nat.append(max((stringWidth(t, f, size) for t, f in col), default=0.0) + pad)
-        words = [(w, f) for t, f in col for w in t.split()]
+        col = [_as_runs(row[c]) for row in measured]
+        nat.append(max((sum(stringWidth(t, f, size) for t, f in runs) for runs in col),
+                       default=0.0) + pad)
         # +1pt: ReportLab's own wrap is not bit-identical to stringWidth, and a
         # column exactly as wide as its longest word still breaks it
-        minw.append(max((stringWidth(w, f, size) for w, f in words), default=0.0)
+        minw.append(max((w for runs in col for w in _word_widths(runs, size)), default=0.0)
                     + pad + 1.0)
 
     total_nat = sum(nat) or 1.0
@@ -4767,8 +4934,12 @@ def _render_table_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=Non
             return _caps_keep_notes(text)
         return text
 
-    measured = [[(_plain(cell_text(t, header and r == 0)),
-                  hfont if (header and r == 0) else fonts['regular'])
+    # each cell as runs of (text, face): a **bold** word in a body cell is
+    # set in the bold file, and measured in the regular one it split across
+    # two lines in a column that had room for it
+    measured = [[_markup_runs(cell_text(t, header and r == 0), fonts,
+                              bold=header and r == 0 and hstyle_name == 'bold',
+                              italic=header and r == 0 and hstyle_name == 'italic')
                  for t in row]
                 for r, row in enumerate(rows)]
 
@@ -4913,6 +5084,17 @@ def _gb_font(fonts, style):
     if style == 'italic':
         return fonts.get('italic', fonts['regular'])
     return fonts['regular']
+
+
+def _upper_text(text, font=None):
+    """Capitals for small caps, as `str.upper` makes them, but a `ß` becomes the
+    capital `ẞ` where the face has one (`Maße` and `Masse` stayed two words),
+    and an entity (`&amp;`) is put back as it was."""
+    cmap = _face_cmap(font) if font else None
+    if cmap and 0x1E9E in cmap:
+        text = text.replace('ß', 'ẞ')
+    out = text.upper()
+    return re.sub(r'&([A-Z]+|#X?[0-9A-F]+);', lambda m: '&' + m.group(1).lower() + ';', out)
 
 
 def _caps_markup(text):
@@ -5932,25 +6114,9 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body', unlink=Non
     anchor left stale by a renamed chapter is fatal to ReportLab, so it has to be
     caught here as well or the whole PDF dies on the front matter.
     """
-    # Split on blank lines into raw paragraph strings
-    raw = [[l.strip() for l in b.split('\n') if l.strip()]
-           for b in text.replace('\r\n', '\n').split('\n\n')]
-    _attr = ('—', '–', '--', '-')
-    if style == 'also_by':
-        # one title per line, as the field asks, blank line or not
-        raw = [[l] for b in raw for l in b]
-    elif style == 'epigraph':
-        # a last line starting with a dash is the source, set as its own line
-        # (it was run on into the quotation unless a blank line came first)
-        split = []
-        for b in raw:
-            if len(b) > 1 and b[-1].startswith(_attr):
-                split += [b[:-1], b[-1:]]
-            else:
-                split.append(b)
-        raw = split
-    blocks = [' '.join(b).strip() for b in raw]
-    blocks = [b for b in blocks if b]
+    # paragraphs as matter.blocks splits them, for the EPUB too
+    blocks = _matter.blocks(text, style)
+    _attr = _matter.ATTR_MARKS
     # the heading is plain text and may carry the author's name ("Also by …")
     heading = _esc_markup(heading or '')
 
@@ -6069,8 +6235,14 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     manuscript['chapters'], ix_marks = _apply_index_markers(manuscript['chapters'], meta)
 
     # ---- cover page (full-bleed art drawn by the page template) ----
+    # A whole leaf: the cover, then its blank inside, so the book behind it
+    # starts on a right-hand page 3 and every recto/verso falls where it does
+    # in the coverless interior a printer gets. A cover page alone put the
+    # half title on a verso and shifted each right-hand start, so the proof's
+    # page count no longer told Send to print's spine (bug hunt 17.4).
     if has_cover:
-        story += [Spacer(1, 2), NextPageTemplate('verso'), PageBreak()]
+        story += [Spacer(1, 2), NextPageTemplate('blank'), PageBreak(), BlankMarker(),
+                  NextPageTemplate('recto'), PageBreak()]
 
     # ---- front matter ----
     level = meta.get('front_matter', 'full')
@@ -6237,6 +6409,16 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 need += st['chap_num'].leading + 0.12 * inch
             if ch['title']:
                 need += st['chap_title'].leading
+            if art and art_pos == 'above':
+                # the art over the number is on the opener too: room for it
+                # alone took the heading over to the next page, and the
+                # contents pointed at an ornament
+                for f in art:
+                    try:
+                        need += (f.wrap(avail_w, text_h)[1] + f.getSpaceBefore()
+                                 + f.getSpaceAfter())
+                    except Exception:
+                        pass
             # (a sink deeper than the page itself is still refused outright:
             # that style can't be set, and the preview says so)
             sink = c['sink'] * inch
@@ -6309,9 +6491,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 sb = preset['scene_break']
                 img_path = scene_image_path(preset)
                 orn = sb.get('ornament', '') if sb.get('type') == 'ornament' else ''
+                orn = orn if _orn.scene(orn) else ''     # furniture is no scene break
                 story.append(SceneBreak(glyph, head_font, sb['size'], sb['gap'],
                                         image_path=img_path, ornament=orn,
-                                        ornament_width=sb.get('ornament_width', 0.0)))
+                                        ornament_width=sb.get('ornament_width', 0.0),
+                                        max_h=text_h))
                 flush_next = True
             elif kind == 'subhead':
                 story.append(_heading_para(val, st['subhead'], 2))
@@ -6349,20 +6533,29 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     _author = meta.get('author', '')
     _bm_first = True   # only the first back-matter page gets recto-forced
 
+    def _bm_break(first):
+        # a page break only where the page has something on it: a chapter
+        # ending in a full-page figure has already broken, and a second break
+        # left a numbered empty page and put the section on the other side
+        if first and rhs:
+            return [RectoBreak()]
+        return [PageBreak()] if _page_open(story) else []
+
     # Notes come first in the back matter, right after the last chapter — they
     # belong to the text in a way acknowledgments and author bios don't.
     if (any(ch.get('notes') for ch in manuscript['chapters'])
             and preset.get('endnotes', {}).get('placement', 'end') != 'foot'):
-        story.append(RectoBreak() if rhs else PageBreak())
+        story.extend(_bm_break(True))
         _bm_first = False
         story.append(RunningHeadMarker(_esc_markup(
             preset.get('endnotes', {}).get('heading', 'Notes'))))
         story.extend(_endnotes_page(manuscript['chapters'], fonts, st, preset))
 
     for _sec in _matter.present(meta, 'back'):
-        story.append((RectoBreak() if rhs else PageBreak()) if _bm_first else PageBreak())
+        story.extend(_bm_break(_bm_first))
         _bm_first = False
-        story.append(RunningHeadMarker(_matter.heading(_sec, _author)))
+        # markup, as the marker reads it: plain, `R. Vale <Pen Name>` lost its <…>
+        story.append(RunningHeadMarker(_esc_markup(_matter.heading(_sec, _author))))
         story.extend(_matter_page(_matter.heading(_sec, _author),
                                   meta[_sec['key']].strip(),
                                   fonts, st, sq, _sec['style'],
@@ -6371,7 +6564,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     # The index closes the book: nothing follows it, so its own length moves
     # no page it lists.
     if index is not None and _bookindex.wanted(ix_marks, meta):
-        story.append((RectoBreak() if rhs else PageBreak()) if _bm_first else PageBreak())
+        story.extend(_bm_break(_bm_first))
         story.append(RunningHeadMarker(_bookindex.HEADING))
         story.extend(_index_page(ix_marks, index, meta, preset, fonts, st))
 
@@ -6790,8 +6983,14 @@ def paint_background(canv, bg, x, y, pw, ph):
     """A style's page background (`page_background`) over the rectangle
     (x, y, pw, ph): its colour, then its picture at its opacity, scaled to
     cover it (the page edge crops the overflow). The ebook's page art
-    paints it too, so a page reads the same there as in print."""
+    paints it too, so a page reads the same there as in print.
+
+    Clipped to the rectangle: a spread's two pages are painted on one sheet,
+    and the right page's picture spilled across the fold onto the left."""
     canv.saveState()
+    clip = canv.beginPath()
+    clip.rect(x, y, pw, ph)
+    canv.clipPath(clip, stroke=0, fill=0)
     if bg['color'] is not None:
         canv.setFillColor(bg['color'])
         canv.rect(x, y, pw, ph, stroke=0, fill=1)
@@ -6811,7 +7010,7 @@ def paint_background(canv, bg, x, y, pw, ph):
 
 def page_background_src(preset):
     """The picture a style lays under its screen pages, or ''."""
-    return ((preset.get('page_background') or {}).get('image') or '').strip()
+    return str(_section(preset, 'page_background').get('image') or '').strip()
 
 
 def page_background(preset):
@@ -7004,6 +7203,12 @@ def _unlink_dead(text, known, dead):
     return _INBOOK_LINK_RE.sub(repl, text)
 
 
+# a block's attributes the PDF sets as inline Markdown (a quote's source, a
+# table's caption, a sidebar's or read-aloud box's title, a stat block's count
+# and challenge rating)
+_MD_ATTRS = frozenset({'source', 'caption', 'title', 'count', 'cr'})
+
+
 def _resolve_inbook_links(chapters):
     """Unlink `#anchor` links this book has no destination for.
 
@@ -7049,7 +7254,11 @@ def _resolve_inbook_links(chapters):
             if b[0] != 'doc_block' or len(b) < 3 or not isinstance(b[2], dict):
                 continue
             attrs = b[2]
-            new = {k: (_MS_LINK_RE.sub(raw_fix, v) if isinstance(v, str) and '](#' in v else v)
+            # only the attributes drawn as Markdown: a poem's title (or a
+            # picture's src) prints as typed, and `[Draft](#x)` there is text
+            md = _MD_ATTRS - ({'title'} if attrs.get('_type') == 'poem' else set())
+            new = {k: (_MS_LINK_RE.sub(raw_fix, v)
+                       if k in md and isinstance(v, str) and '](#' in v else v)
                    for k, v in attrs.items()}
             if new != attrs:
                 blocks[i] = b[:2] + (new,) + tuple(b[3:])
@@ -7098,6 +7307,58 @@ def build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         _FLOOR.size = float(preset.get('min_text_size') or 0)
     except (TypeError, ValueError):
         _FLOOR.size = 0
+    # Laid out beside the real name and moved over it once the last pass is
+    # done: the passes rewrite the file, and a download (or a reader opening
+    # it from the folder) mid-build got an empty or half-made edition.
+    part = out_path + '.part'
+    _SCRATCH.files = []
+    try:
+        res = _build_pdf_variant(manuscript, preset, part, meta, press, screen)
+        _replace_retrying(part, out_path)
+        return res
+    finally:
+        # the passes' scratch PDFs and the cropped cover, which a pass that
+        # failed (a layout error in the contents pass) left in the temp folder
+        for f in [part] + (getattr(_SCRATCH, 'files', None) or []):
+            try:
+                if f:
+                    os.remove(f)
+            except OSError:
+                pass
+        _SCRATCH.files = []
+
+
+_SCRATCH = threading.local()
+
+
+def _scratch_add(path):
+    """A temp file this build made, removed when it ends however it ends."""
+    if path:
+        if getattr(_SCRATCH, 'files', None) is None:
+            _SCRATCH.files = []
+        _SCRATCH.files.append(path)
+
+
+def _scratch_mkstemp(suffix):
+    fd, tmp = tempfile.mkstemp(suffix=suffix)
+    _scratch_add(tmp)
+    return fd, tmp
+
+
+def _replace_retrying(src, dst, tries=20):
+    """os.replace, waiting a moment while Windows has `dst` open elsewhere."""
+    import time
+    for i in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.1)
+
+
+def _build_pdf_variant(manuscript, preset, out_path, meta, press, screen):
     try:
         if screen:
             return _build_pdf(manuscript, _screen_preset(preset), out_path, meta,
@@ -7155,12 +7416,17 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
                  'fonts': _register_cover_fonts(ctpl, fonts)}
     else:
         cover_path = _prepare_cover(meta, preset)
+        _scratch_add(cover_path)
         if cover_path:
             cover = {'mode': 'image',
                      'path': cover_path,
                      'overlay': meta.get('cover_overlay', False),
                      'color': meta.get('cover_color', 'light'),
-                     'title_font': fonts.get('bold', fonts['regular'])}
+                     'title_font': fonts.get('bold', fonts['regular']),
+                     # the author in the regular face, as the wrap sets it
+                     # (image_cover_fonts): the display face lost letters the
+                     # wrap printed
+                     'author_font': fonts['regular']}
 
     # full-bleed pages (#74 Phase 6a): print only; a screen PDF is read on a
     # screen, where the page edge is the edge and nothing is trimmed off
@@ -7212,7 +7478,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         probe = {}
 
         def _measure(reserve, assign):
-            fd, tmp = tempfile.mkstemp(suffix='.pdf')
+            fd, tmp = _scratch_mkstemp('.pdf')
             os.close(fd)
             probe.clear()
             story = _build_story(manuscript, preset, meta, fonts, st, head_font,
@@ -7249,7 +7515,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
 
     if meta.get('include_toc'):
         # Pass 1 — no TOC, just capture chapter positions
-        fd, tmp = tempfile.mkstemp(suffix='.pdf')
+        fd, tmp = _scratch_mkstemp('.pdf')
         os.close(fd)
         story1 = _build_story(manuscript, preset, meta, fonts, st, head_font,
                               has_cover=bool(cover), avail_w=avail_w, hyph=hyph,
@@ -7308,7 +7574,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         if has_index or has_refs:
             # a pass to learn each marker's page; the index is the last thing
             # in the book, so the pass that sets it puts them where this did
-            fd, tmp = tempfile.mkstemp(suffix='.pdf')
+            fd, tmp = _scratch_mkstemp('.pdf')
             os.close(fd)
             probe_doc = _make_doc(tmp)
             probe_doc.build(_build_story(manuscript, preset, meta, fonts, st, head_font,
@@ -7350,7 +7616,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         'page_count':     page_count,
         # the pages a printer binds: the cover page a proof opens with is the
         # cover's own file at the printer, not a leaf of the book
-        'interior_pages': max(page_count - (1 if cover else 0), 0),
+        'interior_pages': max(page_count - (2 if cover else 0), 0),
         'notes_unplaced': len(set(unplaced_notes)),
         # the page references or the index still moved on the last pass
         'refs_unsettled': unsettled,
@@ -7376,6 +7642,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
                                and not meta.get('cover_template_data') else '',
         'cover_glyphs_missing': (cover_glyphs_missing(meta, cover['fonts'])
                                  if cover and cover.get('mode') == 'designed' else ''),
+        'text_glyphs_missing': text_glyphs_missing(manuscript, fonts, head_font),
         'cover_fonts_missing': cover_fonts_missing(cover['template'])
                                if cover and cover.get('mode') == 'designed' else [],
         'cover_art_missing': cover_art_missing(cover['template'])

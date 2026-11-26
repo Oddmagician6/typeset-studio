@@ -279,7 +279,7 @@ BOOK_TEXT = ('name', 'title', 'subtitle', 'author', 'publisher', 'year', 'preset
              'cover_template', 'cover_color', 'cover_collection', 'cover_kicker',
              'cover_accent', 'cover_epigraph', 'cover_studio', 'format', 'front_matter',
              'created', 'updated', 'last_pdf', 'last_epub', 'last_print_package',
-             'last_package_scope', 'last_screen_pdf', 'built')
+             'last_package_scope', 'last_screen_pdf', 'built', 'build_started')
 BOOK_FLAGS = ('include_toc', 'smartquotes', 'right_hand_starts', 'cover_overlay', 'press',
               'screen_pdf', 'index_statblocks', 'index_cr', 'link_pages', 'bleed',
               'picture_book')
@@ -722,6 +722,7 @@ engine.FONT_DIR = FONT_DIR
 engine.COVER_ASSET_DIR = COVER_ASSET_DIR
 engine.FIGURE_DIR = FIGURE_DIR
 epub.FIGURE_DIR = FIGURE_DIR
+epub.FONT_DIR = FONT_DIR            # a scene-break picture kept with the fonts
 manuscript.FIGURE_DIR = FIGURE_DIR    # where .docx images are extracted to
 try:
     engine.ensure_parchment()         # the page background the app ships (#74)
@@ -1036,6 +1037,13 @@ def _preflight(build_result, preset, page_count, paper=None, binding=None, retai
             'the figure library, or can’t be read, so the pages print without it - upload '
             'it on the Figures page, or pick another in the style')})
 
+    if build_result.get('text_glyphs_missing'):
+        checks.append({'label': 'Letters the font lacks', 'ok': False, 'detail': (
+            'The book\u2019s font has no letters for '
+            + ' '.join(build_result['text_glyphs_missing'][:20])
+            + ' - those print as blank boxes or not at all. Pick a style whose font '
+              'has them, or upload one that does')})
+
     if build_result.get('cover_glyphs_missing'):
         checks.append({'label': 'Cover lettering', 'ok': False, 'detail': (
             'The cover\u2019s fonts have no letters for '
@@ -1229,6 +1237,10 @@ def _epub_checks(path, ms=None, meta=None, preset=None):
             checks += fixed_epub.notes(ms, meta, preset)
         except Exception:
             logging.exception('page-by-page ebook notes failed')
+    if meta is not None and meta.get('cover_mode') == 'designed'             and not meta.get('cover_template_data'):
+        # the EPUB's own checks only see a cover it declares: one left off
+        # because its template was deleted read as all clear
+        checks += _missing_checks(template_gone=meta.get('cover_template') or '?')
     extra = _run_epubcheck(path)
     if extra:
         checks.append(extra)
@@ -1752,6 +1764,36 @@ def update_project(pid, changes):
             return None
         proj = upgrade_project(_damaged_as('book', pid, read_book, path))
         proj.update(changes)
+        save_project_file(pid, proj)
+    return proj
+
+
+def _record_build(pid, done, started, created):
+    """Write a finished build's downloads into the book, as `update_project`
+    does, unless they no longer belong there; the book, or None.
+
+    Two things can make them not belong. A newer build of the same book (begun
+    later, finished sooner) has recorded its edition already: the older one
+    finishing last put its stale PDF on the shelf. Or the book was deleted while
+    this built and a new one took its id: the old book's files and page count
+    landed on it. `started` is when this build read the book (microseconds, so
+    two in one second still order); `created` the book's own birth stamp then.
+    """
+    path = os.path.join(PROJECT_DIR, secure_filename(pid) + '.json')
+    with _PROJECT_LOCK:
+        if not os.path.exists(path):
+            return None
+        proj = upgrade_project(_damaged_as('book', pid, read_book, path))
+        if created and proj.get('created') and proj.get('created') != created:
+            return None                             # another book has this id now
+        if str(proj.get('build_started') or '') > started:
+            return proj                             # a newer edition is on the shelf
+        done = dict(done, build_started=started)
+        # the edition is the book as it was read: a save made while it built
+        # is newer than it, and the shelf says "changed since"
+        done['built'] = started[:19]
+        done['updated'] = max(str(proj.get('updated') or ''), started[:19])
+        proj.update(done)
         save_project_file(pid, proj)
     return proj
 
@@ -3156,6 +3198,27 @@ def project_last_pdf_path(data):
     return path if os.path.exists(path) else None
 
 
+def _thumb_cache(pid, pdf_path):
+    return os.path.join(PROJECT_THUMB_DIR,
+                        f'{pid}@{secure_filename(os.path.basename(pdf_path))}.png')
+
+
+def _drop_thumbs(pid, keep=''):
+    """A book's cached thumbnails (all but `keep`), and one from before they were
+    named for their PDF."""
+    try:
+        names = os.listdir(PROJECT_THUMB_DIR)
+    except OSError:
+        return
+    for f in names:
+        path = os.path.join(PROJECT_THUMB_DIR, f)
+        if (f == pid + '.png' or f.startswith(pid + '@')) and path != keep:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
 def _project_thumb_bytes(pid):
     """Page-1 thumbnail of a project's last built PDF (its cover, or the first
     front-matter page), cached to disk and keyed by the PDF's mtime. Returns None
@@ -3171,7 +3234,10 @@ def _project_thumb_bytes(pid):
     pdf_path = project_last_pdf_path(data)
     if not pdf_path:
         return None
-    cache = os.path.join(PROJECT_THUMB_DIR, pid + '.png')
+    # named for the PDF it was made from, not just the book: a thumbnail of the
+    # old edition written after a rebuild had finished was newer than the new
+    # PDF, and the time check alone kept it for good
+    cache = _thumb_cache(pid, pdf_path)
     if os.path.exists(cache) and os.path.getmtime(cache) >= os.path.getmtime(pdf_path):
         try:
             with open(cache, 'rb') as f:
@@ -3191,6 +3257,7 @@ def _project_thumb_bytes(pid):
             _atomic_write_bytes(cache, png)   # a tile asked for twice at once
         except OSError:
             pass
+        _drop_thumbs(pid, keep=cache)
         return png
     except Exception:
         logging.exception('project thumbnail build failed for %s', pid)
@@ -3650,7 +3717,9 @@ def wrap_designer_save(pid):
         proj['cover_mode'] = 'wrap'
     elif proj.get('cover_mode') == 'wrap':
         # unticked: back to the cover the book had before, as Send to print reads it
-        proj['cover_mode'] = ('designed' if proj.get('cover_template_data')
+        # (the saved book names its template by id; the template's data is
+        # only put together for a build)
+        proj['cover_mode'] = ('designed' if load_cover_template(proj.get('cover_template', ''))
                               else 'image' if proj.get('cover_file') else 'none')
     front = os.path.join(PROJECT_MS_DIR, proj['wrap_front_file'])
     # rendered beside the real one and swapped in only once the book is saved:
@@ -4288,15 +4357,7 @@ def cover_wrap_preview():
             kind = 'paperback'
         info = (f"{dims['trim_w']:g}×{dims['trim_h']:g}\" {kind} · spine {res['spine_w']:g}\" · "
                 f"full {res['wrap_w']:g}×{res['wrap_h']:g}\" · {spine_txt}")
-        warnings = list(dims.get('warnings', []))
-        for where in res.get('overflow', []):
-            foot = 'the barcode area' if where == 'back cover' else 'the bottom of the flap'
-            warnings.append(f'The {where} copy is too long to fit: it runs past {foot}. '
-                            'Shorten it.')
-        if res.get('glyphs_missing'):
-            warnings.append('The cover\u2019s fonts have no letters for '
-                            + ' '.join(res['glyphs_missing'][:20])
-                            + ' - those print blank. Pick a cover font that has them.')
+        warnings = list(dims.get('warnings', [])) + _wrap_warnings(res)
         return jsonify({'ok': True, 'image': f'data:image/png;base64,{b64}', 'info': info,
                         'warnings': warnings})
     except Exception as exc:
@@ -4829,6 +4890,17 @@ def generate():
     cov = request.files.get('cover')
     cover_mode = form.get('cover_mode', 'none')
     cover_path = ''
+
+    def rejected():
+        # the form again, without the copies this attempt staged in uploads/:
+        # each corrected retry left another manuscript (and cover) behind
+        for staged in (ms_path, cover_path):
+            if staged and os.path.dirname(os.path.abspath(staged)) == os.path.abspath(UPLOAD_DIR):
+                try:
+                    os.remove(staged)
+                except OSError:
+                    pass
+        return render_template('generate.html', presets=presets, form=form)
     try:
         if up and up.filename:
             ms_path, raw = _manuscript_upload(up, UPLOAD_DIR)
@@ -4839,7 +4911,7 @@ def generate():
             cover_path = _cover_upload(cov, UPLOAD_DIR)
     except _PreviewError as exc:
         flash(str(exc))
-        return render_template('generate.html', presets=presets, form=form)
+        return rejected()
     if raw is not None:
         pass
     elif form.get('pasted', '').strip():
@@ -4857,7 +4929,7 @@ def generate():
 
     if not raw:
         flash('Add a manuscript: upload a file, paste text, or use the sample.')
-        return render_template('generate.html', presets=presets, form=form)
+        return rejected()
 
     cover_template = form.get('cover_template', '') or 'ashforge-house'
     cover_template_data = load_cover_template(cover_template) if cover_mode == 'designed' else None
@@ -4913,7 +4985,7 @@ def generate():
             logging.error('PDF build failed: %s', traceback.format_exc())
             _drop_out(out_name)
             flash(f'PDF build failed: {exc}')
-            return render_template('generate.html', presets=presets, form=form)
+            return rejected()
         screen_name, warn = _screen_build(ms, preset, meta, base, stamp)
         if warn:
             flash(warn)
@@ -4925,8 +4997,8 @@ def generate():
             flash(warn)
 
     if fmt in ('epub', 'both'):
-        epub_name = _claim_out(f'{base}-{stamp}.epub')
         try:
+            epub_name = _claim_out(f'{base}-{stamp}.epub')
             with _epub_cover(preset, meta) as emeta:
                 epub.build_epub(ms, preset, os.path.join(OUT_DIR, epub_name), emeta)
         except Exception as exc:
@@ -4934,6 +5006,10 @@ def generate():
             flash(f'EPUB build failed: {exc}')
             _drop_out(epub_name)
             epub_name = ''
+    if not (out_name or epub_name or screen_name):
+        # nothing came out: the form again, with the failure above it, rather
+        # than "Off the press" with no download
+        return rejected()
 
     # the pages a printer binds: a proof's cover page is not one of them
     bound     = (build_result or {}).get('interior_pages') or page_count
@@ -5018,7 +5094,7 @@ PREVIEW_MAX_CHAPTERS = 2
 PREVIEW_MAX_PAGES    = 8
 
 
-def _book_from_compose_form(tmp_files):
+def _book_from_compose_form(tmp_files, toc_stubs=False):
     """Read the compose form into (preset, manuscript, meta, total, truncated).
 
     Shared by the page-image preview and the ebook preview: both need exactly the
@@ -5080,6 +5156,10 @@ def _book_from_compose_form(tmp_files):
         # (press-ready drops the cover; bleed runs pages to the edge)
         'press':          'press' in form,
         'bleed':          'bleed' in form,
+        # an ebook-only book with the colour screen PDF asked for exports
+        # only that PDF, so that is the one the preview shows
+        'screen_pdf':     'screen_pdf' in form,
+        'format':         form.get('format', 'pdf'),
         **{k: k in form for k in ON_FLAGS},
         **{k: form.get(k, '').strip() for k in matter.KEYS},
     }
@@ -5088,7 +5168,13 @@ def _book_from_compose_form(tmp_files):
     chapters_total = len(ms['chapters'])
     truncated = chapters_total > PREVIEW_MAX_CHAPTERS
     if truncated:
-        ms = {'chapters': ms['chapters'][:PREVIEW_MAX_CHAPTERS]}
+        kept = ms['chapters'][:PREVIEW_MAX_CHAPTERS]
+        if toc_stubs and meta['include_toc']:
+            # the chapters past the preview's are still listed in the contents,
+            # with no text of their own: cut, the contents had two entries and
+            # the first chapter came pages earlier than in the book
+            kept += [dict(ch, blocks=[], notes=[]) for ch in ms['chapters'][PREVIEW_MAX_CHAPTERS:]]
+        ms = dict(ms, chapters=kept)
     return preset, ms, meta, chapters_total, truncated
 
 
@@ -5108,23 +5194,28 @@ def generate_preview():
     tmp_files = []
     try:
         preset, ms, meta, chapters_total, truncated = \
-            _book_from_compose_form(tmp_files)
+            _book_from_compose_form(tmp_files, toc_stubs=True)
 
         fd, tmp_pdf = tempfile.mkstemp(suffix='.pdf')
         os.close(fd)
         tmp_files.append(tmp_pdf)
-        engine.build_pdf(ms, preset, tmp_pdf, meta, press=meta.get('press', False))
+        if meta.get('format') == 'epub' and meta.get('screen_pdf'):
+            engine.build_pdf(ms, preset, tmp_pdf, meta, screen=True)
+        else:
+            engine.build_pdf(ms, preset, tmp_pdf, meta, press=meta.get('press', False))
 
         doc = fitz.open(tmp_pdf)
-        built_pages = doc.page_count
-        images = []
-        for i, page in enumerate(doc):
-            if i >= PREVIEW_MAX_PAGES:
-                break
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)  # ~144 dpi
-            b64 = base64.b64encode(pix.tobytes('png')).decode()
-            images.append(f'data:image/png;base64,{b64}')
-        doc.close()
+        try:
+            built_pages = doc.page_count
+            images = []
+            for i, page in enumerate(doc):
+                if i >= PREVIEW_MAX_PAGES:
+                    break
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)  # ~144 dpi
+                b64 = base64.b64encode(pix.tobytes('png')).decode()
+                images.append(f'data:image/png;base64,{b64}')
+        finally:
+            doc.close()     # before the temp file is removed (Windows keeps it open)
 
         return jsonify({
             'ok': True,
@@ -5132,7 +5223,7 @@ def generate_preview():
             'shown': len(images),
             'built_pages': built_pages,
             'chapters_total': chapters_total,
-            'chapters_shown': len(ms['chapters']),
+            'chapters_shown': min(len(ms['chapters']), PREVIEW_MAX_CHAPTERS),
             'truncated': truncated,
         })
     except _PreviewError as exc:
@@ -6101,7 +6192,44 @@ def _build_project(pid, proj):
     raw, err = _project_source(proj)
     if err:
         return {'error': err}
+    started = datetime.now().isoformat(timespec='microseconds')
+    created = proj.get('created') or ''
     meta, cover_path = _project_meta(proj)
+    # the cover as it is now, for every edition this build makes: Edit can
+    # replace the file while the PDF is laying out, and the EPUB, which reads
+    # it later, came out with the other cover
+    snap = _snapshot_file(cover_path)
+    try:
+        if snap:
+            meta = dict(meta, cover_image=snap)
+        return _build_project_with(pid, proj, preset, raw, meta, cover_path, started, created)
+    finally:
+        if snap:
+            try:
+                os.remove(snap)
+            except OSError:
+                pass
+
+
+def _snapshot_file(path):
+    """A private copy of `path` (same extension) in the temp folder, or ''."""
+    if not path or not os.path.isfile(path):
+        return ''
+    fd, snap = tempfile.mkstemp(suffix=os.path.splitext(path)[1] or '.img')
+    os.close(fd)
+    try:
+        shutil.copyfile(path, snap)
+        return snap
+    except OSError:
+        try:
+            os.remove(snap)
+        except OSError:
+            pass
+        return ''
+
+
+def _build_project_with(pid, proj, preset, raw, meta, cover_path, started, created):
+    """`_build_project`'s work, on the book as read at `started`."""
     ms_parsed = manuscript.parse_markdown(raw, smartquotes=meta.get('smartquotes', True))
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     base  = _slug_or_blank(meta['title']) or _slug_or_blank(proj.get('name')) or 'book'
@@ -6146,8 +6274,10 @@ def _build_project(pid, proj):
             res['warnings'].append(warn)
 
     if fmt in ('epub', 'both'):
-        res['epub_name'] = _claim_out(f'{base}-{stamp}.epub')
         try:
+            # claimed inside the try: a folder that refuses the file costs the
+            # EPUB, not the PDF already built
+            res['epub_name'] = _claim_out(f'{base}-{stamp}.epub')
             with _epub_cover(preset, meta) as emeta:
                 epub.build_epub(ms_parsed, preset,
                                 os.path.join(OUT_DIR, res['epub_name']), emeta)
@@ -6158,12 +6288,12 @@ def _build_project(pid, proj):
             res['epub_name'] = ''
             res['epub_failed'] = True
 
+    if not (res['out_name'] or res['epub_name'] or res['screen_name']):
+        # nothing came out (an EPUB-only book whose EPUB failed): a failure,
+        # and the book keeps the build date and downloads it had
+        return dict(res, error='; '.join(res['warnings']) or 'The build made no files.')
     done = {'last_pdf': res['out_name'], 'last_epub': res['epub_name'],
-            'last_screen_pdf': res['screen_name'],
-            'updated': datetime.now().isoformat(timespec='seconds')}
-    # when the downloads were made: `updated` moves with every later save or
-    # History restore, which then read as "Last built"
-    done['built'] = done['updated']
+            'last_screen_pdf': res['screen_name']}
     if res.get('epub_failed'):
         del done['last_epub']           # the last one that worked stays downloadable
     if res['page_count']:
@@ -6171,9 +6301,9 @@ def _build_project(pid, proj):
         # spine as Send to print (a proof's cover page is not a leaf)
         done['last_page_count'] = (res['build_result'].get('interior_pages')
                                    or res['page_count'])
-    proj.update(done)
     # into the book as it is now: it may have been saved while this built
-    proj.update(update_project(pid, done) or {})
+    # (and only if this is still that book's newest edition)
+    proj.update(_record_build(pid, done, started, created) or {})
     return res
 
 
@@ -6183,8 +6313,9 @@ def _screen_build(ms, preset, meta, base, stamp):
     costs the print PDF, which is already built."""
     if not meta.get('screen_pdf'):
         return '', ''
-    name = _claim_out(f'{base}-{stamp}-screen.pdf')
+    name = ''
     try:
+        name = _claim_out(f'{base}-{stamp}-screen.pdf')
         engine.build_pdf(ms, preset, os.path.join(OUT_DIR, name), meta, screen=True)
         return name, ''
     except Exception as exc:
@@ -6242,9 +6373,8 @@ def project_rebuild(pid):
         return jsonify(ok=False, error=f'Build failed: {exc}')
     if res['error']:
         return jsonify(ok=False, error=res['error'])
-    if res.get('epub_failed') and not res['out_name']:
-        # an EPUB-only book that built nothing has failed, not built with a warning
-        return jsonify(ok=False, error='; '.join(res['warnings']) or 'The EPUB build failed.')
+    # (an EPUB-only book that built nothing came back as an error above; one
+    # whose screen PDF was made has built that, with the EPUB as a warning)
     issues = []
     if res['build_result']:
         issues += issue_rows(_preflight(res['build_result'], res['preset'],
@@ -6407,6 +6537,22 @@ def _art_resolution_check(res, w_in, h_in):
                        f'Ask for {need[0]}×{need[1]} px or larger.')}
 
 
+def _wrap_warnings(res, glyphs=None):
+    """What a built wrap's result says went wrong in it - copy cut short, letters
+    its fonts don't have - for Cover Studio and Send to print alike."""
+    out = []
+    for where in res.get('overflow', []):
+        foot = 'the barcode area' if where == 'back cover' else 'the bottom of the flap'
+        out.append(f'The {where} copy is too long to fit: it runs past {foot}. '
+                   'Shorten it.')
+    glyphs = res.get('glyphs_missing') if glyphs is None else glyphs
+    if glyphs:
+        out.append('The cover\u2019s fonts have no letters for '
+                   + ' '.join(glyphs[:20])
+                   + ' - those print blank. Pick a cover font that has them.')
+    return out
+
+
 def _back_image_check(res, w_in):
     """The check row for the back-cover photo or logo, placed `w_in` wide."""
     if not res:
@@ -6532,6 +6678,8 @@ def build_print_package(proj, scope='print'):
             wrap_design.build_pdf(design, dims, wrap)
             wres = wrap_design.summary(g, design)
             checks += _missing_checks(design_missing=wrap_design.missing(design))
+            for w in _wrap_warnings({}, wrap_design.glyphs_missing(design)):
+                checks.append({'label': 'Cover lettering', 'ok': False, 'detail': w})
             # every picture measured at the size it is placed at, bleed included
             for path, w_in, h_in in wrap_design.placed_images(design, g):
                 row = _art_resolution_check(engine.image_cover_check(path, w_in, h_in),
@@ -6548,6 +6696,11 @@ def build_print_package(proj, scope='print'):
             cf = (engine.image_cover_fonts(preset) if art else
                   engine._register_cover_fonts(tpl, engine.register_fonts(preset)))
             wres = engine.build_cover_wrap(tpl, cf, wmeta, dims, wrap)
+            # copy cut short and letters the fonts lack: Cover Studio shows
+            # them, and the package is where they cost a print run
+            for w in _wrap_warnings(wres):
+                checks.append({'label': 'Cover lettering' if 'letters' in w else 'Cover copy',
+                               'ok': False, 'detail': w})
             if not art:
                 checks += _missing_checks(cover_fonts=engine.cover_fonts_missing(tpl),
                                           cover_art=engine.cover_art_missing(tpl))
@@ -6581,11 +6734,18 @@ def build_print_package(proj, scope='print'):
         # width set under Send to print (a design measures its own pictures)
         back = '' if design else wmeta.get('cover_back_image')
         if back:
-            bw = max(float(wmeta.get('cover_back_image_w') or 1.5), 0.25)
-            res = engine.image_cover_check(back, bw, bw)
-            if res:
-                bh = bw * res['px'][1] / float(res['px'][0])
+            placed = wres.get('back_image_in')
+            if placed:
+                # at the size the wrap drew it: a width wider than the panel
+                # is fitted inside it, and prints sharper than asked
+                bw, bh = placed
                 res = engine.image_cover_check(back, bw, bh)
+            else:
+                bw = max(float(wmeta.get('cover_back_image_w') or 1.5), 0.25)
+                res = engine.image_cover_check(back, bw, bw)
+                if res:
+                    bh = bw * res['px'][1] / float(res['px'][0])
+                    res = engine.image_cover_check(back, bw, bh)
             checks.append(_back_image_check(res, bw))
         if not wres['spine_text'] and not design:
             thin = engine.wrap_geometry(dims)['spine_text']    # allowed, but no room
@@ -6930,10 +7090,7 @@ def project_delete(pid):
             _drop_files(_book_files(proj) - others)
         if pid:
             shutil.rmtree(_history_folder(pid), ignore_errors=True)
-            try:
-                os.remove(os.path.join(PROJECT_THUMB_DIR, pid + '.png'))
-            except OSError:
-                pass
+            _drop_thumbs(pid)
     flash('Project deleted.')
     return redirect(url_for('projects'))
 

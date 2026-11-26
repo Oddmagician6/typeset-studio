@@ -310,6 +310,13 @@ def get(oid):
     return BY_ID.get(oid) or FURNITURE_BY_ID.get(oid)
 
 
+def scene(oid):
+    """The scene-break ornament with this id, or None: a furniture piece (a
+    corner, a footer band) is no scene break, and has no recommended width to
+    set one at."""
+    return BY_ID.get((oid or '').strip())
+
+
 def size(oid, avail_w, width_frac=0.0):
     """(width, height) in points for `oid` drawn across `avail_w` points.
 
@@ -319,7 +326,7 @@ def size(oid, avail_w, width_frac=0.0):
     d = get(oid)
     if not d:
         return (0.0, 0.0)
-    frac = width_frac if width_frac and width_frac > 0 else d['width']
+    frac = width_frac if width_frac and width_frac > 0 else d.get('width', 0.3)
     w = max(0.02, min(float(frac), 1.0)) * avail_w
     return (w, w / d['aspect'])
 

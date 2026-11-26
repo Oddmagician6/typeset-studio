@@ -232,7 +232,7 @@ try:
     check('it is marked decorative, not given a name to read out',
           'alt=""' in ch1 and 'role="presentation"' in ch1)
     check('the width is a percentage, so it reflows',
-          re.search(r'class="chapter-art"><img[^>]*style="width:(\d+(?:\.\d+)?)%[;"]', ch1),
+          re.search(r'class="chapter-art"[^>]*><img[^>]*style="width:(\d+(?:\.\d+)?)%[;"]', ch1),
           re.search(r'<p class="chapter-art[^>]*>[^<]*<img[^>]*>', ch1))
     check('the art precedes the heading', ch1.index('chapter-art') < ch1.index('chapter-num'))
     check('the stylesheet styles it', 'p.chapter-art' in css)

@@ -54,6 +54,14 @@ A.OUT_DIR = os.path.join(ROOT, 'out')
 A.UPLOAD_DIR = os.path.join(ROOT, 'uploads')
 A.COVER_THUMB_DIR = os.path.join(A.OUT_DIR, '_cover_thumbs')
 A.PROJECT_THUMB_DIR = os.path.join(A.OUT_DIR, '_project_thumbs')
+
+
+def thumbs(pid):
+    """A book's cached thumbnails (named `<pid>@<pdf>.png` since bug hunt 18.11)."""
+    try:
+        return [f for f in os.listdir(A.PROJECT_THUMB_DIR) if f.startswith(pid + '@')]
+    except OSError:
+        return []
 for d in (A.PROJECT_MS_DIR, A.HISTORY_DIR, A.UPLOAD_DIR, A.COVER_THUMB_DIR, A.PROJECT_THUMB_DIR):
     os.makedirs(d, exist_ok=True)
 
@@ -100,14 +108,14 @@ def books_tests():
     built = A.load_project('doomed')['last_pdf']
     check('set up: history, a thumbnail and a build exist',
           os.listdir(A._history_folder('doomed'))
-          and os.path.exists(os.path.join(A.PROJECT_THUMB_DIR, 'doomed.png')) and built)
+          and thumbs('doomed') and built)
     C.post('/project/doomed/delete')
     gone = [f for f in ('doomed.md', 'doomed-cover.png', 'doomed-wrap-front.jpg')
             if os.path.exists(MS(f))]
     check('its manuscript, cover and wrap front are gone', not gone, gone)
     check('its History and thumbnail are gone',
           not os.path.exists(A._history_folder('doomed'))
-          and not os.path.exists(os.path.join(A.PROJECT_THUMB_DIR, 'doomed.png')))
+          and not thumbs('doomed'))
     check('a file another book also names is kept', os.path.exists(MS('doomed-back.png')))
     check('what it built stays (a download the writer may want)',
           os.path.exists(os.path.join(A.OUT_DIR, built)))
