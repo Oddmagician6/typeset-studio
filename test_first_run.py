@@ -343,7 +343,8 @@ def main():
         got = ''.join(pdf_pages(os.path.join(A.OUT_DIR, pdf)))
         # the opener sets the first words in small capitals
         check('a Windows-1252 .txt is set as written',
-              'GRÜSSE AUS KÖLN' in got and '“Anführung”' in got, got[-80:])
+              # (a capital sharp s where the face has one: bug hunt 20.14)
+              'GRÜ\u1e9eE AUS KÖLN' in got and '“Anführung”' in got, got[-80:])
 
         # the same file name twice, the first result saved after the second upload
         r1 = compose(c, dict(FULL, format='pdf'), {'manuscript': ('book.md', b'# First\n\nFIRST BOOK.\n')})

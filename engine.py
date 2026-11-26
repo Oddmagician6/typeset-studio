@@ -462,6 +462,51 @@ def cover_glyphs_missing(meta, cf):
     return ''.join(sorted(missing))
 
 
+def _face_cmap(name):
+    """The code points an embedded TrueType face has, or None (a standard PDF
+    font, or one that can't be read: not checked)."""
+    from reportlab.pdfbase import pdfmetrics as _pm
+    try:
+        return getattr(getattr(_pm.getFont(name), 'face', None), 'charToGlyph', None) or None
+    except Exception:
+        return None
+
+
+def text_glyphs_missing(manuscript, fonts, head_font=None):
+    """Characters of the book's text that its body face has no letter for, and
+    of its chapter titles that the heading face lacks: ReportLab draws the
+    face's empty glyph (a box, or nothing), and the font checks only asked
+    whether the font loaded. Emphasis set in a bold or italic file that does
+    have the letter is not told apart: the body face is the one most text is in."""
+    import html as _html
+    tag = re.compile(r'<[^>]*>')
+    body, heads = set(), set()
+
+    def add(into, s):
+        into.update(_html.unescape(tag.sub('', s or '')))
+    chapters = (manuscript or {}).get('chapters') or []
+    for ch in chapters:
+        for key in ('title', 'byline', 'tagline'):
+            add(heads if key == 'title' else body, ch.get(key) or '')
+        part = ch.get('part') or {}
+        add(heads, part.get('title') or '')
+        for n in ch.get('notes') or []:
+            add(body, n.get('text') if isinstance(n, dict) else str(n))
+    _ms_map_texts(chapters, lambda t, _ch: (add(body, t), t)[1])
+    missing = set()
+    for chars, face in ((body, fonts.get('regular')), (heads, head_font or fonts.get('regular'))):
+        cmap = _face_cmap(face)
+        if not cmap:
+            continue
+        for ch in chars:
+            if ch.isspace() or ord(ch) < 32 or ch in INVISIBLE_CHARS or ord(ch) in cmap:
+                continue
+            if 0xE000 <= ord(ch) <= 0xF8FF:      # the parser's own private markers
+                continue
+            missing.add(ch)
+    return ''.join(sorted(missing))
+
+
 # ---------------------------------------------------------------- cover panels
 # The designed cover is drawn into an arbitrary rectangle so the same code paints
 # a standalone front cover (page 1 of the interior) and the front panel of a full
@@ -3297,7 +3342,8 @@ class BookDoc(BaseDocTemplate):
         # book and the cover going to the printer carry the same title
         _paint_cover_overlay(canv, self.meta.get('title', ''),
                              self.meta.get('author', ''),
-                             cv.get('title_font', self.head_font), self.head_font,
+                             cv.get('title_font', self.head_font),
+                             cv.get('author_font', self.head_font),
                              0, 0, self._pw, self._ph,
                              light=cv.get('color', 'light') == 'light')
 
@@ -3823,8 +3869,8 @@ def _opening_para(text, st, preset, fonts, hyph=None):
         lead, rest = ' '.join(words[:n]), ' '.join(words[n:])
         big   = int(st['first'].fontSize * 1.05)
         rest  = _hyphenate_markup(rest, hyph) if hyph else rest
-        return marks + [Paragraph(f'<font size="{big}">{lead.upper()}</font> {rest}',
-                                  st['first'])]
+        return marks + [Paragraph(f'<font size="{big}">{_upper_text(lead, st["first"].fontName)}'
+                                  f'</font> {rest}', st['first'])]
     text_h = _hyphenate_markup(text, hyph) if hyph else text
     return [Paragraph(text_h, st['first'])]
 
@@ -4738,6 +4784,63 @@ def _table_rows(block_paras):
     return [r + [''] * (cols - len(r)) for r in rows]
 
 
+def _markup_runs(markup, fonts, bold=False, italic=False):
+    """ReportLab markup as [(plain text, face)]: `<b>` and `<i>` switch to the
+    family's bold, italic or bold-italic file, as the paragraph sets them."""
+    import html as _html
+    from reportlab.lib.fonts import ps2tt, tt2ps
+    try:
+        family = ps2tt(fonts['regular'])[0]      # the lookup a Paragraph makes
+    except Exception:
+        family = None
+
+    def face(b, i):
+        try:
+            return tt2ps(family, int(b), int(i))
+        except Exception:
+            return ((fonts.get('bold') if b else fonts.get('italic') if i else None)
+                    or fonts['regular'])
+    runs, b, i, pos = [], int(bold), int(italic), 0
+    for m in re.finditer(r'<(/?)(b|i|strong|em)\b[^>]*>|<[^>]*>', markup or ''):
+        if m.start() > pos:
+            runs.append((_html.unescape(markup[pos:m.start()]), face(b > 0, i > 0)))
+        if m.group(2):
+            step = -1 if m.group(1) else 1
+            if m.group(2) in ('b', 'strong'):
+                b = max(0, b + step)
+            else:
+                i = max(0, i + step)
+        pos = m.end()
+    if pos < len(markup or ''):
+        runs.append((_html.unescape(markup[pos:]), face(b > 0, i > 0)))
+    return [r for r in runs if r[0]]
+
+
+def _as_runs(cell):
+    """A measured cell: runs, or the (text, face) pair callers used to pass."""
+    if isinstance(cell, tuple) and len(cell) == 2 and isinstance(cell[0], str):
+        return [cell]
+    return cell
+
+
+def _word_widths(runs, size):
+    """The width of each word across a cell's runs (a word may change face
+    partway: `**bold**ly`)."""
+    out, cur, any_ = [], 0.0, False
+    for text, f in runs:
+        for ch in text:
+            if ch.isspace():
+                if any_:
+                    out.append(cur)
+                cur, any_ = 0.0, False
+            else:
+                cur += stringWidth(ch, f, size)
+                any_ = True
+    if any_:
+        out.append(cur)
+    return out
+
+
 def _table_widths(measured, attrs, target_w, size, pad):
     """Column widths in points, summing to target_w.
 
@@ -4767,12 +4870,12 @@ def _table_widths(measured, attrs, target_w, size, pad):
 
     nat, minw = [], []
     for c in range(cols):
-        col = [row[c] for row in measured]
-        nat.append(max((stringWidth(t, f, size) for t, f in col), default=0.0) + pad)
-        words = [(w, f) for t, f in col for w in t.split()]
+        col = [_as_runs(row[c]) for row in measured]
+        nat.append(max((sum(stringWidth(t, f, size) for t, f in runs) for runs in col),
+                       default=0.0) + pad)
         # +1pt: ReportLab's own wrap is not bit-identical to stringWidth, and a
         # column exactly as wide as its longest word still breaks it
-        minw.append(max((stringWidth(w, f, size) for w, f in words), default=0.0)
+        minw.append(max((w for runs in col for w in _word_widths(runs, size)), default=0.0)
                     + pad + 1.0)
 
     total_nat = sum(nat) or 1.0
@@ -4831,8 +4934,12 @@ def _render_table_block(block_paras, attrs, preset, fonts, st, avail_w, hyph=Non
             return _caps_keep_notes(text)
         return text
 
-    measured = [[(_plain(cell_text(t, header and r == 0)),
-                  hfont if (header and r == 0) else fonts['regular'])
+    # each cell as runs of (text, face): a **bold** word in a body cell is
+    # set in the bold file, and measured in the regular one it split across
+    # two lines in a column that had room for it
+    measured = [[_markup_runs(cell_text(t, header and r == 0), fonts,
+                              bold=header and r == 0 and hstyle_name == 'bold',
+                              italic=header and r == 0 and hstyle_name == 'italic')
                  for t in row]
                 for r, row in enumerate(rows)]
 
@@ -4977,6 +5084,17 @@ def _gb_font(fonts, style):
     if style == 'italic':
         return fonts.get('italic', fonts['regular'])
     return fonts['regular']
+
+
+def _upper_text(text, font=None):
+    """Capitals for small caps, as `str.upper` makes them, but a `ß` becomes the
+    capital `ẞ` where the face has one (`Maße` and `Masse` stayed two words),
+    and an entity (`&amp;`) is put back as it was."""
+    cmap = _face_cmap(font) if font else None
+    if cmap and 0x1E9E in cmap:
+        text = text.replace('ß', 'ẞ')
+    out = text.upper()
+    return re.sub(r'&([A-Z]+|#X?[0-9A-F]+);', lambda m: '&' + m.group(1).lower() + ';', out)
 
 
 def _caps_markup(text):
@@ -7304,7 +7422,11 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
                      'path': cover_path,
                      'overlay': meta.get('cover_overlay', False),
                      'color': meta.get('cover_color', 'light'),
-                     'title_font': fonts.get('bold', fonts['regular'])}
+                     'title_font': fonts.get('bold', fonts['regular']),
+                     # the author in the regular face, as the wrap sets it
+                     # (image_cover_fonts): the display face lost letters the
+                     # wrap printed
+                     'author_font': fonts['regular']}
 
     # full-bleed pages (#74 Phase 6a): print only; a screen PDF is read on a
     # screen, where the page edge is the edge and nothing is trimmed off
@@ -7520,6 +7642,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
                                and not meta.get('cover_template_data') else '',
         'cover_glyphs_missing': (cover_glyphs_missing(meta, cover['fonts'])
                                  if cover and cover.get('mode') == 'designed' else ''),
+        'text_glyphs_missing': text_glyphs_missing(manuscript, fonts, head_font),
         'cover_fonts_missing': cover_fonts_missing(cover['template'])
                                if cover and cover.get('mode') == 'designed' else [],
         'cover_art_missing': cover_art_missing(cover['template'])

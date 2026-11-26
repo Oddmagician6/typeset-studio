@@ -222,6 +222,13 @@ def heading_match(line):
     return None
 
 
+# an apostrophe that starts a word: the common elisions and a decade
+_ELISION_RE = re.compile(
+    r"(?<![\w’])'(?=(?:tis|twas|twere|twill|twould|em|cause|cos|til|bout|round|cept"
+    r"|n'|n\b|ere|neath|gainst|nother|scuse)\b|\d0s\b)",
+    re.IGNORECASE)
+
+
 def _smarten(text):
     """Convert ASCII punctuation to typographic equivalents.
 
@@ -233,12 +240,17 @@ def _smarten(text):
     # ellipsis
     text = re.sub(r'\.{3,}', '…', text)
     # double quotes
-    # opening: preceded by start-of-string, whitespace, open bracket, or em dash
-    text = re.sub(r'(^|[\s(\[{—])"', r'\1“', text, flags=re.MULTILINE)
+    # opening: preceded by start-of-string, whitespace, open bracket, a dash
+    # (em or en: `stopped –"Wait."`), or the emphasis marker the quotation
+    # opens inside (`*"wait"*`, which this runs before)
+    text = re.sub(r'(^|[\s(\[{—–*_])"', r'\1“', text, flags=re.MULTILINE)
     text = text.replace('"', '”')                         # remaining → closing
     # single quotes / apostrophes
     text = re.sub(r"(\w)'(\w)", r'\1’\2', text)          # contractions first
-    text = re.sub(r"(^|[\s(\[{—])'", r'\1‘', text, flags=re.MULTILINE)
+    # a word's lost opening letters are an apostrophe, not a quotation
+    # (`'Tis`, `'twas`, `rock 'n' roll`, `the '90s`)
+    text = _ELISION_RE.sub('’', text)
+    text = re.sub(r"(^|[\s(\[{—–*_])'", r'\1‘', text, flags=re.MULTILINE)
     text = text.replace("'", '’')                         # remaining → closing/apostrophe
     # collapse multiple spaces
     text = re.sub(r'  +', ' ', text)

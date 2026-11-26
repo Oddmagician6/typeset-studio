@@ -603,7 +603,8 @@
   // ---- layers and checks --------------------------------------------------------
   function label(el) {
     if (el.label) return el.label;
-    if (el.type === 'text') return '"' + String(el.text).slice(0, 28) + '"';
+    // by characters, not UTF-16 units: an emoji's two halves were cut apart
+    if (el.type === 'text') return '"' + WD.chars(String(el.text)).slice(0, 28).join('') + '"';
     var where = PAGE ? pageWhere(el.fill) : el.fill + ' cover';
     if (el.type === 'image') return (el.fill ? 'Picture (' + where + ')' : 'Picture') + ': ' + el.src;
     if (el.type === 'vector') return 'Shapes';

@@ -1037,6 +1037,13 @@ def _preflight(build_result, preset, page_count, paper=None, binding=None, retai
             'the figure library, or can’t be read, so the pages print without it - upload '
             'it on the Figures page, or pick another in the style')})
 
+    if build_result.get('text_glyphs_missing'):
+        checks.append({'label': 'Letters the font lacks', 'ok': False, 'detail': (
+            'The book\u2019s font has no letters for '
+            + ' '.join(build_result['text_glyphs_missing'][:20])
+            + ' - those print as blank boxes or not at all. Pick a style whose font '
+              'has them, or upload one that does')})
+
     if build_result.get('cover_glyphs_missing'):
         checks.append({'label': 'Cover lettering', 'ok': False, 'detail': (
             'The cover\u2019s fonts have no letters for '
