@@ -3650,7 +3650,9 @@ def wrap_designer_save(pid):
         proj['cover_mode'] = 'wrap'
     elif proj.get('cover_mode') == 'wrap':
         # unticked: back to the cover the book had before, as Send to print reads it
-        proj['cover_mode'] = ('designed' if proj.get('cover_template_data')
+        # (the saved book names its template by id; the template's data is
+        # only put together for a build)
+        proj['cover_mode'] = ('designed' if load_cover_template(proj.get('cover_template', ''))
                               else 'image' if proj.get('cover_file') else 'none')
     front = os.path.join(PROJECT_MS_DIR, proj['wrap_front_file'])
     # rendered beside the real one and swapped in only once the book is saved:
@@ -4288,15 +4290,7 @@ def cover_wrap_preview():
             kind = 'paperback'
         info = (f"{dims['trim_w']:g}×{dims['trim_h']:g}\" {kind} · spine {res['spine_w']:g}\" · "
                 f"full {res['wrap_w']:g}×{res['wrap_h']:g}\" · {spine_txt}")
-        warnings = list(dims.get('warnings', []))
-        for where in res.get('overflow', []):
-            foot = 'the barcode area' if where == 'back cover' else 'the bottom of the flap'
-            warnings.append(f'The {where} copy is too long to fit: it runs past {foot}. '
-                            'Shorten it.')
-        if res.get('glyphs_missing'):
-            warnings.append('The cover\u2019s fonts have no letters for '
-                            + ' '.join(res['glyphs_missing'][:20])
-                            + ' - those print blank. Pick a cover font that has them.')
+        warnings = list(dims.get('warnings', [])) + _wrap_warnings(res)
         return jsonify({'ok': True, 'image': f'data:image/png;base64,{b64}', 'info': info,
                         'warnings': warnings})
     except Exception as exc:
@@ -6407,6 +6401,22 @@ def _art_resolution_check(res, w_in, h_in):
                        f'Ask for {need[0]}×{need[1]} px or larger.')}
 
 
+def _wrap_warnings(res, glyphs=None):
+    """What a built wrap's result says went wrong in it - copy cut short, letters
+    its fonts don't have - for Cover Studio and Send to print alike."""
+    out = []
+    for where in res.get('overflow', []):
+        foot = 'the barcode area' if where == 'back cover' else 'the bottom of the flap'
+        out.append(f'The {where} copy is too long to fit: it runs past {foot}. '
+                   'Shorten it.')
+    glyphs = res.get('glyphs_missing') if glyphs is None else glyphs
+    if glyphs:
+        out.append('The cover\u2019s fonts have no letters for '
+                   + ' '.join(glyphs[:20])
+                   + ' - those print blank. Pick a cover font that has them.')
+    return out
+
+
 def _back_image_check(res, w_in):
     """The check row for the back-cover photo or logo, placed `w_in` wide."""
     if not res:
@@ -6532,6 +6542,8 @@ def build_print_package(proj, scope='print'):
             wrap_design.build_pdf(design, dims, wrap)
             wres = wrap_design.summary(g, design)
             checks += _missing_checks(design_missing=wrap_design.missing(design))
+            for w in _wrap_warnings({}, wrap_design.glyphs_missing(design)):
+                checks.append({'label': 'Cover lettering', 'ok': False, 'detail': w})
             # every picture measured at the size it is placed at, bleed included
             for path, w_in, h_in in wrap_design.placed_images(design, g):
                 row = _art_resolution_check(engine.image_cover_check(path, w_in, h_in),
@@ -6548,6 +6560,11 @@ def build_print_package(proj, scope='print'):
             cf = (engine.image_cover_fonts(preset) if art else
                   engine._register_cover_fonts(tpl, engine.register_fonts(preset)))
             wres = engine.build_cover_wrap(tpl, cf, wmeta, dims, wrap)
+            # copy cut short and letters the fonts lack: Cover Studio shows
+            # them, and the package is where they cost a print run
+            for w in _wrap_warnings(wres):
+                checks.append({'label': 'Cover lettering' if 'letters' in w else 'Cover copy',
+                               'ok': False, 'detail': w})
             if not art:
                 checks += _missing_checks(cover_fonts=engine.cover_fonts_missing(tpl),
                                           cover_art=engine.cover_art_missing(tpl))
@@ -6581,11 +6598,18 @@ def build_print_package(proj, scope='print'):
         # width set under Send to print (a design measures its own pictures)
         back = '' if design else wmeta.get('cover_back_image')
         if back:
-            bw = max(float(wmeta.get('cover_back_image_w') or 1.5), 0.25)
-            res = engine.image_cover_check(back, bw, bw)
-            if res:
-                bh = bw * res['px'][1] / float(res['px'][0])
+            placed = wres.get('back_image_in')
+            if placed:
+                # at the size the wrap drew it: a width wider than the panel
+                # is fitted inside it, and prints sharper than asked
+                bw, bh = placed
                 res = engine.image_cover_check(back, bw, bh)
+            else:
+                bw = max(float(wmeta.get('cover_back_image_w') or 1.5), 0.25)
+                res = engine.image_cover_check(back, bw, bw)
+                if res:
+                    bh = bw * res['px'][1] / float(res['px'][0])
+                    res = engine.image_cover_check(back, bw, bh)
             checks.append(_back_image_check(res, bw))
         if not wres['spine_text'] and not design:
             thin = engine.wrap_geometry(dims)['spine_text']    # allowed, but no room

@@ -142,9 +142,12 @@
   function layout(el) {                 // [(line, dx, base)] in points, as text_layout
     var m = metrics[el.font];
     if (!m) return [];
+    // set as wrap_design.break_lines sets it: invisible characters out, and a
+    // box with no width keeps its own lines (Python's splitlines)
+    el = Object.assign({}, el, {text: WD.clean(el.text)});
     var lines = el.w ? (el.keep_spaces ? keptLines(el, m)
                                        : WD.breakLines(el.text, m, el.size, el.w * 72, el.tracking || 0))
-                     : String(el.text).split(/\r?\n/);
+                     : (WD.splitlines(el.text).length ? WD.splitlines(el.text) : ['']);
     var asc = m.ascent / 1000 * el.size, box = (el.w || 0) * 72, down = 0;
     var step = el.size * (el.leading || 1.2), blank = blankOf(el);
     var ends = el.align === 'justify' && box ? paraEnds(el, m, lines) : null;
@@ -693,7 +696,7 @@
       if (el.type !== 'text') return;
       var m = metrics[el.font];
       if (m) {
-        var gone = WD.chars(String(el.text)).filter(function (ch) {
+        var gone = WD.chars(WD.clean(el.text)).filter(function (ch) {
           return !/\s/.test(ch) && m.widths[ch.codePointAt(0)] === undefined;
         });
         if (gone.length) missing.push(label(el) + ' (' + Array.from(new Set(gone)).join(' ') + ')');
@@ -1374,12 +1377,18 @@
     if (!on) { $('wd-trim').disabled = false; $('wd-book-note').hidden = true; $('wd-save-status').textContent = ''; }
   }
   var shownPid = '';                    // the book whose design and settings are on the page
+  var openSeq = 0;                      // only the latest openBook may fill the page
   function openBook(pid, keepLocal) {
+    var seq = ++openSeq;
+    function stale() { return seq !== openSeq; }
     bookUi(!!pid);
     shownPid = null;                      // nothing may be saved until this book has loaded
     if (!pid) { savedJSON = null; currentBook = null; shownPid = ''; persist(); return regeometry(); }
     return fetch('/wrap-designer/project/' + encodeURIComponent(pid)).then(function (r) { return r.json(); })
       .then(function (b) {
+        // a slower answer for a book the picker has since left must not
+        // replace the design on the page (Save would write it to the other book)
+        if (stale()) return;
         var s = b.settings;
         $('wd-retailer').value = s.wrap_retailer; $('wd-paper').value = s.wrap_paper;
         $('wd-binding').value = s.wrap_binding; $('wd-pages').value = s.pages;
@@ -1398,9 +1407,11 @@
         $('wd-save-status').textContent = b.saved ? 'Saved ' + b.saved.replace('T', ' ') : 'Not saved to this book yet';
         // the geometry first, so an example design can be laid out for this book
         return fetchGeometry().then(function () {
+          if (stale()) return;
           if (!keepLocal) design = b.design || starter(b, g);
           return loadFonts();
         }).then(function () {
+          if (stale()) return;
           render(); resetHistory();
           if ($('wd-project').value === pid) shownPid = pid;
         });

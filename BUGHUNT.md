@@ -97,6 +97,15 @@ Code the first eight sections didn't cover.
 | 15 | Customise (template to designer) | `wrap_convert.py`, `/wrap-designer/customise` | A customised design that doesn't match its template, elements lost in conversion, crashes on empty fields |
 | 16 | Styles, defaults & libraries | Style editor routes, large print, defaults restore, fonts/figures libraries, history restore, repair | Settings saved but ignored, deleting a font or figure still in use, restores that drop data |
 
+### Round 4 (started 2026-11-25, after 1.14.2)
+
+| # | Section | Main files | What to look for |
+|---|---|---|---|
+| 17 | Regressions from the fixes | Non-test changes since v1.14.0 | Double or missing escapes, guards that refuse valid input, call sites not updated, fixes on one output path only |
+| 18 | Build pipeline & outputs | generate/preview/rebuild/download routes, `generate.html`, `result.html` | Overlapping builds sharing state, stale outputs after a failed build, preview vs final differences, swallowed errors |
+| 19 | Ornaments & matter end to end | `ornaments.py`, `matter.py` and their readers in PDF and EPUB | Matter missing or reordered between outputs, ornament size/position, page parity, heads and folios on matter pages |
+| 20 | Fonts, glyphs & unusual text | Font registration and embedding, text measurement (Python and `wrap_text.js`), smart quotes | Missing glyphs with no warning, JS/Python measurement mismatch, wrong apostrophes, case changes |
+
 ## After each section
 
 1. **Triage.** Claude sorts every finding as confirmed, false positive or needs a repro, and gives the user a short list.

@@ -120,7 +120,7 @@ def metrics(fname):
 
 def break_lines(el):
     """The lines a text element is set in: the engine's breaker, or its own lines."""
-    text = el.get('text', '')
+    text = engine.cover_clean(el.get('text', ''))
     if not el.get('w'):
         return text.splitlines() or ['']
     if el.get('keep_spaces'):
@@ -224,7 +224,7 @@ def para_ends(el, lines):
     justified box leaves ragged. Broken a paragraph at a time with the engine's
     own breaker, which is how `break_lines` broke them."""
     ends = []
-    for para in (str(el.get('text', '')).splitlines() or ['']):
+    for para in (engine.cover_clean(el.get('text', '')).splitlines() or ['']):
         n = len(engine._wrap_tracked(para, font_name(el['font']), el['size'],
                                      el['w'] * 72.0, el.get('tracking', 0.0)))
         ends += [False] * (n - 1) + [True]
@@ -979,6 +979,31 @@ def missing(design):
         out.append(('Pictures left off the cover - the file is gone or can’t be read',
                     sorted(pictures)))
     return out
+
+
+def glyphs_missing(design):
+    """Characters of the design's text boxes that their own fonts don't have:
+    they print blank, so the package checks say so (a missing font file is
+    `missing`'s business)."""
+    out = set()
+    for el in design.get('elements', []):
+        if not isinstance(el, dict) or el.get('hidden') or el.get('type') != 'text':
+            continue
+        text = el.get('text') or ''
+        if not text.strip() or not font_file(el.get('font')):
+            continue
+        try:
+            cmap = getattr(pdfmetrics.getFont(font_name(el['font'])).face, 'charToGlyph', None)
+        except Exception:
+            continue
+        if not cmap:
+            continue
+        for ch in set(text):
+            if ch.isspace() or ord(ch) < 32 or ch in engine.INVISIBLE_CHARS:
+                continue
+            if ord(ch) not in cmap:
+                out.add(ch)
+    return ''.join(sorted(out))
 
 
 def placed_images(design, g):

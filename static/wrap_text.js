@@ -60,12 +60,16 @@
     if (out.length && out[out.length - 1] === '' && LINE_BREAK.test(s.slice(-1))) out.pop();
     return out;
   }
-  // Python's str.split() with no argument: runs of whitespace, no empty words.
-  var PY_SPACE = /[\s\x1c-\x1f\x85]+/;
-  function words(s) { return s.split(PY_SPACE).filter(function (w) { return w; }); }
+  // engine.cover_clean: soft hyphens, zero-width spaces and joiners and stray
+  // byte-order marks are set without (JS counts U+FEFF as a space; Python doesn't)
+  var INVISIBLE = /[\u00ad\u200b\u2060\ufeff]/g;
+  function clean(s) { return String(s == null ? '' : s).replace(INVISIBLE, ''); }
+  // engine._BREAK_RE: runs of white space, but not the no-break spaces.
+  var BREAK = /(?:(?![\u00a0\u2007\u202f])[\s\x1c-\x1f\x85])+/;
+  function words(s) { return s.split(BREAK).filter(function (w) { return w; }); }
 
   function breakWith(measure, text, maxW) {
-    var out = [], paras = splitlines(String(text));
+    var out = [], paras = splitlines(clean(text));
     if (!paras.length) paras = [''];
     paras.forEach(function (para) {
       var ws = words(para);
@@ -86,5 +90,6 @@
   }
 
   global.WD = { family: family, loadFont: loadFont, metrics: metrics, width: width,
-                breakLines: breakLines, breakWith: breakWith, chars: chars, splitlines: splitlines };
+                breakLines: breakLines, breakWith: breakWith, chars: chars, splitlines: splitlines,
+                clean: clean };
 })(window);

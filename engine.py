@@ -156,6 +156,7 @@ def _source(canv, role=None, text='', **kw):
 
 def _tracked_centre(canv, cx, y, text, font, size, tracking=0.0):
     """Draw letterspaced text centred on cx at baseline y."""
+    text = cover_clean(text or '')
     if not text:
         return
     bounds = getattr(_FRONT, 'bounds', None)
@@ -205,11 +206,26 @@ def _break_overlong(lines, font, size, max_w, tracking=0.0):
     return out
 
 
+# Characters a cover line is set without: a soft hyphen, zero-width space or
+# joiner and a stray byte-order mark have no width and no business printing,
+# and ReportLab drew them as they came (a soft hyphen as a visible `-`)
+INVISIBLE_CHARS = '\u00ad\u200b\u2060\ufeff'
+_INVISIBLE_RE = re.compile('[' + INVISIBLE_CHARS + ']')
+# where a cover line may break: white space, but not the no-break spaces
+# (`10\u00a0kg` stays together, and keeps its own width)
+_BREAK_RE = re.compile(r'[^\S\u00a0\u2007\u202f]+')
+
+
+def cover_clean(text):
+    """Cover text with the invisible characters taken out."""
+    return _INVISIBLE_RE.sub('', str(text))
+
+
 def _wrap_tracked(text, font, size, max_w, tracking=0.0):
     """Word-wrap text to max_w, honouring the tracking already applied."""
     out = []
-    for para in (str(text).splitlines() or ['']):
-        words = para.split()
+    for para in (cover_clean(text).splitlines() or ['']):
+        words = [w for w in _BREAK_RE.split(para) if w]
         if not words:
             out.append('')
             continue
@@ -350,10 +366,18 @@ def figures_missing(ms, preset):
     return out + (['(no src)'] if no_src else [])
 
 
+def _section(preset, key):
+    """A style's settings group as a dict: a damaged style's `null` (or any
+    other non-object) reads as empty, so the library-wide checks that ask every
+    style what it names (deleting a figure) never fail on one bad style."""
+    v = (preset or {}).get(key)
+    return v if isinstance(v, dict) else {}
+
+
 def scene_image_src(preset):
     """The picture a style marks scene breaks with, or '' (another type)."""
-    sb = preset.get('scene_break', {}) or {}
-    return (sb.get('image') or '').strip() if sb.get('type') == 'image' else ''
+    sb = _section(preset, 'scene_break')
+    return str(sb.get('image') or '').strip() if sb.get('type') == 'image' else ''
 
 
 def scene_image_path(preset):
@@ -416,6 +440,9 @@ def cover_glyphs_missing(meta, cf):
                                                     'cover_author_bio', 'cover_studio',
                                                     'publisher', 'cover_epigraph',
                                                     'cover_collection', 'author')),
+        # the kicker, tagline and epigraph are set in the italic face
+        'italic': ' '.join(meta.get(k) or '' for k in ('cover_kicker', 'cover_epigraph',
+                                                     'epigraph')),
     }
     missing = set()
     for role, text in words.items():
@@ -1159,6 +1186,7 @@ def _design_photographic(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
 
 def _tracked_left(canv, x, y, text, font, size, tracking=0.0):
     """Draw letterspaced text left-aligned from x at baseline y."""
+    text = cover_clean(text or '')
     if not text:
         return
     bounds = getattr(_FRONT, 'bounds', None)
@@ -1772,6 +1800,11 @@ def _paint_cover_front(canv, tpl, cf, meta, x0, y0, w, h, bleed=None):
         _FRONT.bounds = None
 
 
+# the back-cover photo's printed size, set where it is drawn, for the wrap's
+# result (Send to print measures its resolution at that size)
+_BACK_IMG = threading.local()
+
+
 def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
     """Back cover: border, collection line, blurb, studio footer, and a barcode zone.
 
@@ -1856,6 +1889,7 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
             icy = min(max(icy, by0 + gap + thh / 2.0), by1 - gap - thh / 2.0)
             canv.drawImage(ir, icx - tw / 2.0, icy - thh / 2.0, width=tw, height=thh,
                            preserveAspectRatio=True, mask='auto')
+            _BACK_IMG.size = (tw / inch, thh / inch)
         except Exception:
             pass
 
@@ -1931,6 +1965,7 @@ def _paint_flap(canv, tpl, cf, meta, x0, y0, w, h, side):
                 thh = tw * (ih / iw) if iw else tw
                 canv.drawImage(ir, cx - tw / 2.0, top - thh, width=tw, height=thh,
                                preserveAspectRatio=True, mask='auto')
+                _BACK_IMG.size = (tw / inch, thh / inch)
                 top -= thh + 14
             except Exception:
                 pass
@@ -2145,6 +2180,7 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
         panel_meta.pop('cover_back_image', None)
         if not (meta.get('cover_jacket_blurb') or '').strip():
             panel_meta.pop('cover_blurb', None)
+    _BACK_IMG.size = None
     back_over = _paint_back_panel(c, tpl, cf, panel_meta, back_x, edge, pw, ph)
     drew_spine = _paint_spine(c, tpl, cf, meta, spine_x, edge, sp, ph, draw_text=draw_spine)
     art = _front_art(meta)
@@ -2177,6 +2213,9 @@ def build_cover_wrap(tpl, cf, meta, dims, out_path, guides=False, canv=None):
             'spine_w': round(g['spine_w'], 4), 'spine_text': bool(drew_spine),
             'overflow': overflow,
             'glyphs_missing': cover_glyphs_missing(meta, cf),
+            # the author photo as drawn (inches): fitted to its panel or flap,
+            # which can be smaller than the width asked for
+            'back_image_in': getattr(_BACK_IMG, 'size', None),
             'binding': g['binding'], 'front': 'image' if art else 'designed',
             'wrap': round(g['wrap'], 4), 'hinge': round(g['hinge'], 4),
             'flap': round(g['flap'], 4), 'panel_w': round(g['panel_w'], 4)}
@@ -4511,7 +4550,7 @@ def chapter_art_src(preset):
     it — the renderer draws its placeholder, so a lost illustration shows up in
     the proof instead of disappearing.
     """
-    return (preset.get('chapter_art', {}).get('image', '') or '').strip()
+    return str(_section(preset, 'chapter_art').get('image') or '').strip()
 
 
 def chapter_art_position(preset):
@@ -6069,8 +6108,14 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     manuscript['chapters'], ix_marks = _apply_index_markers(manuscript['chapters'], meta)
 
     # ---- cover page (full-bleed art drawn by the page template) ----
+    # A whole leaf: the cover, then its blank inside, so the book behind it
+    # starts on a right-hand page 3 and every recto/verso falls where it does
+    # in the coverless interior a printer gets. A cover page alone put the
+    # half title on a verso and shifted each right-hand start, so the proof's
+    # page count no longer told Send to print's spine (bug hunt 17.4).
     if has_cover:
-        story += [Spacer(1, 2), NextPageTemplate('verso'), PageBreak()]
+        story += [Spacer(1, 2), NextPageTemplate('blank'), PageBreak(), BlankMarker(),
+                  NextPageTemplate('recto'), PageBreak()]
 
     # ---- front matter ----
     level = meta.get('front_matter', 'full')
@@ -6790,8 +6835,14 @@ def paint_background(canv, bg, x, y, pw, ph):
     """A style's page background (`page_background`) over the rectangle
     (x, y, pw, ph): its colour, then its picture at its opacity, scaled to
     cover it (the page edge crops the overflow). The ebook's page art
-    paints it too, so a page reads the same there as in print."""
+    paints it too, so a page reads the same there as in print.
+
+    Clipped to the rectangle: a spread's two pages are painted on one sheet,
+    and the right page's picture spilled across the fold onto the left."""
     canv.saveState()
+    clip = canv.beginPath()
+    clip.rect(x, y, pw, ph)
+    canv.clipPath(clip, stroke=0, fill=0)
     if bg['color'] is not None:
         canv.setFillColor(bg['color'])
         canv.rect(x, y, pw, ph, stroke=0, fill=1)
@@ -6811,7 +6862,7 @@ def paint_background(canv, bg, x, y, pw, ph):
 
 def page_background_src(preset):
     """The picture a style lays under its screen pages, or ''."""
-    return ((preset.get('page_background') or {}).get('image') or '').strip()
+    return str(_section(preset, 'page_background').get('image') or '').strip()
 
 
 def page_background(preset):
@@ -7004,6 +7055,12 @@ def _unlink_dead(text, known, dead):
     return _INBOOK_LINK_RE.sub(repl, text)
 
 
+# a block's attributes the PDF sets as inline Markdown (a quote's source, a
+# table's caption, a sidebar's or read-aloud box's title, a stat block's count
+# and challenge rating)
+_MD_ATTRS = frozenset({'source', 'caption', 'title', 'count', 'cr'})
+
+
 def _resolve_inbook_links(chapters):
     """Unlink `#anchor` links this book has no destination for.
 
@@ -7049,7 +7106,11 @@ def _resolve_inbook_links(chapters):
             if b[0] != 'doc_block' or len(b) < 3 or not isinstance(b[2], dict):
                 continue
             attrs = b[2]
-            new = {k: (_MS_LINK_RE.sub(raw_fix, v) if isinstance(v, str) and '](#' in v else v)
+            # only the attributes drawn as Markdown: a poem's title (or a
+            # picture's src) prints as typed, and `[Draft](#x)` there is text
+            md = _MD_ATTRS - ({'title'} if attrs.get('_type') == 'poem' else set())
+            new = {k: (_MS_LINK_RE.sub(raw_fix, v)
+                       if k in md and isinstance(v, str) and '](#' in v else v)
                    for k, v in attrs.items()}
             if new != attrs:
                 blocks[i] = b[:2] + (new,) + tuple(b[3:])
@@ -7350,7 +7411,7 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         'page_count':     page_count,
         # the pages a printer binds: the cover page a proof opens with is the
         # cover's own file at the printer, not a leaf of the book
-        'interior_pages': max(page_count - (1 if cover else 0), 0),
+        'interior_pages': max(page_count - (2 if cover else 0), 0),
         'notes_unplaced': len(set(unplaced_notes)),
         # the page references or the index still moved on the last pass
         'refs_unsettled': unsettled,

@@ -90,7 +90,10 @@ def split(text):
                     block.pop()
                 block.append('~~~')
             kind, attrs = _header(line)
-            if kind == 'page':
+            # a page fence that names no design is the book's own text, as the
+            # typesetter reads it (manuscript: a plain block); counted as an
+            # empty placement, it made every page plan edit look unsafe
+            if kind == 'page' and (attrs.get('src') or '').strip():
                 flush()
                 items.append({'kind': 'page', 'src': (attrs.get('src') or '').strip(),
                               'side': side_of(attrs), 'text': '\n'.join(block)})
@@ -118,11 +121,14 @@ def rename(text, old, new, key=lambda s: s):
         in_block = True
         kind, attrs = _header(line)
         if kind == 'page' and key(attrs.get('src', '')) == key(old):
-            # straight or curly quotes, as the book reads them (manuscript._ATTR_RE);
-            # written back straight
-            lines[i] = re.sub(r'\bsrc=["“”][^"“”]*["“”]', lambda m: f'src="{new}"',
-                              line, count=1)
-            changed = True
+            # the src the reader found, by the same pattern (a value may hold
+            # quotes of the other kind: `src="The “Map” Page"`); written back
+            # straight
+            m = next((m for m in _ATTR_RE.finditer(line)
+                      if (m.group(1) or m.group(3)) == 'src'), None)
+            if m:
+                lines[i] = line[:m.start()] + f'src="{new}"' + line[m.end():]
+                changed = True
     return '\n'.join(lines) if changed else text
 
 

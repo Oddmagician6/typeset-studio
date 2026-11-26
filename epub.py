@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import matter as _matter
 import bookindex as _bookindex
 import ornaments as _orn
+
 from manuscript import (book_anchors as _ms_book_anchors, LINK_RE as _LINK_RE,
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts,
@@ -30,6 +31,14 @@ from manuscript import (book_anchors as _ms_book_anchors, LINK_RE as _LINK_RE,
                         ANCHOR_TAG_RE as _MS_ANCHOR_TAG_RE,
                         PAGEREF_TAG_RE as _MS_PAGEREF_TAG_RE,
                         CELL_SEP as _MS_CELL)
+
+
+def _num_label(fmt, n):
+    """As engine._num_label: the style's number format with `{n}` (either case)
+    put in, anything else printed as typed. `str.format` raised KeyError on a
+    `Chapter {N}` the PDF accepted, and cost the EPUB."""
+    return re.sub(r'\{[nN]\}', str(n), fmt or '')
+
 
 _NOTE_MARK_RE = re.compile(r'<note n="(\d+)" id="[\w\-]+"/>')
 
@@ -122,7 +131,7 @@ def _index_xhtml(chapters, marks, meta, preset):
 
     def label(n):
         ch = chapters[n - 1]
-        return ch.get('title') or (num_fmt.format(n=nums[n - 1])
+        return ch.get('title') or (_num_label(num_fmt, nums[n - 1])
                                    if nums[n - 1] else f'Section {n}')
 
     def links(hits):
@@ -182,7 +191,7 @@ def _apply_page_refs(chapters, meta, preset):
     hrefs, labels = {}, {}
     for n, names in enumerate(targets['chapters'], 1):
         ch = chapters[n - 1]
-        label = ch.get('title') or (num_fmt.format(n=nums[n - 1])
+        label = ch.get('title') or (_num_label(num_fmt, nums[n - 1])
                                     if nums[n - 1] else f'Section {n}')
         for name in names:
             hrefs[name], labels[name] = f'chapter{n:03d}.xhtml', label
@@ -652,12 +661,12 @@ def _toc_page_xhtml(chapters, preset):
         ch_part     = ch.get('part')
         ch_part_num = ch_part['number'] if ch_part else None
         if ch_part_num is not None and ch_part_num != current_part_num:
-            part_label = ch_part.get('title') or pd_fmt.format(n=ch_part_num)
+            part_label = ch_part.get('title') or _num_label(pd_fmt, ch_part_num)
             body += ('    <li class="toc-part">'
                      f'<a href="part{ch_part_num:03d}.xhtml">'
                      f'{_text_to_html(part_label)}</a></li>\n')
             current_part_num = ch_part_num
-        label = ch.get('title') or (num_fmt.format(n=_nums[idx - 1])
+        label = ch.get('title') or (_num_label(num_fmt, _nums[idx - 1])
                                    if show_num and _nums[idx - 1] else f'Section {idx}')
         indent = ' class="toc-indent"' if ch_part_num is not None else ''
         body += (f'    <li{indent}><a href="chapter{idx:03d}.xhtml">'
@@ -680,7 +689,7 @@ def _part_xhtml(part_num, title, preset):
     body = '<div class="part-page">\n'
     if show_num:
         body += ('  <p class="part-num">'
-                 f'{_text_to_html(num_fmt.format(n=part_num))}</p>\n')
+                 f'{_text_to_html(_num_label(num_fmt, part_num))}</p>\n')
     if title:
         body += f'  <h1 class="part-title">{_text_to_html(title)}</h1>\n'
     body += '</div>\n'
@@ -976,7 +985,7 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
 
     if show_num and number is not None:
         lines.append('  <h1 class="chapter-num">'
-                     f'{_text_to_html(num_fmt.format(n=number))}</h1>')
+                     f'{_text_to_html(_num_label(num_fmt, number))}</h1>')
 
     if chapter.get('title'):
         lines.append('  <h1 class="chapter-title">'
@@ -1138,7 +1147,7 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='')
             no_indent_next = False
 
     lines.append('</div>\n')
-    ch_title = chapter.get('title') or (num_fmt.format(n=number)
+    ch_title = chapter.get('title') or (_num_label(num_fmt, number)
                                         if show_num and number else f'Section {idx}')
     return _xhtml(ch_title, '\n'.join(lines))
 
@@ -1600,10 +1609,10 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
         ch_part     = ch.get('part')
         ch_part_num = ch_part['number'] if ch_part else None
         if ch_part_num is not None and ch_part_num != current_part_num:
-            part_label = ch_part.get('title') or pd_fmt.format(n=ch_part_num)
+            part_label = ch_part.get('title') or _num_label(pd_fmt, ch_part_num)
             toc.append((f'part{ch_part_num:03d}.xhtml', part_label))
             current_part_num = ch_part_num
-        label = ch.get('title') or (num_fmt.format(n=_nums[idx - 1])
+        label = ch.get('title') or (_num_label(num_fmt, _nums[idx - 1])
                                    if show_num and _nums[idx - 1] else f'Section {idx}')
         kids = [(f'chapter{idx:03d}.xhtml#{hid}', text, level)
                 # a heading with no words (`## {#signal}`) has no label to show:

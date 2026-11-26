@@ -223,8 +223,8 @@ meta = {'title': 'T', 'subtitle': '', 'author': 'A', 'year': '2026', 'publisher'
         'cover_template_data': A.load_cover_template('ashforge-house'),
         'cover_overlay': False, 'cover_color': 'light'}
 r = engine.build_pdf(M.parse_markdown('# One\n\nWords.\n'), P, os.path.join(TMP, 'b.pdf'), meta)
-check('a proof with a cover page counts one page fewer as interior',
-      r['interior_pages'] == r['page_count'] - 1, (r['page_count'], r['interior_pages']))
+check('a proof with a cover leaf (cover + its blank inside) counts two pages fewer as interior',
+      r['interior_pages'] == r['page_count'] - 2, (r['page_count'], r['interior_pages']))
 spec = A.print_spec(25, P)
 check('a 25-page spine is 26 pages thick',
       all(abs(v - round(26 * A._PAPER[k]['ppi'], 3)) < 1e-9 for k, v in spec['spines'].items()),
