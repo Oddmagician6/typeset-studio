@@ -3333,6 +3333,7 @@ class BookDoc(BaseDocTemplate):
         # outline may only go one level deeper at a time) and the level the
         # current chapter sits at (1 under a part, else 0)
         self._ol_n, self._ol_last, self._ol_chapter = 0, -1, 0
+        self._ol_stack = []
         # running heads by chapter or section: what is in force, what was in
         # force when the page began, and the first section started on it
         self._rh_chapter = self._rh_section = None
@@ -3519,7 +3520,15 @@ class BookDoc(BaseDocTemplate):
         """Add a PDF bookmark for the current page at `level` (0 = top)."""
         if not title:
             return
-        level = max(0, min(level, self._ol_last + 1))
+        # A skipped level is closed up (a ### with no ## sits right under its
+        # chapter), and what follows at the same asked-for level is its
+        # sibling, not its child: two ### in a row came out as parent and
+        # child (bug hunt 30.5). `_ol_stack` holds (asked, set) per open level.
+        asked, stack = level, self._ol_stack
+        while stack and stack[-1][0] >= asked:
+            stack.pop()
+        level = stack[-1][1] + 1 if stack else 0
+        stack.append((asked, level))
         self._ol_n += 1
         key = f'ts-ol-{self._ol_n}'
         canv.bookmarkPage(key)
@@ -3876,7 +3885,10 @@ def _styles(preset, fonts):
             spaceBefore=b['leading'] * gap_before, spaceAfter=b['leading'] * gap_after,
             keepWithNext=1)
     section = _heading_style('sec', 'section', 'bold', 0.9, 0.3)
-    if disp:
+    # the display face stands in for bold, the default; an italic or regular
+    # `###` the writer picked is set as picked, as the ebook sets it (bug
+    # hunt 30.9 - the display face replaced it in the PDF)
+    if disp and (hd.get('section_style') or 'bold') == 'bold':
         section.fontName = disp
     subsection = _heading_style('subsec', 'subsection', 'italic', 0.6, 0.2)
     pd = preset.get('part_divider', {})
@@ -5512,6 +5524,9 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     sm    = _gb_section(preset, 'statblock')
     size  = sm.get('font_size', 0) or st['body'].fontSize
     lead  = size * sm.get('line_leading', 1.25)
+    # small caps are set a size smaller, but never under a Large Print
+    # edition's floor (bug hunt 30.8)
+    small = max(size - 1, getattr(_FLOOR, 'size', 0) or 0)
     space = sm.get('space_around', 12.0)
     pad_x = sm.get('pad_x', 6.0)
     pad_y = sm.get('pad_y', 5.0)
@@ -5573,7 +5588,7 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     lab_open, lab_close = {'bold': ('<b>', '</b>'), 'bolditalic': ('<b><i>', '</i></b>'),
                            'italic': ('<i>', '</i>'),
                            # small caps as elsewhere: capitals, a size smaller
-                           'smallcaps': (f'<b><font size="{size - 1:g}">', '</font></b>'),
+                           'smallcaps': (f'<b><font size="{small:g}">', '</font></b>'),
                            }.get(flabel, ('', ''))
     field_style = ParagraphStyle('sbfield', parent=base, leftIndent=size,
                                  firstLineIndent=-size)
@@ -5608,7 +5623,7 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     estyle = sm.get('entry_name_style', 'bolditalic')
     eo, ec = {'bolditalic': ('<b><i>', '</i></b>'), 'bold': ('<b>', '</b>'),
               'italic': ('<i>', '</i>'),
-              'smallcaps': (f'<b><font size="{size - 1:g}">', '</font></b>'),
+              'smallcaps': (f'<b><font size="{small:g}">', '</font></b>'),
               }.get(estyle, ('', ''))
     ent_style = ParagraphStyle('sbentry', parent=base,
                                leftIndent=sm.get('entry_indent', 0.0) * inch)
@@ -6754,12 +6769,16 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 flush_next = True
             else:
                 if not opened:
+                    probe = []
                     if fn_probe is not None:
                         nums = _NOTE_SUPER_RE.findall(val) or                                re.findall(r'{}(\d+)-(\d+)'.format(re.escape(_FN_SCHEME)), val)
                         nums = [n[-1] if isinstance(n, tuple) else n for n in nums]
                         if nums:
-                            story.append(FnProbe(fn_probe, idx, [int(n) for n in nums]))
-                    story.extend(keep(_opening_para(val, st, preset, fonts, hyph=hyph)))
+                            probe = [FnProbe(fn_probe, idx, [int(n) for n in nums])]
+                    # the probe rides inside the keep-whole group, so it moves
+                    # to the next page with the paragraph (bug hunt 30.3)
+                    story.extend(keep(probe + _opening_para(val, st, preset, fonts,
+                                                            hyph=hyph)))
                     opened = True
                 elif flush_next:
                     val_h = _hyphenate_markup(val, hyph) if hyph else val
@@ -7425,8 +7444,12 @@ def _press_canvasmaker(pw, ph, colour=False):
             def setStrokeGray(self, gray, alpha=None):
                 self.setStrokeColor((gray, gray, gray), alpha=alpha)
 
-        def linkURL(self, *a, **kw):
-            pass
+        def linkURL(self, url, *a, **kw):
+            # The footnote measuring pass finds each reference by its marker
+            # link (`_footnote_pages`); that build is read back and thrown
+            # away, never printed (bug hunt 30.1).
+            if str(url).startswith(_FN_SCHEME):
+                _canvas.Canvas.linkURL(self, url, *a, **kw)
 
         def linkRect(self, *a, **kw):
             pass
@@ -7503,6 +7526,11 @@ def _resolve_inbook_links(chapters):
         return m.group(1)
 
     for ch in out:
+        # a piece's byline and a `#>` tagline are raw Markdown too, inlined
+        # under the title (bug hunt 30.2, 31.1)
+        for key in ('byline', 'tagline'):
+            if isinstance(ch.get(key), str) and '](#' in ch[key]:
+                ch[key] = _MS_LINK_RE.sub(raw_fix, ch[key])
         if ch.get('notes'):
             ch['notes'] = [dict(n, text=_unlink_dead(n.get('text') or '', known, dead))
                            for n in ch['notes']]
@@ -7556,9 +7584,9 @@ def build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
 
     A press build that hits a colour it cannot express falls back to a normal
     one and says so in `press_error`, because a book that builds in RGB beats
-    a book that doesn't build. The fallback still leaves the cover out: only
-    the CMYK conversion failed, and a print interior wants a coverless block
-    either way — the page count it reports is what a spine gets cut from.
+    a book that doesn't build. The fallback is still a print edition: no cover
+    (the page count it reports is what a spine gets cut from), no links, form
+    fields flattened - only the CMYK conversion is let go.
     """
     try:
         _FLOOR.size = float(preset.get('min_text_size') or 0)
@@ -7631,8 +7659,13 @@ def _build_pdf_variant(manuscript, preset, out_path, meta, press, screen):
         except ValueError as exc:
             if 'color' not in str(exc).lower():
                 raise
-            res = _build_pdf(manuscript, preset, out_path, _coverless(meta))
-            res['press'] = False
+            # Still the print edition, only not forced to CMYK: the colour
+            # interior's press canvas keeps the colour it met, and still
+            # flattens form fields, drops links and declares the trim (bug
+            # hunt 30.6 - the plain build put live fields in a print package)
+            res = _build_pdf(manuscript, preset, out_path,
+                             dict(_coverless(meta), colour_interior=True), press=True)
+            res['press'] = res['colour'] = False
             res['press_error'] = str(exc)
             return res
     except LayoutError as exc:

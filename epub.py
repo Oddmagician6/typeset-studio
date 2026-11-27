@@ -1165,6 +1165,7 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
     no_indent_next = False
     n_head         = 0              # heading ids: see chapter_headings
     head_level     = 1              # the chapter title is the h1
+    head_stack     = []             # (level asked for, h-level set)
 
     for bi, block in enumerate(chapter.get('blocks', [])):
         kind = block[0]
@@ -1181,7 +1182,13 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
             # never deeper than one below the heading before it: a `###` as a
             # chapter's first heading went h1 -> h3, a level a screen reader's
             # heading list skips. Its kind stays in the class, which styles it.
-            head_level = min(_HEAD_LEVEL[kind], head_level + 1)
+            # A heading at the level asked for by one before it is that one's
+            # sibling: two `###` with no `##` went h2 then h3 (bug hunt 30.5).
+            asked = _HEAD_LEVEL[kind]
+            while head_stack and head_stack[-1][0] >= asked:
+                head_stack.pop()
+            head_level = (head_stack[-1][1] if head_stack else 1) + 1
+            head_stack.append((asked, head_level))
             tag = f'h{head_level}'
             lines.append(f'  <{tag} id="h{n_head}" class="hd-{kind}">'
                          f'{_markup_to_html(val)}</{tag}>')

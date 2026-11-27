@@ -5522,14 +5522,14 @@ def generate():
             _drop_out(out_name)
             flash(f'PDF build failed: {exc}')
             return rejected()
-        screen_name, warn = _screen_build(ms, preset, meta, base, stamp)
-        if warn:
+        screen_name, warns = _screen_build(ms, preset, meta, base, stamp, build_result)
+        for warn in warns:
             flash(warn)
     elif meta.get('screen_pdf'):
         # an ebook-only book that also asks for the colour screen PDF gets it:
         # it was only ever built beside a print PDF, so the box did nothing
-        screen_name, warn = _screen_build(ms, preset, meta, base, stamp)
-        if warn:
+        screen_name, warns = _screen_build(ms, preset, meta, base, stamp)
+        for warn in warns:
             flash(warn)
 
     if fmt in ('epub', 'both'):
@@ -6905,14 +6905,13 @@ def _build_project_with(pid, proj, preset, raw, meta, cover_path, started, creat
             logging.error('PDF build failed: %s', traceback.format_exc())
             _drop_out(res['out_name'])
             return {'error': f'PDF build failed: {exc}'}
-        res['screen_name'], warn = _screen_build(ms_parsed, preset, meta, base, stamp)
-        if warn:
-            res['warnings'].append(warn)
+        res['screen_name'], warns = _screen_build(ms_parsed, preset, meta, base, stamp,
+                                                  res['build_result'])
+        res['warnings'].extend(warns)
     elif meta.get('screen_pdf'):
         # ebook only, with the screen PDF asked for: build it as well
-        res['screen_name'], warn = _screen_build(ms_parsed, preset, meta, base, stamp)
-        if warn:
-            res['warnings'].append(warn)
+        res['screen_name'], warns = _screen_build(ms_parsed, preset, meta, base, stamp)
+        res['warnings'].extend(warns)
 
     if fmt in ('epub', 'both'):
         try:
@@ -6949,21 +6948,39 @@ def _build_project_with(pid, proj, preset, raw, meta, cover_path, started, creat
     return res
 
 
-def _screen_build(ms, preset, meta, base, stamp):
+# preflight rows about paper, trim and the printer: nothing to a screen PDF
+_SCREEN_SKIP_CHECKS = {'Cover on page 1', 'Bleed', 'Art across the fold',
+                       'Picture book pages', 'Page count'}
+
+
+def _screen_build(ms, preset, meta, base, stamp, print_result=None):
     """The colour screen PDF beside a print one, when the book asks for it
-    (#74 Phase 3): (file name, '') or ('', a warning). A failure here never
-    costs the print PDF, which is already built."""
+    (#74 Phase 3): (file name, [warnings]) or ('', [a warning]). A failure
+    here never costs the print PDF, which is already built.
+
+    The screen edition's own preflight problems come back as warnings, less
+    any the print PDF's preflight already shows: the results page only checks
+    the print PDF, and the screen edition can differ from it - a page
+    background drawn only on screen, say (bug hunt 30.4)."""
     if not meta.get('screen_pdf'):
-        return '', ''
+        return '', []
     name = ''
     try:
         name = _claim_out(f'{base}-{stamp}-screen.pdf')
-        engine.build_pdf(ms, preset, os.path.join(OUT_DIR, name), meta, screen=True)
-        return name, ''
+        result = engine.build_pdf(ms, preset, os.path.join(OUT_DIR, name), meta,
+                                  screen=True)
     except Exception as exc:
         logging.error('Screen PDF build failed: %s', traceback.format_exc())
         _drop_out(name)
-        return '', f'The screen PDF could not be built: {exc}'
+        return '', [f'The screen PDF could not be built: {exc}']
+    shown = {(c['label'], c['detail'])
+             for c in (_preflight(print_result, preset, 0) if print_result else [])
+             if not c['ok']}
+    warnings = [f'Screen PDF - {c["label"].strip()}: {c["detail"]}'
+                for c in _preflight(result or {}, preset, 0)
+                if not c['ok'] and c['label'].strip() not in _SCREEN_SKIP_CHECKS
+                and (c['label'], c['detail']) not in shown]
+    return name, warnings
 
 
 @app.route('/project/<pid>/generate', methods=['POST'])
@@ -7327,7 +7344,8 @@ def build_print_package(proj, scope='print'):
             checks.insert(0, {
                 'label': 'Press-ready', 'ok': False,
                 'detail': ('This book has colour in it, so the interior was built as an '
-                           'ordinary RGB PDF: ' + built['press_error'])})
+                           'RGB PDF (still without links or live form fields): '
+                           + built['press_error'])})
         press = (engine.press_check(interior, colour=bool(built.get('colour')))
                  if built.get('press') else None)
 

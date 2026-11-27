@@ -201,6 +201,12 @@ def notes(ms, meta, preset):
     import matter
     # a dedication, acknowledgments… from Book settings print as pages of
     # their own; the page-by-page ebook holds only designed pages
+    # and the notes print as well - a Notes section, or at the foot of the
+    # page - even one no text refers to (bug hunt 30.7)
+    if any(ch.get('notes') for ch in ms.get('chapters', [])):
+        em = (preset or {}).get('endnotes') or {}
+        left_out.append('Footnotes' if em.get('placement') == 'foot'
+                        else _snippet(_plain(em.get('heading') or 'Notes')))
     left_out = ([s['key'].replace('_', ' ').capitalize()
                  for s in matter.present(meta or {}, 'front')] + left_out
                 + [s['key'].replace('_', ' ').capitalize()
