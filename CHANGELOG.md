@@ -8,6 +8,73 @@ line here.
 
 ---
 
+## 1.16.1 — 27 November 2026
+
+A bug-fix release: round seven of the bug hunt, covering regressions in 1.16.0,
+the press, screen and large-print editions, and anthologies, poems and the
+index. The top bar also carries the Ashforge Studio logo now.
+
+### Changed
+
+- The top bar shows the Ashforge Studio logo beside the app's name, in a
+  version for the light theme and one for the dark.
+
+### Fixed
+
+**Writing and saving**
+
+- A manuscript save or restore that has lost its lock is refused and kept in
+  History, so it can't write over newer work, and saving Book settings works
+  from the book as it is now.
+- A heading titled `Salt | Ash` (from Word, or written `# Salt \| Ash`) keeps
+  its pipe instead of becoming a title and an author credit, and clearing a
+  piece's title in rich mode no longer drops its byline.
+- Italics round a bold word read back in the writing page as the book sets
+  them.
+
+**Printed interior**
+
+- Press-ready PDFs keep their foot-of-page notes, and the RGB fallback of a
+  press build still has no links or live form fields.
+- A broken link in a byline or a `#>` tagline is left as text and reported,
+  instead of stopping the PDF.
+- An index entry or link target inside a telegram or a small-caps table
+  header is no longer lost (a page reference to one stopped the PDF).
+- With a raised initial or small-caps opening, index entries and page
+  references follow the first paragraph when it moves to the next page; with
+  keep-whole and a drop cap, so does its footnote.
+- A chapter titled "Chapter 2" no longer takes the link meant for the second
+  chapter.
+- Two `###` headings with no `##` above them sit side by side in the PDF
+  bookmarks and the ebook's contents.
+- Large Print stat-block small caps keep the minimum size, and an italic or
+  regular `###` stays as picked under a display face.
+- The back cover photo keeps clear of the blurb.
+- An overlong first word in a paragraph is split at the margin again.
+- In Contributors, only the name before the first `--` or em dash is bold.
+- `Café` typed two different ways is one index entry, not two.
+
+**Ebooks**
+
+- The byline and `#>` tagline show their emphasis and links, as the PDF does.
+- Print page numbers are only listed when they belong to the PDF built from
+  the same manuscript, run to the last page, and land on figures, designed
+  pages and split tables.
+- No Contents landmark without a Contents page; language codes are checked,
+  and Book settings refuses one that isn't valid.
+- A page reference to a heading with a footnote reads as the heading, without
+  the note number.
+- The page-by-page ebook's check of what it leaves out names the notes.
+
+**Importing and checking**
+
+- A blank line inside a Word verse paragraph starts a new stanza.
+- The screen PDF reports its own preflight problems.
+- Your own fonts set aside on an installed start are kept in your styles
+  again.
+- The name-variant check keeps finding variants late in a long book and says
+  when it stopped early.
+
 ## 1.16.0 — 27 November 2026
 
 Ebooks that are easier to find your way around: a language setting, print page
