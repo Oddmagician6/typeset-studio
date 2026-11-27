@@ -34,6 +34,7 @@ from manuscript import (book_anchors as _ms_book_anchors, LINK_RE as _LINK_RE,
                         PAGEREF_TAG_RE as _MS_PAGEREF_TAG_RE,
                         CELL_SEP as _MS_CELL,
                         NOTE_REF_RE as _MS_NOTE_REF_RE,
+                        _NOTEREF_SUP_RE as _MS_NOTEREF_SUP_RE,
                         _inline as _ms_inline)
 
 
@@ -209,7 +210,10 @@ def _apply_page_refs(chapters, meta, preset):
         for i, block in enumerate(blocks):
             if i in heads:
                 name = heads[i]
-                label = ' '.join(html.unescape(re.sub(r'<[^>]+>', '', block[1])).split())
+                # the heading's words: a note's number is not one of them
+                # (`## Guard Room[^1]` captioned its references "Guard Room1")
+                label = ' '.join(html.unescape(re.sub(r'<[^>]+>', '', _MS_NOTEREF_SUP_RE.sub(
+                    '', block[1]))).split())
                 hrefs[name], labels[name] = f'{file}#{_target_id(name)}', label
                 blocks[i] = (block[0], f'<anchor name="{name}"/>' + block[1]) + tuple(block[2:])
                 own_here = blocks[i]
@@ -867,11 +871,10 @@ def _matter_xhtml(heading, text, css_class, style='body', smartquotes=True):
             cls = ' class="no-indent"'
         elif css_class == 'matter-contributors':
             # Bold the name (text before an em dash / '--'); rest is the bio.
-            name, bio = b, ''
-            for sep in ('—', '--'):
-                if sep in b:
-                    name, bio = b.split(sep, 1)
-                    break
+            # the first separator, whichever it is: an em dash later in the
+            # bio was taken over an earlier `--` and bolded half of it
+            parts = re.split('—|--', b, maxsplit=1)
+            name, bio = parts[0], (parts[1] if len(parts) > 1 else '')
             md = '**' + name.strip() + '**'
             if bio.strip():
                 md += ' — ' + bio.strip()
@@ -1126,7 +1129,7 @@ def _scene_image_html(preset, href):
 
 
 def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
-                   scene_href='', page_marks=None):
+                   scene_href='', page_marks=None, smartquotes=True):
     c          = preset.get('chapter', {})
     show_num   = c.get('show_number', True)
     num_fmt    = c.get('number_format', 'Chapter {n}')
@@ -1150,13 +1153,16 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
         lines.append('  <h1 class="chapter-title">'
                      f'{_text_to_html(chapter["title"])}</h1>')
 
+    # a byline and a `#>` tagline are raw Markdown, which the PDF inlines:
+    # escaped as plain text the ebook printed `\\*` and link syntax (bug hunt
+    # 31.11, 30.11)
     if chapter.get('byline'):
         lines.append('  <p class="chapter-byline">'
-                     f'{_text_to_html(chapter["byline"])}</p>')
+                     f'{_md_emph_to_html(chapter["byline"], smartquotes)}</p>')
 
     if chapter.get('tagline'):
         lines.append('  <p class="chapter-tagline">'
-                     f'{_text_to_html(chapter["tagline"])}</p>')
+                     f'{_md_emph_to_html(chapter["tagline"], smartquotes)}</p>')
 
     if art_href and art_pos == 'below':
         lines.append(_chapter_art_html(preset, art_href, 'below'))
@@ -2225,7 +2231,8 @@ def _build_epub(manuscript, preset, out_path, meta):
                         _chapter_xhtml(idx, ch, preset, figures=fig_href,
                                        number=_numbers[idx - 1],
                                        art_href=art_href, scene_href=scene_href,
-                                       page_marks=page_marks.get(idx)))
+                                       page_marks=page_marks.get(idx),
+                                       smartquotes=meta.get('smartquotes', True)))
 
         if has_notes:
             zf.writestr('OEBPS/endnotes.xhtml', _endnotes_xhtml(chapters, preset))

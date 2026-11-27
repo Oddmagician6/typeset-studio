@@ -220,6 +220,8 @@ EXPECT = {
     'bh26-poem-hash-line': '# One\n\n~~~ poem\nA line\n\\# 7 on the door\nB line\n~~~\n\nAfter.\n',
     'bh26-blank-run': 'fast 50001',
     'bh29-nested-emphasis': 'before bold after | 3 em | 1 strong | # One\n\n*before **bold** after*\n',
+    'bh31-byline-cleared-title': '# | Ana Vale\n\nText.\n',
+    'bh31-title-pipe': 'Salt | Ash / Ana Vale / # Salt \\| Ash | Ana Vale\n\nText.\n',
 }
 
 

@@ -4014,18 +4014,23 @@ def _opening_para(text, st, preset, fonts, hyph=None):
         return [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
                         lines=preset['chapter'].get('dropcap_lines', 3), marks=marks,
                         page_h=(trim['h'] - mar['top'] - mar['bottom']) * inch)]
+    # The two that set a paragraph carry the markers in its first line: as
+    # flowables of their own in front of it they drew on the opener page even
+    # when the paragraph moved on to the next one, and the index and any page
+    # reference read the old page.
+    tags = ''.join(_MARKER_TAGS_RE.findall(text))
     if style == 'raised_initial':
         cap, rest = _split_initial(plain)
         rest = _hyphenate_markup(rest, hyph) if hyph else rest
-        return marks + [RaisedInitial(cap, rest, st['first'], fonts['regular'])]
+        return [RaisedInitial(cap, tags + rest.lstrip(), st['first'], fonts['regular'])]
     if style == 'smallcaps_leadin':
         words = plain.split(' ')
         n     = preset['chapter'].get('leadin_words', 4)
         lead, rest = ' '.join(words[:n]), ' '.join(words[n:])
         big   = int(st['first'].fontSize * 1.05)
         rest  = _hyphenate_markup(rest, hyph) if hyph else rest
-        return marks + [Paragraph(f'<font size="{big}">{_upper_text(lead, st["first"].fontName)}'
-                                  f'</font> {rest}', st['first'])]
+        return [Paragraph(f'{tags}<font size="{big}">{_upper_text(lead, st["first"].fontName)}'
+                          f'</font> {rest}', st['first'])]
     text_h = _hyphenate_markup(text, hyph) if hyph else text
     return [Paragraph(text_h, st['first'])]
 
@@ -4057,8 +4062,13 @@ def _ep_dfont(fonts, dateline_style):
     return fonts['bold'] if dateline_style in ('bold', 'smallcaps') else fonts['italic']
 
 
+# what an `{index: …}` and a `{#name}` leave in paragraph markup: the
+# destination and the callbacks that report where they were drawn
+_MARKER_TAGS_RE = re.compile(
+    r'<a name="[\w\-]+"/>|<onDraw name="_ts_(?:index|anchor)" label="[\w\-]+"/>')
 _NOTE_REF_RE = re.compile(
-    r'<a href="[^"]*"><super[^>]*>\d+</super></a>|<super[^>]*>\d+</super>')
+    r'<a href="[^"]*"><super[^>]*>\d+</super></a>|<super[^>]*>\d+</super>|'
+    + _MARKER_TAGS_RE.pattern)
 
 
 def _caps_keep_notes(markup):
@@ -4067,7 +4077,9 @@ def _caps_keep_notes(markup):
     A telegram body and a small-caps table header are set in capitals with
     the markup stripped, and that stripped the note's superscript and the
     link the measuring pass finds it by: the marker and the footnote were
-    both lost. Entities are read back to characters first, so `&amp;` is not
+    both lost. Index and anchor markers ride through the same way, or the
+    entry vanished and a page reference linked to a destination never drawn.
+    Entities are read back to characters first, so `&amp;` is not
     upper-cased into `&AMP;`."""
     import html as _html
     out, pos = [], 0
@@ -6426,11 +6438,10 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body', unlink=Non
         s = ParagraphStyle('contrib', parent=st['body'], firstLineIndent=0,
                            spaceAfter=st['body'].leading * 0.6)
         for b in blocks:
-            name, bio = b, ''
-            for sep in ('—', '--'):
-                if sep in b:
-                    name, bio = b.split(sep, 1)
-                    break
+            # the first separator, whichever it is: an em dash later in the
+            # bio was taken over an earlier `--` and bolded half of it
+            parts = re.split('—|--', b, maxsplit=1)
+            name, bio = parts[0], (parts[1] if len(parts) > 1 else '')
             md = '**' + name.strip() + '**'
             if bio.strip():
                 md += ' — ' + bio.strip()

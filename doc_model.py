@@ -703,8 +703,10 @@ def to_markdown(blocks):
             title = b["title"] or ""
             byline = b.get("byline")
             mark = "#* " if b.get("unnumbered") else "# "
-            if title and byline:                         # byline needs a title to round-trip
-                out.append(mark + title + manuscript.BYLINE_SEP + byline)
+            title = manuscript.escape_title_pipes(title)
+            if byline:                    # `# | Author` while the title is empty
+                out.append(mark + (title + manuscript.BYLINE_SEP if title else '| ')
+                           + byline)
             else:
                 out.append(mark + title)
             if b.get("tagline"):

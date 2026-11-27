@@ -65,16 +65,35 @@
   var ATTR_RE        = /([\p{L}\p{N}_]+)=["“”]((?:(?!\s[\p{L}\p{N}_]+=["“”]).)*?)["“”](?=\s+[\p{L}\p{N}_]+=["“”]|\s*$)|([\p{L}\p{N}_]+)=["“”]([^"“”]*)["“”]/gu;
   var BYLINE_SEP     = ' | ';   // "# Title | Author" anthology byline (mirror manuscript.py)
 
+  function bylineSplitAt(t) {
+    // mirrors manuscript._byline_split_at: the first ` | ` not escaped (`\|`)
+    // and not inside a link label; `| ` at the start is a byline, no title
+    if (t.slice(0, 2) === '| ') return 0;
+    var depth = 0;
+    for (var i = 0; i < t.length; i++) {
+      var c = t.charAt(i);
+      if (c === '\\' || (i && t.charAt(i - 1) === '\\')) continue;
+      if (c === '[') depth++;
+      else if (c === ']') depth = Math.max(0, depth - 1);
+      else if (c === '|' && !depth && t.charAt(i - 1) === ' ' && t.charAt(i + 1) === ' ') return i - 1;
+    }
+    return -1;
+  }
+
+  function escapeTitlePipes(title) {
+    // mirrors manuscript.escape_title_pipes: `Salt | Ash` -> `Salt \| Ash`
+    return title.replace(/(^|(?<= ))\|(?= )/g, '$1\\|');
+  }
+
   function splitByline(titleLine) {
     // "The Lottery | Shirley Jackson" -> {title, byline}; no separator -> byline null.
     if (titleLine == null) return { title: null, byline: null };
-    var i = titleLine.indexOf(BYLINE_SEP);
-    if (i !== -1) {
-      var title = titleLine.slice(0, i).trim();
-      var byline = titleLine.slice(i + BYLINE_SEP.length).trim();
-      return { title: title || null, byline: byline || null };
-    }
-    return { title: titleLine.trim() || null, byline: null };
+    var i = bylineSplitAt(titleLine), title, byline = null;
+    if (i === 0 && titleLine.slice(0, 2) === '| ') { title = ''; byline = titleLine.slice(2); }
+    else if (i >= 0) { title = titleLine.slice(0, i); byline = titleLine.slice(i + BYLINE_SEP.length); }
+    else title = titleLine;
+    title = title.replace(/\\\|/g, '|').trim();
+    return { title: title || null, byline: (byline || '').trim() || null };
   }
 
   // ---- inline emphasis patterns (mirror doc_model.py; bold-italic, then bold,
@@ -616,9 +635,10 @@
     var out = [];
     blocks.forEach(function (b) {
       if (b.type === 'chapter') {
-        var title = b.title || '';
+        var title = escapeTitlePipes(b.title || '');
         var mark = b.unnumbered ? '#* ' : '# ';
-        if (title && b.byline) out.push(mark + title + BYLINE_SEP + b.byline);
+        // `# | Author` while the title is still empty: the byline survives
+        if (b.byline) out.push(mark + (title ? title + BYLINE_SEP : '| ') + b.byline);
         else out.push(mark + title);
         if (b.tagline) out.push('#> ' + b.tagline);
       } else if (b.type === 'part') {

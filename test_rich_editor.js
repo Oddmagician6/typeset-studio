@@ -444,6 +444,17 @@ f.onload = function () {
                 + ' em | ' + rich.querySelectorAll('strong, b').length + ' strong';
     return shown + ' | ' + getMd();
   });
+  run('bh31-byline-cleared-title', function () {
+    // the title's words deleted: the byline stays with the heading
+    loadMd('# Salt Road | Ana Vale\n\nText.\n');
+    q('.wb-chapter').textContent = '';
+    return getMd();
+  });
+  run('bh31-title-pipe', function () {
+    // an escaped pipe is the title's, and is written back escaped
+    loadMd('# Salt \\| Ash | Ana Vale\n\nText.\n');
+    return q('.wb-chapter').textContent + ' / ' + q('.wb-chapter').dataset.byline + ' / ' + getMd();
+  });
   run('bh22-wrap-legacy-blank', function () {
     return w.DocModel.wrapUnfenced('___\n\n> ## Ash Drake\n> *Large dragon*\n> - **AC** 15\n\nAfter.\n');
   });
