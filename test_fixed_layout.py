@@ -338,8 +338,12 @@ def project(pid, md, designs, **kw):
 def test_app():
     print('\nin the app')
     one = [{'name': 'a', 'elements': []}]
+    project('auto-fixed', '~~~ page src="a"\n~~~\n', one, picture_book=True)
     check('automatic: a picture book of page designs is page by page',
-          A.ebook_layout({'picture_book': True, 'page_designs': one}) == 'fixed')
+          A.ebook_layout(A.load_project('auto-fixed')) == 'fixed')
+    # bug hunt 32.7: designs saved but none placed is not a picture book's ebook
+    check('automatic: unplaced designs flow',
+          A.ebook_layout({'picture_book': True, 'page_designs': one}) == 'flow')
     # bug hunt 8.2: in 1.13 the flag was only a print check, and a picture
     # book written as text and figures got an ebook of just its cover
     check('automatic: a picture book with no designs flows',

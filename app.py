@@ -129,6 +129,16 @@ def data_path(path):
     return path
 
 
+def exc_words(exc):
+    """An exception for a flash or a check: a file error in a writer's words,
+    with its file inside the data folder - its str() carried the absolute path
+    (bug hunt 32.11). The log keeps the full traceback."""
+    if isinstance(exc, OSError):
+        where = f' ({data_path(exc.filename)})' if getattr(exc, 'filename', None) else ''
+        return os_problem(exc) + where
+    return str(exc)
+
+
 _JSON_KINDS = {list: 'a list', str: 'a piece of text', int: 'a number',
                float: 'a number', bool: 'a yes/no value', type(None): 'nothing ("null")'}
 
@@ -1297,6 +1307,10 @@ for _rid, _rc in WRAP_RETAILERS.items():
     # what the cover editor fills its fields from when a printer is picked
     _rc['binding_allowances'] = {b: _allowances(_rid, b)
                                  for b in ('paperback', 'hardcover', 'jacket')}
+    # bindings whose bleed the printer fixes (a KDP case: the turn-in is the
+    # outer allowance) - _wrap_dims ignores the form there, so the form locks it
+    _rc['fixed_bleed'] = [b for b in ('hardcover',)
+                          if 'bleed' in (_rc.get('allowances') or {}).get(b, {})]
 
 # KDP's hardcover programme is narrower than its paperback one; the wrap builds
 # either way, but a book outside these is one KDP will refuse.
@@ -3765,6 +3779,19 @@ def cover_preview():
 
 
 IMAGE_EXTS = ('.jpg', '.jpeg', '.png')
+# The most an uploaded cover or back-cover image may be. A full wrap at
+# 600 dpi saved as an uncompressed 16-bit PNG is about 400 MB, far past what
+# a printer asks for; read no further than this (bug hunt 32.8)
+IMAGE_MAX_BYTES = 256 * 1024 * 1024
+
+
+def _read_image_upload(f):
+    """An uploaded image's bytes, or None when it is over IMAGE_MAX_BYTES."""
+    data = f.read(IMAGE_MAX_BYTES + 1)
+    return None if len(data) > IMAGE_MAX_BYTES else data
+
+
+_IMAGE_TOO_BIG = f'is larger than {IMAGE_MAX_BYTES // (1024 * 1024)} MB'
 
 
 @app.route('/cover/asset/upload', methods=['POST'])
@@ -3793,13 +3820,17 @@ def cover_asset_upload():
         f.save(out)
     try:                                             # reject anything Pillow can't read
         from PIL import Image
-        Image.open(dest).verify()
+        with Image.open(dest) as im:
+            fmt = im.format
+            im.verify()
+        if fmt != _EXT_FORMAT.get(ext):              # a BMP named .png (bug hunt 32.10)
+            raise ValueError(fmt)
     except Exception:
         try:
             os.remove(dest)
         except OSError:
             pass
-        return jsonify({'ok': False, 'error': 'That file is not a readable image.'})
+        return jsonify({'ok': False, 'error': 'That file is not a readable .jpg or .png image.'})
     return jsonify({'ok': True, 'filename': fn})
 
 
@@ -3813,8 +3844,11 @@ def _save_back_image(f):
     .png raises `_BadBackImage`: the cover drew without it and said nothing."""
     if not f or not f.filename:
         return None
-    ext, data = _upload_ext(f), f.read()
-    if ext not in IMAGE_EXTS or not _is_image(data):
+    ext, data = _upload_ext(f), _read_image_upload(f)
+    if data is None:
+        raise _BadBackImage(f'The back-cover image “{f.filename}” {_IMAGE_TOO_BIG}. '
+                            'Choose a smaller one, or clear it.')
+    if ext not in IMAGE_EXTS or not _is_image(data, ext):
         raise _BadBackImage(f'The back-cover image “{f.filename}” is not a readable '
                             '.jpg or .png picture. Choose another, or clear it.')
     fd, tmp = tempfile.mkstemp(suffix=ext)
@@ -4069,7 +4103,9 @@ def _wrap_front_path(proj):
     # The front is cut from a wrap of the book's current trim and spine: a file
     # rendered at another size (the style's trim changed since the design was
     # saved) would put a different cover in the ebook than on the print wrap.
-    if not os.path.exists(path) or _wrap_front_key(path) != _wrap_dims_key(dims):
+    # And from this design: a save interrupted between writing the book and
+    # replacing the file left the old front qualifying (bug hunt 32.5)
+    if not os.path.exists(path) or _wrap_front_key(path) != _wrap_front_cache_key(design, dims):
         try:
             _render_wrap_front(design, dims, path)
         except Exception:
@@ -4078,8 +4114,12 @@ def _wrap_front_path(proj):
     return path
 
 
-def _wrap_dims_key(dims):
-    return json.dumps(dims, sort_keys=True, default=str)
+def _wrap_front_cache_key(design, dims):
+    """What a rendered front was cut from: the geometry and the design."""
+    return json.dumps({'dims': dims,
+                       'design': hashlib.sha1(json.dumps(design, sort_keys=True, default=str)
+                                              .encode('utf-8')).hexdigest()},
+                      sort_keys=True, default=str)
 
 
 def _wrap_front_key(path):
@@ -4091,10 +4131,10 @@ def _wrap_front_key(path):
 
 
 def _render_wrap_front(design, dims, path):
-    """Render a design's front cover, recording the geometry it was cut from."""
+    """Render a design's front cover, recording what it was cut from."""
     wrap_design.render_front(design, dims, path)
     with open(path + '.dims', 'w', encoding='utf-8') as f:
-        f.write(_wrap_dims_key(dims))
+        f.write(_wrap_front_cache_key(design, dims))
 
 
 def _design_too_big(els):
@@ -4138,24 +4178,79 @@ def wrap_designer_project(pid):
 
 @app.route('/wrap-designer/project/<pid>/save', methods=['POST'])
 def wrap_designer_save(pid):
-    proj = load_project(pid)
-    body = request.get_json(silent=True) or {}
+    load_project(pid)                     # 404s for an unknown project
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}
     design = _clean_design(body.get('design'))
     if design is None:
         els = (body.get('design') or {}).get('elements') if isinstance(body.get('design'), dict) else None
         big = _design_too_big([e for e in els if isinstance(e, dict)]) if isinstance(els, list) else ''
         return jsonify(ok=False, error=big or 'That design could not be read.')
-    s = body.get('settings') or {}
-    if s.get('wrap_retailer') in WRAP_RETAILERS:
-        proj['print_retailer'] = s['wrap_retailer']
-    if s.get('wrap_paper') in _PAPER:
-        proj['print_paper'] = s['wrap_paper']
-    if s.get('wrap_binding') in _WRAP_SUFFIX:
-        proj['print_binding'] = s['wrap_binding']
-    proj['wrap_design'] = design
-    proj['wrap_design_saved'] = datetime.now().isoformat(timespec='seconds')
-    proj['wrap_front_file'] = secure_filename(f'{pid}-wrap-front.jpg')
-    if body.get('use_as_cover'):
+    s = body.get('settings')
+    s = s if isinstance(s, dict) else {}
+
+    def apply_settings(proj):
+        if s.get('wrap_retailer') in WRAP_RETAILERS:
+            proj['print_retailer'] = s['wrap_retailer']
+        if s.get('wrap_paper') in _PAPER:
+            proj['print_paper'] = s['wrap_paper']
+        if s.get('wrap_binding') in _WRAP_SUFFIX:
+            proj['print_binding'] = s['wrap_binding']
+
+    proj = load_project(pid)
+    apply_settings(proj)
+    front_file = secure_filename(f'{pid}-wrap-front.jpg')
+    front = os.path.join(PROJECT_MS_DIR, front_file)
+    # rendered beside the real one and swapped in only once the book is saved:
+    # the builds reuse that file while it fits, so writing it first let a
+    # failed save put the unsaved front on the next book built. Named for this
+    # request: two saves rendering at once each have their own
+    pending = f'{front}.{os.getpid()}-{threading.get_ident()}.saving.jpg'
+    try:
+        dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
+        wrap_design.render_front(design, dims, pending)
+    except Exception as exc:
+        logging.error('Wrap design front render failed: %s', traceback.format_exc())
+        _drop_files([os.path.basename(pending)])
+        return jsonify(ok=False, error=f'The design was not saved: {exc}')
+    # The render takes seconds: what it changes is written onto the book as
+    # it is now. Saving the copy read before it put back an older title or
+    # blurb saved meanwhile in another tab (bug hunt 32.2)
+    with _PROJECT_LOCK:
+        proj = load_project(pid)
+        apply_settings(proj)
+        proj['wrap_design'] = design
+        proj['wrap_design_saved'] = datetime.now().isoformat(timespec='seconds')
+        proj['wrap_front_file'] = front_file
+        _wrap_cover_choice(proj, bool(body.get('use_as_cover')))
+        proj['updated'] = datetime.now().isoformat(timespec='seconds')
+        try:
+            fits = _wrap_design_dims(_project_wrap_settings(proj))[0] == dims
+        except Exception:
+            fits = False
+        try:
+            save_project_file(pid, proj)
+        except Exception:
+            _drop_files([os.path.basename(pending)])
+            raise
+        try:
+            if not fits:
+                # the printer or page count changed while it rendered: the
+                # next build draws the front at the size the book has now
+                raise OSError('rendered at another size')
+            os.replace(pending, front)
+            with open(front + '.dims', 'w', encoding='utf-8') as f:
+                f.write(_wrap_front_cache_key(proj['wrap_design'], dims))
+        except OSError:
+            # the old front no longer matches the saved design: the next build draws it
+            _drop_files([os.path.basename(pending), front_file, front_file + '.dims'])
+    return jsonify(ok=True, saved=proj['wrap_design_saved'],
+                   is_cover=proj.get('cover_mode') == 'wrap')
+
+
+def _wrap_cover_choice(proj, use_as_cover):
+    """The wrap design made the book's cover, or (unticked) the cover it had before."""
+    if use_as_cover:
         if proj.get('cover_mode') != 'wrap':
             # kept, so unticking brings back exactly this cover
             proj['cover_mode_before_wrap'] = proj.get('cover_mode', 'none')
@@ -4176,34 +4271,6 @@ def wrap_designer_save(pid):
         else:
             proj['cover_mode'] = ('image' if has_image
                                   else 'designed' if has_template else 'none')
-    front = os.path.join(PROJECT_MS_DIR, proj['wrap_front_file'])
-    # rendered beside the real one and swapped in only once the book is saved:
-    # the builds reuse that file while its size fits, so writing it first let a
-    # failed save put the unsaved front on the next book built
-    pending = front + '.saving.jpg'
-    try:
-        dims, _ = _wrap_design_dims(_project_wrap_settings(proj))
-        wrap_design.render_front(design, dims, pending)
-    except Exception as exc:
-        logging.error('Wrap design front render failed: %s', traceback.format_exc())
-        _drop_files([os.path.basename(pending)])
-        return jsonify(ok=False, error=f'The design was not saved: {exc}')
-    proj['updated'] = datetime.now().isoformat(timespec='seconds')
-    try:
-        save_project_file(pid, proj)
-    except Exception:
-        _drop_files([os.path.basename(pending)])
-        raise
-    try:
-        os.replace(pending, front)
-        with open(front + '.dims', 'w', encoding='utf-8') as f:
-            f.write(_wrap_dims_key(dims))
-    except OSError:
-        # the old front no longer matches the saved design: the next build draws it
-        _drop_files([os.path.basename(pending), proj['wrap_front_file'],
-                     proj['wrap_front_file'] + '.dims'])
-    return jsonify(ok=True, saved=proj['wrap_design_saved'],
-                   is_cover=proj.get('cover_mode') == 'wrap')
 
 
 # "Customise this design" (phase C): a template's wrap - or the wrap a book's
@@ -4343,7 +4410,8 @@ def page_designer_save(pid):
     """Keep a page design with the book, under its name (renamed from `was`
     when it had another). Returns the book's designs."""
     proj = load_project(pid)
-    body = request.get_json(silent=True) or {}
+    body = request.get_json(silent=True)
+    body = body if isinstance(body, dict) else {}   # `["draft"]` was a 500 (32.12)
     name = wrap_design.page_name(body.get('name'))
     if not name:
         return jsonify(ok=False, error='Give the page a name (letters, numbers and hyphens): '
@@ -4355,9 +4423,22 @@ def page_designer_save(pid):
         return jsonify(ok=False, error=big or 'That design could not be read.')
     # read again under the lock, changed and written before it is let go: two
     # saves at once (two tabs, two designs) each wrote back the book as they
-    # had read it, and the second undid the first
-    with _PROJECT_LOCK:
+    # had read it, and the second undid the first. The manuscript lock (which
+    # holds _PROJECT_LOCK too): a rename rewrites the placements as well
+    with _manuscript_lock(pid):
         return _page_designer_save(pid, body, name, design)
+
+
+_RENAME_LOG_MAX = 200
+
+
+def _rename_log(proj):
+    """A book's page renames, oldest first: [{'was', 'now', 'at'}]. A History
+    version older than a rename placed the page by its old name, whatever has
+    taken that name since (bug hunt 32.6)."""
+    return [e for e in (proj.get('page_rename_log') or [])
+            if isinstance(e, dict) and all(isinstance(e.get(k), str)
+                                           for k in ('was', 'now', 'at'))]
 
 
 def _page_designer_save(pid, body, name, design):
@@ -4389,21 +4470,30 @@ def _page_designer_save(pid, body, name, design):
         # the page when it is restored
         renames = {k: (name if v == was else v) for k, v in renames.items()}
         renames[was] = name
+        proj['page_rename_log'] = (_rename_log(proj)
+                                   + [{'was': was, 'now': name, 'at': saved}])[-_RENAME_LOG_MAX:]
     if renames:
         proj['page_renames'] = renames
     else:
         proj.pop('page_renames', None)
     proj['updated'] = saved
-    save_project_file(pid, proj)
     # renamed: the manuscript places it by its new name too (#75b-2), so the
     # page plan and the build keep it where it was
     # (a Word file or the sample is left as it is: rewriting would replace it)
+    moved = None
     if old is not None and name != was and proj.get('manuscript_type') != 'sample' \
             and not proj.get('manuscript_file', '').lower().endswith('.docx'):
         text = _project_manuscript_text(proj, report_import=False)
-        moved = page_plan.rename(text, was, name, key=wrap_design.page_name)
-        if moved != text and page_plan.readable(text):
-            _store_manuscript(pid, proj, moved)
+        if page_plan.readable(text):
+            moved = page_plan.rename(text, was, name, key=wrap_design.page_name)
+            moved = None if moved == text else moved
+    if moved is not None:
+        # the manuscript is written first and the book with it: the design
+        # committed first and a failed manuscript write left every placement
+        # naming a page that was gone (bug hunt 32.4)
+        _store_manuscript(pid, proj, moved)
+    else:
+        save_project_file(pid, proj)
     return jsonify(ok=True, name=name, saved=saved, designs=_page_info(proj)['designs'])
 
 
@@ -4505,7 +4595,8 @@ def _plan_total_known(proj):
 
 
 def _plan_data(pid, proj, text=None):
-    text = _project_manuscript_text(proj, report_import=False) if text is None else text
+    if text is None:            # only reading: no figures written (bug hunt 32.9)
+        text = _project_manuscript_text(proj, report_import=False, save_images=False)
     items = page_plan.split(text)
     designs = _page_designs(proj)
     numbered = _plan_numbered(proj)
@@ -4554,7 +4645,16 @@ def page_plan_data(pid):
 def _plan_write(pid, proj, rev, build):
     """Rewrite the manuscript from the plan: `build(items)` returns the new
     pieces, or a refusal string. Refused when the manuscript changed since
-    the plan was read, or when the plan can't read it as the book does."""
+    the plan was read, or when the plan can't read it as the book does.
+
+    Checked and written under the manuscript lock, on the book as it is then:
+    an editor autosave landing between the revision check and the write was
+    otherwise written over (bug hunt 32.1)."""
+    with _manuscript_lock(pid) as still_mine:
+        return _plan_write_locked(pid, load_project(pid), rev, build, still_mine)
+
+
+def _plan_write_locked(pid, proj, rev, build, still_mine):
     try:
         current = _project_manuscript_text(proj, report_import=False, strict=True)
     except DamagedFile:
@@ -4570,7 +4670,7 @@ def _plan_write(pid, proj, rev, build):
         return jsonify(ok=False, error='The plan can\'t safely rearrange this manuscript: its '
                                        'page blocks are written in a way it doesn\'t read as the '
                                        'book does. Move them in the manuscript editor instead.')
-    new = build(items)
+    new = build(items, proj)
     if isinstance(new, str):
         return jsonify(ok=False, error=new)
     text = page_plan.join(new)
@@ -4581,6 +4681,13 @@ def _plan_write(pid, proj, rev, build):
             return jsonify(ok=False, error='That change would have moved or removed some of the '
                                            'manuscript\'s text, so nothing was changed. Move the '
                                            'page blocks in the manuscript editor instead.')
+        if not still_mine():
+            # paused past the lock's life: another copy of the app saved meanwhile
+            return jsonify(ok=False, conflict=True,
+                           error='The manuscript was saved by another copy of the app while '
+                                 'the plan was being saved. The plan has been brought up to '
+                                 'date: try that again.',
+                           data=_plan_data(pid, load_project(pid))), 409
         _store_manuscript(pid, proj, text)
     return jsonify(_plan_data(pid, proj, text))
 
@@ -4593,9 +4700,9 @@ def page_plan_save(pid):
     proj = load_project(pid)
     body = request.get_json(silent=True) or {}
     order = body.get('order')
-    designs = _page_designs(proj)
 
-    def build(items):
+    def build(items, proj):
+        designs = _page_designs(proj)
         if not isinstance(order, list):
             return 'That plan could not be read.'
         new, used = [], set()
@@ -4647,18 +4754,17 @@ def page_plan_add(pid):
     proj = load_project(pid)
     body = request.get_json(silent=True) or {}
     spread = body.get('kind') == 'spread'
-    designs = _page_designs(proj)
-    try:
-        placed = [it['src'] for it in page_plan.split(
-            _project_manuscript_text(proj, report_import=False)) if it['kind'] == 'page']
-    except Exception:
-        placed = []
-    placed += list((proj.get('page_renames') or {}).keys())
-    name = _next_page_name(designs, 'spread' if spread else 'page', placed)
     at = body.get('at')
     made = {}
 
-    def build(items):
+    def build(items, proj):
+        # the book as it is under the manuscript lock: the design and its
+        # placement are saved together, by the one write (bug hunt 32.1)
+        designs = _page_designs(proj)
+        placed = [it['src'] for it in items if it['kind'] == 'page']
+        placed += list((proj.get('page_renames') or {}).keys())
+        placed += [e.get('was') for e in _rename_log(proj)]
+        name = _next_page_name(designs, 'spread' if spread else 'page', placed)
         pos = at if isinstance(at, int) and not isinstance(at, bool) and 0 <= at <= len(items) \
             else len(items)
         entry = {'name': name, 'elements': _blank_page_design(spread),
@@ -4666,7 +4772,7 @@ def page_plan_add(pid):
         if spread:
             entry['spread'] = True
         proj['page_designs'] = designs + [entry]
-        made['yes'] = True
+        made['name'] = name
         return items[:pos] + [{'kind': 'page', 'src': name, 'text': page_plan.fence(name)}] \
             + items[pos:]
 
@@ -4674,8 +4780,7 @@ def page_plan_add(pid):
     resp = res[0] if isinstance(res, tuple) else res
     data = resp.get_json()
     if made and data.get('ok'):
-        save_project_file(pid, proj)    # the design, when the text was already written
-        data = _plan_data(pid, proj)
+        name = made['name']
         data['name'] = name
         data['designer'] = url_for('wrap_designer', page=pid, design=name)
         return jsonify(data)
@@ -5372,8 +5477,10 @@ def _manuscript_upload(up, folder):
 def _cover_upload(cov, folder):
     """Store uploaded cover art in `folder`; raises _PreviewError unless it is a
     real .jpg or .png (anything else failed later, as a build error)."""
-    data = cov.read()
-    if _upload_ext(cov) not in IMAGE_EXTS or not _is_image(data):
+    data = _read_image_upload(cov)
+    if data is None:
+        raise _PreviewError(f'The cover “{cov.filename}” {_IMAGE_TOO_BIG}.')
+    if _upload_ext(cov) not in IMAGE_EXTS or not _is_image(data, _upload_ext(cov)):
         raise _PreviewError(f'The cover “{cov.filename}” isn\'t a .jpg or .png picture.')
     os.makedirs(folder, exist_ok=True)
     fd, path = tempfile.mkstemp(dir=folder, prefix=datetime.now().strftime('%Y%m%d-%H%M%S-'),
@@ -6042,16 +6149,26 @@ def _image_file_ok(path):
         return False
 
 
-def _is_image(data):
+# what each picture extension promises the bytes are
+_EXT_FORMAT = {'.png': 'PNG', '.jpg': 'JPEG', '.jpeg': 'JPEG', '.gif': 'GIF'}
+
+
+def _is_image(data, ext=None):
+    """Whether `data` decodes all the way through - and, given its `ext`, is
+    the format that extension names: a BMP renamed .png read fine here, then
+    went into the EPUB declared as a PNG (bug hunt 32.10; Figures already
+    checked this)."""
     try:
         from PIL import Image
         # verify() only reads the header: a JPEG cut off part way through
         # passes it, then prints as nothing. Decoding it all catches that.
         with Image.open(io.BytesIO(data)) as im:
+            fmt = im.format
             im.load()
-        return True
     except Exception:
         return False
+    want = _EXT_FORMAT.get((ext or '').lower())
+    return not (want and fmt != want)
 
 
 def _choice(form, key, allowed, current, default):
@@ -6182,11 +6299,20 @@ def project_edit(pid):
                     # was switched to None or a template is not a new cover: it
                     # replaced (and deleted) the saved art kept for later
                     continue
-                ext, data = _upload_ext(f), f.read()
-                if ext not in IMAGE_EXTS or not _is_image(data):
+                ext, data = _upload_ext(f), _read_image_upload(f)
+                if data is None:
+                    problems.append(f'The {what} was not replaced: “{f.filename}” '
+                                    f'{_IMAGE_TOO_BIG}.')
+                    continue
+                if ext not in IMAGE_EXTS or not _is_image(data, ext):
                     problems.append(f'The {what} was not replaced: “{f.filename}” '
                                     "isn't a .jpg or .png picture.")
                     continue
+                # written, committed and the replaced file dropped as one: two
+                # replacements at once each dropped the file the other had
+                # just made current, and the book was left with no cover
+                # (bug hunt 32.3)
+                held.enter_context(_PROJECT_LOCK)
                 _replace_file(pid, data, pid + suffix + ext, proj.get(key, ''), stale)
                 proj[key] = pid + suffix + ext
                 took.add(key)
@@ -6277,7 +6403,10 @@ def project_edit(pid):
                         stale.append(theirs)
                 now.update(mine)
                 save_project_file(pid, now)
-            _drop_files(stale)
+                # never a file the book as saved points at
+                keep = {os.path.normcase(now.get(k) or '')
+                        for k in ('manuscript_file', 'cover_file', 'print_back_file')}
+                _drop_files([f for f in stale if os.path.normcase(f) not in keep])
         if problems:
             for msg in problems:
                 flash(msg)
@@ -6303,7 +6432,7 @@ STARTER_DRAFT = ("# Chapter One\n\n"
                  "scene break with `* * *` on its own line.\n")
 
 
-def _project_manuscript_text(proj, report_import=True, strict=False):
+def _project_manuscript_text(proj, report_import=True, strict=False, save_images=True):
     """Return a project's manuscript as editable Markdown text ('' if none).
 
     `report_import=False` for the internal readers (snapshotting before a
@@ -6314,6 +6443,9 @@ def _project_manuscript_text(proj, report_import=True, strict=False):
     that can't be read raises `DamagedFile` instead of reading as empty, since
     writing over "empty" replaced the book with whatever was being added and
     deleted the Word file it came from.
+
+    `save_images=False` for a page that only reads the book (the Page Plan):
+    a Word file's pictures are not written to the Figures library.
     """
     ms_type = proj.get('manuscript_type', 'file')
     ms_file = proj.get('manuscript_file', '')
@@ -6328,7 +6460,7 @@ def _project_manuscript_text(proj, report_import=True, strict=False):
             if ms_file.lower().endswith('.docx'):
                 try:
                     rep = {}
-                    text = manuscript.import_docx(path, report=rep)
+                    text = manuscript.import_docx(path, report=rep, save_images=save_images)
                     if report_import:
                         _flash_import(rep)   # the page-rendering callers only
                     return text
@@ -6728,9 +6860,24 @@ def _write_restore(pid, stamp, still_mine=lambda: True):
         return None
     current = _project_manuscript_text(proj, report_import=False)
     snapshot_manuscript(pid, current, reason='restore', force=True)
-    # pages renamed since that version: place them by the name they have now
+    # pages renamed since that version: place them by the name they have now.
+    # The log replays every rename made after the version was kept, in order,
+    # even when a new page has taken an old name since (bug hunt 32.6)
     designs = _page_designs(proj)
+    kept = datetime.strptime(stamp, '%Y%m%d-%H%M%S')
+    logged = set()
+    for e in _rename_log(proj):
+        logged.add(e['was'])
+        try:
+            at = datetime.fromisoformat(e['at'])
+        except ValueError:
+            continue
+        if at >= kept and page_plan.readable(text):
+            text = page_plan.rename(text, e['was'], e['now'], key=wrap_design.page_name)
+    # renames from before the log: only where the old name is free
     for was, now in (proj.get('page_renames') or {}).items():
+        if was in logged:
+            continue
         if (isinstance(was, str) and isinstance(now, str) and page_plan.readable(text)
                 and wrap_design.find_page(designs, now) is not None
                 and wrap_design.find_page(designs, was) is None):
@@ -7150,7 +7297,19 @@ def ebook_layout(proj):
     chosen = proj.get('ebook_layout', '')
     if chosen in ('fixed', 'flow'):
         return chosen
-    return 'fixed' if proj.get('picture_book') and _page_designs(proj) else 'flow'
+    designs = _page_designs(proj)
+    if not (proj.get('picture_book') and designs):
+        return 'flow'
+    # and only when the manuscript places one: a draft design saved but not
+    # placed turned a book of text and figures into an ebook of nothing but
+    # its cover (bug hunt 32.7)
+    try:
+        text = _project_manuscript_text(proj, report_import=False, save_images=False)
+        placed = any(it['kind'] == 'page' and wrap_design.find_page(designs, it['src'])
+                     for it in page_plan.split(text))
+    except Exception:
+        placed = False
+    return 'fixed' if placed else 'flow'
 
 
 # ------------------------------------------------------------ send to print
@@ -7470,7 +7629,7 @@ def build_print_package(proj, scope='print'):
         except Exception as exc:
             logging.exception('front cover JPG for the print package failed')
             checks.append({'label': 'Front cover image', 'ok': False,
-                           'detail': (f'Could not render the store-listing JPG ({exc}) — '
+                           'detail': (f'Could not render the store-listing JPG ({exc_words(exc)}) — '
                                       'the interior and wrap are unaffected')})
 
         epub_checks = None
@@ -7509,7 +7668,7 @@ def build_print_package(proj, scope='print'):
                 logging.exception('EPUB for the publish package failed')
                 checks.insert(0, {
                     'label': 'Ebook', 'ok': False,
-                    'detail': (f'The EPUB could not be built ({exc}) — the print files '
+                    'detail': (f'The EPUB could not be built ({exc_words(exc)}) — the print files '
                                'in this package are unaffected')})
 
         info = {
@@ -7551,7 +7710,9 @@ def build_print_package(proj, scope='print'):
             with zipfile.ZipFile(part, 'w', zipfile.ZIP_DEFLATED) as z:
                 for name, path in files.items():
                     z.write(path, f'{folder}/{name}')
-            os.replace(part, final)
+            # retried while OneDrive or a scanner holds the name a moment, as
+            # the PDF and EPUB are: one failure threw the finished ZIP away
+            engine._replace_retrying(part, final)
         except BaseException:
             for leftover in (part, final):
                 with contextlib.suppress(OSError):
@@ -7719,7 +7880,8 @@ def project_print_package(pid):
         return redirect(url_for('project_edit', pid=pid))
     except Exception as exc:
         logging.error('print package failed: %s', traceback.format_exc())
-        flash(f'{"Publish" if scope == "publish" else "Print"} package failed: {exc}')
+        flash(f'{"Publish" if scope == "publish" else "Print"} package failed: '
+              f'{exc_words(exc)}')
         return redirect(url_for('projects'))
     # One slot for "the last handoff package", whichever kind it was — the
     # projects page offers it back as a download, and either kind supersedes.

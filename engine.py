@@ -3101,7 +3101,13 @@ class HRule(Flowable):
 
     def draw(self):
         c = self.canv
-        c.setStrokeColorRGB(*self.color)
+        # a Color as well as an RGB tuple: a FixedColor (a writer's own rule
+        # colour) must reach the canvas as itself, or the screen palette
+        # remaps it (bug hunt 30.10)
+        if isinstance(self.color, tuple):
+            c.setStrokeColorRGB(*self.color)
+        else:
+            c.setStrokeColor(self.color)
         c.setLineWidth(self.thickness)
         y = self.thickness / 2 + 1
         c.line(0, y, self.width, y)
@@ -5648,8 +5654,7 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
                          gap * 2 if k or not (fields or scores) else 0))
             if sm.get('section_rule', True):
                 keep.add(len(rows))
-                rows.append(HRule(color=(rule_c.red, rule_c.green, rule_c.blue),
-                                  thickness=0.5))
+                rows.append(HRule(color=rule_c, thickness=0.5))
         elif k and rows:
             rows.append(rule())           # a bare `---`
         for e in sec['entries']:
@@ -6900,8 +6905,11 @@ def _build_toc(entries, body_start, avail_w, preset, fonts, st):
         # Part heading (no page number)
         part = e.get('part')
         if part and part != last_part:
-            out.append(Paragraph(_esc_markup(part.get('title') or
-                                             f"Part {part['number']}"), toc_pt))
+            # an untitled part: its divider's own label (`Volume {n}`), as the
+            # bookmark and the EPUB contents have it (bug hunt 30.12)
+            out.append(Paragraph(_esc_markup(part.get('title') or _num_label(
+                (preset.get('part_divider') or {}).get('number_format', 'Part {n}'),
+                part['number'])), toc_pt))
             last_part = part
 
         # Chapter line with dot leaders

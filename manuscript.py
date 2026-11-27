@@ -34,6 +34,7 @@ Anything before the first "# " is treated as the opening of an untitled first
 chapter, so a plain manuscript with no headings still works.
 """
 
+import contextvars
 import copy
 import os
 import re
@@ -1588,6 +1589,12 @@ def _note_ref(ref, notes, report):
     return f'[^{label}]'
 
 
+# Off while a book is only being read (opening its Page Plan): the figures'
+# names are worked out, but nothing is written to the Figures library
+# (bug hunt 32.9).
+_SAVE_IMAGES = contextvars.ContextVar('save_images', default=True)
+
+
 def _para_images(p, stem, report):
     """Save every image embedded in a paragraph; yield (filename, alt) pairs.
 
@@ -1630,6 +1637,9 @@ def _para_images(p, stem, report):
             continue
         fn = f'{stem}-{hashlib.sha1(blob).hexdigest()[:8]}{ext}'
         dest = os.path.join(FIGURE_DIR, fn)
+        if not _SAVE_IMAGES.get():
+            found.append((fn, descrs[i] if i < len(descrs) else ''))
+            continue
         try:
             os.makedirs(FIGURE_DIR, exist_ok=True)
             if not os.path.exists(dest):
@@ -1813,7 +1823,7 @@ def _new_report():
             'images_failed': 0}
 
 
-def import_docx(path, report=None, stem=None):
+def import_docx(path, report=None, stem=None, save_images=True):
     """Best-effort .docx -> canonical Markdown string.
 
     Heading 1/Title become chapters, other headings subheads; centered short
@@ -1835,7 +1845,16 @@ def import_docx(path, report=None, stem=None):
 
     Pass a dict as ``report`` to receive counts of what was imported and what
     could not be — ``import_summary`` turns it into a sentence for the UI.
+    ``save_images=False`` reads the file without writing its pictures.
     """
+    token = _SAVE_IMAGES.set(bool(save_images))
+    try:
+        return _import_docx(path, report, stem)
+    finally:
+        _SAVE_IMAGES.reset(token)
+
+
+def _import_docx(path, report, stem):
     from docx import Document
     from docx.table import Table
 

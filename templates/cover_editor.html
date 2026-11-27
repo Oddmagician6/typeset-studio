@@ -678,6 +678,15 @@
             + 'board extension — and the flaps fold in behind the covers. Only IngramSpark '
             + 'prints jackets among the presets here; confirm flap and hinge with your printer.'
           : (hard && r ? (r.hardcover_note || '') : '');
+        // a bleed the printer fixes for this binding: shown, but not editable
+        var bleedEl = form.querySelector('[name=wrap_bleed]');
+        if (bleedEl){
+          var fixed = !!(r && r.fixed_bleed && r.fixed_bleed.indexOf(bindingSel.value) >= 0);
+          bleedEl.readOnly = fixed;
+          var bh = bleedEl.parentNode.querySelector('.hint');
+          if (bh) bh.textContent = fixed ? 'set by the printer: the turn-in is the outer allowance'
+                                         : 'inches per side';
+        }
       }
       // the printer's own case and jacket allowances (IngramSpark's differ from
       // the shared defaults), into the fields the wrap is built from
