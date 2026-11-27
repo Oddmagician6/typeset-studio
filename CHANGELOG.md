@@ -8,6 +8,42 @@ line here.
 
 ---
 
+## 1.16.0 — 27 November 2026
+
+Ebooks that are easier to find your way around: a language setting, print page
+numbers in the ebook, and landmarks for the cover, contents and story. KDP
+hardcover wraps now follow KDP's own measurements, and some very long books
+build faster.
+
+### New
+
+- A **Language** setting (a code such as `fr` or `pt-BR`) on Set a Book and in
+  Book settings. The ebook and the
+  PDF say which language the book is in, so a screen reader reads a French
+  book with French rules rather than English ones.
+- An ebook built together with its PDF (Build with both, Regenerate, or a
+  publish package) carries the print edition's page numbers. Reading apps
+  that support it can go to "page 47" and land where page 47 starts in print,
+  so readers of the two editions can point each other to the same place.
+- Ebooks list landmarks (cover, contents, start of the story, notes and
+  index), which some reading apps use for their "go to" menus.
+
+### Changed
+
+- **KDP hardcover wraps** use KDP's own 0.51" wrap and 0.4" hinges, with no
+  separate bleed; the art used to run about a quarter inch too far all
+  round. Rebuild the wrap of a KDP hardcover before you upload it again.
+
+### Fixed
+
+- An ebook with an animated picture no longer says it has no flashing or
+  motion hazards; it says they haven't been checked.
+- Very large or unusual books (thousands of repeated headings, very long
+  name lists in Continuity, many page references in the ebook) build and
+  check much faster.
+- Text dropped into the writing page from another app is cleaned up the way
+  pasted text is.
+
 ## 1.15.1 — 26 November 2026
 
 A bug-fix release: round six of the bug hunt, covering regressions from the
