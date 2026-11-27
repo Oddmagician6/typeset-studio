@@ -21,6 +21,7 @@ import matter as _matter
 import bookindex as _bookindex
 import ornaments as _orn
 
+from manuscript import page_map_key as _ms_page_map_key
 from manuscript import (book_anchors as _ms_book_anchors, LINK_RE as _LINK_RE,
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts,
@@ -260,7 +261,22 @@ def _apply_page_refs(chapters, meta, preset):
 # The book's language (23.5): every book said it was English, so a French one
 # was read aloud with English rules. A tag of letters and hyphens (`fr`,
 # `pt-BR`, `zh-Hant`), anything else being taken as English.
-_LANG_RE = re.compile(r'^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$')
+# A well-formed BCP 47 tag (RFC 5646 section 2.1): language, then script,
+# region, variants, extensions and private use, in that order. A loose
+# "letters, then any subtags" pattern passed `fr-u` (an extension with
+# nothing in it) and refused a private-use tag like `x-internal` (29.11).
+_LANG_RE = re.compile(r"""^(?:
+    [a-z]{2,3}(?:-[a-z]{3}){0,3}                           # language (+ extlang): the
+                                                           # 4- and 5-8-letter forms are
+                                                           # registered to nothing, and
+                                                           # `French` is a word, not a tag
+    (?:-[a-z]{4})?                                         # script
+    (?:-(?:[a-z]{2}|[0-9]{3}))?                            # region
+    (?:-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*               # variants
+    (?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*                   # extensions
+    (?:-x(?:-[a-z0-9]{1,8})+)?                             # private use
+  | x(?:-[a-z0-9]{1,8})+                                   # private use alone
+)$""", re.I | re.X)
 
 
 def book_lang(meta):
@@ -672,15 +688,18 @@ def _xhtml(title, body_content, css_href='style.css'):
     )
 
 
-def print_page_marks(chapters, print_pages):
+def print_page_marks(chapters, print_pages, key=None):
     """The print edition's pages in a reflowable ebook (bug hunt 23.11):
     `(marks, pages)`. `print_pages` is what the PDF of the same manuscript
     reported (`engine` `print_pages`: [(folio, chapter, block)]); `marks` is
     {chapter: {block: [folio, ...]}}, block -1 being the chapter's opening,
     and `pages` the page list's [(folio, href)]. An entry naming a chapter or
     block this manuscript hasn't means the PDF was another book's: then there
-    is no list at all."""
+    is no list at all. So does a false `key`: the caller's word that the
+    PDF's `print_pages_key` is this manuscript's (`page_map_key`)."""
     marks, pages, seen = {}, [], set()
+    if not print_pages or not key:
+        return {}, []
     for entry in print_pages or ():
         try:
             folio, idx, bi = (int(v) for v in entry)
@@ -1664,8 +1683,14 @@ def _a11y_meta(manifest_items, all_alt=True, animated=False, page_source=''):
         # the print edition's pages, marked in the text and listed (23.11)
         for feature in ('pageBreakMarkers', 'pageNavigation'):
             lines.append(f'    <meta property="schema:accessibilityFeature">{feature}</meta>')
-        lines.append('    <meta property="a11y:pageBreakSource">'
-                     f'{_text_to_html(xml_safe(page_source))}</meta>')
+        # EPUB 3.3 names the print source as a dc:source that is the source
+        # of the pagination (`source-of`); `a11y:pageBreakSource` is no
+        # property at all, and 3.4's unprefixed `pageBreakSource` is unknown
+        # to a 3.0 package (bug hunt 29.9)
+        lines.append('    <dc:source id="pagination-source">'
+                     f'{_text_to_html(xml_safe(page_source))}</dc:source>')
+        lines.append('    <meta refines="#pagination-source" property="source-of">'
+                     'pagination</meta>')
     # no known hazards: no flashing, sound or motion in a typeset book - unless
     # it carries an animated picture (23.12), which nothing here can measure
     # for flashing: then the flashing and motion are unknown, not none
@@ -1773,8 +1798,11 @@ def _landmarks(chapters, has_cover, meta, has_notes, has_index):
     marks = []
     if has_cover:
         marks.append(('cover', 'cover.xhtml', 'Cover'))
-    marks.append(('toc', 'toc.xhtml' if meta.get('include_toc') else 'nav.xhtml#toc',
-                  'Contents'))
+    # a landmark must lead to a document in the reading order: the nav
+    # document isn't one, so without a Contents page there is no landmark
+    # for it (bug hunt 29.10)
+    if meta.get('include_toc'):
+        marks.append(('toc', 'toc.xhtml', 'Contents'))
     if chapters:
         part = chapters[0].get('part')
         marks.append(('bodymatter', f'part{part["number"]:03d}.xhtml' if part
@@ -1992,7 +2020,7 @@ def build_epub(manuscript, preset, out_path, meta):
 
 
 def _page_source(meta):
-    """Where the page numbers come from, for `a11y:pageBreakSource`: the print
+    """Where the page numbers come from, for the pagination `dc:source`: the print
     edition named in words, there being no ISBN to give (the W3C's page source
     note asks for a description when there is no identifier)."""
     title = xml_safe(str(meta.get('title') or '')).strip() or 'Untitled'
@@ -2006,6 +2034,8 @@ def _build_epub(manuscript, preset, out_path, meta):
         return fixed_epub.build(manuscript, preset, out_path, meta)
     uid      = 'urn:uuid:' + str(uuid.uuid4())
     modified = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    # the manuscript the PDF's page map must have been set from (29.8)
+    page_key = _ms_page_map_key(manuscript['chapters'])
     chapters = _apply_note_markers(manuscript['chapters'])
     has_notes = any(ch.get('notes') for ch in chapters)
     chapters, ix_marks = _apply_index_markers(chapters, meta)
@@ -2035,7 +2065,9 @@ def _build_epub(manuscript, preset, out_path, meta):
     # anchor -> chapter file, so `[see](#slug)` resolves across the spine;
     # a heading or a `{#name}` -> its place in that file (#74 Phase 5b)
     chapters, ref_hrefs = _apply_page_refs(chapters, meta, preset)
-    page_marks, print_pages = print_page_marks(chapters, meta.get('print_pages'))
+    page_marks, print_pages = print_page_marks(
+        chapters, meta.get('print_pages'),
+        meta.get('print_pages_key') == page_key and page_key)
     _BUILD.anchors = anchors = {}
     for _i, _names in enumerate(_ms_book_anchors(chapters), start=1):
         for _a in _names:

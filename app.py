@@ -133,6 +133,30 @@ _JSON_KINDS = {list: 'a list', str: 'a piece of text', int: 'a number',
                float: 'a number', bool: 'a yes/no value', type(None): 'nothing ("null")'}
 
 
+_BOMS = ((b'\xef\xbb\xbf', 'utf-8'), (b'\xff\xfe\x00\x00', 'utf-32-le'),
+         (b'\x00\x00\xfe\xff', 'utf-32-be'), (b'\xff\xfe', 'utf-16-le'),
+         (b'\xfe\xff', 'utf-16-be'))
+
+
+def _decode_text(raw):
+    """A text file's words, whatever it was saved as.
+
+    Read as UTF-8 with bad bytes replaced, a Windows-1252 file (Notepad's
+    "ANSI", older Word "Save as text") lost every accent and curly quote, a
+    UTF-16 one ("Unicode" in Notepad) came out as noise, and a UTF-8 file with
+    a byte-order mark started with an invisible character that stopped its
+    first `# Chapter` line being a chapter. A mark names the encoding; then
+    UTF-8 if it is valid, else Windows-1252.
+    """
+    for bom, enc in _BOMS:
+        if raw.startswith(bom):
+            return raw[len(bom):].decode(enc, errors='replace')
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError:
+        return raw.decode('cp1252', errors='replace')
+
+
 def read_json(path):
     """The JSON object (a dict) in `path`, or `DamagedFile` saying what is wrong.
 
@@ -930,7 +954,7 @@ def _repoint_font(old, new):
             path = os.path.join(folder, fn)
             try:
                 data = read_json(path)
-            except Exception:
+            except (OSError, DamagedFile):
                 continue
             if kind == 'presets':
                 hit = fix_dict(data.get('font_files'))
@@ -3544,7 +3568,9 @@ def _with_print_pages(emeta, pdf_result):
     beside a PDF of the same manuscript lists the PDF's page numbers and
     marks where each starts. Built alone it has none to give."""
     pages = (pdf_result or {}).get('print_pages')
-    return dict(emeta, print_pages=pages) if pages else emeta
+    return (dict(emeta, print_pages=pages,
+                 print_pages_key=(pdf_result or {}).get('print_pages_key'))
+            if pages else emeta)
 
 
 @contextlib.contextmanager
@@ -6095,145 +6121,163 @@ def project_edit(pid):
         stale = []             # replaced files, dropped once the book is saved
         took = set()           # file keys this request replaced (maybe under the same name)
 
-        # Optional manuscript replacement
-        up = request.files.get('manuscript')
-        if up and up.filename:
-            ext = _upload_ext(up)
-            data = _read_manuscript_upload(up, ext) if ext in MANUSCRIPT_EXTS else b''
-            why = ''
-            if ext not in MANUSCRIPT_EXTS:
-                why = "isn't a manuscript - use a .docx, .md or .txt file"
-            elif data is None:
-                why = _too_big_words(ext)
-            elif ext == '.docx':
-                fd, tmp = tempfile.mkstemp(suffix='.docx', dir=PROJECT_MS_DIR)
-                with os.fdopen(fd, 'wb') as f:
-                    f.write(data)
-                try:
-                    # named as the book's own import will name them
-                    if not manuscript.import_docx(tmp, stem=pid).strip():
-                        why = 'has no text in it'
-                except Exception:
-                    why = "couldn't be read as a Word document"
-                finally:
-                    os.remove(tmp)
-            else:
-                # stored as UTF-8, whatever it came in as (see _decode_text)
-                text = _norm_newlines(_decode_text(data))
-                if not text.strip():
-                    why = 'is empty'
-                data = text.encode('utf-8')
-            if why:
-                problems.append(f'The manuscript was not replaced: “{up.filename}” {why}.')
-            else:
-                # the draft about to be replaced is the one most worth keeping —
-                # an upload here overwrites work that may exist nowhere else
-                snapshot_manuscript(pid, _project_manuscript_text(proj, report_import=False),
-                                    reason='replaced', force=True)
-                _replace_file(pid, data, pid + ext, proj.get('manuscript_file', ''), stale)
-                proj['manuscript_file'] = pid + ext
-                proj['manuscript_type'] = 'file'
-                took |= {'manuscript_file', 'manuscript_type'}
+        # A manuscript upload is snapshotted, written and committed under the
+        # manuscript lock: an editor save landing meanwhile (a Word book's
+        # first one makes a .md and drops the .docx) was neither kept in
+        # History - the snapshot read the stale record's file, gone by then -
+        # nor kept on disk, dropped as the stale file
+        with contextlib.ExitStack() as held:
+            # Optional manuscript replacement
+            up = request.files.get('manuscript')
+            if up and up.filename:
+                ext = _upload_ext(up)
+                data = _read_manuscript_upload(up, ext) if ext in MANUSCRIPT_EXTS else b''
+                why = ''
+                if ext not in MANUSCRIPT_EXTS:
+                    why = "isn't a manuscript - use a .docx, .md or .txt file"
+                elif data is None:
+                    why = _too_big_words(ext)
+                elif ext == '.docx':
+                    fd, tmp = tempfile.mkstemp(suffix='.docx', dir=PROJECT_MS_DIR)
+                    with os.fdopen(fd, 'wb') as f:
+                        f.write(data)
+                    try:
+                        # named as the book's own import will name them
+                        if not manuscript.import_docx(tmp, stem=pid).strip():
+                            why = 'has no text in it'
+                    except Exception:
+                        why = "couldn't be read as a Word document"
+                    finally:
+                        os.remove(tmp)
+                else:
+                    # stored as UTF-8, whatever it came in as (see _decode_text)
+                    text = _norm_newlines(_decode_text(data))
+                    if not text.strip():
+                        why = 'is empty'
+                    data = text.encode('utf-8')
+                if why:
+                    problems.append(f'The manuscript was not replaced: “{up.filename}” {why}.')
+                else:
+                    held.enter_context(_manuscript_lock(pid))
+                    # the draft about to be replaced is the one most worth keeping —
+                    # an upload here overwrites work that may exist nowhere else.
+                    # The book as it is now: a save may have moved it to a new file
+                    snapshot_manuscript(pid, _project_manuscript_text(load_project(pid),
+                                                                      report_import=False),
+                                        reason='replaced', force=True)
+                    _replace_file(pid, data, pid + ext, proj.get('manuscript_file', ''), stale)
+                    proj['manuscript_file'] = pid + ext
+                    proj['manuscript_type'] = 'file'
+                    took |= {'manuscript_file', 'manuscript_type'}
 
-        # Optional cover replacement, and the back-cover image for the print wrap
-        for field, suffix, key, what in (('cover', '-cover', 'cover_file', 'cover'),
-                                         ('print_back_image', '-back', 'print_back_file',
-                                          'back-cover image')):
-            f = request.files.get(field)
-            if not (f and f.filename):
-                continue
-            if field == 'cover' and request.form.get('cover_mode', 'image') != 'image':
-                # a file still sitting in the hidden upload box once the cover
-                # was switched to None or a template is not a new cover: it
-                # replaced (and deleted) the saved art kept for later
-                continue
-            ext, data = _upload_ext(f), f.read()
-            if ext not in IMAGE_EXTS or not _is_image(data):
-                problems.append(f'The {what} was not replaced: “{f.filename}” '
-                                "isn't a .jpg or .png picture.")
-                continue
-            _replace_file(pid, data, pid + suffix + ext, proj.get(key, ''), stale)
-            proj[key] = pid + suffix + ext
-            took.add(key)
-        back = request.files.get('print_back_image')
-        if 'print_back_clear' in form and not (back and back.filename) \
-                and proj.get('print_back_file'):
-            stale.append(proj['print_back_file'])
-            proj['print_back_file'] = ''
-            took.add('print_back_file')
+            # Optional cover replacement, and the back-cover image for the print wrap
+            for field, suffix, key, what in (('cover', '-cover', 'cover_file', 'cover'),
+                                             ('print_back_image', '-back', 'print_back_file',
+                                              'back-cover image')):
+                f = request.files.get(field)
+                if not (f and f.filename):
+                    continue
+                if field == 'cover' and request.form.get('cover_mode', 'image') != 'image':
+                    # a file still sitting in the hidden upload box once the cover
+                    # was switched to None or a template is not a new cover: it
+                    # replaced (and deleted) the saved art kept for later
+                    continue
+                ext, data = _upload_ext(f), f.read()
+                if ext not in IMAGE_EXTS or not _is_image(data):
+                    problems.append(f'The {what} was not replaced: “{f.filename}” '
+                                    "isn't a .jpg or .png picture.")
+                    continue
+                _replace_file(pid, data, pid + suffix + ext, proj.get(key, ''), stale)
+                proj[key] = pid + suffix + ext
+                took.add(key)
+            back = request.files.get('print_back_image')
+            if 'print_back_clear' in form and not (back and back.filename) \
+                    and proj.get('print_back_file'):
+                stale.append(proj['print_back_file'])
+                proj['print_back_file'] = ''
+                took.add('print_back_file')
 
-        def choice(key, allowed, default):
-            return _choice(form, key, allowed, proj.get(key, default), default)
+            def choice(key, allowed, default):
+                return _choice(form, key, allowed, proj.get(key, default), default)
 
-        proj.update({
-            'print_retailer':   choice('print_retailer', tuple(WRAP_RETAILERS), 'kdp'),
-            'print_paper':      choice('print_paper', tuple(_PAPER), 'white'),
-            'print_blurb':      form.get('print_blurb', '').strip(),
-            'print_flap_blurb': form.get('print_flap_blurb', '').strip(),
-            'print_flap_bio':   form.get('print_flap_bio', '').strip(),
-            'print_back_w':     _num(form, 'print_back_w', proj.get('print_back_w', 1.5), 0, 12),
-            'print_back_y':     _num(form, 'print_back_y', proj.get('print_back_y', 0.4), 0, 1),
-            **{k: choice(k, allowed, default) for k, (allowed, default) in EDIT_CHOICES.items()},
-        })
-        proj.update({
-            'name':             form.get('name', '').strip() or proj.get('name', '') or pid,
-            'preset':           choice('preset', tuple(p['id'] for p in presets), ''),
-            'include_toc': 'include_toc' in form,
-            'smartquotes': 'smartquotes' in form,
-            'press': 'press' in form,
-            # written only once it is used, so a save of a book from before the
-            # option changes nothing in it
-            **({'screen_pdf': 'screen_pdf' in form}
-               if 'screen_pdf' in form or 'screen_pdf' in proj else {}),
-            **({'bleed': 'bleed' in form}
-               if 'bleed' in form or 'bleed' in proj else {}),
-            **({'picture_book': 'picture_book' in form}
-               if 'picture_book' in form or 'picture_book' in proj else {}),
-            **({'ebook_layout': choice('ebook_layout', EBOOK_LAYOUTS, '')}
-               if form.get('ebook_layout') or 'ebook_layout' in proj else {}),
-            # on when a book doesn't say: written once it differs from that
-            **{k: k in form for k in ON_FLAGS
-               if (k in form) != proj.get(k, True) or k in proj},
-            **{k: form.get(k, '').strip() for k in matter.KEYS},
-            'title':            form.get('title', '').strip(),
-            'subtitle':         form.get('subtitle', '').strip(),
-            'author':           form.get('author', '').strip(),
-            'year':             form.get('year', '').strip(),
-            'publisher':        form.get('publisher', '').strip(),
-            # written once it is set or changed: an unchanged save of a book
-            # from before the setting is the same book
-            **({'language': epub.book_lang(form)}
-               if 'language' in proj or epub.book_lang(form) != 'en' else {}),
-            'right_hand_starts': 'right_hand_starts' in form,
-            'cover_overlay':    'cover_overlay' in form,
-            'cover_template':   choice('cover_template',
-                                       ('',) + tuple(c['id'] for c in list_cover_templates()), ''),
-            'cover_collection': form.get('cover_collection', '').strip(),
-            'cover_kicker':     form.get('cover_kicker', '').strip(),
-            'cover_accent':     form.get('cover_accent', '').strip(),
-            'cover_epigraph':   form.get('cover_epigraph', '').strip(),
-            'cover_studio':     form.get('cover_studio', '').strip(),
-            'updated':          datetime.now().isoformat(timespec='seconds'),
-        })
-        # Only what this form changed is written, onto the book as it is now. A
-        # cover upload can keep this request going for seconds, and saving the
-        # copy read at its start wrote back whatever that copy held: a
-        # manuscript save made meanwhile (a Word book's first one points the
-        # book at its new .md and deletes the .docx) was undone, and the book
-        # pointed at a file that was gone.
-        mine = {k: v for k, v in proj.items()
-                if k in took or k not in before or before[k] != v}
-        with _PROJECT_LOCK:
-            now = load_project(pid)
-            for key in ('manuscript_file', 'cover_file', 'print_back_file'):
-                theirs = now.get(key) or ''
-                # replaced here and meanwhile there: theirs is the stale one
-                if (key in mine and theirs and theirs != before.get(key)
-                        and os.path.normcase(theirs) != os.path.normcase(mine[key] or '')):
-                    stale.append(theirs)
-            now.update(mine)
-            save_project_file(pid, now)
-        _drop_files(stale)
+            # a tag that isn't one (`fr-u`, `en--us`) is refused, not quietly
+            # made English (bug hunt 29.11)
+            lang = epub.book_lang(form)
+            typed = form.get('language', '').strip()
+            if typed and lang != typed.replace('_', '-'):
+                lang = epub.book_lang(proj)
+                problems.append(f'The language was not changed: “{typed}” isn\'t a language '
+                                f'tag (like en, fr or pt-BR), so the book stays in “{lang}”.')
+
+            proj.update({
+                'print_retailer':   choice('print_retailer', tuple(WRAP_RETAILERS), 'kdp'),
+                'print_paper':      choice('print_paper', tuple(_PAPER), 'white'),
+                'print_blurb':      form.get('print_blurb', '').strip(),
+                'print_flap_blurb': form.get('print_flap_blurb', '').strip(),
+                'print_flap_bio':   form.get('print_flap_bio', '').strip(),
+                'print_back_w':     _num(form, 'print_back_w', proj.get('print_back_w', 1.5), 0, 12),
+                'print_back_y':     _num(form, 'print_back_y', proj.get('print_back_y', 0.4), 0, 1),
+                **{k: choice(k, allowed, default) for k, (allowed, default) in EDIT_CHOICES.items()},
+            })
+            proj.update({
+                'name':             form.get('name', '').strip() or proj.get('name', '') or pid,
+                'preset':           choice('preset', tuple(p['id'] for p in presets), ''),
+                'include_toc': 'include_toc' in form,
+                'smartquotes': 'smartquotes' in form,
+                'press': 'press' in form,
+                # written only once it is used, so a save of a book from before the
+                # option changes nothing in it
+                **({'screen_pdf': 'screen_pdf' in form}
+                   if 'screen_pdf' in form or 'screen_pdf' in proj else {}),
+                **({'bleed': 'bleed' in form}
+                   if 'bleed' in form or 'bleed' in proj else {}),
+                **({'picture_book': 'picture_book' in form}
+                   if 'picture_book' in form or 'picture_book' in proj else {}),
+                **({'ebook_layout': choice('ebook_layout', EBOOK_LAYOUTS, '')}
+                   if form.get('ebook_layout') or 'ebook_layout' in proj else {}),
+                # on when a book doesn't say: written once it differs from that
+                **{k: k in form for k in ON_FLAGS
+                   if (k in form) != proj.get(k, True) or k in proj},
+                **{k: form.get(k, '').strip() for k in matter.KEYS},
+                'title':            form.get('title', '').strip(),
+                'subtitle':         form.get('subtitle', '').strip(),
+                'author':           form.get('author', '').strip(),
+                'year':             form.get('year', '').strip(),
+                'publisher':        form.get('publisher', '').strip(),
+                # written once it is set or changed: an unchanged save of a book
+                # from before the setting is the same book
+                **({'language': lang}
+                   if 'language' in proj or lang != 'en' else {}),
+                'right_hand_starts': 'right_hand_starts' in form,
+                'cover_overlay':    'cover_overlay' in form,
+                'cover_template':   choice('cover_template',
+                                           ('',) + tuple(c['id'] for c in list_cover_templates()), ''),
+                'cover_collection': form.get('cover_collection', '').strip(),
+                'cover_kicker':     form.get('cover_kicker', '').strip(),
+                'cover_accent':     form.get('cover_accent', '').strip(),
+                'cover_epigraph':   form.get('cover_epigraph', '').strip(),
+                'cover_studio':     form.get('cover_studio', '').strip(),
+                'updated':          datetime.now().isoformat(timespec='seconds'),
+            })
+            # Only what this form changed is written, onto the book as it is now. A
+            # cover upload can keep this request going for seconds, and saving the
+            # copy read at its start wrote back whatever that copy held: a
+            # manuscript save made meanwhile (a Word book's first one points the
+            # book at its new .md and deletes the .docx) was undone, and the book
+            # pointed at a file that was gone.
+            mine = {k: v for k, v in proj.items()
+                    if k in took or k not in before or before[k] != v}
+            with _PROJECT_LOCK:
+                now = load_project(pid)
+                for key in ('manuscript_file', 'cover_file', 'print_back_file'):
+                    theirs = now.get(key) or ''
+                    # replaced here and meanwhile there: theirs is the stale one
+                    if (key in mine and theirs and theirs != before.get(key)
+                            and os.path.normcase(theirs) != os.path.normcase(mine[key] or '')):
+                        stale.append(theirs)
+                now.update(mine)
+                save_project_file(pid, now)
+            _drop_files(stale)
         if problems:
             for msg in problems:
                 flash(msg)
@@ -6320,30 +6364,6 @@ def _norm_newlines(text):
     """LF only. Manuscripts are stored as the writer's own source, so a stray
     CR is corruption, not formatting — and it compounds on every save."""
     return (text or '').replace('\r\r\n', '\n').replace('\r\n', '\n').replace('\r', '\n')
-
-
-_BOMS = ((b'\xef\xbb\xbf', 'utf-8'), (b'\xff\xfe\x00\x00', 'utf-32-le'),
-         (b'\x00\x00\xfe\xff', 'utf-32-be'), (b'\xff\xfe', 'utf-16-le'),
-         (b'\xfe\xff', 'utf-16-be'))
-
-
-def _decode_text(raw):
-    """A text file's words, whatever it was saved as.
-
-    Read as UTF-8 with bad bytes replaced, a Windows-1252 file (Notepad's
-    "ANSI", older Word "Save as text") lost every accent and curly quote, a
-    UTF-16 one ("Unicode" in Notepad) came out as noise, and a UTF-8 file with
-    a byte-order mark started with an invisible character that stopped its
-    first `# Chapter` line being a chapter. A mark names the encoding; then
-    UTF-8 if it is valid, else Windows-1252.
-    """
-    for bom, enc in _BOMS:
-        if raw.startswith(bom):
-            return raw[len(bom):].decode(enc, errors='replace')
-    try:
-        return raw.decode('utf-8')
-    except UnicodeDecodeError:
-        return raw.decode('cp1252', errors='replace')
 
 
 def _read_text_file(path):
@@ -6594,8 +6614,12 @@ def _manuscript_lock(pid):
     separately, two saves from two tabs both passed the revision check against
     the same text and the second quietly wrote over the first."""
     lock = os.path.join(PROJECT_MS_DIR, f'.{secure_filename(pid)}.mslock')
-    with _PROJECT_LOCK, _file_lock(lock, "This book's manuscript"):
-        yield
+    with _PROJECT_LOCK, _file_lock(lock, "This book's manuscript") as still_mine:
+        yield still_mine
+
+
+_LOCK_LOST = ("This book's manuscript was saved by another copy of the app while "
+              'this save waited; this text was kept in History instead.')
 
 
 @app.route('/project/<pid>/write/save', methods=['POST'])
@@ -6609,8 +6633,8 @@ def project_write_save(pid):
     # text-mode write then turns each of those into CR CR LF — so every autosave
     # grew the file another carriage return. Both halves are fixed here.
     text = _norm_newlines(request.form['text'])
-    with _manuscript_lock(pid):           # a failed write: the OSError handler answers
-        answer = _write_save(pid, text)
+    with _manuscript_lock(pid) as still_mine:   # a failed write: the OSError handler answers
+        answer = _write_save(pid, text, still_mine)
     if answer is not None:
         return answer
     parsed = manuscript.parse_markdown(text, smartquotes=False)
@@ -6619,7 +6643,7 @@ def project_write_save(pid):
                     'words': _wordcount(text), 'chapters': len(parsed['chapters'])})
 
 
-def _write_save(pid, text):
+def _write_save(pid, text, still_mine=lambda: True):
     """The editor's save, under `_manuscript_lock`: None once written, else
     the refusal to send back."""
     proj = load_project(pid)              # as it is now, not as the request began
@@ -6642,6 +6666,12 @@ def _write_save(pid, text):
             return jsonify({'ok': False, 'conflict': True,
                             'snapshots': list_snapshots(pid)}), 409
         snapshot_manuscript(pid, current, reason='overwritten', force=True)
+    if not still_mine():
+        # paused past the lock's life, another copy of the app took the lock
+        # and saved: written now, this older text would win over that one
+        snapshot_manuscript(pid, text, reason='conflict', force=True)
+        return jsonify({'ok': False, 'conflict': True, 'error': _LOCK_LOST,
+                        'snapshots': list_snapshots(pid)}), 409
     _store_manuscript(pid, proj, text)
     return None
 
@@ -6674,8 +6704,12 @@ def project_history_restore(pid, stamp):
     load_project(pid)
     # the draft is snapshotted and replaced as one step: a save landing in
     # between was replaced without being kept
-    with _manuscript_lock(pid):
-        text = _write_restore(pid, stamp)
+    with _manuscript_lock(pid) as still_mine:
+        text = _write_restore(pid, stamp, still_mine)
+    if text is _LOCK_LOST:
+        return jsonify({'ok': False, 'error': _LOCK_LOST.replace(
+            'this save waited; this text was kept in History instead',
+            'the version was being put back; try again')}), 409
     if text is None:
         return jsonify({'ok': False, 'error': 'That version is no longer kept.'}), 404
     parsed = manuscript.parse_markdown(text, smartquotes=False)
@@ -6685,8 +6719,9 @@ def project_history_restore(pid, stamp):
                     'snapshots': list_snapshots(pid)})
 
 
-def _write_restore(pid, stamp):
-    """Put a version back, under `_manuscript_lock`; its text, or None."""
+def _write_restore(pid, stamp, still_mine=lambda: True):
+    """Put a version back, under `_manuscript_lock`; its text, None, or
+    _LOCK_LOST when the lock was taken over before it wrote."""
     proj = load_project(pid)
     text = read_snapshot(pid, stamp)
     if text is None:
@@ -6700,6 +6735,8 @@ def _write_restore(pid, stamp):
                 and wrap_design.find_page(designs, now) is not None
                 and wrap_design.find_page(designs, was) is None):
             text = page_plan.rename(text, was, now, key=wrap_design.page_name)
+    if not still_mine():
+        return _LOCK_LOST
     new_file = secure_filename(pid) + '.md'
     _atomic_write_text(os.path.join(PROJECT_MS_DIR, new_file), text)
     proj['manuscript_file'] = new_file

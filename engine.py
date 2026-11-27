@@ -31,6 +31,7 @@ except ImportError:
 import matter as _matter
 import bookindex as _bookindex
 import ornaments as _orn
+from manuscript import page_map_key as _ms_page_map_key
 from manuscript import (_inline as _ms_inline_raw, book_anchors as _ms_book_anchors,
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts,
@@ -58,7 +59,7 @@ from reportlab.platypus import (
     PageBreak, Flowable, NextPageTemplate, Table, TableStyle, KeepTogether,
 )
 from reportlab.platypus.paragraph import Paragraph as _P
-from reportlab.platypus.doctemplate import LayoutError
+from reportlab.platypus.doctemplate import LayoutError, ActionFlowable
 from reportlab.lib import colors as _colors
 
 try:
@@ -1907,12 +1908,53 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
                         cf['serif'], cc.get('size', 12.5) * 0.85, cc.get('tracking', 3.4))
         _source(canv)
 
+    # where the photo goes, worked out before the blurb is laid out: it is
+    # drawn after the blurb, and placed by itself it was raised above the
+    # barcode into the blurb's lower lines (bug hunt 29.5)
+    photo = None
+    bimg = meta.get('cover_back_image')
+    if bimg and os.path.exists(bimg):
+        try:
+            from reportlab.lib.utils import ImageReader
+            ir = ImageReader(_upright(bimg))
+            iw, ih = ir.getSize()
+            tw = max(meta.get('cover_back_image_w', 1.5), 0.25) * inch
+            tw = min(tw, (bx1 - bx0) - 2 * gap)          # keep inside the frame
+            thh = tw * (ih / iw) if iw else tw
+            # a tall picture is fitted by its height too, and its centre kept
+            # far enough in that none of it is cut off at the top or the foot
+            room_h = (by1 - by0) - 2 * gap
+            if thh > room_h > 0:
+                tw, thh = tw * room_h / thh, room_h
+            icx = cx
+            # The barcode box is painted white over whatever is under it, so a
+            # picture that reaches across it sits above it instead - made
+            # smaller if the room above the box is too short for it.
+            pfloor = by0 + gap
+            if icx + tw / 2.0 > bxr:
+                pfloor = byr + bh + 0.1 * inch
+                above = (by1 - gap) - pfloor
+                if thh > above > 0:
+                    tw, thh = tw * above / thh, above
+            icy = y0 + h * min(max(meta.get('cover_back_image_y', 0.4), 0.0), 1.0)
+            icy = min(max(icy, pfloor + thh / 2.0), by1 - gap - thh / 2.0)
+            photo = (ir, icx, icy, tw, thh)
+        except Exception:
+            photo = None
+
     # blurb — centred serif block in the upper-middle
     blurb = meta.get('cover_blurb') or ''
     if blurb:
         colw = (bx1 - bx0) * 0.82
         canv.setFillColor(_pal_color(tpl, 'ink'))
         top, floor = yat(0.72), byr + bh + 0.2 * inch
+        if photo is not None:
+            ptop, pbot = photo[2] + photo[4] / 2.0, photo[2] - photo[4] / 2.0
+            if ptop < top:
+                # a photo below the blurb's start: the blurb stops above it
+                floor = max(floor, ptop + 0.2 * inch)
+            elif pbot < top + 11.0:
+                overflow = True     # placed over the blurb's opening lines
 
         def layout(size, lead):
             rows = []                     # (line, or None for a gap; step down)
@@ -1946,32 +1988,9 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
         _source(canv)
 
     # optional author photo / publisher logo — centred, aspect preserved
-    bimg = meta.get('cover_back_image')
-    if bimg and os.path.exists(bimg):
+    if photo is not None:
+        ir, icx, icy, tw, thh = photo
         try:
-            from reportlab.lib.utils import ImageReader
-            ir = ImageReader(_upright(bimg))
-            iw, ih = ir.getSize()
-            tw = max(meta.get('cover_back_image_w', 1.5), 0.25) * inch
-            tw = min(tw, (bx1 - bx0) - 2 * gap)          # keep inside the frame
-            thh = tw * (ih / iw) if iw else tw
-            # a tall picture is fitted by its height too, and its centre kept
-            # far enough in that none of it is cut off at the top or the foot
-            room_h = (by1 - by0) - 2 * gap
-            if thh > room_h > 0:
-                tw, thh = tw * room_h / thh, room_h
-            icx = cx
-            # The barcode box is painted white over whatever is under it, so a
-            # picture that reaches across it sits above it instead - made
-            # smaller if the room above the box is too short for it.
-            floor = by0 + gap
-            if icx + tw / 2.0 > bxr:
-                floor = byr + bh + 0.1 * inch
-                above = (by1 - gap) - floor
-                if thh > above > 0:
-                    tw, thh = tw * above / thh, above
-            icy = y0 + h * min(max(meta.get('cover_back_image_y', 0.4), 0.0), 1.0)
-            icy = min(max(icy, floor + thh / 2.0), by1 - gap - thh / 2.0)
             canv.drawImage(ir, icx - tw / 2.0, icy - thh / 2.0, width=tw, height=thh,
                            preserveAspectRatio=True, mask='auto')
             _BACK_IMG.size = (tw / inch, thh / inch)
@@ -2843,6 +2862,27 @@ def _heads(f):
     return isinstance(f, HeadingPara) or bool(f.getKeepWithNext())
 
 
+def _keep_pos(whole, first):
+    """A block's place (`_ts_pos`, 23.11) handed to the first piece ReportLab
+    split it into: the pieces are new flowables, and a table or a column run
+    split over a page lost its place (bug hunt 29.7)."""
+    pos = getattr(whole, '_ts_pos', None)
+    if pos is not None and getattr(first, '_ts_pos', None) is None:
+        try:
+            first._ts_pos = pos
+        except (AttributeError, TypeError):
+            pass
+
+
+def _report_pos(canv, f):
+    """A flowable drawn inside another (a column run, a kept figure), which
+    `BookDoc.afterFlowable` never sees: its block's place, if it has one."""
+    pos = getattr(f, '_ts_pos', None)
+    doc = getattr(canv, '_doctemplate', None)
+    if pos is not None and isinstance(doc, BookDoc):
+        doc._pos_hits.setdefault(pos, canv.getPageNumber())
+
+
 class _Kept(Flowable):
     """Flowables that stay in one column: a picture and its caption."""
 
@@ -2869,6 +2909,7 @@ class _Kept(Flowable):
         for f, top, h, w in self._lay:
             # the unused width lets a narrow table keep its alignment
             f.drawOn(self.canv, 0, self.height - top - h, _sW=self.width - w)
+            _report_pos(self.canv, f)
 
 
 class _HeadCell(_P):
@@ -2941,6 +2982,7 @@ class ColumnRun(Flowable):
                 except Exception:
                     parts = []
                 if len(parts) >= 2:
+                    _keep_pos(f, parts[0])
                     w0, h0 = parts[0].wrapOn(canv, cw, 0xfffffff)
                     if h0 <= room + _COL_EPS:
                         placed.append((parts[0], y + gap, h0, w0))
@@ -3036,6 +3078,7 @@ class ColumnRun(Flowable):
             for f, top, h, w in placed:
                 # the unused width lets a narrow table keep its alignment
                 f.drawOn(self.canv, x, height - top - h, _sW=cw - w)
+                _report_pos(self.canv, f)
         if self._rule:
             c = self.canv
             c.saveState()
@@ -3303,6 +3346,8 @@ class BookDoc(BaseDocTemplate):
         self._index_hits  = []      # (marker key, page) as each index marker is set
         self._anchor_hits = {}      # link target -> the page it was first set on
         self._pos_hits    = {}      # (chapter, block) -> the page it was first set on
+        self._body_last   = 0       # the last page chapters are set on
+        self._body_done   = False   # the back matter has begun
         self._cover = cover or {}        # {path, overlay, color, title_font}
         trim = preset['trim']
         pw, ph = trim['w'] * inch, trim['h'] * inch
@@ -3486,6 +3531,15 @@ class BookDoc(BaseDocTemplate):
         contents, bookmark `##` and `###`, and follow `##` for running heads.
         A block set without paragraph markup (a figure, a table, a scene
         break) carries its place in `_ts_pos` instead of a `_ts_pos` tag."""
+        if getattr(flowable, '_ts_body_end', False):
+            self._body_done = True
+        if not self._body_done and not isinstance(flowable, ActionFlowable) \
+                and (getattr(flowable, 'width', 0) or getattr(flowable, 'height', 0)):
+            # the last page a chapter reaches: a long block that runs on
+            # starts no block there, and the page list stopped short of it.
+            # Not a page break, a template switch or a zero-size marker: they
+            # are taken on the page after
+            self._body_last = self.canv.getPageNumber()
         pos = getattr(flowable, '_ts_pos', None)
         if pos is not None:
             self._pos_hits.setdefault(pos, self.canv.getPageNumber())
@@ -3633,6 +3687,8 @@ class BookDoc(BaseDocTemplate):
                 flowables.insert(0, item)
             return
         BaseDocTemplate.handle_flowable(self, flowables)
+        if flowables and flowables[0] is not f:
+            _keep_pos(f, flowables[0])          # split: the rest goes on
 
     def _draw_page_ornaments(self, canv, opener, text_left, tw):
         """The style's page furniture (#74 Phase 3b): a header bar under the
@@ -6127,9 +6183,38 @@ def _pos_tag(idx, bi):
     return f'<onDraw name="_ts_pos" label="{idx}-{bi}"/>'
 
 
+_WORD_SPACE = ' \t\r\n'      # where ReportLab breaks words (a no-break space doesn't)
+
+
+def _after_first_word(tag, markup):
+    """`markup` with `tag` (a zero-width `<onDraw>`) at the end of its first
+    word. Put before it, the tag was the word's first fragment, and ReportLab
+    neither hyphenates nor splits a word that starts with a callback: a first
+    word wider than the measure ran past the trim (bug hunt 29.4)."""
+    i, n, seen = 0, len(markup), False
+    while i < n:
+        ch = markup[i]
+        if ch == '<':
+            j = markup.find('>', i)
+            if j < 0:
+                break
+            i = j + 1
+            continue
+        if ch in _WORD_SPACE:
+            if seen:
+                return markup[:i] + tag + markup[i:]
+        else:
+            seen = True
+        i += 1
+    return markup + tag
+
+
 def _pos_flows(flows, idx, bi):
     """Mark the first of a block's flowables with its place; returns them."""
-    f = flows[0] if flows else None
+    # not on a break, which is taken without being drawn, or on the space
+    # before a figure, which can end a page the figure doesn't fit on
+    real = [g for g in flows if not isinstance(g, (SideBreak, PageBreak, Spacer))]
+    f = real[0] if real else None
     # a KeepTogether is taken apart before anything is drawn: the mark goes
     # on what it holds
     while isinstance(getattr(f, '_content', None), list) and f._content:
@@ -6156,7 +6241,8 @@ def _print_pages(doc):
     for pos, page in doc._pos_hits.items():
         first[page] = min(first.get(page, pos), pos)
     out, cur = [], None
-    for page in range(start, max(first, default=0) + 1):
+    end = max(max(first, default=0), getattr(doc, '_body_last', 0) or 0)
+    for page in range(start, end + 1):
         here = first.get(page)
         # never backwards: a figure floated past text keeps the list in
         # reading order
@@ -6632,7 +6718,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                     kind not in ('scene', 'doc_block') and opened):
                 # its page, for the ebook's page list (an opening paragraph's
                 # drop cap takes no markup: the chapter's own opening stands in)
-                val = _pos_tag(idx, bi) + val
+                val = _after_first_word(_pos_tag(idx, bi), val)
             if ncols == 2 and kind == 'doc_block' and _spans(block):
                 _flush_run()
                 blk_meta = block[2] if len(block) > 2 else {}
@@ -6689,6 +6775,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     _author = meta.get('author', '')
     _bm_first = True   # only the first back-matter page gets recto-forced
 
+    def _bm_head(text):
+        m = RunningHeadMarker(text)
+        m._ts_body_end = True           # the chapters end here (_print_pages)
+        return m
+
     def _bm_break(first):
         # a page break only where the page has something on it: a chapter
         # ending in a full-page figure has already broken, and a second break
@@ -6703,7 +6794,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             and preset.get('endnotes', {}).get('placement', 'end') != 'foot'):
         story.extend(_bm_break(True))
         _bm_first = False
-        story.append(RunningHeadMarker(_esc_markup(
+        story.append(_bm_head(_esc_markup(
             preset.get('endnotes', {}).get('heading', 'Notes'))))
         story.extend(_endnotes_page(manuscript['chapters'], fonts, st, preset))
 
@@ -6711,7 +6802,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         story.extend(_bm_break(_bm_first))
         _bm_first = False
         # markup, as the marker reads it: plain, `R. Vale <Pen Name>` lost its <…>
-        story.append(RunningHeadMarker(_esc_markup(_matter.heading(_sec, _author))))
+        story.append(_bm_head(_esc_markup(_matter.heading(_sec, _author))))
         story.extend(_matter_page(_matter.heading(_sec, _author),
                                   meta[_sec['key']].strip(),
                                   fonts, st, sq, _sec['style'],
@@ -6721,7 +6812,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     # no page it lists.
     if index is not None and _bookindex.wanted(ix_marks, meta):
         story.extend(_bm_break(_bm_first))
-        story.append(RunningHeadMarker(_bookindex.HEADING))
+        story.append(_bm_head(_bookindex.HEADING))
         story.extend(_index_page(ix_marks, index, meta, preset, fonts, st))
 
     return story
@@ -7478,9 +7569,13 @@ def build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
     # it from the folder) mid-build got an empty or half-made edition.
     part = out_path + '.part'
     _SCRATCH.files = []
+    # what the page map was set from, taken before the passes start
+    key = _ms_page_map_key(manuscript.get('chapters'))
     try:
         res = _build_pdf_variant(manuscript, preset, part, meta, press, screen)
         _replace_retrying(part, out_path)
+        if isinstance(res, dict):
+            res['print_pages_key'] = key
         return res
     finally:
         # the passes' scratch PDFs and the cropped cover, which a pass that

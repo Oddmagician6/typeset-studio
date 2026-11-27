@@ -418,8 +418,8 @@ def _opf(uid, meta, manifest, spine, modified, vw, vh):
         ('accessibilityHazard', 'none'),
         ('accessibilitySummary', 'A fixed-layout picture book: the words on every page '
                                  'are live text over its illustration, in reading order.')))
-    # its page list is its own pages, not a print edition's (23.11)
-    a11y += '    <meta property="a11y:pageBreakSource">none</meta>\n'
+    # its page list is its own pages, not a print edition's (23.11): EPUB
+    # Accessibility asks that no source be named then (bug hunt 29.9)
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"'
             f' unique-identifier="uid" xml:lang="{book_lang(meta)}">\n'
@@ -454,7 +454,6 @@ def _nav(has_cover, first_href, pages, lang='en'):
     plist = ''.join(f'<li><a href="{href}">{n}</a></li>' for n, href in pages)
     # the cover and the first page by their role too (23.13)
     marks = ([('cover', 'cover.xhtml', 'Cover')] if has_cover else []) + \
-        [('toc', 'nav.xhtml#toc', 'Contents')] + \
         ([('bodymatter', first_href, 'Beginning')] if first_href else [])
     landmarks = ('<nav epub:type="landmarks" hidden="hidden"><ol>'
                  + ''.join(f'<li><a epub:type="{t}" href="{h}">{label}</a></li>'

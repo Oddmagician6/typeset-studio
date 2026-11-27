@@ -143,7 +143,8 @@ c.post('/project/bk/edit', data=form)
 check('a language is saved', A.load_project('bk').get('language') == 'de',
       A.load_project('bk').get('language'))
 c.post('/project/bk/edit', data=dict(form, language='<b>'))
-check('nonsense is saved as English', A.load_project('bk').get('language') == 'en',
+# refused with a message, the book's language kept (bug hunt 29.11)
+check('nonsense is refused, the language kept', A.load_project('bk').get('language') == 'de',
       A.load_project('bk').get('language'))
 check('Set a Book has the field', 'name="language"' in c.get('/generate').get_data(as_text=True))
 
@@ -182,8 +183,8 @@ def landmarks(nav):
 
 out, docs = build('# One\n\nText.[^1]\n\n[^1]: A note.\n\n# Two\n\nMore.\n', 'marks')
 lm = landmarks(docs['OEBPS/nav.xhtml'])
-check('contents, start and notes', lm == [('toc', 'nav.xhtml#toc'),
-                                          ('bodymatter', 'chapter001.xhtml'),
+# no Contents page: no contents landmark (the nav isn't in the reading order, 29.10)
+check('start and notes', lm == [('bodymatter', 'chapter001.xhtml'),
                                           ('endnotes', 'endnotes.xhtml')], lm)
 out, docs = build('=== The Coast\n\n# One\n\nText.\n', 'part', include_toc=True)
 lm = landmarks(docs['OEBPS/nav.xhtml'])
@@ -198,8 +199,8 @@ if 'OEBPS/bookindex.xhtml' in docs:
     check('an index is a landmark', lm and ('index', 'bookindex.xhtml') in lm, lm)
 check('the contents page is well-formed', not well_formed(docs), well_formed(docs))
 lm = landmarks(fdocs['OEBPS/nav.xhtml'])
-check('a picture book: cover, contents, beginning', lm and [t for t, _ in lm]
-      == ['cover', 'toc', 'bodymatter'], lm)
+check('a picture book: cover, beginning', lm and [t for t, _ in lm]
+      == ['cover', 'bodymatter'], lm)
 check('its check still passes', all(r['ok'] for r in epub.check(fxl)
                                     if r.get('severity') != 'info'),
       [r for r in epub.check(fxl) if not r['ok']])

@@ -254,77 +254,70 @@ def _note_runs(text):
     return out
 
 
-def _emphasis_runs(text):
-    """Split one link-free stretch into bold/italic runs."""
-    runs = []
-    # Pass 0: carve out bold-italic spans, so the ** pass below cannot claim the
-    # first two stars of a *** marker and strand the third as literal text.
-    outer = []                                           # (is_bothemph, str)
-    pos = 0
-    for m in manuscript.emph_finditer(_BOLDITAL_RE, text):
-        if m.start() > pos:
-            outer.append((False, text[pos:m.start()]))
-        outer.append((True, m.group(1) if m.group(1) is not None else m.group(2)))
-        pos = m.end()
-    if pos < len(text):
-        outer.append((False, text[pos:]))
+_SPAN_OPEN, _SPAN_CLOSE = '', ''
+_SPAN_RE = re.compile(_SPAN_OPEN + r'(\d+)' + _SPAN_CLOSE)
 
-    # Pass 1: carve out bold spans in what is left.
-    segments = []                                        # (is_bold, is_italic, str)
-    for both, chunk in outer:
-        if both:
-            segments.append((True, True, chunk))
+
+def _emphasis_pass(pieces, rx, bold, italic):
+    """One emphasis pass as the engine makes it (manuscript `_inline`): at
+    every level of the spans earlier passes made, a match holding a whole span
+    but never starting or ending inside one. Pieces are text and
+    (bold, italic, pieces) spans. Split at the spans instead,
+    `*before **bold** after*` read back with its outer asterisks (29.12)."""
+    spans, flat = [], []
+    for p in pieces:
+        if isinstance(p, str):
+            flat.append(p)
             continue
-        pos = 0
-        for m in _BOLD_RE.finditer(chunk):
+        spans.append((p[0], p[1], _emphasis_pass(p[2], rx, bold, italic)))
+        flat.append(f'{_SPAN_OPEN}{len(spans) - 1}{_SPAN_CLOSE}')
+    flat = ''.join(flat)
+
+    def unflat(chunk):
+        out, pos = [], 0
+        for m in _SPAN_RE.finditer(chunk):
             if m.start() > pos:
-                segments.append((False, False, chunk[pos:m.start()]))
-            segments.append((True, False, m.group(1)))
+                out.append(chunk[pos:m.start()])
+            out.append(spans[int(m.group(1))])
             pos = m.end()
         if pos < len(chunk):
-            segments.append((False, False, chunk[pos:]))
+            out.append(chunk[pos:])
+        return out
 
-    # Pass 2: carve out italics within each non-bold segment.
-    for is_bold, is_ital, seg in segments:
-        if is_bold:
-            runs.append(_run(seg, bold=True, italic=is_ital))
-            continue
-        for is_italic, chunk in _split_italics(seg):
-            if chunk:
-                runs.append(_run(chunk, italic=is_italic))
+    out, pos = [], 0
+    for m in manuscript.emph_finditer(rx, flat):
+        if m.start() > pos:
+            out.extend(unflat(flat[pos:m.start()]))
+        inner = m.group(1) if m.group(1) is not None else m.group(2)
+        out.append((bold, italic, unflat(inner)))
+        pos = m.end()
+    if pos < len(flat):
+        out.extend(unflat(flat[pos:]))
+    return out
 
-    runs = _coalesce(runs)
-    for r in runs:                                       # parked -> literal chars
-        r["text"] = _restore_escapes(r["text"])
+
+def _flatten_spans(pieces, bold, italic, runs):
+    for p in pieces:
+        if isinstance(p, str):
+            if p:
+                runs.append(_run(p, bold=bold, italic=italic))
+        else:
+            _flatten_spans(p[2], bold or p[0], italic or p[1], runs)
     return runs
 
 
-def _split_italics(seg):
-    """Yield (is_italic, str) for a non-bold segment: *...* then _..._ ."""
-    out = []
-    pos = 0
-    for m in manuscript.emph_finditer(_ITALIC_STAR, seg):
-        if m.start() > pos:
-            out.append((False, seg[pos:m.start()]))
-        out.append((True, m.group(1)))
-        pos = m.end()
-    if pos < len(seg):
-        out.append((False, seg[pos:]))
-
-    final = []
-    for is_italic, piece in out:
-        if is_italic:
-            final.append((True, piece))
-            continue
-        p2 = 0
-        for m in manuscript.emph_finditer(_ITALIC_UNDER, piece):
-            if m.start() > p2:
-                final.append((False, piece[p2:m.start()]))
-            final.append((True, m.group(1)))
-            p2 = m.end()
-        if p2 < len(piece):
-            final.append((False, piece[p2:]))
-    return final
+def _emphasis_runs(text):
+    """Split one link-free stretch into bold/italic runs."""
+    # ***both*** first, so the ** pass cannot claim the first two stars of a
+    # *** marker and strand the third as literal text; then **, *, _
+    pieces = _emphasis_pass([text], _BOLDITAL_RE, True, True)
+    pieces = _emphasis_pass(pieces, _BOLD_RE, True, False)
+    pieces = _emphasis_pass(pieces, _ITALIC_STAR, False, True)
+    pieces = _emphasis_pass(pieces, _ITALIC_UNDER, False, True)
+    runs = _coalesce(_flatten_spans(pieces, False, False, []))
+    for r in runs:                                       # parked -> literal chars
+        r["text"] = _restore_escapes(r["text"])
+    return runs
 
 
 def _coalesce(runs):
@@ -422,7 +415,40 @@ def _runs_to_md(runs):
             md = _emit_runs(runs, force, marks)
             if _parse_inline(md, smartquotes=False) == want:
                 return md
+    # one emphasis round another (`*before **bold** after*`), which side by
+    # side spans can't spell: `*before *` doesn't close (bug hunt 29.12)
+    for force in (False, True):
+        md = _emit_nested(runs, force)
+        if md is not None and _parse_inline(md, smartquotes=False) == want:
+            return md
     return _emit_runs(runs, force_escape=True)
+
+
+def _emit_nested(runs, force_escape):
+    """A stretch of runs sharing italics (or bold) with others inside it that
+    add the other emphasis, written as the outer mark round the inner spans.
+    None when a link is among them: its brackets would cross the marks.
+    Mirrors doc_model.js emitNested."""
+    if any(r.get("link") for r in runs):
+        return None
+    out, i = [], 0
+    while i < len(runs):
+        r = runs[i]
+        key = ("italic" if r["italic"] and not r["bold"]
+               else "bold" if r["bold"] and not r["italic"] else "")
+        j = i
+        if key:
+            while j < len(runs) and runs[j][key]:
+                j += 1
+        stretch = runs[i:max(j, i + 1)]
+        if key and len(stretch) > 1:
+            inner = [dict(x, **{key: False}) for x in stretch]
+            mark = "*" if key == "italic" else "**"
+            out.append(mark + _emit_runs(inner, force_escape) + mark)
+        else:
+            out.append(_emit_runs(stretch, force_escape))
+        i += len(stretch)
+    return "".join(out)
 
 
 def _table_row(text, smartquotes):

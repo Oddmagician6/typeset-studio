@@ -176,18 +176,6 @@
     return out;
   }
 
-  function splitItalics(seg) {
-    // *...* first, then _..._ inside still-plain pieces
-    var out = [];
-    splitBySpans(seg, ITALIC_STAR_RE).forEach(function (p) {
-      if (p.hit) { out.push({ italic: true, text: p.text }); return; }
-      splitBySpans(p.text, ITALIC_UNDER_RE).forEach(function (q) {
-        out.push({ italic: q.hit, text: q.text });
-      });
-    });
-    return out;
-  }
-
   function coalesce(runs) {
     var out = [];
     runs.forEach(function (r) {
@@ -200,20 +188,57 @@
     return out.filter(function (r) { return r.text !== ''; });
   }
 
+  // The emphasis passes as the engine makes them (manuscript `_inline`): each
+  // pass works at every level of the spans the earlier ones made, and a match
+  // may hold a whole span but never start or end inside one. Split at the
+  // spans instead, `*before **bold** after*` showed its outer asterisks here
+  // while the PDF and the ebook set it in italics (bug hunt 29.12).
+  var SPAN_OPEN = '', SPAN_CLOSE = '';
+  var SPAN_RE = new RegExp(SPAN_OPEN + '(\\d+)' + SPAN_CLOSE, 'g');
+
+  function emphasisPass(pieces, re, bold, italic) {
+    var spans = [], flat = '';
+    pieces.forEach(function (p) {
+      if (typeof p === 'string') { flat += p; return; }
+      spans.push({ bold: p.bold, italic: p.italic,
+                   kids: emphasisPass(p.kids, re, bold, italic) });
+      flat += SPAN_OPEN + (spans.length - 1) + SPAN_CLOSE;
+    });
+    function unflat(str) {
+      var out = [], pos = 0;
+      eachMatch(SPAN_RE, str, function (m) {
+        if (m.index > pos) out.push(str.slice(pos, m.index));
+        out.push(spans[+m[1]]);
+        pos = m.index + m[0].length;
+      });
+      if (pos < str.length) out.push(str.slice(pos));
+      return out;
+    }
+    var out = [];
+    splitBySpans(flat, re).forEach(function (part) {
+      if (part.hit) out.push({ bold: bold, italic: italic, kids: unflat(part.text) });
+      else out = out.concat(unflat(part.text));
+    });
+    return out;
+  }
+
+  function flattenSpans(pieces, bold, italic, runs) {
+    pieces.forEach(function (p) {
+      if (typeof p === 'string') { if (p) runs.push(run(p, bold, italic)); return; }
+      flattenSpans(p.kids, bold || p.bold, italic || p.italic, runs);
+    });
+    return runs;
+  }
+
   function emphasisRuns(text) {
-    var runs = [];
     // ***both*** is carved out first, so the ** pass cannot claim the first two
     // stars of a *** marker and strand the third as literal text.
-    splitBySpans(text, BOLDITAL_RE).forEach(function (outer) {
-      if (outer.hit) { runs.push(run(outer.text, true, true)); return; }
-      splitBySpans(outer.text, BOLD_RE).forEach(function (seg) {
-        if (seg.hit) { runs.push(run(seg.text, true, false)); return; }
-        splitItalics(seg.text).forEach(function (it) {
-          if (it.text) runs.push(run(it.text, false, it.italic));
-        });
-      });
-    });
-    runs = coalesce(runs);
+    var pieces = emphasisPass([text], BOLDITAL_RE, true, true);
+    pieces = emphasisPass(pieces, BOLD_RE, true, false);
+    // *...* first, then _..._
+    pieces = emphasisPass(pieces, ITALIC_STAR_RE, false, true);
+    pieces = emphasisPass(pieces, ITALIC_UNDER_RE, false, true);
+    var runs = coalesce(flattenSpans(pieces, false, false, []));
     runs.forEach(function (r) { r.text = restoreEscapes(r.text); });
     return runs;
   }
@@ -312,7 +337,37 @@
         if (sameRuns(parseInline(md), want)) return md;
       }
     }
+    // one emphasis round another (`*before **bold** after*`), which side by
+    // side spans can't spell: `*before *` doesn't close (bug hunt 29.12)
+    for (var n = 0; n < 2; n++) {
+      var nested = emitNested(runs, !!n);
+      if (nested !== null && sameRuns(parseInline(nested), want)) return nested;
+    }
     return emitRuns(runs, true);
+  }
+
+  // A stretch of runs sharing italics (or bold) with others inside it that
+  // add the other emphasis, written as the outer mark round the inner spans.
+  // null when a link is among them: its brackets would cross the marks.
+  function emitNested(runs, forceEscape) {
+    if (runs.some(function (r) { return r.link; })) return null;
+    var out = '', i = 0;
+    while (i < runs.length) {
+      var key = runs[i].italic && !runs[i].bold ? 'italic'
+              : runs[i].bold && !runs[i].italic ? 'bold' : '';
+      var j = i;
+      if (key) while (j < runs.length && runs[j][key]) j++;
+      var stretch = runs.slice(i, Math.max(j, i + 1));
+      if (key && stretch.length > 1) {
+        var inner = stretch.map(function (r) { var c = copyRun(r); c[key] = false; return c; });
+        var mark = key === 'italic' ? '*' : '**';
+        out += mark + emitRuns(inner, forceEscape) + mark;
+      } else {
+        out += emitRuns(stretch, forceEscape);
+      }
+      i += stretch.length;
+    }
+    return out;
   }
 
   // A table row's runs, a cell at a time: the typesetter splits a row on `|`

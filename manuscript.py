@@ -643,6 +643,20 @@ def _statblock_children(model):
     return out
 
 
+def page_map_key(chapters):
+    """A fingerprint of a manuscript's chapters: what a PDF's page map (its
+    `print_pages`) was set from. An ebook lists the print pages only when its
+    own chapters give the same key; checked by shape alone, another book's map
+    with as many chapters and blocks was taken as this one's (bug hunt 29.8)."""
+    import hashlib
+    h = hashlib.sha256()
+    for ch in chapters or ():
+        h.update(repr((ch.get('title'), ch.get('part'),
+                       [tuple(b[:2]) for b in ch.get('blocks') or ()])).encode('utf-8', 'replace'))
+        h.update(b'\x00')
+    return h.hexdigest()[:32]
+
+
 def map_block_texts(chapters, fn):
     """Return a copy of `chapters` with every markup string passed through `fn`.
 

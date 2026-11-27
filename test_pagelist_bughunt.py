@@ -6,7 +6,7 @@
           marks where each page starts (doc-pagebreak), lists the pages in a
           page-list nav and says so in its accessibility metadata. Built
           alone, or handed another book's pages, it claims none. The
-          fixed-layout EPUB's page list is its own pages: pageBreakSource none.
+          fixed-layout EPUB's page list is its own pages: no source named (29.9).
 """
 
 import copy, os, re, sys, shutil, tempfile, zipfile
@@ -103,7 +103,8 @@ ms = manuscript.parse_markdown(MD)
 res = engine.build_pdf(ms, preset_of(), os.path.join(TMP, 'pair.pdf'), dict(META))
 pp = res['print_pages']
 out = os.path.join(TMP, 'pair.epub')
-epub.build_epub(ms, preset_of(), out, dict(META, print_pages=pp))
+epub.build_epub(ms, preset_of(), out, dict(META, print_pages=pp,
+                                            print_pages_key=res['print_pages_key']))
 docs = read(out)
 bad = []
 for n, s in docs.items():
@@ -140,8 +141,10 @@ opf = docs['OEBPS/content.opf']
 check('OPF: pageNavigation and pageBreakMarkers',
       'accessibilityFeature">pageNavigation<' in opf
       and 'accessibilityFeature">pageBreakMarkers<' in opf)
-check('OPF: pageBreakSource names the print edition',
-      '<meta property="a11y:pageBreakSource">The Drowned Bell, print edition</meta>' in opf, opf)
+check('OPF: the pagination source names the print edition',
+      '<dc:source id="pagination-source">The Drowned Bell, print edition</dc:source>' in opf
+      and '<meta refines="#pagination-source" property="source-of">pagination</meta>' in opf
+      and 'pageBreakSource' not in opf, opf)
 problems = [p for p in epub.check(out) if 'error' in str(p).lower()] \
     if hasattr(epub, 'check') else []
 check("the app's EPUB check finds no errors", not problems, problems)
@@ -153,7 +156,7 @@ d = read(alone)
 check('alone: no page list', 'page-list' not in d['OEBPS/nav.xhtml'])
 check('alone: no page claims',
       'pageNavigation' not in d['OEBPS/content.opf']
-      and 'pageBreakSource' not in d['OEBPS/content.opf'])
+      and 'source-of' not in d['OEBPS/content.opf'])
 check('alone: no markers', not any('doc-pagebreak' in s for s in d.values()))
 other = os.path.join(TMP, 'other.epub')
 epub.build_epub(manuscript.parse_markdown('# Only\n\nOne paragraph.\n'), preset_of(), other,
@@ -191,8 +194,8 @@ finally:
 print('Fixed layout')
 import fixed_epub
 src = open(fixed_epub.__file__, encoding='utf-8').read()
-check('fixed layout declares pageBreakSource none',
-      '<meta property="a11y:pageBreakSource">none</meta>' in src)
+check('fixed layout names no pagination source',
+      'pageBreakSource' not in src and 'source-of' not in src)
 
 shutil.rmtree(TMP, ignore_errors=True)
 print()
