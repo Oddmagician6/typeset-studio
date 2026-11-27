@@ -129,6 +129,16 @@ def data_path(path):
     return path
 
 
+def exc_words(exc):
+    """An exception for a flash or a check: a file error in a writer's words,
+    with its file inside the data folder - its str() carried the absolute path
+    (bug hunt 32.11). The log keeps the full traceback."""
+    if isinstance(exc, OSError):
+        where = f' ({data_path(exc.filename)})' if getattr(exc, 'filename', None) else ''
+        return os_problem(exc) + where
+    return str(exc)
+
+
 _JSON_KINDS = {list: 'a list', str: 'a piece of text', int: 'a number',
                float: 'a number', bool: 'a yes/no value', type(None): 'nothing ("null")'}
 
@@ -1297,6 +1307,10 @@ for _rid, _rc in WRAP_RETAILERS.items():
     # what the cover editor fills its fields from when a printer is picked
     _rc['binding_allowances'] = {b: _allowances(_rid, b)
                                  for b in ('paperback', 'hardcover', 'jacket')}
+    # bindings whose bleed the printer fixes (a KDP case: the turn-in is the
+    # outer allowance) - _wrap_dims ignores the form there, so the form locks it
+    _rc['fixed_bleed'] = [b for b in ('hardcover',)
+                          if 'bleed' in (_rc.get('allowances') or {}).get(b, {})]
 
 # KDP's hardcover programme is narrower than its paperback one; the wrap builds
 # either way, but a book outside these is one KDP will refuse.
@@ -3806,13 +3820,17 @@ def cover_asset_upload():
         f.save(out)
     try:                                             # reject anything Pillow can't read
         from PIL import Image
-        Image.open(dest).verify()
+        with Image.open(dest) as im:
+            fmt = im.format
+            im.verify()
+        if fmt != _EXT_FORMAT.get(ext):              # a BMP named .png (bug hunt 32.10)
+            raise ValueError(fmt)
     except Exception:
         try:
             os.remove(dest)
         except OSError:
             pass
-        return jsonify({'ok': False, 'error': 'That file is not a readable image.'})
+        return jsonify({'ok': False, 'error': 'That file is not a readable .jpg or .png image.'})
     return jsonify({'ok': True, 'filename': fn})
 
 
@@ -3830,7 +3848,7 @@ def _save_back_image(f):
     if data is None:
         raise _BadBackImage(f'The back-cover image “{f.filename}” {_IMAGE_TOO_BIG}. '
                             'Choose a smaller one, or clear it.')
-    if ext not in IMAGE_EXTS or not _is_image(data):
+    if ext not in IMAGE_EXTS or not _is_image(data, ext):
         raise _BadBackImage(f'The back-cover image “{f.filename}” is not a readable '
                             '.jpg or .png picture. Choose another, or clear it.')
     fd, tmp = tempfile.mkstemp(suffix=ext)
@@ -5462,7 +5480,7 @@ def _cover_upload(cov, folder):
     data = _read_image_upload(cov)
     if data is None:
         raise _PreviewError(f'The cover “{cov.filename}” {_IMAGE_TOO_BIG}.')
-    if _upload_ext(cov) not in IMAGE_EXTS or not _is_image(data):
+    if _upload_ext(cov) not in IMAGE_EXTS or not _is_image(data, _upload_ext(cov)):
         raise _PreviewError(f'The cover “{cov.filename}” isn\'t a .jpg or .png picture.')
     os.makedirs(folder, exist_ok=True)
     fd, path = tempfile.mkstemp(dir=folder, prefix=datetime.now().strftime('%Y%m%d-%H%M%S-'),
@@ -6131,16 +6149,26 @@ def _image_file_ok(path):
         return False
 
 
-def _is_image(data):
+# what each picture extension promises the bytes are
+_EXT_FORMAT = {'.png': 'PNG', '.jpg': 'JPEG', '.jpeg': 'JPEG', '.gif': 'GIF'}
+
+
+def _is_image(data, ext=None):
+    """Whether `data` decodes all the way through - and, given its `ext`, is
+    the format that extension names: a BMP renamed .png read fine here, then
+    went into the EPUB declared as a PNG (bug hunt 32.10; Figures already
+    checked this)."""
     try:
         from PIL import Image
         # verify() only reads the header: a JPEG cut off part way through
         # passes it, then prints as nothing. Decoding it all catches that.
         with Image.open(io.BytesIO(data)) as im:
+            fmt = im.format
             im.load()
-        return True
     except Exception:
         return False
+    want = _EXT_FORMAT.get((ext or '').lower())
+    return not (want and fmt != want)
 
 
 def _choice(form, key, allowed, current, default):
@@ -6276,7 +6304,7 @@ def project_edit(pid):
                     problems.append(f'The {what} was not replaced: “{f.filename}” '
                                     f'{_IMAGE_TOO_BIG}.')
                     continue
-                if ext not in IMAGE_EXTS or not _is_image(data):
+                if ext not in IMAGE_EXTS or not _is_image(data, ext):
                     problems.append(f'The {what} was not replaced: “{f.filename}” '
                                     "isn't a .jpg or .png picture.")
                     continue
@@ -7601,7 +7629,7 @@ def build_print_package(proj, scope='print'):
         except Exception as exc:
             logging.exception('front cover JPG for the print package failed')
             checks.append({'label': 'Front cover image', 'ok': False,
-                           'detail': (f'Could not render the store-listing JPG ({exc}) — '
+                           'detail': (f'Could not render the store-listing JPG ({exc_words(exc)}) — '
                                       'the interior and wrap are unaffected')})
 
         epub_checks = None
@@ -7640,7 +7668,7 @@ def build_print_package(proj, scope='print'):
                 logging.exception('EPUB for the publish package failed')
                 checks.insert(0, {
                     'label': 'Ebook', 'ok': False,
-                    'detail': (f'The EPUB could not be built ({exc}) — the print files '
+                    'detail': (f'The EPUB could not be built ({exc_words(exc)}) — the print files '
                                'in this package are unaffected')})
 
         info = {
@@ -7682,7 +7710,9 @@ def build_print_package(proj, scope='print'):
             with zipfile.ZipFile(part, 'w', zipfile.ZIP_DEFLATED) as z:
                 for name, path in files.items():
                     z.write(path, f'{folder}/{name}')
-            os.replace(part, final)
+            # retried while OneDrive or a scanner holds the name a moment, as
+            # the PDF and EPUB are: one failure threw the finished ZIP away
+            engine._replace_retrying(part, final)
         except BaseException:
             for leftover in (part, final):
                 with contextlib.suppress(OSError):
@@ -7850,7 +7880,8 @@ def project_print_package(pid):
         return redirect(url_for('project_edit', pid=pid))
     except Exception as exc:
         logging.error('print package failed: %s', traceback.format_exc())
-        flash(f'{"Publish" if scope == "publish" else "Print"} package failed: {exc}')
+        flash(f'{"Publish" if scope == "publish" else "Print"} package failed: '
+              f'{exc_words(exc)}')
         return redirect(url_for('projects'))
     # One slot for "the last handoff package", whichever kind it was — the
     # projects page offers it back as a download, and either kind supersedes.
