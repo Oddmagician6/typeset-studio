@@ -21,6 +21,7 @@ import matter as _matter
 import bookindex as _bookindex
 import ornaments as _orn
 
+from manuscript import page_map_key as _ms_page_map_key
 from manuscript import (book_anchors as _ms_book_anchors, LINK_RE as _LINK_RE,
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts,
@@ -33,6 +34,7 @@ from manuscript import (book_anchors as _ms_book_anchors, LINK_RE as _LINK_RE,
                         PAGEREF_TAG_RE as _MS_PAGEREF_TAG_RE,
                         CELL_SEP as _MS_CELL,
                         NOTE_REF_RE as _MS_NOTE_REF_RE,
+                        _NOTEREF_SUP_RE as _MS_NOTEREF_SUP_RE,
                         _inline as _ms_inline)
 
 
@@ -208,7 +210,10 @@ def _apply_page_refs(chapters, meta, preset):
         for i, block in enumerate(blocks):
             if i in heads:
                 name = heads[i]
-                label = ' '.join(html.unescape(re.sub(r'<[^>]+>', '', block[1])).split())
+                # the heading's words: a note's number is not one of them
+                # (`## Guard Room[^1]` captioned its references "Guard Room1")
+                label = ' '.join(html.unescape(re.sub(r'<[^>]+>', '', _MS_NOTEREF_SUP_RE.sub(
+                    '', block[1]))).split())
                 hrefs[name], labels[name] = f'{file}#{_target_id(name)}', label
                 blocks[i] = (block[0], f'<anchor name="{name}"/>' + block[1]) + tuple(block[2:])
                 own_here = blocks[i]
@@ -260,7 +265,22 @@ def _apply_page_refs(chapters, meta, preset):
 # The book's language (23.5): every book said it was English, so a French one
 # was read aloud with English rules. A tag of letters and hyphens (`fr`,
 # `pt-BR`, `zh-Hant`), anything else being taken as English.
-_LANG_RE = re.compile(r'^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$')
+# A well-formed BCP 47 tag (RFC 5646 section 2.1): language, then script,
+# region, variants, extensions and private use, in that order. A loose
+# "letters, then any subtags" pattern passed `fr-u` (an extension with
+# nothing in it) and refused a private-use tag like `x-internal` (29.11).
+_LANG_RE = re.compile(r"""^(?:
+    [a-z]{2,3}(?:-[a-z]{3}){0,3}                           # language (+ extlang): the
+                                                           # 4- and 5-8-letter forms are
+                                                           # registered to nothing, and
+                                                           # `French` is a word, not a tag
+    (?:-[a-z]{4})?                                         # script
+    (?:-(?:[a-z]{2}|[0-9]{3}))?                            # region
+    (?:-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*               # variants
+    (?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*                   # extensions
+    (?:-x(?:-[a-z0-9]{1,8})+)?                             # private use
+  | x(?:-[a-z0-9]{1,8})+                                   # private use alone
+)$""", re.I | re.X)
 
 
 def book_lang(meta):
@@ -672,15 +692,18 @@ def _xhtml(title, body_content, css_href='style.css'):
     )
 
 
-def print_page_marks(chapters, print_pages):
+def print_page_marks(chapters, print_pages, key=None):
     """The print edition's pages in a reflowable ebook (bug hunt 23.11):
     `(marks, pages)`. `print_pages` is what the PDF of the same manuscript
     reported (`engine` `print_pages`: [(folio, chapter, block)]); `marks` is
     {chapter: {block: [folio, ...]}}, block -1 being the chapter's opening,
     and `pages` the page list's [(folio, href)]. An entry naming a chapter or
     block this manuscript hasn't means the PDF was another book's: then there
-    is no list at all."""
+    is no list at all. So does a false `key`: the caller's word that the
+    PDF's `print_pages_key` is this manuscript's (`page_map_key`)."""
     marks, pages, seen = {}, [], set()
+    if not print_pages or not key:
+        return {}, []
     for entry in print_pages or ():
         try:
             folio, idx, bi = (int(v) for v in entry)
@@ -848,11 +871,10 @@ def _matter_xhtml(heading, text, css_class, style='body', smartquotes=True):
             cls = ' class="no-indent"'
         elif css_class == 'matter-contributors':
             # Bold the name (text before an em dash / '--'); rest is the bio.
-            name, bio = b, ''
-            for sep in ('—', '--'):
-                if sep in b:
-                    name, bio = b.split(sep, 1)
-                    break
+            # the first separator, whichever it is: an em dash later in the
+            # bio was taken over an earlier `--` and bolded half of it
+            parts = re.split('—|--', b, maxsplit=1)
+            name, bio = parts[0], (parts[1] if len(parts) > 1 else '')
             md = '**' + name.strip() + '**'
             if bio.strip():
                 md += ' — ' + bio.strip()
@@ -1107,7 +1129,7 @@ def _scene_image_html(preset, href):
 
 
 def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
-                   scene_href='', page_marks=None):
+                   scene_href='', page_marks=None, smartquotes=True):
     c          = preset.get('chapter', {})
     show_num   = c.get('show_number', True)
     num_fmt    = c.get('number_format', 'Chapter {n}')
@@ -1131,13 +1153,16 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
         lines.append('  <h1 class="chapter-title">'
                      f'{_text_to_html(chapter["title"])}</h1>')
 
+    # a byline and a `#>` tagline are raw Markdown, which the PDF inlines:
+    # escaped as plain text the ebook printed `\\*` and link syntax (bug hunt
+    # 31.11, 30.11)
     if chapter.get('byline'):
         lines.append('  <p class="chapter-byline">'
-                     f'{_text_to_html(chapter["byline"])}</p>')
+                     f'{_md_emph_to_html(chapter["byline"], smartquotes)}</p>')
 
     if chapter.get('tagline'):
         lines.append('  <p class="chapter-tagline">'
-                     f'{_text_to_html(chapter["tagline"])}</p>')
+                     f'{_md_emph_to_html(chapter["tagline"], smartquotes)}</p>')
 
     if art_href and art_pos == 'below':
         lines.append(_chapter_art_html(preset, art_href, 'below'))
@@ -1146,6 +1171,7 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
     no_indent_next = False
     n_head         = 0              # heading ids: see chapter_headings
     head_level     = 1              # the chapter title is the h1
+    head_stack     = []             # (level asked for, h-level set)
 
     for bi, block in enumerate(chapter.get('blocks', [])):
         kind = block[0]
@@ -1162,7 +1188,13 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
             # never deeper than one below the heading before it: a `###` as a
             # chapter's first heading went h1 -> h3, a level a screen reader's
             # heading list skips. Its kind stays in the class, which styles it.
-            head_level = min(_HEAD_LEVEL[kind], head_level + 1)
+            # A heading at the level asked for by one before it is that one's
+            # sibling: two `###` with no `##` went h2 then h3 (bug hunt 30.5).
+            asked = _HEAD_LEVEL[kind]
+            while head_stack and head_stack[-1][0] >= asked:
+                head_stack.pop()
+            head_level = (head_stack[-1][1] if head_stack else 1) + 1
+            head_stack.append((asked, head_level))
             tag = f'h{head_level}'
             lines.append(f'  <{tag} id="h{n_head}" class="hd-{kind}">'
                          f'{_markup_to_html(val)}</{tag}>')
@@ -1664,8 +1696,14 @@ def _a11y_meta(manifest_items, all_alt=True, animated=False, page_source=''):
         # the print edition's pages, marked in the text and listed (23.11)
         for feature in ('pageBreakMarkers', 'pageNavigation'):
             lines.append(f'    <meta property="schema:accessibilityFeature">{feature}</meta>')
-        lines.append('    <meta property="a11y:pageBreakSource">'
-                     f'{_text_to_html(xml_safe(page_source))}</meta>')
+        # EPUB 3.3 names the print source as a dc:source that is the source
+        # of the pagination (`source-of`); `a11y:pageBreakSource` is no
+        # property at all, and 3.4's unprefixed `pageBreakSource` is unknown
+        # to a 3.0 package (bug hunt 29.9)
+        lines.append('    <dc:source id="pagination-source">'
+                     f'{_text_to_html(xml_safe(page_source))}</dc:source>')
+        lines.append('    <meta refines="#pagination-source" property="source-of">'
+                     'pagination</meta>')
     # no known hazards: no flashing, sound or motion in a typeset book - unless
     # it carries an animated picture (23.12), which nothing here can measure
     # for flashing: then the flashing and motion are unknown, not none
@@ -1773,8 +1811,11 @@ def _landmarks(chapters, has_cover, meta, has_notes, has_index):
     marks = []
     if has_cover:
         marks.append(('cover', 'cover.xhtml', 'Cover'))
-    marks.append(('toc', 'toc.xhtml' if meta.get('include_toc') else 'nav.xhtml#toc',
-                  'Contents'))
+    # a landmark must lead to a document in the reading order: the nav
+    # document isn't one, so without a Contents page there is no landmark
+    # for it (bug hunt 29.10)
+    if meta.get('include_toc'):
+        marks.append(('toc', 'toc.xhtml', 'Contents'))
     if chapters:
         part = chapters[0].get('part')
         marks.append(('bodymatter', f'part{part["number"]:03d}.xhtml' if part
@@ -1992,7 +2033,7 @@ def build_epub(manuscript, preset, out_path, meta):
 
 
 def _page_source(meta):
-    """Where the page numbers come from, for `a11y:pageBreakSource`: the print
+    """Where the page numbers come from, for the pagination `dc:source`: the print
     edition named in words, there being no ISBN to give (the W3C's page source
     note asks for a description when there is no identifier)."""
     title = xml_safe(str(meta.get('title') or '')).strip() or 'Untitled'
@@ -2006,6 +2047,8 @@ def _build_epub(manuscript, preset, out_path, meta):
         return fixed_epub.build(manuscript, preset, out_path, meta)
     uid      = 'urn:uuid:' + str(uuid.uuid4())
     modified = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    # the manuscript the PDF's page map must have been set from (29.8)
+    page_key = _ms_page_map_key(manuscript['chapters'])
     chapters = _apply_note_markers(manuscript['chapters'])
     has_notes = any(ch.get('notes') for ch in chapters)
     chapters, ix_marks = _apply_index_markers(chapters, meta)
@@ -2035,7 +2078,9 @@ def _build_epub(manuscript, preset, out_path, meta):
     # anchor -> chapter file, so `[see](#slug)` resolves across the spine;
     # a heading or a `{#name}` -> its place in that file (#74 Phase 5b)
     chapters, ref_hrefs = _apply_page_refs(chapters, meta, preset)
-    page_marks, print_pages = print_page_marks(chapters, meta.get('print_pages'))
+    page_marks, print_pages = print_page_marks(
+        chapters, meta.get('print_pages'),
+        meta.get('print_pages_key') == page_key and page_key)
     _BUILD.anchors = anchors = {}
     for _i, _names in enumerate(_ms_book_anchors(chapters), start=1):
         for _a in _names:
@@ -2186,7 +2231,8 @@ def _build_epub(manuscript, preset, out_path, meta):
                         _chapter_xhtml(idx, ch, preset, figures=fig_href,
                                        number=_numbers[idx - 1],
                                        art_href=art_href, scene_href=scene_href,
-                                       page_marks=page_marks.get(idx)))
+                                       page_marks=page_marks.get(idx),
+                                       smartquotes=meta.get('smartquotes', True)))
 
         if has_notes:
             zf.writestr('OEBPS/endnotes.xhtml', _endnotes_xhtml(chapters, preset))

@@ -643,6 +643,20 @@ def _statblock_children(model):
     return out
 
 
+def page_map_key(chapters):
+    """A fingerprint of a manuscript's chapters: what a PDF's page map (its
+    `print_pages`) was set from. An ebook lists the print pages only when its
+    own chapters give the same key; checked by shape alone, another book's map
+    with as many chapters and blocks was taken as this one's (bug hunt 29.8)."""
+    import hashlib
+    h = hashlib.sha256()
+    for ch in chapters or ():
+        h.update(repr((ch.get('title'), ch.get('part'),
+                       [tuple(b[:2]) for b in ch.get('blocks') or ()])).encode('utf-8', 'replace'))
+        h.update(b'\x00')
+    return h.hexdigest()[:32]
+
+
 def map_block_texts(chapters, fn):
     """Return a copy of `chapters` with every markup string passed through `fn`.
 
@@ -710,18 +724,56 @@ def _number_notes(chapter):
         chapter['notes'] = notes
 
 
+def _byline_split_at(title_line):
+    """Where the byline separator sits in a heading body, or -1.
+
+    The first ` | ` that is not escaped (`\\|`, a title with a literal pipe)
+    and not inside a link label's brackets. A body that starts with `| ` is a
+    byline with no title (0): the separator's leading space went with the
+    heading's own. Mirrored by doc_model.js's bylineSplitAt."""
+    if title_line.startswith('| '):
+        return 0
+    depth = 0
+    for i, c in enumerate(title_line):
+        if c == '\\':
+            continue
+        if i and title_line[i - 1] == '\\':
+            continue
+        if c == '[':
+            depth += 1
+        elif c == ']':
+            depth = max(0, depth - 1)
+        elif c == '|' and not depth and title_line[i - 1:i] == ' ' \
+                and title_line[i + 1:i + 2] == ' ':
+            return i - 1
+    return -1
+
+
+def escape_title_pipes(title):
+    """A title's literal ` | ` (or leading `| `) escaped, so it does not read
+    back as the byline separator: `Salt | Ash` -> `Salt \\| Ash`."""
+    return re.sub(r'(^|(?<= ))\|(?= )', lambda m: m.group(1) + '\\|', title)
+
+
 def _split_byline(title_line):
     """Split a chapter heading body into (title|None, byline|None).
 
     'The Lottery | Shirley Jackson' -> ('The Lottery', 'Shirley Jackson').
-    A heading with no ' | ' separator returns (title, None).
+    A heading with no ' | ' separator returns (title, None); '| Ana Vale' is a
+    byline whose title is still to be written. An escaped `\\|` is a pipe in
+    the title.
     """
     if title_line is None:
         return None, None
-    if BYLINE_SEP in title_line:
-        title, byline = title_line.split(BYLINE_SEP, 1)
-        return (title.strip() or None), (byline.strip() or None)
-    return (title_line.strip() or None), None
+    i = _byline_split_at(title_line)
+    if i == 0 and title_line.startswith('| '):
+        title, byline = '', title_line[2:]
+    elif i >= 0:
+        title, byline = title_line[:i], title_line[i + len(BYLINE_SEP):]
+    else:
+        title, byline = title_line, None
+    title = re.sub(r'\\\|', '|', title).strip()
+    return (title or None), ((byline or '').strip() or None)
 
 
 def _parse_block_header(header):
@@ -1075,11 +1127,14 @@ def book_anchors(chapters):
     # `nxt` remembers where a name's suffixes got to: starting again at -2 for
     # every repeat made a thousand chapters called "Interlude" quadratic.
     # Everything below it is taken, so the names come out as they always did.
-    taken, out, nxt = set(), [], {}
+    # Every positional `chapter-N` is reserved up front: a first chapter
+    # titled "Chapter 2" took `chapter-2` as its slug and the real second
+    # chapter's positional name became `chapter-2-2`.
+    taken, out, nxt = {f'chapter-{i}' for i in range(1, len(chapters) + 1)}, [], {}
     for idx, ch in enumerate(chapters, 1):
         names = []
-        for name in chapter_anchors(ch, idx):
-            if name in taken:
+        for k, name in enumerate(chapter_anchors(ch, idx)):
+            if k and name in taken:
                 n = nxt.get(name, 2)
                 while f'{name}-{n}' in taken:
                     n += 1
@@ -1922,14 +1977,17 @@ def import_docx(path, report=None, stem=None):
         if item is title_para:
             flush_all()
             rep['chapters'] += 1
-            out.extend(['', '#* ' + _one_line(_para_md(p, rep, None, plain=True)), ''])
+            out.extend(['', '#* ' + escape_title_pipes(
+                _one_line(_para_md(p, rep, None, plain=True))), ''])
             continue
         if level == 1:
             flush_all()                       # (its notes went out above)
             rep['chapters'] += 1
             # titles are stored raw by the engine, so a bolded Word heading must
             # arrive as words: `# **Title**` printed the asterisks
-            out.extend(['', '# ' + _one_line(_para_md(p, rep, None, plain=True)), ''])
+            # and a pipe in it is the title's, not a byline separator
+            out.extend(['', '# ' + escape_title_pipes(
+                _one_line(_para_md(p, rep, None, plain=True))), ''])
             continue
         if level:
             flush_all()
@@ -1954,7 +2012,17 @@ def import_docx(path, report=None, stem=None):
         if any(w in style for w in ('verse', 'poem', 'poetry')):
             flush_quotes()
             flush_list()
-            poem_buf.append(lines)
+            # a blank manual line inside the paragraph is a stanza break
+            # (`lines` has the empty ones filtered out, which merged them)
+            cur = []
+            for ln in raw.split('\n'):
+                if ln.strip():
+                    cur.append(_guard(ln.strip()))
+                elif cur:
+                    poem_buf.append(cur)
+                    cur = []
+            if cur:
+                poem_buf.append(cur)
             continue
         if 'quote' in style:
             flush_list()

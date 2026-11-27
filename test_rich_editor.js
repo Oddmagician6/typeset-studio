@@ -434,6 +434,27 @@ f.onload = function () {
     var out = w.DocModel.wrapUnfenced('Prose.' + new Array(50001).join('\n') + 'More.');
     return (Date.now() - t0 < 2000 ? 'fast ' : 'SLOW ') + out.split('\n').length;
   });
+  // ---- bug hunt round 7, section 29: regressions from 1.16.0
+  run('bh29-nested-emphasis', function () {
+    // italics round a bold span show as italics, as the PDF sets them, and
+    // are written back as typed
+    loadMd('# One\n\n*before **bold** after*\n');
+    var p = rich.querySelector('p');
+    var shown = (p ? p.textContent : '') + ' | ' + rich.querySelectorAll('em, i').length
+                + ' em | ' + rich.querySelectorAll('strong, b').length + ' strong';
+    return shown + ' | ' + getMd();
+  });
+  run('bh31-byline-cleared-title', function () {
+    // the title's words deleted: the byline stays with the heading
+    loadMd('# Salt Road | Ana Vale\n\nText.\n');
+    q('.wb-chapter').textContent = '';
+    return getMd();
+  });
+  run('bh31-title-pipe', function () {
+    // an escaped pipe is the title's, and is written back escaped
+    loadMd('# Salt \\| Ash | Ana Vale\n\nText.\n');
+    return q('.wb-chapter').textContent + ' / ' + q('.wb-chapter').dataset.byline + ' / ' + getMd();
+  });
   run('bh22-wrap-legacy-blank', function () {
     return w.DocModel.wrapUnfenced('___\n\n> ## Ash Drake\n> *Large dragon*\n> - **AC** 15\n\nAfter.\n');
   });

@@ -201,6 +201,12 @@ def notes(ms, meta, preset):
     import matter
     # a dedication, acknowledgments… from Book settings print as pages of
     # their own; the page-by-page ebook holds only designed pages
+    # and the notes print as well - a Notes section, or at the foot of the
+    # page - even one no text refers to (bug hunt 30.7)
+    if any(ch.get('notes') for ch in ms.get('chapters', [])):
+        em = (preset or {}).get('endnotes') or {}
+        left_out.append('Footnotes' if em.get('placement') == 'foot'
+                        else _snippet(_plain(em.get('heading') or 'Notes')))
     left_out = ([s['key'].replace('_', ' ').capitalize()
                  for s in matter.present(meta or {}, 'front')] + left_out
                 + [s['key'].replace('_', ' ').capitalize()
@@ -418,8 +424,8 @@ def _opf(uid, meta, manifest, spine, modified, vw, vh):
         ('accessibilityHazard', 'none'),
         ('accessibilitySummary', 'A fixed-layout picture book: the words on every page '
                                  'are live text over its illustration, in reading order.')))
-    # its page list is its own pages, not a print edition's (23.11)
-    a11y += '    <meta property="a11y:pageBreakSource">none</meta>\n'
+    # its page list is its own pages, not a print edition's (23.11): EPUB
+    # Accessibility asks that no source be named then (bug hunt 29.9)
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"'
             f' unique-identifier="uid" xml:lang="{book_lang(meta)}">\n'
@@ -454,7 +460,6 @@ def _nav(has_cover, first_href, pages, lang='en'):
     plist = ''.join(f'<li><a href="{href}">{n}</a></li>' for n, href in pages)
     # the cover and the first page by their role too (23.13)
     marks = ([('cover', 'cover.xhtml', 'Cover')] if has_cover else []) + \
-        [('toc', 'nav.xhtml#toc', 'Contents')] + \
         ([('bodymatter', first_href, 'Beginning')] if first_href else [])
     landmarks = ('<nav epub:type="landmarks" hidden="hidden"><ol>'
                  + ''.join(f'<li><a epub:type="{t}" href="{h}">{label}</a></li>'

@@ -165,8 +165,9 @@ def _check_name_variants(parsed: dict) -> list:
     # later in the book was never looked at.
     candidates = [t for t, c in token_count.items() if c >= 2]
     order = {t: i for i, t in enumerate(candidates)}
+    report = {}
     pairs = [tuple(sorted(p, key=order.get))                  # first seen first
-             for p in _similar_pairs(candidates, _VARIANT_RATIO)]
+             for p in _similar_pairs(candidates, _VARIANT_RATIO, report)]
 
     issues = []
     for a, b in sorted(pairs, key=lambda p: (order[p[0]], order[p[1]]))[:_MAX_VARIANTS]:
@@ -191,6 +192,15 @@ def _check_name_variants(parsed: dict) -> list:
             'location': '',
             'tier': 1,
         })
+    if report.get('incomplete'):
+        issues.append({
+            'label':    'Name variants: not every name was compared',
+            'severity': 'info',
+            'detail':   ('The book has more different names than the check compares '
+                         'in one go, so some spelling variants may not be listed.'),
+            'location': '',
+            'tier': 1,
+        })
     return issues
 
 
@@ -210,7 +220,7 @@ def _deletions(word, k):
     return out
 
 
-def _similar_pairs(words, ratio):
+def _similar_pairs(words, ratio, report=None):
     """The pairs whose lower-cased difflib ratio is at least `ratio` (0.85).
 
     Comparing every pair was millions of SequenceMatcher calls in a long book.
@@ -220,19 +230,24 @@ def _similar_pairs(words, ratio):
     every string it becomes with up to 0.27 x its length deleted, and only
     words sharing such a key are measured. Words over 16 letters (rare, and a
     blow-up in keys) are measured against all.
+
+    Past the key budget a word is still indexed by its one-letter deletions,
+    which are few and find a one-letter variant; measured against all instead,
+    1,500 unrelated names used up the candidate cap and a misspelling late in
+    the book was never looked at (bug hunt 29.13). When the cap still cuts the
+    check short, `report['incomplete']` says so.
     """
     index = collections.defaultdict(set)
     long_words = []
     keys = 0
     for w in words:
         low = w.lower()
-        if len(low) > 16 or keys > _MAX_KEYS:
-            # past the budget a word is measured against all, like a long
-            # one, under the same cap: 10,000 different 16-letter names made
-            # 25 million keys, gigabytes, before the cap below was reached
+        if len(low) > 16:
             long_words.append(w)
             continue
-        dels = _deletions(low, int(0.27 * len(low)))
+        # past the budget, one letter deleted at most: 10,000 different
+        # 16-letter names made 25 million keys, gigabytes, at the full depth
+        dels = _deletions(low, 1 if keys > _MAX_KEYS else int(0.27 * len(low)))
         keys += len(dels)
         for key in dels:
             index[key].add(w)
@@ -246,9 +261,13 @@ def _similar_pairs(words, ratio):
             g = sorted(group)
             maybe.update((a, b) for i, a in enumerate(g) for b in g[i + 1:])
             if len(maybe) > _MAX_CANDIDATES:
+                if report is not None:
+                    report['incomplete'] = True
                 break
     for w in long_words:
         if len(maybe) > _MAX_CANDIDATES:
+            if report is not None:
+                report['incomplete'] = True
             break
         maybe.update(tuple(sorted((w, o))) for o in words if o != w)
     out, sm = [], difflib.SequenceMatcher(None)

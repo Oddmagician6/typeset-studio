@@ -157,9 +157,11 @@ try:
     real = engine._build_pdf
 
     def refuse_colour(ms_, preset_, out_, meta_, press=False):
-        if press:
+        # the CMYK canvas refuses; the fallback (the colour interior's press
+        # canvas, bug hunt 30.6) takes it
+        if press and not meta_.get('colour_interior'):
             raise ValueError('cannot convert color to CMYK: chromatic')
-        return real(ms_, preset_, out_, meta_)
+        return real(ms_, preset_, out_, meta_, press=press)
 
     engine._build_pdf = refuse_colour
     try:

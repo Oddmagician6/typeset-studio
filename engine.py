@@ -31,6 +31,7 @@ except ImportError:
 import matter as _matter
 import bookindex as _bookindex
 import ornaments as _orn
+from manuscript import page_map_key as _ms_page_map_key
 from manuscript import (_inline as _ms_inline_raw, book_anchors as _ms_book_anchors,
                         chapter_numbers as _ms_numbers,
                         map_block_texts as _ms_map_texts,
@@ -58,7 +59,7 @@ from reportlab.platypus import (
     PageBreak, Flowable, NextPageTemplate, Table, TableStyle, KeepTogether,
 )
 from reportlab.platypus.paragraph import Paragraph as _P
-from reportlab.platypus.doctemplate import LayoutError
+from reportlab.platypus.doctemplate import LayoutError, ActionFlowable
 from reportlab.lib import colors as _colors
 
 try:
@@ -1907,12 +1908,53 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
                         cf['serif'], cc.get('size', 12.5) * 0.85, cc.get('tracking', 3.4))
         _source(canv)
 
+    # where the photo goes, worked out before the blurb is laid out: it is
+    # drawn after the blurb, and placed by itself it was raised above the
+    # barcode into the blurb's lower lines (bug hunt 29.5)
+    photo = None
+    bimg = meta.get('cover_back_image')
+    if bimg and os.path.exists(bimg):
+        try:
+            from reportlab.lib.utils import ImageReader
+            ir = ImageReader(_upright(bimg))
+            iw, ih = ir.getSize()
+            tw = max(meta.get('cover_back_image_w', 1.5), 0.25) * inch
+            tw = min(tw, (bx1 - bx0) - 2 * gap)          # keep inside the frame
+            thh = tw * (ih / iw) if iw else tw
+            # a tall picture is fitted by its height too, and its centre kept
+            # far enough in that none of it is cut off at the top or the foot
+            room_h = (by1 - by0) - 2 * gap
+            if thh > room_h > 0:
+                tw, thh = tw * room_h / thh, room_h
+            icx = cx
+            # The barcode box is painted white over whatever is under it, so a
+            # picture that reaches across it sits above it instead - made
+            # smaller if the room above the box is too short for it.
+            pfloor = by0 + gap
+            if icx + tw / 2.0 > bxr:
+                pfloor = byr + bh + 0.1 * inch
+                above = (by1 - gap) - pfloor
+                if thh > above > 0:
+                    tw, thh = tw * above / thh, above
+            icy = y0 + h * min(max(meta.get('cover_back_image_y', 0.4), 0.0), 1.0)
+            icy = min(max(icy, pfloor + thh / 2.0), by1 - gap - thh / 2.0)
+            photo = (ir, icx, icy, tw, thh)
+        except Exception:
+            photo = None
+
     # blurb — centred serif block in the upper-middle
     blurb = meta.get('cover_blurb') or ''
     if blurb:
         colw = (bx1 - bx0) * 0.82
         canv.setFillColor(_pal_color(tpl, 'ink'))
         top, floor = yat(0.72), byr + bh + 0.2 * inch
+        if photo is not None:
+            ptop, pbot = photo[2] + photo[4] / 2.0, photo[2] - photo[4] / 2.0
+            if ptop < top:
+                # a photo below the blurb's start: the blurb stops above it
+                floor = max(floor, ptop + 0.2 * inch)
+            elif pbot < top + 11.0:
+                overflow = True     # placed over the blurb's opening lines
 
         def layout(size, lead):
             rows = []                     # (line, or None for a gap; step down)
@@ -1946,32 +1988,9 @@ def _paint_back_panel(canv, tpl, cf, meta, x0, y0, w, h):
         _source(canv)
 
     # optional author photo / publisher logo — centred, aspect preserved
-    bimg = meta.get('cover_back_image')
-    if bimg and os.path.exists(bimg):
+    if photo is not None:
+        ir, icx, icy, tw, thh = photo
         try:
-            from reportlab.lib.utils import ImageReader
-            ir = ImageReader(_upright(bimg))
-            iw, ih = ir.getSize()
-            tw = max(meta.get('cover_back_image_w', 1.5), 0.25) * inch
-            tw = min(tw, (bx1 - bx0) - 2 * gap)          # keep inside the frame
-            thh = tw * (ih / iw) if iw else tw
-            # a tall picture is fitted by its height too, and its centre kept
-            # far enough in that none of it is cut off at the top or the foot
-            room_h = (by1 - by0) - 2 * gap
-            if thh > room_h > 0:
-                tw, thh = tw * room_h / thh, room_h
-            icx = cx
-            # The barcode box is painted white over whatever is under it, so a
-            # picture that reaches across it sits above it instead - made
-            # smaller if the room above the box is too short for it.
-            floor = by0 + gap
-            if icx + tw / 2.0 > bxr:
-                floor = byr + bh + 0.1 * inch
-                above = (by1 - gap) - floor
-                if thh > above > 0:
-                    tw, thh = tw * above / thh, above
-            icy = y0 + h * min(max(meta.get('cover_back_image_y', 0.4), 0.0), 1.0)
-            icy = min(max(icy, floor + thh / 2.0), by1 - gap - thh / 2.0)
             canv.drawImage(ir, icx - tw / 2.0, icy - thh / 2.0, width=tw, height=thh,
                            preserveAspectRatio=True, mask='auto')
             _BACK_IMG.size = (tw / inch, thh / inch)
@@ -2843,6 +2862,27 @@ def _heads(f):
     return isinstance(f, HeadingPara) or bool(f.getKeepWithNext())
 
 
+def _keep_pos(whole, first):
+    """A block's place (`_ts_pos`, 23.11) handed to the first piece ReportLab
+    split it into: the pieces are new flowables, and a table or a column run
+    split over a page lost its place (bug hunt 29.7)."""
+    pos = getattr(whole, '_ts_pos', None)
+    if pos is not None and getattr(first, '_ts_pos', None) is None:
+        try:
+            first._ts_pos = pos
+        except (AttributeError, TypeError):
+            pass
+
+
+def _report_pos(canv, f):
+    """A flowable drawn inside another (a column run, a kept figure), which
+    `BookDoc.afterFlowable` never sees: its block's place, if it has one."""
+    pos = getattr(f, '_ts_pos', None)
+    doc = getattr(canv, '_doctemplate', None)
+    if pos is not None and isinstance(doc, BookDoc):
+        doc._pos_hits.setdefault(pos, canv.getPageNumber())
+
+
 class _Kept(Flowable):
     """Flowables that stay in one column: a picture and its caption."""
 
@@ -2869,6 +2909,7 @@ class _Kept(Flowable):
         for f, top, h, w in self._lay:
             # the unused width lets a narrow table keep its alignment
             f.drawOn(self.canv, 0, self.height - top - h, _sW=self.width - w)
+            _report_pos(self.canv, f)
 
 
 class _HeadCell(_P):
@@ -2941,6 +2982,7 @@ class ColumnRun(Flowable):
                 except Exception:
                     parts = []
                 if len(parts) >= 2:
+                    _keep_pos(f, parts[0])
                     w0, h0 = parts[0].wrapOn(canv, cw, 0xfffffff)
                     if h0 <= room + _COL_EPS:
                         placed.append((parts[0], y + gap, h0, w0))
@@ -3036,6 +3078,7 @@ class ColumnRun(Flowable):
             for f, top, h, w in placed:
                 # the unused width lets a narrow table keep its alignment
                 f.drawOn(self.canv, x, height - top - h, _sW=cw - w)
+                _report_pos(self.canv, f)
         if self._rule:
             c = self.canv
             c.saveState()
@@ -3290,6 +3333,7 @@ class BookDoc(BaseDocTemplate):
         # outline may only go one level deeper at a time) and the level the
         # current chapter sits at (1 under a part, else 0)
         self._ol_n, self._ol_last, self._ol_chapter = 0, -1, 0
+        self._ol_stack = []
         # running heads by chapter or section: what is in force, what was in
         # force when the page began, and the first section started on it
         self._rh_chapter = self._rh_section = None
@@ -3303,6 +3347,8 @@ class BookDoc(BaseDocTemplate):
         self._index_hits  = []      # (marker key, page) as each index marker is set
         self._anchor_hits = {}      # link target -> the page it was first set on
         self._pos_hits    = {}      # (chapter, block) -> the page it was first set on
+        self._body_last   = 0       # the last page chapters are set on
+        self._body_done   = False   # the back matter has begun
         self._cover = cover or {}        # {path, overlay, color, title_font}
         trim = preset['trim']
         pw, ph = trim['w'] * inch, trim['h'] * inch
@@ -3474,7 +3520,15 @@ class BookDoc(BaseDocTemplate):
         """Add a PDF bookmark for the current page at `level` (0 = top)."""
         if not title:
             return
-        level = max(0, min(level, self._ol_last + 1))
+        # A skipped level is closed up (a ### with no ## sits right under its
+        # chapter), and what follows at the same asked-for level is its
+        # sibling, not its child: two ### in a row came out as parent and
+        # child (bug hunt 30.5). `_ol_stack` holds (asked, set) per open level.
+        asked, stack = level, self._ol_stack
+        while stack and stack[-1][0] >= asked:
+            stack.pop()
+        level = stack[-1][1] + 1 if stack else 0
+        stack.append((asked, level))
         self._ol_n += 1
         key = f'ts-ol-{self._ol_n}'
         canv.bookmarkPage(key)
@@ -3486,6 +3540,15 @@ class BookDoc(BaseDocTemplate):
         contents, bookmark `##` and `###`, and follow `##` for running heads.
         A block set without paragraph markup (a figure, a table, a scene
         break) carries its place in `_ts_pos` instead of a `_ts_pos` tag."""
+        if getattr(flowable, '_ts_body_end', False):
+            self._body_done = True
+        if not self._body_done and not isinstance(flowable, ActionFlowable) \
+                and (getattr(flowable, 'width', 0) or getattr(flowable, 'height', 0)):
+            # the last page a chapter reaches: a long block that runs on
+            # starts no block there, and the page list stopped short of it.
+            # Not a page break, a template switch or a zero-size marker: they
+            # are taken on the page after
+            self._body_last = self.canv.getPageNumber()
         pos = getattr(flowable, '_ts_pos', None)
         if pos is not None:
             self._pos_hits.setdefault(pos, self.canv.getPageNumber())
@@ -3633,6 +3696,8 @@ class BookDoc(BaseDocTemplate):
                 flowables.insert(0, item)
             return
         BaseDocTemplate.handle_flowable(self, flowables)
+        if flowables and flowables[0] is not f:
+            _keep_pos(f, flowables[0])          # split: the rest goes on
 
     def _draw_page_ornaments(self, canv, opener, text_left, tw):
         """The style's page furniture (#74 Phase 3b): a header bar under the
@@ -3820,7 +3885,10 @@ def _styles(preset, fonts):
             spaceBefore=b['leading'] * gap_before, spaceAfter=b['leading'] * gap_after,
             keepWithNext=1)
     section = _heading_style('sec', 'section', 'bold', 0.9, 0.3)
-    if disp:
+    # the display face stands in for bold, the default; an italic or regular
+    # `###` the writer picked is set as picked, as the ebook sets it (bug
+    # hunt 30.9 - the display face replaced it in the PDF)
+    if disp and (hd.get('section_style') or 'bold') == 'bold':
         section.fontName = disp
     subsection = _heading_style('subsec', 'subsection', 'italic', 0.6, 0.2)
     pd = preset.get('part_divider', {})
@@ -3946,18 +4014,23 @@ def _opening_para(text, st, preset, fonts, hyph=None):
         return [DropCap(plain_h, st['first'], fonts.get('bold', fonts['regular']),
                         lines=preset['chapter'].get('dropcap_lines', 3), marks=marks,
                         page_h=(trim['h'] - mar['top'] - mar['bottom']) * inch)]
+    # The two that set a paragraph carry the markers in its first line: as
+    # flowables of their own in front of it they drew on the opener page even
+    # when the paragraph moved on to the next one, and the index and any page
+    # reference read the old page.
+    tags = ''.join(_MARKER_TAGS_RE.findall(text))
     if style == 'raised_initial':
         cap, rest = _split_initial(plain)
         rest = _hyphenate_markup(rest, hyph) if hyph else rest
-        return marks + [RaisedInitial(cap, rest, st['first'], fonts['regular'])]
+        return [RaisedInitial(cap, tags + rest.lstrip(), st['first'], fonts['regular'])]
     if style == 'smallcaps_leadin':
         words = plain.split(' ')
         n     = preset['chapter'].get('leadin_words', 4)
         lead, rest = ' '.join(words[:n]), ' '.join(words[n:])
         big   = int(st['first'].fontSize * 1.05)
         rest  = _hyphenate_markup(rest, hyph) if hyph else rest
-        return marks + [Paragraph(f'<font size="{big}">{_upper_text(lead, st["first"].fontName)}'
-                                  f'</font> {rest}', st['first'])]
+        return [Paragraph(f'{tags}<font size="{big}">{_upper_text(lead, st["first"].fontName)}'
+                          f'</font> {rest}', st['first'])]
     text_h = _hyphenate_markup(text, hyph) if hyph else text
     return [Paragraph(text_h, st['first'])]
 
@@ -3989,8 +4062,13 @@ def _ep_dfont(fonts, dateline_style):
     return fonts['bold'] if dateline_style in ('bold', 'smallcaps') else fonts['italic']
 
 
+# what an `{index: …}` and a `{#name}` leave in paragraph markup: the
+# destination and the callbacks that report where they were drawn
+_MARKER_TAGS_RE = re.compile(
+    r'<a name="[\w\-]+"/>|<onDraw name="_ts_(?:index|anchor)" label="[\w\-]+"/>')
 _NOTE_REF_RE = re.compile(
-    r'<a href="[^"]*"><super[^>]*>\d+</super></a>|<super[^>]*>\d+</super>')
+    r'<a href="[^"]*"><super[^>]*>\d+</super></a>|<super[^>]*>\d+</super>|'
+    + _MARKER_TAGS_RE.pattern)
 
 
 def _caps_keep_notes(markup):
@@ -3999,7 +4077,9 @@ def _caps_keep_notes(markup):
     A telegram body and a small-caps table header are set in capitals with
     the markup stripped, and that stripped the note's superscript and the
     link the measuring pass finds it by: the marker and the footnote were
-    both lost. Entities are read back to characters first, so `&amp;` is not
+    both lost. Index and anchor markers ride through the same way, or the
+    entry vanished and a page reference linked to a destination never drawn.
+    Entities are read back to characters first, so `&amp;` is not
     upper-cased into `&AMP;`."""
     import html as _html
     out, pos = [], 0
@@ -5456,6 +5536,9 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     sm    = _gb_section(preset, 'statblock')
     size  = sm.get('font_size', 0) or st['body'].fontSize
     lead  = size * sm.get('line_leading', 1.25)
+    # small caps are set a size smaller, but never under a Large Print
+    # edition's floor (bug hunt 30.8)
+    small = max(size - 1, getattr(_FLOOR, 'size', 0) or 0)
     space = sm.get('space_around', 12.0)
     pad_x = sm.get('pad_x', 6.0)
     pad_y = sm.get('pad_y', 5.0)
@@ -5517,7 +5600,7 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     lab_open, lab_close = {'bold': ('<b>', '</b>'), 'bolditalic': ('<b><i>', '</i></b>'),
                            'italic': ('<i>', '</i>'),
                            # small caps as elsewhere: capitals, a size smaller
-                           'smallcaps': (f'<b><font size="{size - 1:g}">', '</font></b>'),
+                           'smallcaps': (f'<b><font size="{small:g}">', '</font></b>'),
                            }.get(flabel, ('', ''))
     field_style = ParagraphStyle('sbfield', parent=base, leftIndent=size,
                                  firstLineIndent=-size)
@@ -5552,7 +5635,7 @@ def _render_statblock_block(block_paras, attrs, preset, fonts, st, avail_w, hyph
     estyle = sm.get('entry_name_style', 'bolditalic')
     eo, ec = {'bolditalic': ('<b><i>', '</i></b>'), 'bold': ('<b>', '</b>'),
               'italic': ('<i>', '</i>'),
-              'smallcaps': (f'<b><font size="{size - 1:g}">', '</font></b>'),
+              'smallcaps': (f'<b><font size="{small:g}">', '</font></b>'),
               }.get(estyle, ('', ''))
     ent_style = ParagraphStyle('sbentry', parent=base,
                                leftIndent=sm.get('entry_indent', 0.0) * inch)
@@ -6127,9 +6210,38 @@ def _pos_tag(idx, bi):
     return f'<onDraw name="_ts_pos" label="{idx}-{bi}"/>'
 
 
+_WORD_SPACE = ' \t\r\n'      # where ReportLab breaks words (a no-break space doesn't)
+
+
+def _after_first_word(tag, markup):
+    """`markup` with `tag` (a zero-width `<onDraw>`) at the end of its first
+    word. Put before it, the tag was the word's first fragment, and ReportLab
+    neither hyphenates nor splits a word that starts with a callback: a first
+    word wider than the measure ran past the trim (bug hunt 29.4)."""
+    i, n, seen = 0, len(markup), False
+    while i < n:
+        ch = markup[i]
+        if ch == '<':
+            j = markup.find('>', i)
+            if j < 0:
+                break
+            i = j + 1
+            continue
+        if ch in _WORD_SPACE:
+            if seen:
+                return markup[:i] + tag + markup[i:]
+        else:
+            seen = True
+        i += 1
+    return markup + tag
+
+
 def _pos_flows(flows, idx, bi):
     """Mark the first of a block's flowables with its place; returns them."""
-    f = flows[0] if flows else None
+    # not on a break, which is taken without being drawn, or on the space
+    # before a figure, which can end a page the figure doesn't fit on
+    real = [g for g in flows if not isinstance(g, (SideBreak, PageBreak, Spacer))]
+    f = real[0] if real else None
     # a KeepTogether is taken apart before anything is drawn: the mark goes
     # on what it holds
     while isinstance(getattr(f, '_content', None), list) and f._content:
@@ -6156,7 +6268,8 @@ def _print_pages(doc):
     for pos, page in doc._pos_hits.items():
         first[page] = min(first.get(page, pos), pos)
     out, cur = [], None
-    for page in range(start, max(first, default=0) + 1):
+    end = max(max(first, default=0), getattr(doc, '_body_last', 0) or 0)
+    for page in range(start, end + 1):
         here = first.get(page)
         # never backwards: a figure floated past text keeps the list in
         # reading order
@@ -6325,11 +6438,10 @@ def _matter_page(heading, text, fonts, st, smartquotes, style='body', unlink=Non
         s = ParagraphStyle('contrib', parent=st['body'], firstLineIndent=0,
                            spaceAfter=st['body'].leading * 0.6)
         for b in blocks:
-            name, bio = b, ''
-            for sep in ('—', '--'):
-                if sep in b:
-                    name, bio = b.split(sep, 1)
-                    break
+            # the first separator, whichever it is: an em dash later in the
+            # bio was taken over an earlier `--` and bolded half of it
+            parts = re.split('—|--', b, maxsplit=1)
+            name, bio = parts[0], (parts[1] if len(parts) > 1 else '')
             md = '**' + name.strip() + '**'
             if bio.strip():
                 md += ' — ' + bio.strip()
@@ -6632,7 +6744,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                     kind not in ('scene', 'doc_block') and opened):
                 # its page, for the ebook's page list (an opening paragraph's
                 # drop cap takes no markup: the chapter's own opening stands in)
-                val = _pos_tag(idx, bi) + val
+                val = _after_first_word(_pos_tag(idx, bi), val)
             if ncols == 2 and kind == 'doc_block' and _spans(block):
                 _flush_run()
                 blk_meta = block[2] if len(block) > 2 else {}
@@ -6668,12 +6780,16 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 flush_next = True
             else:
                 if not opened:
+                    probe = []
                     if fn_probe is not None:
                         nums = _NOTE_SUPER_RE.findall(val) or                                re.findall(r'{}(\d+)-(\d+)'.format(re.escape(_FN_SCHEME)), val)
                         nums = [n[-1] if isinstance(n, tuple) else n for n in nums]
                         if nums:
-                            story.append(FnProbe(fn_probe, idx, [int(n) for n in nums]))
-                    story.extend(keep(_opening_para(val, st, preset, fonts, hyph=hyph)))
+                            probe = [FnProbe(fn_probe, idx, [int(n) for n in nums])]
+                    # the probe rides inside the keep-whole group, so it moves
+                    # to the next page with the paragraph (bug hunt 30.3)
+                    story.extend(keep(probe + _opening_para(val, st, preset, fonts,
+                                                            hyph=hyph)))
                     opened = True
                 elif flush_next:
                     val_h = _hyphenate_markup(val, hyph) if hyph else val
@@ -6689,6 +6805,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     _author = meta.get('author', '')
     _bm_first = True   # only the first back-matter page gets recto-forced
 
+    def _bm_head(text):
+        m = RunningHeadMarker(text)
+        m._ts_body_end = True           # the chapters end here (_print_pages)
+        return m
+
     def _bm_break(first):
         # a page break only where the page has something on it: a chapter
         # ending in a full-page figure has already broken, and a second break
@@ -6703,7 +6824,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             and preset.get('endnotes', {}).get('placement', 'end') != 'foot'):
         story.extend(_bm_break(True))
         _bm_first = False
-        story.append(RunningHeadMarker(_esc_markup(
+        story.append(_bm_head(_esc_markup(
             preset.get('endnotes', {}).get('heading', 'Notes'))))
         story.extend(_endnotes_page(manuscript['chapters'], fonts, st, preset))
 
@@ -6711,7 +6832,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
         story.extend(_bm_break(_bm_first))
         _bm_first = False
         # markup, as the marker reads it: plain, `R. Vale <Pen Name>` lost its <…>
-        story.append(RunningHeadMarker(_esc_markup(_matter.heading(_sec, _author))))
+        story.append(_bm_head(_esc_markup(_matter.heading(_sec, _author))))
         story.extend(_matter_page(_matter.heading(_sec, _author),
                                   meta[_sec['key']].strip(),
                                   fonts, st, sq, _sec['style'],
@@ -6721,7 +6842,7 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
     # no page it lists.
     if index is not None and _bookindex.wanted(ix_marks, meta):
         story.extend(_bm_break(_bm_first))
-        story.append(RunningHeadMarker(_bookindex.HEADING))
+        story.append(_bm_head(_bookindex.HEADING))
         story.extend(_index_page(ix_marks, index, meta, preset, fonts, st))
 
     return story
@@ -7334,8 +7455,12 @@ def _press_canvasmaker(pw, ph, colour=False):
             def setStrokeGray(self, gray, alpha=None):
                 self.setStrokeColor((gray, gray, gray), alpha=alpha)
 
-        def linkURL(self, *a, **kw):
-            pass
+        def linkURL(self, url, *a, **kw):
+            # The footnote measuring pass finds each reference by its marker
+            # link (`_footnote_pages`); that build is read back and thrown
+            # away, never printed (bug hunt 30.1).
+            if str(url).startswith(_FN_SCHEME):
+                _canvas.Canvas.linkURL(self, url, *a, **kw)
 
         def linkRect(self, *a, **kw):
             pass
@@ -7412,6 +7537,11 @@ def _resolve_inbook_links(chapters):
         return m.group(1)
 
     for ch in out:
+        # a piece's byline and a `#>` tagline are raw Markdown too, inlined
+        # under the title (bug hunt 30.2, 31.1)
+        for key in ('byline', 'tagline'):
+            if isinstance(ch.get(key), str) and '](#' in ch[key]:
+                ch[key] = _MS_LINK_RE.sub(raw_fix, ch[key])
         if ch.get('notes'):
             ch['notes'] = [dict(n, text=_unlink_dead(n.get('text') or '', known, dead))
                            for n in ch['notes']]
@@ -7465,9 +7595,9 @@ def build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
 
     A press build that hits a colour it cannot express falls back to a normal
     one and says so in `press_error`, because a book that builds in RGB beats
-    a book that doesn't build. The fallback still leaves the cover out: only
-    the CMYK conversion failed, and a print interior wants a coverless block
-    either way — the page count it reports is what a spine gets cut from.
+    a book that doesn't build. The fallback is still a print edition: no cover
+    (the page count it reports is what a spine gets cut from), no links, form
+    fields flattened - only the CMYK conversion is let go.
     """
     try:
         _FLOOR.size = float(preset.get('min_text_size') or 0)
@@ -7478,9 +7608,13 @@ def build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
     # it from the folder) mid-build got an empty or half-made edition.
     part = out_path + '.part'
     _SCRATCH.files = []
+    # what the page map was set from, taken before the passes start
+    key = _ms_page_map_key(manuscript.get('chapters'))
     try:
         res = _build_pdf_variant(manuscript, preset, part, meta, press, screen)
         _replace_retrying(part, out_path)
+        if isinstance(res, dict):
+            res['print_pages_key'] = key
         return res
     finally:
         # the passes' scratch PDFs and the cropped cover, which a pass that
@@ -7536,8 +7670,13 @@ def _build_pdf_variant(manuscript, preset, out_path, meta, press, screen):
         except ValueError as exc:
             if 'color' not in str(exc).lower():
                 raise
-            res = _build_pdf(manuscript, preset, out_path, _coverless(meta))
-            res['press'] = False
+            # Still the print edition, only not forced to CMYK: the colour
+            # interior's press canvas keeps the colour it met, and still
+            # flattens form fields, drops links and declares the trim (bug
+            # hunt 30.6 - the plain build put live fields in a print package)
+            res = _build_pdf(manuscript, preset, out_path,
+                             dict(_coverless(meta), colour_interior=True), press=True)
+            res['press'] = res['colour'] = False
             res['press_error'] = str(exc)
             return res
     except LayoutError as exc:

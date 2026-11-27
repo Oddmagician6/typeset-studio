@@ -152,13 +152,15 @@ def tree(marks, found, meta):
         hits = by_key.get(key)
         if not hits:
             continue
+        # one spelling per term: `Café` typed precomposed in one marker and
+        # as e + U+0301 in another were two entries that looked the same
+        path = tuple(unicodedata.normalize('NFC', p) for p in mark['path'])
         if mark.get('stat'):
             if on(meta, 'index_cr') and mark.get('cr'):
                 (ratings.setdefault(mark['cr'], {})
-                        .setdefault(mark['path'][0], []).extend(hits))
+                        .setdefault(path[0], []).extend(hits))
             if not on(meta, 'index_statblocks'):
                 continue
-        path = mark['path']
         node = mains.setdefault(path[0], {'hits': [], 'subs': {}})
         if len(path) == 1:
             node['hits'].extend(hits)

@@ -78,6 +78,13 @@
   }
   .wordmark{font-family:var(--serif);font-size:21px;letter-spacing:.02em;font-weight:600;text-decoration:none}
   .wordmark .stamp{color:var(--red)}
+  /* Ashforge mark beside the name: a dark-stone version for the light theme and
+     a light-stone one for the dark theme. Lowered so it centres on the caps
+     without moving the text baseline the tagline lines up with. */
+  .wordmark .logo{height:30px;width:auto;vertical-align:-7px;margin-right:9px}
+  .wordmark .logo-dark{display:none}
+  html[data-theme="dark"] .wordmark .logo-light{display:none}
+  html[data-theme="dark"] .wordmark .logo-dark{display:inline}
   .tagline{font-family:var(--mono);font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.18em}
   .nav{margin-left:auto;display:flex;gap:4px;align-items:center}
   .nav a{
@@ -207,7 +214,7 @@
 <body>
   <header class="masthead">
     <div class="inner">
-      <a class="wordmark" href="{{ url_for('index') }}">Typeset&nbsp;<span class="stamp">Studio</span></a>
+      <a class="wordmark" href="{{ url_for('index') }}"><img class="logo logo-light" src="{{ url_for('static', filename='logo-light.png') }}" alt="Ashforge Studio"><img class="logo logo-dark" src="{{ url_for('static', filename='logo-dark.png') }}" alt="Ashforge Studio">Typeset&nbsp;<span class="stamp">Studio</span></a>
       <span class="tagline">the composing room</span>
       <nav class="nav">
         <a href="{{ url_for('index') }}" class="{{ 'active' if active=='styles' }}">Styles</a>
