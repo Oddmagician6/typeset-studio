@@ -659,7 +659,8 @@ def _xhtml(title, body_content, css_href='style.css'):
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE html>\n'
-        f'<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{_lang()}" lang="{_lang()}">\n'
+        '<html xmlns="http://www.w3.org/1999/xhtml"'
+        f' xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{_lang()}" lang="{_lang()}">\n'
         '<head>\n'
         '  <meta charset="UTF-8"/>\n'
         f'  <title>{_text_to_html(title)}</title>\n'
@@ -669,6 +670,35 @@ def _xhtml(title, body_content, css_href='style.css'):
         + body_content +
         '</body>\n</html>\n'
     )
+
+
+def print_page_marks(chapters, print_pages):
+    """The print edition's pages in a reflowable ebook (bug hunt 23.11):
+    `(marks, pages)`. `print_pages` is what the PDF of the same manuscript
+    reported (`engine` `print_pages`: [(folio, chapter, block)]); `marks` is
+    {chapter: {block: [folio, ...]}}, block -1 being the chapter's opening,
+    and `pages` the page list's [(folio, href)]. An entry naming a chapter or
+    block this manuscript hasn't means the PDF was another book's: then there
+    is no list at all."""
+    marks, pages, seen = {}, [], set()
+    for entry in print_pages or ():
+        try:
+            folio, idx, bi = (int(v) for v in entry)
+        except (TypeError, ValueError):
+            return {}, []
+        if not (1 <= idx <= len(chapters)) \
+                or not (-1 <= bi < len(chapters[idx - 1].get('blocks') or [])) \
+                or folio in seen:
+            return {}, []
+        seen.add(folio)
+        marks.setdefault(idx, {}).setdefault(bi, []).append(folio)
+        pages.append((folio, f'chapter{idx:03d}.xhtml#page{folio}'))
+    return marks, pages
+
+
+def _page_break_html(folios):
+    return '\n'.join(f'  <span epub:type="pagebreak" role="doc-pagebreak" id="page{n}"'
+                     f' aria-label="{n}"></span>' for n in folios)
 
 
 def _default_copyright(meta):
@@ -1077,7 +1107,7 @@ def _scene_image_html(preset, href):
 
 
 def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
-                   scene_href=''):
+                   scene_href='', page_marks=None):
     c          = preset.get('chapter', {})
     show_num   = c.get('show_number', True)
     num_fmt    = c.get('number_format', 'Chapter {n}')
@@ -1086,6 +1116,9 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
     art_pos     = chapter_art_position(preset)
 
     lines = ['<div class="chapter">']
+    page_marks = page_marks or {}
+    if -1 in page_marks:              # print pages before its first block (23.11)
+        lines.append(_page_break_html(page_marks[-1]))
 
     if art_href and art_pos == 'above':
         lines.append(_chapter_art_html(preset, art_href, 'above'))
@@ -1114,9 +1147,11 @@ def _chapter_xhtml(idx, chapter, preset, figures=None, number=None, art_href='',
     n_head         = 0              # heading ids: see chapter_headings
     head_level     = 1              # the chapter title is the h1
 
-    for block in chapter.get('blocks', []):
+    for bi, block in enumerate(chapter.get('blocks', [])):
         kind = block[0]
         val  = block[1]
+        if bi in page_marks:              # where a print page starts (23.11)
+            lines.append(_page_break_html(page_marks[bi]))
         if kind == 'scene':
             lines.append(_scene_orn_html(preset, scene_orn) if scene_orn else
                          _scene_image_html(preset, scene_href) if scene_href else
@@ -1601,7 +1636,7 @@ def check(path):
     return out
 
 
-def _a11y_meta(manifest_items, all_alt=True, animated=False):
+def _a11y_meta(manifest_items, all_alt=True, animated=False, page_source=''):
     """Accessibility metadata for the OPF.
 
     This is what ACE (and, increasingly, the retailers) look for, and what the
@@ -1625,6 +1660,12 @@ def _a11y_meta(manifest_items, all_alt=True, animated=False):
         lines.append(f'    <meta property="schema:accessibilityFeature">{feature}</meta>')
     if has_images and all_alt:
         lines.append('    <meta property="schema:accessibilityFeature">alternativeText</meta>')
+    if page_source:
+        # the print edition's pages, marked in the text and listed (23.11)
+        for feature in ('pageBreakMarkers', 'pageNavigation'):
+            lines.append(f'    <meta property="schema:accessibilityFeature">{feature}</meta>')
+        lines.append('    <meta property="a11y:pageBreakSource">'
+                     f'{_text_to_html(xml_safe(page_source))}</meta>')
     # no known hazards: no flashing, sound or motion in a typeset book - unless
     # it carries an animated picture (23.12), which nothing here can measure
     # for flashing: then the flashing and motion are unknown, not none
@@ -1637,6 +1678,8 @@ def _a11y_meta(manifest_items, all_alt=True, animated=False):
     if has_images:
         summary += (' All illustrations carry alternative text.' if all_alt else
                     ' Some illustrations have no text alternative.')
+    if page_source:
+        summary += ' The print edition\'s page numbers are marked and listed.'
     if animated:
         summary += (' Some illustrations are animated and have not been checked'
                     ' for flashing.')
@@ -1659,7 +1702,7 @@ def dc_title_creator_date(meta):
 
 
 def _content_opf(uid, meta, manifest_items, spine_items, modified, all_alt=True,
-                 animated=False):
+                 animated=False, page_source=''):
 
     def _item(i):
         props = f' properties="{i["props"]}"' if i.get('props') else ''
@@ -1685,7 +1728,7 @@ def _content_opf(uid, meta, manifest_items, spine_items, modified, all_alt=True,
         + dc_title_creator_date(meta) +
         f'    <dc:language>{book_lang(meta)}</dc:language>\n'
         f'    <meta property="dcterms:modified">{modified}</meta>\n'
-        + _a11y_meta(manifest_items, all_alt, animated) +
+        + _a11y_meta(manifest_items, all_alt, animated, page_source) +
         cover_meta_xml +
         '  </metadata>\n'
         '  <manifest>\n'
@@ -1748,7 +1791,7 @@ def _landmarks(chapters, has_cover, meta, has_notes, has_index):
 
 
 def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=False,
-               has_index=False):
+               has_index=False, pages=()):
     c        = preset.get('chapter', {})
     show_num = c.get('show_number', True)
     num_fmt  = c.get('number_format', 'Chapter {n}')
@@ -1803,6 +1846,10 @@ def _nav_xhtml(chapters, has_cover, has_front, preset, meta=None, has_notes=Fals
         + items + '\n'
         '  </ol>\n'
         '</nav>\n'
+        # the print edition's pages (23.11)
+        + (('<nav epub:type="page-list" hidden="hidden">\n  <h2>Pages</h2>\n  <ol>\n'
+            + ''.join(f'    <li><a href="{h}">{n}</a></li>\n' for n, h in pages)
+            + '  </ol>\n</nav>\n') if pages else '')
         + _landmarks(chapters, has_cover, meta, has_notes, has_index)
     )
     return (
@@ -1944,6 +1991,14 @@ def build_epub(manuscript, preset, out_path, meta):
         _BUILD.lang = 'en'
 
 
+def _page_source(meta):
+    """Where the page numbers come from, for `a11y:pageBreakSource`: the print
+    edition named in words, there being no ISBN to give (the W3C's page source
+    note asks for a description when there is no identifier)."""
+    title = xml_safe(str(meta.get('title') or '')).strip() or 'Untitled'
+    return f'{title}, print edition'
+
+
 def _build_epub(manuscript, preset, out_path, meta):
     """Write an EPUB 3 file to out_path. Returns out_path."""
     import fixed_epub
@@ -1980,6 +2035,7 @@ def _build_epub(manuscript, preset, out_path, meta):
     # anchor -> chapter file, so `[see](#slug)` resolves across the spine;
     # a heading or a `{#name}` -> its place in that file (#74 Phase 5b)
     chapters, ref_hrefs = _apply_page_refs(chapters, meta, preset)
+    page_marks, print_pages = print_page_marks(chapters, meta.get('print_pages'))
     _BUILD.anchors = anchors = {}
     for _i, _names in enumerate(_ms_book_anchors(chapters), start=1):
         for _a in _names:
@@ -2086,7 +2142,8 @@ def _build_epub(manuscript, preset, out_path, meta):
         zf.writestr('META-INF/container.xml', _container_xml())
         zf.writestr('OEBPS/nav.xhtml',
                     _nav_xhtml(chapters, has_cover, has_front, preset, meta=meta,
-                               has_notes=has_notes, has_index=has_index))
+                               has_notes=has_notes, has_index=has_index,
+                               pages=print_pages))
         zf.writestr('OEBPS/style.css', _style_css(preset))
 
         if scene_orn:
@@ -2128,7 +2185,8 @@ def _build_epub(manuscript, preset, out_path, meta):
             zf.writestr(f'OEBPS/chapter{idx:03d}.xhtml',
                         _chapter_xhtml(idx, ch, preset, figures=fig_href,
                                        number=_numbers[idx - 1],
-                                       art_href=art_href, scene_href=scene_href))
+                                       art_href=art_href, scene_href=scene_href,
+                                       page_marks=page_marks.get(idx)))
 
         if has_notes:
             zf.writestr('OEBPS/endnotes.xhtml', _endnotes_xhtml(chapters, preset))
@@ -2149,6 +2207,7 @@ def _build_epub(manuscript, preset, out_path, meta):
                     _content_opf(uid, meta, manifest_items, spine_items, modified,
                                  all_alt=not zf.unlabelled,
                                  animated=any(_animated(f['path'])
-                                              for f in figures.values())))
+                                              for f in figures.values()),
+                                 page_source=_page_source(meta) if print_pages else ''))
 
     return out_path

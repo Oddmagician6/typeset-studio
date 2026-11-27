@@ -418,6 +418,8 @@ def _opf(uid, meta, manifest, spine, modified, vw, vh):
         ('accessibilityHazard', 'none'),
         ('accessibilitySummary', 'A fixed-layout picture book: the words on every page '
                                  'are live text over its illustration, in reading order.')))
+    # its page list is its own pages, not a print edition's (23.11)
+    a11y += '    <meta property="a11y:pageBreakSource">none</meta>\n'
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
             '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"'
             f' unique-identifier="uid" xml:lang="{book_lang(meta)}">\n'

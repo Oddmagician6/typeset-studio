@@ -3539,6 +3539,14 @@ def _cover_page_jpeg(preset, meta, jpg_path):
             pass
 
 
+def _with_print_pages(emeta, pdf_result):
+    """The ebook's metadata with the print PDF's pages (23.11): an EPUB built
+    beside a PDF of the same manuscript lists the PDF's page numbers and
+    marks where each starts. Built alone it has none to give."""
+    pages = (pdf_result or {}).get('print_pages')
+    return dict(emeta, print_pages=pages) if pages else emeta
+
+
 @contextlib.contextmanager
 def _epub_cover(preset, meta):
     """Yield a meta whose ``cover_image`` is page 1 of the book's cover, rasterised.
@@ -5502,7 +5510,8 @@ def generate():
         try:
             epub_name = _claim_out(f'{base}-{stamp}.epub')
             with _epub_cover(preset, meta) as emeta:
-                epub.build_epub(ms, preset, os.path.join(OUT_DIR, epub_name), emeta)
+                epub.build_epub(ms, preset, os.path.join(OUT_DIR, epub_name),
+                                _with_print_pages(emeta, build_result))
         except Exception as exc:
             logging.error('EPUB build failed: %s', traceback.format_exc())
             flash(f'EPUB build failed: {exc}')
@@ -6875,7 +6884,8 @@ def _build_project_with(pid, proj, preset, raw, meta, cover_path, started, creat
             res['epub_name'] = _claim_out(f'{base}-{stamp}.epub')
             with _epub_cover(preset, meta) as emeta:
                 epub.build_epub(ms_parsed, preset,
-                                os.path.join(OUT_DIR, res['epub_name']), emeta)
+                                os.path.join(OUT_DIR, res['epub_name']),
+                                _with_print_pages(emeta, res.get('build_result')))
         except Exception as exc:
             logging.error('EPUB build failed: %s', traceback.format_exc())
             res['warnings'].append(f'EPUB build failed: {exc}')
@@ -7422,7 +7432,7 @@ def build_print_package(proj, scope='print'):
             # still the one without the title overlay and uncropped to the trim —
             # the rasterised page is the cover this book has, so it is the only
             # thing that ships.
-            emeta = dict(meta, cover_image=cover_jpg)
+            emeta = _with_print_pages(dict(meta, cover_image=cover_jpg), built)
             try:
                 epub.build_epub(ms, preset, ebook, emeta)
                 files[edir + os.path.basename(ebook)] = ebook

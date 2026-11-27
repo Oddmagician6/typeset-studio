@@ -3302,6 +3302,7 @@ class BookDoc(BaseDocTemplate):
         self._fn_drawn    = set()   # notes actually set on a page
         self._index_hits  = []      # (marker key, page) as each index marker is set
         self._anchor_hits = {}      # link target -> the page it was first set on
+        self._pos_hits    = {}      # (chapter, block) -> the page it was first set on
         self._cover = cover or {}        # {path, overlay, color, title_font}
         trim = preset['trim']
         pw, ph = trim['w'] * inch, trim['h'] * inch
@@ -3442,6 +3443,16 @@ class BookDoc(BaseDocTemplate):
         # a paragraph's `<onDraw name="_ts_index" …/>` calls this on the canvas
         self.canv.setNamedCB('_ts_index', self._on_index)
         self.canv.setNamedCB('_ts_anchor', self._on_anchor)
+        self.canv.setNamedCB('_ts_pos', self._on_pos)
+
+    def _on_pos(self, canv, kind, label):
+        """A chapter's block has been set (23.11): note its first page, for
+        the ebook's list of the print pages (`_print_pages`)."""
+        try:
+            idx, bi = (int(n) for n in str(label).split('-'))
+        except (TypeError, ValueError):
+            return
+        self._pos_hits.setdefault((idx, bi), canv.getPageNumber())
 
     def _on_anchor(self, canv, kind, label):
         """A link target has been set (#74 Phase 5b): note its page for the
@@ -3472,7 +3483,12 @@ class BookDoc(BaseDocTemplate):
 
     def afterFlowable(self, flowable):
         """A heading inside a chapter has been set: record its page for the
-        contents, bookmark `##` and `###`, and follow `##` for running heads."""
+        contents, bookmark `##` and `###`, and follow `##` for running heads.
+        A block set without paragraph markup (a figure, a table, a scene
+        break) carries its place in `_ts_pos` instead of a `_ts_pos` tag."""
+        pos = getattr(flowable, '_ts_pos', None)
+        if pos is not None:
+            self._pos_hits.setdefault(pos, self.canv.getPageNumber())
         tag = getattr(flowable, '_ts_heading', None)
         if not tag or getattr(flowable, '_ts_in_columns', False):
             return
@@ -6102,6 +6118,55 @@ def _apply_page_refs(chapters, targets, refs, meta):
     return _ms_map_texts(chapters, render)
 
 
+# The print pages an ebook can list (bug hunt 23.11). Each block of a chapter
+# reports the page it is first set on: a paragraph or heading by an `<onDraw>`
+# tag at its start (zero width, so no line moves), anything else by a
+# `_ts_pos` on its first flowable, which `BookDoc.afterFlowable` reads.
+
+def _pos_tag(idx, bi):
+    return f'<onDraw name="_ts_pos" label="{idx}-{bi}"/>'
+
+
+def _pos_flows(flows, idx, bi):
+    """Mark the first of a block's flowables with its place; returns them."""
+    f = flows[0] if flows else None
+    # a KeepTogether is taken apart before anything is drawn: the mark goes
+    # on what it holds
+    while isinstance(getattr(f, '_content', None), list) and f._content:
+        f = f._content[0]
+    if f is not None:
+        f._ts_pos = (idx, bi)
+    return flows
+
+
+def _print_pages(doc):
+    """[(folio, chapter, block)] for each numbered page from the first chapter
+    opener to the last page a chapter's block starts on: the block that
+    starts first on the page, or, on a page none starts on (one long table or
+    paragraph, a blank verso), the block still running. Block -1 is the
+    chapter's opening, before its first block. An ebook built from the same
+    manuscript puts its page break markers there."""
+    start = doc._body_start
+    if not start:
+        return []
+    first = {}
+    for e in doc._toc_entries:
+        if e.get('idx') is not None and 'heading' not in e:
+            first[e['page']] = min(first.get(e['page'], (e['idx'], -1)), (e['idx'], -1))
+    for pos, page in doc._pos_hits.items():
+        first[page] = min(first.get(page, pos), pos)
+    out, cur = [], None
+    for page in range(start, max(first, default=0) + 1):
+        here = first.get(page)
+        # never backwards: a figure floated past text keeps the list in
+        # reading order
+        if here is not None and (cur is None or here > cur):
+            cur = here
+        if cur is not None:
+            out.append((page - start + 1, cur[0], cur[1]))
+    return out
+
+
 def _refs_found(doc):
     """Each link target's folio, counted as the folios are."""
     start = doc._body_start or 1
@@ -6563,11 +6628,17 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
             val  = block[1]
             if bi in heading_names:              # a heading a link can land on
                 val = _anchor_tag(heading_names[bi]) + val
+            if kind in ('subhead', 'section', 'subsection') or (
+                    kind not in ('scene', 'doc_block') and opened):
+                # its page, for the ebook's page list (an opening paragraph's
+                # drop cap takes no markup: the chapter's own opening stands in)
+                val = _pos_tag(idx, bi) + val
             if ncols == 2 and kind == 'doc_block' and _spans(block):
                 _flush_run()
                 blk_meta = block[2] if len(block) > 2 else {}
-                page_story.extend(_render_doc_block(val, preset, fonts, st, page_w,
-                                                    hyph=hyph, block_meta=blk_meta))
+                page_story.extend(_pos_flows(
+                    _render_doc_block(val, preset, fonts, st, page_w,
+                                      hyph=hyph, block_meta=blk_meta), idx, bi))
                 flush_next = True
                 continue
             if kind == 'scene':
@@ -6575,10 +6646,11 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 img_path = scene_image_path(preset)
                 orn = sb.get('ornament', '') if sb.get('type') == 'ornament' else ''
                 orn = orn if _orn.scene(orn) else ''     # furniture is no scene break
-                story.append(SceneBreak(glyph, head_font, sb['size'], sb['gap'],
-                                        image_path=img_path, ornament=orn,
-                                        ornament_width=sb.get('ornament_width', 0.0),
-                                        max_h=text_h))
+                story.extend(_pos_flows([SceneBreak(
+                    glyph, head_font, sb['size'], sb['gap'],
+                    image_path=img_path, ornament=orn,
+                    ornament_width=sb.get('ornament_width', 0.0),
+                    max_h=text_h)], idx, bi))
                 flush_next = True
             elif kind == 'subhead':
                 story.append(_heading_para(val, st['subhead'], 2))
@@ -6590,8 +6662,9 @@ def _build_story(manuscript, preset, meta, fonts, st, head_font,
                 if not opened:
                     opened = True
                 blk_meta = block[2] if len(block) > 2 else {}
-                story.extend(_render_doc_block(val, preset, fonts, st, avail_w,
-                                               hyph=hyph, block_meta=blk_meta))
+                story.extend(_pos_flows(
+                    _render_doc_block(val, preset, fonts, st, avail_w,
+                                      hyph=hyph, block_meta=blk_meta), idx, bi))
                 flush_next = True
             else:
                 if not opened:
@@ -7717,6 +7790,9 @@ def _build_pdf(manuscript, preset, out_path, meta, press=False, screen=False):
         # to stop before chapters it lays out only for the contents' sake
         'chapter_pages':  {e['idx']: e['page'] for e in final_doc._toc_entries
                            if e.get('idx') is not None and 'heading' not in e},
+        # each folio and the chapter block it shows (23.11): an ebook built
+        # from the same manuscript lists these pages (epub `print_pages`)
+        'print_pages':    _print_pages(final_doc),
         # the page references or the index still moved on the last pass
         'refs_unsettled': unsettled,
         'dead_links':     dead_links + dead_refs + sorted(_matter_dead),
