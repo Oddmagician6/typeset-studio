@@ -8,6 +8,49 @@ line here.
 
 ---
 
+## 1.16.2 — 27 November 2026
+
+A bug-fix release: the rest of round seven of the bug hunt, covering the
+pages and saves added since 1.14 and a handful of smaller problems.
+
+### Fixed
+
+**Saving and History**
+
+- Moving or adding a page in the Page Plan, saving a print wrap, and replacing
+  a cover image while another save is under way no longer lose either change:
+  a title or blurb saved meanwhile stays, and the book always keeps a cover.
+- Renaming a designed page is all-or-nothing, and restoring an older version
+  from History prints the right design even after a renamed page's old name
+  has been reused.
+- Opening the Page Plan of a Word book no longer copies its pictures into
+  Figures.
+- A wrap design that was saved but not rendered is no longer drawn from the
+  previous version's front cover.
+
+**Covers and uploads**
+
+- Cover, back-cover and cover-art uploads are refused when the file isn't
+  really the picture type its name says (a BMP renamed `.png`), as Figures
+  uploads already were, and very large uploads are refused instead of read in
+  full.
+- On a KDP or IngramSpark hardcover, the Bleed field is locked and says the
+  printer sets it — the value typed there was ignored.
+
+**Books and editions**
+
+- Automatic EPUB layout stays reflowable unless the manuscript actually places
+  a designed page, so an unplaced draft design no longer gives an empty ebook.
+- An untitled part shows your own number format (`Volume 1`) in the PDF
+  contents, as it does on the divider and in the EPUB.
+- A white stat-block section rule stays white on a dark screen PDF page.
+
+**Send to print**
+
+- When a package can't be written, the message names the file inside your
+  data folder instead of its full path, and a ZIP held open for a moment by
+  OneDrive or a scanner is retried instead of thrown away.
+
 ## 1.16.1 — 27 November 2026
 
 A bug-fix release: round seven of the bug hunt, covering regressions in 1.16.0,
